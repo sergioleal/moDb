@@ -1,0 +1,135 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 30,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "profile-8k",
+      "displayName": "RelWithDebInfo with 8 KiB pages",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MODB_PAGE_SIZE": "8192"
+      }
+    },
+    {
+      "name": "profile-16k",
+      "displayName": "RelWithDebInfo with 16 KiB pages",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MODB_PAGE_SIZE": "16384"
+      }
+    },
+    {
+      "name": "local-gcc13",
+      "displayName": "Local GCC 13 bootstrap (C++23 fallback)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "MODB_ALLOW_CXX23_FALLBACK": "ON"
+      }
+    },
+    {
+      "name": "sanitizers",
+      "displayName": "Debug with sanitizers",
+      "inherits": "debug",
+      "cacheVariables": {
+        "MODB_ENABLE_SANITIZERS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "profile-8k",
+      "configurePreset": "profile-8k"
+    },
+    {
+      "name": "profile-16k",
+      "configurePreset": "profile-16k"
+    },
+    {
+      "name": "local-gcc13",
+      "configurePreset": "local-gcc13"
+    },
+    {
+      "name": "sanitizers",
+      "configurePreset": "sanitizers"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "profile-8k",
+      "configurePreset": "profile-8k",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "profile-16k",
+      "configurePreset": "profile-16k",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "sanitizers",
+      "configurePreset": "sanitizers",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "local-gcc13",
+      "configurePreset": "local-gcc13",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

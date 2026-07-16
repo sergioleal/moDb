@@ -1,0 +1,20 @@
+# Build trees
+/build/
+/cmake-build-*/
+/out/
+
+# IDEs and editors
+/.idea/
+/.vscode/
+*.user
+
+# Generated files
+compile_commands.json
+Testing/
+
+# Runtime database files
+*.modb
+*.modb-wal
+*.db
+*.db-wal
+
