@@ -1,4 +1,7 @@
 #include "modb/catalog.hpp"
+#include "modb/object/attribute_value.hpp"
+#include "modb/object/type_definition.hpp"
+#include "modb/object/type_registry.hpp"
 #include "modb/row.hpp"
 #include "modb/schema.hpp"
 #include "modb/text_escape.hpp"
@@ -54,6 +57,7 @@ void print_record_help();
 void print_heap_help();
 void print_codec_help();
 void print_catalog_help();
+void print_types_help();
 
 int command_demo();
 int command_demo_run(bool force);
@@ -91,6 +95,7 @@ int command_heap_delete(const std::filesystem::path& path,
 int command_heap_repair(const std::filesystem::path& path, modb::storage::PageId root_page);
 int command_codec_run();
 int command_catalog_run();
+int command_types_run();
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -113,6 +118,8 @@ modb::Result<modb::storage::SlottedPage>
 load_record_page(const std::filesystem::path& path, modb::storage::PageId page_id);
 void print_value(const modb::Value& value);
 void print_row(const modb::Row& row);
+void print_attribute_value(const modb::object::AttributeValue& value);
+void print_field_values(const modb::object::FieldValues& fields);
 
 // Help shown in the same order as the public command groups.
 void print_help() {
@@ -128,6 +135,7 @@ void print_help() {
            "  heap     Manage multi-page table heaps.\n"
            "  codec    Encode and decode a row in memory.\n"
            "  catalog  Exercise the in-memory catalog.\n"
+           "  types    Exercise the in-memory object model (ODB++).\n"
            "\n"
            "Options:\n"
            "  -h, --help     Show this help.\n"
@@ -187,6 +195,11 @@ void print_codec_help() {
                  "  modb codec\n";
 }
 
+void print_types_help() {
+    std::cout << "Usage:\n"
+                 "  modb types\n";
+}
+
 void print_catalog_help() {
     std::cout << "Usage:\n"
                  "  modb catalog\n";
@@ -233,6 +246,7 @@ int command_demo() {
            "[6/7] Try the in-memory tools\n"
            "  modb codec\n"
            "  modb catalog\n"
+           "  modb types\n"
            "\n"
            "[7/7] Validate and remove the demonstration database\n"
            "  modb db check demo.modb\n"
@@ -289,6 +303,7 @@ int command_demo_run(bool force) {
         {"modb", "heap", "scan", "demo.modb", "3"},
         {"modb", "codec"},
         {"modb", "catalog"},
+        {"modb", "types"},
         {"modb", "db", "check", "demo.modb"},
         {"modb", "db", "delete", "demo.modb"},
     };
@@ -968,6 +983,92 @@ int command_catalog_run() {
     return 0;
 }
 
+// Command group: types.
+
+// Exercita o modelo de objetos do ODB++ (TypeDefinition/TypeRegistry/
+// validate_object) inteiramente em memoria, sem tocar em armazenamento.
+// A persistencia real chega na Fase 2 do plano ODB++ (docs/PLANO_ODB.md).
+int command_types_run() {
+    using modb::object::AttributeDefinition;
+    using modb::object::AttributeType;
+    using modb::object::AttributeValue;
+    using modb::object::FieldId;
+    using modb::object::FieldValues;
+    using modb::object::TypeDefinition;
+    using modb::object::TypeRegistry;
+
+    // O atributo country e opcional e tem um default, ao contrario de name e
+    // salary, que sao obrigatorios.
+    AttributeDefinition country{
+        .id = FieldId{3}, .name = "country", .type = AttributeType::string, .nullable = true};
+    country.default_value = AttributeValue{"BR"};
+
+    auto employee = TypeDefinition::create(
+        "Employee",
+        std::vector<AttributeDefinition>{
+            AttributeDefinition{.id = FieldId{1}, .name = "name",
+                               .type = AttributeType::string, .nullable = false},
+            AttributeDefinition{.id = FieldId{2}, .name = "salary",
+                               .type = AttributeType::float64, .nullable = false},
+            country,
+        });
+    if (!employee) {
+        return print_error(employee.error());
+    }
+
+    // O registro atribui o TypeDefinitionId; um TypeDefinition criado por
+    // create() sozinho ainda nao tem identidade (id() == 0).
+    TypeRegistry registry;
+    auto type_id = registry.register_type(*employee);
+    if (!type_id) {
+        return print_error(type_id.error());
+    }
+    std::cout << "Registered type: Employee (id " << type_id->value << ")\n";
+
+    auto registered = registry.find(*type_id);
+    if (!registered) {
+        return print_error(registered.error());
+    }
+    std::cout << "Attributes:\n";
+    for (const auto& attribute : registered->get().attributes()) {
+        std::cout << "  " << attribute.id.value << ": " << attribute.name << " ("
+                  << modb::object::attribute_type_name(attribute.type)
+                  << (attribute.nullable ? ", nullable" : ", not null");
+        if (attribute.default_value) {
+            std::cout << ", default: ";
+            print_attribute_value(*attribute.default_value);
+        }
+        std::cout << ")\n";
+    }
+
+    // Um payload completo e compativel com o tipo.
+    const FieldValues complete{
+        {FieldId{1}, AttributeValue{"Ana"}},
+        {FieldId{2}, AttributeValue{15000.0}},
+        {FieldId{3}, AttributeValue{"US"}},
+    };
+    if (auto valid = modb::object::validate_object(registered->get(), complete); !valid) {
+        return print_error(valid.error());
+    }
+    std::cout << "Valid object: ";
+    print_field_values(complete);
+
+    // country fica de fora do payload e e completado pelo default do tipo.
+    const FieldValues using_default{
+        {FieldId{1}, AttributeValue{"Beatriz"}},
+        {FieldId{2}, AttributeValue{12000.0}},
+    };
+    if (auto valid = modb::object::validate_object(registered->get(), using_default); !valid) {
+        return print_error(valid.error());
+    }
+    std::cout << "Valid object (country omitted, covered by its default): ";
+    print_field_values(using_default);
+
+    std::cout << "Note: this type registry exists only in memory; persistence arrives in "
+                 "Fase 2 (see docs/PLANO_ODB.md).\n";
+    return 0;
+}
+
 // Group dispatchers, kept after the command implementations.
 int run_db_command(int argc, char* argv[]) {
     if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
@@ -1281,6 +1382,16 @@ int run(int argc, char* argv[]) {
         }
         return command_catalog_run();
     }
+    if (command == "types") {
+        if (argc == 3 && is_help_argument(argv[2])) {
+            print_types_help();
+            return 0;
+        }
+        if (argc != 2) {
+            return print_usage_error("modb types");
+        }
+        return command_types_run();
+    }
     std::cerr << "Unknown command: " << command << "\nUse --help for usage.\n";
     return 2;
 }
@@ -1528,6 +1639,46 @@ void print_row(const modb::Row& row) {
         }
         // Mostra o valor atual conforme seu tipo.
         print_value(value);
+        first = false;
+    }
+    // Encerra a linha exibida no console.
+    std::cout << '\n';
+}
+
+// Mostra um AttributeValue conforme sua tag ativa (modb::object::AttributeType).
+void print_attribute_value(const modb::object::AttributeValue& value) {
+    std::visit(
+        Overloaded{
+            [](modb::object::AttributeNull) { std::cout << "NULL"; },
+            [](bool boolean) { std::cout << (boolean ? "true" : "false"); },
+            [](std::int64_t integer) { std::cout << integer; },
+            [](double real) { std::cout << real; },
+            // Escapa bytes de controle antes de exibir texto de origem não confiável.
+            [](const std::string& text) { std::cout << modb::escape_for_terminal(text); },
+            [](const std::vector<std::byte>& bytes) {
+                std::cout << bytes.size() << " bytes: " << std::hex << std::setfill('0');
+                for (const auto byte : bytes) {
+                    std::cout << std::setw(2)
+                              << static_cast<unsigned>(std::to_integer<unsigned char>(byte));
+                }
+                std::cout << std::dec;
+            },
+            [](modb::object::ObjectId id) { std::cout << "ObjectId(" << id.value << ")"; },
+            [](modb::object::BlobId id) { std::cout << "BlobId(" << id.value << ")"; },
+        },
+        value.storage());
+}
+
+// Mostra todos os valores de um FieldValues separados por uma barra vertical.
+void print_field_values(const modb::object::FieldValues& fields) {
+    bool first = true;
+    // Percorre os campos na ordem em que foram fornecidos.
+    for (const auto& [field_id, value] : fields) {
+        if (!first) {
+            std::cout << " | ";
+        }
+        std::cout << field_id.value << '=';
+        print_attribute_value(value);
         first = false;
     }
     // Encerra a linha exibida no console.

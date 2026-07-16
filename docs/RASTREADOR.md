@@ -110,6 +110,12 @@ entradas incompatíveis (`duplicate_field`, `too_many_columns`,
 `duplicate_type`, `invalid_object_id`); ambas as classes não possuem mutador
 público — evolução é sempre um novo objeto estampado, nunca mutação in-place.
 
+**Extra (fora da lista de tarefas):** comando `modb types` adicionado à CLI —
+demo em memória do modelo desta fase (`TypeDefinition`/`TypeRegistry`/
+`validate_object`), no mesmo espírito de `modb catalog`. Não persiste nada;
+não é uma tarefa de nenhuma fase, só uma vitrine útil enquanto a Fase 2 não
+chega. Ver [USO_DA_CLI.md](USO_DA_CLI.md#modb-types--modelo-de-objetos-em-memória-odb).
+
 ---
 
 ## Fase 2 — Codec genérico e ObjectStore persistente

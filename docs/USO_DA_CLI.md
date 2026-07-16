@@ -1,14 +1,16 @@
 # Uso da CLI (`modb`)
 
-> ⚠️ **Isto documenta a CLI atual, do modelo relacional legado** — os comandos
-> `db`, `page`, `record`, `heap`, `codec` e `catalog` que existem hoje no
+> ⚠️ **A maior parte desta CLI ainda é do modelo relacional legado** — os
+> comandos `db`, `page`, `record`, `heap` e `codec` que existem hoje no
 > código. O projeto pivotou para um banco Orientado a Objetos (ver
-> [PLANO_ODB.md](PLANO_ODB.md)); os primeiros comandos OO (`type define`,
-> `object create/get`) só chegam ao final da **Fase 2**
-> (ver [RASTREADOR.md](RASTREADOR.md)). Até lá, esta é a CLI que existe e
-> funciona de verdade. Este documento será revisado quando a Fase 2 aposentar
-> os comandos relacionais (decisão registrada na
-> [ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md)).
+> [PLANO_ODB.md](PLANO_ODB.md)). O comando **`types`** já é OO: demonstra em
+> memória o modelo da Fase 1 (`TypeDefinition`/`TypeRegistry`/
+> `validate_object`), mas ainda **não persiste nada** — é o mesmo espírito do
+> `catalog` relacional (uma vitrine em memória). Os primeiros comandos OO
+> persistentes (`type define`, `object create/get`) só chegam ao final da
+> **Fase 2** (ver [RASTREADOR.md](RASTREADOR.md)). Este documento será
+> revisado quando a Fase 2 aposentar os comandos relacionais (decisão
+> registrada na [ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md)).
 
 ## Compilar
 
@@ -35,6 +37,7 @@ Commands:
   heap     Manage multi-page table heaps.
   codec    Encode and decode a row in memory.
   catalog  Exercise the in-memory catalog.
+  types    Exercise the in-memory object model (ODB++).
 
 Options:
   -h, --help     Show this help.
@@ -339,6 +342,33 @@ Rows in users:
 Note: this catalog exists only in memory.
 ```
 
+## `modb types` — modelo de objetos em memória (ODB++)
+
+```text
+modb types
+```
+
+Sem argumentos: define um tipo `Employee` (atributos `name`, `salary`
+obrigatórios e `country` opcional com default `"BR"`), registra no
+[`TypeRegistry`](../include/modb/object/type_registry.hpp), valida dois
+objetos lógicos contra o tipo — um completo e outro que omite `country` e é
+completado pelo default — usando
+[`validate_object`](../include/modb/object/type_definition.hpp). **Nada é
+persistido**: é a vitrine em memória do modelo da Fase 1, no mesmo espírito
+do `modb catalog` acima.
+
+```text
+$ modb types
+Registered type: Employee (id 16)
+Attributes:
+  1: name (STRING, not null)
+  2: salary (FLOAT64, not null)
+  3: country (STRING, nullable, default: BR)
+Valid object: 1=Ana | 2=15000 | 3=US
+Valid object (country omitted, covered by its default): 1=Beatriz | 2=12000
+Note: this type registry exists only in memory; persistence arrives in Fase 2 (see docs/PLANO_ODB.md).
+```
+
 ## Roteiro completo (equivalente a `modb demo run`)
 
 ```sh
@@ -369,6 +399,7 @@ modb heap scan demo.modb 3
 
 modb codec
 modb catalog
+modb types
 
 modb db check demo.modb
 modb db delete demo.modb
@@ -380,7 +411,8 @@ Segundo o [RASTREADOR.md](RASTREADOR.md), a Fase 2 do plano OO
 (`docs/PLANO_ODB.md`) prevê explicitamente:
 
 - remoção dos comandos relacionais (`record`/`catalog` no sentido atual);
-- comandos OO mínimos: `modb type define <db> <nome> <campo:tipo[:null]>...`,
-  `modb type list <db>`, `modb object create/get/remove <db> ...`.
+- comandos OO **persistentes**: `modb type define <db> <nome> <campo:tipo[:null]>...`,
+  `modb type list <db>`, `modb object create/get/remove <db> ...` — o
+  `modb types` atual (em memória) provavelmente é absorvido por eles.
 
 Este documento será reescrito quando isso acontecer.
