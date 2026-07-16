@@ -307,10 +307,16 @@ de heap saudável não reescreve nada) + validação ponta a ponta na CLI. Suít
 destrava o P1** (persistência adiada da raiz agora tem rede de segurança).
 
 **Ainda pendente neste item (não bloqueia P1):** (a) reconciliação/truncamento da página
-órfã de cauda no nível do `PageFile` — hoje o `open` a tolera (S1), falta a poda; (b) um
-`modb db repair` que percorra **todas** as raízes THRP do arquivo (o atual repara uma raiz por
-vez); (c) remoção de registro duplicado de `update` interrompido — deixada de fora por não
-ser bem-definida num heap sem chave primária. Estas ficam como continuação.
+órfã de cauda no nível do `PageFile` — hoje o `open` a tolera (S1), falta a poda; (c) remoção
+de registro duplicado de `update` interrompido — deixada de fora por não ser bem-definida num
+heap sem chave primária. Estas ficam como continuação.
+
+**Atualização:** o item (b) foi feito — `modb db repair <file>` agora percorre **todas** as
+raízes THRP do arquivo (localizadas por `classify_page`) e repara cada uma via
+`repair_table_heap`, reportando quantas foram reescritas e tolerando raízes irreparáveis sem
+abortar as demais. Validado ponta a ponta na CLI: `record_count` de raiz corrompido →
+`heap scan` falha → `db repair` reconstrói → `heap scan` volta a funcionar. Continua sendo
+reparo **estrutural**; a recuperação por WAL é a Fase 5 do [PLANO_ODB.md](docs/PLANO_ODB.md).
 
 **Onde:** consequências em [page_file.cpp:187](src/storage/page_file.cpp:187) (contagem vs.
 tamanho físico), [table_heap.cpp:443-448](src/storage/table_heap.cpp:443) (contadores da

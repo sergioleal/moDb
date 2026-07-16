@@ -115,6 +115,7 @@ forma mais rápida de ver a CLI inteira funcionando: `modb demo run -force`.
 modb db create <file>
 modb db info <file>
 modb db check <file>
+modb db repair <file>
 modb db delete <file>
 ```
 
@@ -125,6 +126,15 @@ modb db delete <file>
 - **`check`**: valida a estrutura do arquivo inteiro (superbloco, páginas
   soltas, slotted pages, raízes de `TableHeap`) — ver
   [database_check](../src/storage/database_check.cpp).
+- **`repair`**: reparo estrutural. Percorre **todas** as raízes `TableHeap`
+  do arquivo e reconstrói os contadores de cada uma (`first`/`last`/
+  `page_count`/`record_count`) a partir da cadeia de páginas autodescritiva —
+  tornando abrível de novo um heap cujos metadados divergiram após uma falha
+  parcial de escrita. É idempotente: num banco saudável não reescreve nada.
+  Uma raiz irreparável (ciclo ou página de dados corrompida) é reportada sem
+  impedir o reparo das demais. Não confundir com a recuperação baseada em WAL
+  (recovery), um mecanismo separado previsto para a Fase 5 do
+  [plano OO](PLANO_ODB.md).
 - **`delete`**: remove o arquivo.
 
 ```text
@@ -149,8 +159,35 @@ Slotted pages: 2
 TableHeap roots: 1
 Database is valid
 
+$ modb db repair demo.modb
+Database repair: "demo.modb"
+TableHeap roots found: 1
+  root 3: pages=1 records=1 (already consistent)
+Roots rewritten: 0
+Database repair complete
+
 $ modb db delete demo.modb
 Database deleted: "demo.modb"
+```
+
+### Exemplo de recuperação (contador de raiz corrompido)
+
+```text
+# um heap com 2 registros teve o record_count da raiz corrompido:
+$ modb heap scan loja.modb 1
+Error: TableHeap root counters or chain endpoints are inconsistent
+
+$ modb db repair loja.modb
+Database repair: "loja.modb"
+TableHeap roots found: 1
+  root 1: pages=1 records=2 (rewritten)
+Roots rewritten: 1
+Database repair complete
+
+$ modb heap scan loja.modb 1
+Records in TableHeap 1: 2
+2:0:1 | 10 | Ana
+2:1:1 | 20 | Beatriz
 ```
 
 ## `modb page` — páginas cruas
@@ -402,6 +439,7 @@ modb catalog
 modb types
 
 modb db check demo.modb
+modb db repair demo.modb
 modb db delete demo.modb
 ```
 

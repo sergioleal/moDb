@@ -65,6 +65,7 @@ int run_demo_step(std::vector<std::string> arguments);
 int command_db_create(const std::filesystem::path& path);
 int command_db_info(const std::filesystem::path& path);
 int command_db_check(const std::filesystem::path& path);
+int command_db_repair(const std::filesystem::path& path);
 int command_db_delete(const std::filesystem::path& path);
 int command_page_create(const std::filesystem::path& path);
 int command_page_info(const std::filesystem::path& path, modb::storage::PageId id);
@@ -156,6 +157,7 @@ void print_db_help() {
            "  modb db create <file>\n"
            "  modb db info <file>\n"
            "  modb db check <file>\n"
+           "  modb db repair <file>\n"
            "  modb db delete <file>\n";
 }
 
@@ -248,8 +250,9 @@ int command_demo() {
            "  modb catalog\n"
            "  modb types\n"
            "\n"
-           "[7/7] Validate and remove the demonstration database\n"
+           "[7/7] Validate, repair and remove the demonstration database\n"
            "  modb db check demo.modb\n"
+           "  modb db repair demo.modb\n"
            "  modb db delete demo.modb\n";
     return 0;
 }
@@ -305,6 +308,7 @@ int command_demo_run(bool force) {
         {"modb", "catalog"},
         {"modb", "types"},
         {"modb", "db", "check", "demo.modb"},
+        {"modb", "db", "repair", "demo.modb"},
         {"modb", "db", "delete", "demo.modb"},
     };
 
@@ -404,6 +408,72 @@ int command_db_check(const std::filesystem::path& path) {
     }
 
     std::cout << "Database is valid\n";
+    return 0;
+}
+
+// Reconstroi a raiz de todos os TableHeaps do arquivo a partir da cadeia de
+// dados autodescritiva, tornando abriveis os heaps cujos contadores divergiram
+// apos uma falha parcial. Este e o reparo estrutural (S11); a recuperacao
+// baseada em WAL e um mecanismo separado, previsto para a Fase 5.
+int command_db_repair(const std::filesystem::path& path) {
+    // Abre o banco; o superbloco ja tolera paginas orfas de cauda (S1).
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+
+    // Localiza todas as raizes THRP percorrendo o inventario de paginas.
+    // classify_page usa apenas os magic bytes, entao acha as raizes mesmo que
+    // seus contadores estejam corrompidos a ponto de recusar a abertura.
+    std::vector<modb::storage::PageId> roots;
+    for (std::uint64_t id = 1; id < file->page_count(); ++id) {
+        const modb::storage::PageId page_id{id};
+        auto page = file->read(page_id);
+        if (!page) {
+            // Uma pagina ilegivel nao impede reparar as demais; registra e segue.
+            std::cerr << "page " << id << ": " << page.error().message << '\n';
+            continue;
+        }
+        if (modb::storage::classify_page(*page) ==
+            modb::storage::PageKind::table_heap_root) {
+            roots.push_back(page_id);
+        }
+    }
+
+    std::cout << "Database repair: " << path << '\n';
+    std::cout << "TableHeap roots found: " << roots.size() << '\n';
+
+    // Repara cada raiz; uma raiz irreparavel (ciclo ou pagina de dados
+    // corrompida) nao impede o reparo das demais.
+    std::size_t rewritten = 0;
+    std::size_t failed = 0;
+    for (const auto root : roots) {
+        auto report = modb::storage::repair_table_heap(*file, root);
+        if (!report) {
+            ++failed;
+            std::cerr << "root " << root.value << ": " << report.error().message << '\n';
+            continue;
+        }
+        std::cout << "  root " << root.value << ": pages=" << report->page_count
+                  << " records=" << report->record_count
+                  << (report->root_rewritten ? " (rewritten)" : " (already consistent)")
+                  << '\n';
+        if (report->root_rewritten) {
+            ++rewritten;
+        }
+    }
+
+    // Garante que as raizes reescritas cheguem ao disco.
+    if (auto flushed = file->flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+
+    std::cout << "Roots rewritten: " << rewritten << '\n';
+    if (failed != 0) {
+        std::cerr << "Roots that could not be repaired: " << failed << '\n';
+        return 1;
+    }
+    std::cout << "Database repair complete\n";
     return 0;
 }
 
@@ -1077,7 +1147,7 @@ int run_db_command(int argc, char* argv[]) {
     }
     const std::string_view subcommand{argv[2]};
     if (argc != 4) {
-        return print_usage_error("modb db <create|info|check|delete> <file>");
+        return print_usage_error("modb db <create|info|check|repair|delete> <file>");
     }
     if (subcommand == "create") {
         return command_db_create(argv[3]);
@@ -1087,6 +1157,9 @@ int run_db_command(int argc, char* argv[]) {
     }
     if (subcommand == "check") {
         return command_db_check(argv[3]);
+    }
+    if (subcommand == "repair") {
+        return command_db_repair(argv[3]);
     }
     if (subcommand == "delete") {
         return command_db_delete(argv[3]);
