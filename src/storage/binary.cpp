@@ -1,6 +1,10 @@
 // Importa BinaryWriter e BinaryReader.
 #include "modb/storage/binary.hpp"
+// Importa store_le/load_le, a implementação única de little-endian.
+#include "modb/storage/endian.hpp"
 
+// Disponibiliza o buffer temporário usado ao serializar um inteiro.
+#include <array>
 // Disponibiliza std::to_integer.
 #include <cstddef>
 // Disponibiliza std::to_string para mensagens de erro.
@@ -27,37 +31,28 @@ void BinaryWriter::write_u8(std::uint8_t value) {
     bytes_.push_back(std::byte{value});
 }
 
-// Escreve os dois bytes do inteiro do menos significativo para o mais significativo.
+// Escreve os dois bytes do inteiro em little-endian.
 void BinaryWriter::write_u16(std::uint16_t value) {
-    // Repete uma vez para cada byte do tipo.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Mantém somente o byte menos significativo atual.
-        write_u8(static_cast<std::uint8_t>(value & 0xffU));
-        // Prepara o próximo byte.
-        value = static_cast<std::uint16_t>(value >> 8U);
-    }
+    // Serializa num buffer local e o acrescenta preservando a ordem dos bytes.
+    std::array<std::byte, sizeof(value)> buffer{};
+    store_le(std::span<std::byte>{buffer}, value);
+    write_bytes(buffer);
 }
 
 // Escreve os quatro bytes do inteiro em little-endian.
 void BinaryWriter::write_u32(std::uint32_t value) {
-    // Repete uma vez para cada byte do tipo.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Mantém somente o byte menos significativo atual.
-        write_u8(static_cast<std::uint8_t>(value & 0xffU));
-        // Prepara o próximo byte.
-        value >>= 8U;
-    }
+    // Serializa num buffer local e o acrescenta preservando a ordem dos bytes.
+    std::array<std::byte, sizeof(value)> buffer{};
+    store_le(std::span<std::byte>{buffer}, value);
+    write_bytes(buffer);
 }
 
 // Escreve os oito bytes do inteiro em little-endian.
 void BinaryWriter::write_u64(std::uint64_t value) {
-    // Repete uma vez para cada byte do tipo.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Mantém somente o byte menos significativo atual.
-        write_u8(static_cast<std::uint8_t>(value & 0xffU));
-        // Prepara o próximo byte.
-        value >>= 8U;
-    }
+    // Serializa num buffer local e o acrescenta preservando a ordem dos bytes.
+    std::array<std::byte, sizeof(value)> buffer{};
+    store_le(std::span<std::byte>{buffer}, value);
+    write_bytes(buffer);
 }
 
 // Copia uma sequência de bytes para o final do vetor.
@@ -86,17 +81,8 @@ Result<std::uint16_t> BinaryReader::read_u16() {
     if (!data) {
         return std::unexpected(data.error());
     }
-    // Começa com todos os bits desligados.
-    std::uint16_t value = 0;
-    // Recoloca cada byte em sua posição original.
-    for (std::size_t index = 0; index < data->size(); ++index) {
-        const auto shifted = static_cast<std::uint16_t>(
-            static_cast<std::uint16_t>(std::to_integer<std::uint8_t>((*data)[index]))
-            << (index * 8U));
-        value = static_cast<std::uint16_t>(value | shifted);
-    }
-    // Retorna o inteiro reconstruído.
-    return value;
+    // Reconstrói pela implementação única de little-endian.
+    return load_le<std::uint16_t>(*data);
 }
 
 // Lê e reconstrói um inteiro de trinta e dois bits.
@@ -107,15 +93,8 @@ Result<std::uint32_t> BinaryReader::read_u32() {
     if (!data) {
         return std::unexpected(data.error());
     }
-    // Começa com todos os bits desligados.
-    std::uint32_t value = 0;
-    // Recoloca cada byte em sua posição original.
-    for (std::size_t index = 0; index < data->size(); ++index) {
-        value |= static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[index]))
-                 << (index * 8U);
-    }
-    // Retorna o inteiro reconstruído.
-    return value;
+    // Reconstrói pela implementação única de little-endian.
+    return load_le<std::uint32_t>(*data);
 }
 
 // Lê e reconstrói um inteiro de sessenta e quatro bits.
@@ -126,15 +105,8 @@ Result<std::uint64_t> BinaryReader::read_u64() {
     if (!data) {
         return std::unexpected(data.error());
     }
-    // Começa com todos os bits desligados.
-    std::uint64_t value = 0;
-    // Recoloca cada byte em sua posição original.
-    for (std::size_t index = 0; index < data->size(); ++index) {
-        value |= static_cast<std::uint64_t>(std::to_integer<std::uint8_t>((*data)[index]))
-                 << (index * 8U);
-    }
-    // Retorna o inteiro reconstruído.
-    return value;
+    // Reconstrói pela implementação única de little-endian.
+    return load_le<std::uint64_t>(*data);
 }
 
 // Entrega uma parte da entrada e avança a posição atual.

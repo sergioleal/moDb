@@ -1,16 +1,21 @@
 #pragma once
 
+#include "modb/error.hpp"
 #include "modb/storage/page.hpp"
 
-#include <condition_variable>
 #include <cstddef>
-#include <mutex>
+#include <memory>
 #include <optional>
 #include <vector>
 
 namespace modb::storage {
 
 // Mantém um conjunto fixo de buffers Page reutilizáveis.
+//
+// O motor é single-thread e single-process por decisão de escopo (ESCOPO_MVP),
+// então o pool não usa primitivas de sincronização: elas seriam peso morto e a
+// espera bloqueante sem timeout de uma versão anterior podia travar sem
+// diagnóstico. A indisponibilidade de um buffer é reportada por try_acquire.
 class ScratchPagePool {
 public:
     class Handle {
@@ -40,24 +45,26 @@ public:
         Page* page_ = nullptr;
     };
 
-    // Aloca todos os buffers e índices uma única vez; zero é inválido.
-    explicit ScratchPagePool(std::size_t capacity);
+    // Cria um pool validando a capacidade sem lançar exceções: zero é inválido.
+    // Concentra num único ponto a checagem antes feita por cada chamador.
+    [[nodiscard]] static Result<std::unique_ptr<ScratchPagePool>> create(std::size_t capacity);
+
     ScratchPagePool(const ScratchPagePool&) = delete;
     ScratchPagePool& operator=(const ScratchPagePool&) = delete;
 
-    [[nodiscard]] Handle acquire();
+    // Empresta um buffer livre, ou std::nullopt quando todos estão em uso.
     [[nodiscard]] std::optional<Handle> try_acquire();
     [[nodiscard]] std::size_t capacity() const noexcept { return pages_.size(); }
-    [[nodiscard]] std::size_t available() const;
+    [[nodiscard]] std::size_t available() const noexcept { return free_indices_.size(); }
 
 private:
+    // Aloca todos os buffers e índices uma única vez; só create pode construir.
+    explicit ScratchPagePool(std::size_t capacity);
     void release(std::size_t index) noexcept;
 
     std::vector<Page> pages_;
     // A capacidade reservada impede alocações durante acquire/release.
     std::vector<std::size_t> free_indices_;
-    mutable std::mutex mutex_;
-    std::condition_variable available_;
 };
 
 } // namespace modb::storage

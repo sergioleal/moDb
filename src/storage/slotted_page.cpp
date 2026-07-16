@@ -1,5 +1,7 @@
 // Importa SlottedPage, SlotId e RecordId.
 #include "modb/storage/slotted_page.hpp"
+// Importa store_le/load_le, a implementação única de little-endian.
+#include "modb/storage/endian.hpp"
 
 // Disponibiliza algoritmos para copiar, comparar e ordenar.
 #include <algorithm>
@@ -49,43 +51,26 @@ constexpr auto slot_size = slotted_page_slot_size;
 
 // Grava um uint16_t em little-endian dentro da página.
 void write_u16(Page& page, std::size_t offset, std::uint16_t value) {
-    // Grava primeiro o byte menos significativo.
-    page[offset] = std::byte{static_cast<std::uint8_t>(value & 0xffU)};
-    // Grava depois o byte mais significativo.
-    page[offset + 1] = std::byte{static_cast<std::uint8_t>(value >> 8U)};
+    // Delega à implementação única de little-endian sobre os bytes da página.
+    store_le(page.bytes().subspan(offset, sizeof(value)), value);
 }
 
 // Lê um uint16_t little-endian da página.
 std::uint16_t read_u16(const Page& page, std::size_t offset) {
-    // Converte o primeiro byte para a parte baixa.
-    const auto low = std::to_integer<std::uint16_t>(page[offset]);
-    // Converte e desloca o segundo byte para a parte alta.
-    const auto high = static_cast<std::uint16_t>(
-        std::to_integer<std::uint16_t>(page[offset + 1]) << 8U);
-    // Combina as duas partes.
-    return static_cast<std::uint16_t>(low | high);
+    // Delega à implementação única de little-endian sobre os bytes da página.
+    return load_le<std::uint16_t>(page.bytes().subspan(offset, sizeof(std::uint16_t)));
 }
 
 // Grava um uint64_t em little-endian dentro da página.
 void write_u64(Page& page, std::size_t offset, std::uint64_t value) {
-    // Escreve um byte por vez, do menos significativo para o mais significativo.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        page[offset + index] = std::byte{static_cast<std::uint8_t>(value & 0xffU)};
-        value >>= 8U;
-    }
+    // Delega à implementação única de little-endian sobre os bytes da página.
+    store_le(page.bytes().subspan(offset, sizeof(value)), value);
 }
 
 // Lê um uint64_t little-endian da página.
 std::uint64_t read_u64(const Page& page, std::size_t offset) {
-    // Começa com todos os bits desligados.
-    std::uint64_t value = 0;
-    // Recoloca cada byte em sua posição original.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        value |= static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(page[offset + index]))
-                 << (index * 8U);
-    }
-    // Retorna o identificador reconstruído.
-    return value;
+    // Delega à implementação única de little-endian sobre os bytes da página.
+    return load_le<std::uint64_t>(page.bytes().subspan(offset, sizeof(std::uint64_t)));
 }
 
 // Calcula onde começa a entrada de um slot.

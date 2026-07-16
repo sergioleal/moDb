@@ -1,5 +1,7 @@
 // Importa PageFile, Page e PageId.
 #include "modb/storage/page_file.hpp"
+// Importa store_le/load_le, a implementação única de little-endian.
+#include "modb/storage/endian.hpp"
 
 // Disponibiliza algoritmos como copy e equal.
 #include <algorithm>
@@ -49,82 +51,40 @@ Error io_error(std::string message) { return Error{ErrorCode::io_error, std::mov
 // Codifica um inteiro de 16 bits em ordem little-endian.
 void encode_u16(std::span<std::byte, page_size> target, std::size_t offset,
                 std::uint16_t value) {
-    // Escreve um byte do valor a cada repetição.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Guarda primeiro o byte menos significativo.
-        target[offset + index] = std::byte{static_cast<unsigned char>(value & 0xffU)};
-        // Remove o byte que acabou de ser escrito.
-        value = static_cast<std::uint16_t>(value >> 8U);
-    }
+    // Delega à implementação única de little-endian a partir do offset dado.
+    store_le(target.subspan(offset, sizeof(value)), value);
 }
 
 // Codifica um inteiro de 32 bits em ordem little-endian.
 void encode_u32(std::span<std::byte, page_size> target, std::size_t offset,
                 std::uint32_t value) {
-    // Percorre os quatro bytes do inteiro.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Escreve o byte menos significativo na posição atual.
-        target[offset + index] = std::byte{static_cast<unsigned char>(value & 0xffU)};
-        // Prepara o próximo byte.
-        value >>= 8U;
-    }
+    // Delega à implementação única de little-endian a partir do offset dado.
+    store_le(target.subspan(offset, sizeof(value)), value);
 }
 
 // Codifica um inteiro de 64 bits em ordem little-endian.
 void encode_u64(std::span<std::byte, page_size> target, std::size_t offset,
                 std::uint64_t value) {
-    // Percorre os oito bytes do inteiro.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Escreve o byte menos significativo na posição atual.
-        target[offset + index] = std::byte{static_cast<unsigned char>(value & 0xffU)};
-        // Prepara o próximo byte.
-        value >>= 8U;
-    }
+    // Delega à implementação única de little-endian a partir do offset dado.
+    store_le(target.subspan(offset, sizeof(value)), value);
 }
 
 // Reconstrói um inteiro de 16 bits armazenado em little-endian.
 std::uint16_t decode_u16(std::span<const std::byte, page_size> source, std::size_t offset) {
-    // Começa com todos os bits desligados.
-    std::uint16_t value = 0;
-    // Lê os dois bytes armazenados.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Move o byte atual de volta para sua posição original no inteiro.
-        const auto shifted = static_cast<std::uint16_t>(
-            static_cast<std::uint16_t>(std::to_integer<unsigned char>(source[offset + index]))
-            << (index * 8U));
-        // Combina o byte atual com os bytes já reconstruídos.
-        value = static_cast<std::uint16_t>(value | shifted);
-    }
-    // Devolve o inteiro reconstruído.
-    return value;
+    // Delega à implementação única de little-endian a partir do offset dado.
+    return load_le<std::uint16_t>(source.subspan(offset, sizeof(std::uint16_t)));
 }
 
 // Reconstrói um inteiro de 32 bits armazenado em little-endian.
 std::uint32_t decode_u32(std::span<const std::byte, page_size> source, std::size_t offset) {
-    // Começa com todos os bits desligados.
-    std::uint32_t value = 0;
-    // Lê os quatro bytes armazenados.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Converte o byte e o desloca para sua posição original.
-        value |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(source[offset + index]))
-                 << (index * 8U);
-    }
-    // Devolve o inteiro reconstruído.
-    return value;
+    // Delega à implementação única de little-endian a partir do offset dado.
+    return load_le<std::uint32_t>(source.subspan(offset, sizeof(std::uint32_t)));
 }
 
 // Reconstrói um inteiro de 64 bits armazenado em little-endian.
 std::uint64_t decode_u64(std::span<const std::byte, page_size> source, std::size_t offset) {
-    // Começa com todos os bits desligados.
-    std::uint64_t value = 0;
-    // Lê os oito bytes armazenados.
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-        // Converte o byte e o desloca para sua posição original.
-        value |= static_cast<std::uint64_t>(std::to_integer<unsigned char>(source[offset + index]))
-                 << (index * 8U);
-    }
-    // Devolve o inteiro reconstruído.
-    return value;
+    // Delega à implementação única de little-endian a partir do offset dado.
+    return load_le<std::uint64_t>(source.subspan(offset, sizeof(std::uint64_t)));
 }
 
 // Monta a página zero com os metadados atuais do arquivo.
@@ -157,17 +117,9 @@ std::optional<PageId> decode_catalog_root(const Page& superblock) {
     return PageId{stored};
 }
 
-// Lê exatamente uma página do ponto atual do fluxo.
-Result<void> read_exact(std::fstream& stream, Page& page) {
-    // Pede ao fluxo para preencher todos os bytes da página.
-    stream.read(reinterpret_cast<char*>(page.bytes().data()),
-                static_cast<std::streamsize>(page_size));
-    // Uma leitura menor significa arquivo truncado ou falha de I/O.
-    if (stream.gcount() != static_cast<std::streamsize>(page_size)) {
-        return std::unexpected(Error{ErrorCode::corrupt_file, "could not read a complete page"});
-    }
-    // A página inteira foi lida.
-    return {};
+// Calcula o offset em bytes onde a página id começa no arquivo.
+std::uint64_t page_offset(PageId id) {
+    return id.value * static_cast<std::uint64_t>(page_size);
 }
 
 // Confere os campos do superbloco e retorna a quantidade de páginas.
@@ -233,35 +185,24 @@ Result<PageFile> PageFile::create(const std::filesystem::path& path) {
                                         filesystem_error.message()));
     }
 
-    // Limita o fluxo de criação a este bloco para fechá-lo antes da reabertura.
-    {
-        // Abre um arquivo binário novo para escrita.
-        std::ofstream output{path, std::ios::binary | std::ios::out | std::ios::trunc};
-        // Confere se o sistema operacional abriu o arquivo.
-        if (!output) {
-            return std::unexpected(io_error("could not create database file: " + path.string()));
-        }
-        // Um banco novo começa com um único superbloco e sem raiz de catálogo.
-        const auto superblock = make_superblock(1, std::nullopt);
-        // Escreve todos os bytes configurados da página zero.
-        output.write(reinterpret_cast<const char*>(superblock.bytes().data()),
-                     static_cast<std::streamsize>(page_size));
-        // Envia ao sistema operacional os bytes mantidos no buffer do fluxo.
-        output.flush();
-        // Verifica se a escrita ou o flush falhou.
-        if (!output) {
-            return std::unexpected(io_error("could not initialize database file: " + path.string()));
-        }
+    // Cria o arquivo com um descritor de leitura e escrita já pronto para uso.
+    auto file = NativeFile::open(path, NativeFile::Mode::create_new);
+    if (!file) {
+        return std::unexpected(file.error());
     }
-
-    // Reabre o arquivo permitindo leituras e escritas futuras.
-    std::fstream stream{path, std::ios::binary | std::ios::in | std::ios::out};
-    // Confere se a reabertura funcionou.
-    if (!stream) {
-        return std::unexpected(io_error("could not reopen database file: " + path.string()));
+    // Um banco novo começa com um único superbloco e sem raiz de catálogo.
+    const auto superblock = make_superblock(1, std::nullopt);
+    // Grava a página zero no início do arquivo.
+    if (auto written = file->write_at(page_offset(superblock_page_id), superblock.bytes());
+        !written) {
+        return std::unexpected(written.error());
     }
-    // Transfere o fluxo aberto para o PageFile retornado.
-    return PageFile{path, std::move(stream), 1};
+    // Garante que o superbloco recém-criado sobrevive a uma queda de energia.
+    if (auto synced = file->sync(); !synced) {
+        return std::unexpected(synced.error());
+    }
+    // Transfere o descritor aberto para o PageFile retornado.
+    return PageFile{path, std::move(*file), 1};
 }
 
 // Abre um arquivo existente somente depois de validar seu formato.
@@ -292,17 +233,17 @@ Result<PageFile> PageFile::open(const std::filesystem::path& path) {
             Error{ErrorCode::corrupt_file, "database file is truncated or misaligned"});
     }
 
-    // Abre o arquivo em modo binário para leitura e escrita.
-    std::fstream stream{path, std::ios::binary | std::ios::in | std::ios::out};
-    // Confere se o sistema operacional permitiu a abertura.
-    if (!stream) {
-        return std::unexpected(io_error("could not open database file: " + path.string()));
+    // Abre o arquivo existente para leitura e escrita.
+    auto file = NativeFile::open(path, NativeFile::Mode::open_existing);
+    if (!file) {
+        return std::unexpected(file.error());
     }
 
     // Prepara o objeto que receberá a primeira página completa.
     Page superblock;
-    // Lê a página zero completa.
-    if (auto result = read_exact(stream, superblock); !result) {
+    // Lê a página zero completa a partir do início do arquivo.
+    if (auto result = file->read_at(page_offset(superblock_page_id), superblock.bytes());
+        !result) {
         return std::unexpected(result.error());
     }
     // Valida assinatura, versão, tamanho e contagem de páginas.
@@ -314,7 +255,7 @@ Result<PageFile> PageFile::open(const std::filesystem::path& path) {
     // Recupera a raiz do catálogo persistida para mantê-la entre reescritas.
     const auto catalog_root = decode_catalog_root(superblock);
     // Retorna o arquivo aberto com a contagem validada e a raiz preservada.
-    return PageFile{path, std::move(stream), *page_count, catalog_root};
+    return PageFile{path, std::move(*file), *page_count, catalog_root};
 }
 
 // Acrescenta uma página zerada ao final do arquivo.
@@ -361,20 +302,8 @@ Result<void> PageFile::read(PageId id, Page& destination) {
             Error{ErrorCode::page_not_found, "page does not exist: " + std::to_string(id.value)});
     }
 
-    // Limpa flags deixadas por operações anteriores no fluxo.
-    stream_.clear();
-    // Move a posição de leitura para o início da página solicitada.
-    stream_.seekg(static_cast<std::streamoff>(id.value * page_size), std::ios::beg);
-    // Confere se o deslocamento foi aceito.
-    if (!stream_) {
-        return std::unexpected(io_error("could not seek to page: " + std::to_string(id.value)));
-    }
-
-    // Sobrescreve todos os bytes do buffer reutilizável.
-    if (auto result = read_exact(stream_, destination); !result) {
-        return std::unexpected(result.error());
-    }
-    return {};
+    // Lê a página inteira diretamente sobre o buffer, sem cursor compartilhado.
+    return file_.read_at(page_offset(id), destination.bytes());
 }
 
 // Sobrescreve uma página de dados existente.
@@ -393,16 +322,10 @@ Result<void> PageFile::write(PageId id, const Page& page) {
     return write_at(id, page);
 }
 
-// Envia ao sistema operacional todas as escritas pendentes no fluxo.
+// Persiste no dispositivo todas as escritas já aceitas (durabilidade real).
 Result<void> PageFile::flush() {
-    // Esvazia o buffer mantido por std::fstream.
-    stream_.flush();
-    // O estado do fluxo informa se o flush falhou.
-    if (!stream_) {
-        return std::unexpected(io_error("could not flush database file: " + path_.string()));
-    }
-    // O fluxo não informou erro.
-    return {};
+    // Delega ao descritor nativo, que chama FlushFileBuffers/fsync.
+    return file_.sync();
 }
 
 // Reconstrói e grava a página zero com uma nova contagem, mantendo os demais campos.
@@ -414,25 +337,9 @@ Result<void> PageFile::write_superblock(std::uint64_t page_count) {
 Result<void> PageFile::write_page_count(std::uint64_t page_count) {
     // Codifica a contagem em little-endian, no mesmo layout de make_superblock.
     std::array<std::byte, sizeof(std::uint64_t)> buffer{};
-    for (std::size_t index = 0; index < sizeof(page_count); ++index) {
-        buffer[index] = std::byte{static_cast<unsigned char>(page_count & 0xffU)};
-        page_count >>= 8U;
-    }
-    // Limpa flags de operações anteriores no fluxo.
-    stream_.clear();
-    // Posiciona a escrita no campo page_count dentro do superbloco.
-    stream_.seekp(static_cast<std::streamoff>(
-        superblock_page_id.value * page_size + page_count_offset), std::ios::beg);
-    if (!stream_) {
-        return std::unexpected(io_error("could not seek to the superblock page count"));
-    }
-    // Escreve apenas os oito bytes do campo.
-    stream_.write(reinterpret_cast<const char*>(buffer.data()),
-                  static_cast<std::streamsize>(buffer.size()));
-    if (!stream_) {
-        return std::unexpected(io_error("could not update the superblock page count"));
-    }
-    return {};
+    store_le(std::span<std::byte>{buffer}, page_count);
+    // Grava apenas os oito bytes do campo, na sua posição dentro do superbloco.
+    return file_.write_at(page_offset(superblock_page_id) + page_count_offset, buffer);
 }
 
 // Persiste a raiz do catálogo sem apagar os demais metadados do superbloco.
@@ -467,23 +374,8 @@ Result<void> PageFile::set_catalog_root(std::optional<PageId> root) {
 
 // Executa a escrita binária sem bloquear páginas reservadas.
 Result<void> PageFile::write_at(PageId id, const Page& page) {
-    // Limpa flags deixadas por operações anteriores no fluxo.
-    stream_.clear();
-    // Move a posição de escrita para o início da página.
-    stream_.seekp(static_cast<std::streamoff>(id.value * page_size), std::ios::beg);
-    // Confere se o deslocamento foi aceito.
-    if (!stream_) {
-        return std::unexpected(io_error("could not seek to page: " + std::to_string(id.value)));
-    }
-    // Escreve todos os bytes da página na posição calculada.
-    stream_.write(reinterpret_cast<const char*>(page.bytes().data()),
-                  static_cast<std::streamsize>(page_size));
-    // Verifica se a escrita completa foi aceita pelo fluxo.
-    if (!stream_) {
-        return std::unexpected(io_error("could not write page: " + std::to_string(id.value)));
-    }
-    // A operação terminou sem erro.
-    return {};
+    // Grava a página inteira na sua posição, sem cursor compartilhado.
+    return file_.write_at(page_offset(id), page.bytes());
 }
 
 } // namespace modb::storage

@@ -25,6 +25,7 @@ add_library(modb
     src/storage/codec.cpp
     src/storage/page_file.cpp
     src/storage/database_check.cpp
+    src/storage/native_file.cpp
     src/storage/scratch_page_pool.cpp
     src/storage/slotted_page.cpp
     src/storage/table_heap.cpp
@@ -78,11 +79,37 @@ else()
 endif()
 
 if(MODB_ENABLE_SANITIZERS)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND NOT WIN32)
+    # Cada toolchain ativa o sanitizer que realmente possui. Nenhum ramo aborta a
+    # configuração: no pior caso avisa e segue, para o preset ser sempre utilizável.
+    if(MSVC)
+        # MSVC oferece AddressSanitizer; UBSan não existe no toolset.
+        # /Zi gera símbolos e o ASan do MSVC é incompatível com link incremental.
+        target_compile_options(modb PUBLIC /fsanitize=address /Zi)
+        target_link_options(modb PUBLIC /INCREMENTAL:NO)
+        message(STATUS "moDb: AddressSanitizer ativado (MSVC).")
+    elseif(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # clang-cl e clang-mingw suportam ASan/UBSan no Windows.
         target_compile_options(modb PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(modb PUBLIC -fsanitize=address,undefined)
+        message(STATUS "moDb: Address/UndefinedBehaviorSanitizer ativado (Clang no Windows).")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND NOT WIN32)
+        # Clang e GCC fora do Windows têm o suporte completo a ASan/UBSan.
+        target_compile_options(modb PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(modb PUBLIC -fsanitize=address,undefined)
+        message(STATUS "moDb: Address/UndefinedBehaviorSanitizer ativado (Clang/GCC).")
+    elseif(MINGW)
+        # O GCC do MinGW-w64 não implementa ASan/UBSan. A rede de segurança viável
+        # aqui é o hardening da libstdc++, ativado independentemente do build type.
+        target_compile_options(modb PUBLIC -fstack-protector-strong)
+        target_compile_definitions(modb PUBLIC _GLIBCXX_ASSERTIONS)
+        message(WARNING
+            "moDb: MinGW GCC não suporta ASan/UBSan. Ativando a rede viável "
+            "(_GLIBCXX_ASSERTIONS + -fstack-protector-strong). Para ASan/UBSan use "
+            "Clang no Windows ou GCC/Clang em Linux/macOS.")
     else()
-        message(FATAL_ERROR "MODB_ENABLE_SANITIZERS is not supported by this toolchain")
+        message(WARNING
+            "moDb: MODB_ENABLE_SANITIZERS ignorado — nenhum sanitizer conhecido para "
+            "o toolchain '${CMAKE_CXX_COMPILER_ID}'.")
     endif()
 endif()
 

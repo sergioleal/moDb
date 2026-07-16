@@ -110,14 +110,15 @@ public:
     [[nodiscard]] Result<void> erase(RecordId id);
 
 private:
-    // Somente create e open podem associar arquivo e raiz.
-    TableHeap(PageFile& file, PageId root, std::size_t scratch_page_count,
+    // Somente create e open podem associar arquivo e raiz. O pool já vem pronto
+    // da fábrica ScratchPagePool::create, então o construtor não pode falhar.
+    TableHeap(PageFile& file, PageId root, std::unique_ptr<ScratchPagePool> scratch_page_pool,
               std::optional<PageId> first = std::nullopt,
               std::optional<PageId> last = std::nullopt,
               std::uint64_t page_count = 0, std::uint64_t record_count = 0)
         : file_{&file},
           root_{root},
-          scratch_page_pool_{std::make_unique<ScratchPagePool>(scratch_page_count)},
+          scratch_page_pool_{std::move(scratch_page_pool)},
           first_{first},
           last_{last},
           page_count_{page_count},

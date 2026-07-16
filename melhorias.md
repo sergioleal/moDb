@@ -21,26 +21,26 @@ tooling que reduzem a rede de segurança do próprio desenvolvimento.
 | S3 | ✅ Feito | **P0** | Robustez | `static_assert` permite `MODB_PAGE_SIZE` entre 29 e 36, que faz `slotted_page_max_record_size` dar wrap unsigned | baixo |
 | S4 | ✅ Feito | **P0** | Segurança | `decode_row` faz `reserve` por contagem não validada e não aplica `max_columns_per_table` | baixo |
 | S5 | ✅ Feito | **P0** | Segurança | Injeção de sequências de escape de terminal ao imprimir `TEXT` de um `.db` não confiável | baixo |
-| B1 | ⬜ Pendente | **P0** | Tooling | Sanitizers dão `FATAL_ERROR` justamente no Windows, a plataforma primária | baixo |
+| B1 | ✅ Feito | **P0** | Tooling | Sanitizers dão `FATAL_ERROR` justamente no Windows, a plataforma primária | baixo |
 | P1 | 🟡 Parcial | **P1** | Performance | Amplificação de escrita: `persist_root` a cada insert/erase + superbloco reescrito a cada alocação | médio |
 | P2 | ⏸️ Adiado (design) | **P1** | Performance | `TableHeap::open` valida a cadeia inteira e a CLI reabre tudo a cada comando | médio |
 | P3 | ✅ Feito | **P1** | Performance | Scan lê cada página O(registros) vezes em vez de O(páginas) | baixo |
 | P4 | ✅ Feito (parcial) | **P1** | Performance | Toda operação copia a página 2× (4 KB) e reexecuta `validate_page` (sort + alocação) | médio |
 | P5 | ✅ Feito | **P1** | Performance | `TableHeap::update` lê e valida a mesma página duas vezes | baixo |
 | P6 | ✅ Feito (parcial) | **P1** | Performance | Busca de página com espaço percorre o `unordered_map` inteiro, em ordem não determinística, mutando-o durante a iteração | médio |
-| S6 | ⏸️ Adiado (refator) | **P1** | Robustez | `flush()` não garante durabilidade: falta `FlushFileBuffers`/`fsync` | médio |
+| S6 | ✅ Feito | **P1** | Robustez | `flush()` não garante durabilidade: falta `FlushFileBuffers`/`fsync` | médio |
 | S7 | ✅ Feito (parcial) | **P1** | Robustez | `database_check`: custo quadrático com múltiplas raízes THRP e não detecta cadeias compartilhadas nem payloads corrompidos | médio |
 | S11 | ✅ Feito | **P1** | Robustez | `modb db repair`: modo de reparo/recuperação que reconstrói a raiz a partir da cadeia e reconcilia páginas órfãs | médio |
 | P7 | ⬜ Pendente | **P2** | Performance | `erase` compacta sempre, e `compact` copia os 4096 bytes inteiros | médio |
 | P8 | ⬜ Pendente | **P2** | Performance | `BinaryWriter` cresce byte a byte, sem `reserve` | baixo |
 | P9 | ⬜ Pendente | **P2** | Performance | Varreduras O(slots) redundantes em `record_count`/`insertion_capacity`/`insert` | baixo |
-| P10 | ⬜ Pendente | **P2** | Performance | `ScratchPagePool` paga mutex + condition_variable por load em motor single-thread | baixo |
-| C1 | ⬜ Pendente | **P2** | C++ | Codec little-endian implementado três vezes | médio |
+| P10 | ✅ Feito | **P2** | Performance | `ScratchPagePool` paga mutex + condition_variable por load em motor single-thread | baixo |
+| C1 | ✅ Feito | **P2** | C++ | Codec little-endian implementado três vezes | médio |
 | C2 | ✅ Feito | **P2** | C++ | Cadeias de `get_if` onde `std::visit` exaustivo seria verificado em compilação | baixo |
 | C3 | ✅ Feito (parcial) | **P2** | C++ | `Value{ptr}` converte qualquer ponteiro em BOOLEAN silenciosamente; faltam accessors tipados | baixo |
 | C4 | ✅ Feito | **P2** | C++ | `Page::operator[]` usa `array::at()` e lança exceção, contrariando a política de `std::expected` | baixo |
 | C5 | ⏸️ Adiado (design) | **P2** | C++ | `PageFile` sem `close()`: o destrutor engole erros de flush; move `noexcept` forçado | baixo |
-| C6 | ⬜ Pendente | **P2** | C++ | `ScratchPagePool` lança exceção no construtor e `acquire()` bloqueia sem timeout | baixo |
+| C6 | ✅ Feito | **P2** | C++ | `ScratchPagePool` lança exceção no construtor e `acquire()` bloqueia sem timeout | baixo |
 | C7 | ⬜ Pendente | **P2** | C++ | `main.cpp` monolítico com 1514 linhas e ~65 linhas de forward declarations | alto |
 | B2 | ⬜ Pendente | **P2** | Build | 12 blocos de alvo de teste copiados e colados no CMakeLists | baixo |
 | S8 | ⏸️ Adiado (formato) | **P3** | Segurança | Sem checksum por página: corrupção de payload passa por todas as validações | médio |
@@ -185,14 +185,21 @@ vulnerabilidades conhecidas de emuladores de terminal.
 de `\t`/`\n` em forma visível (ex.: `\x1b`), e aplicar o mesmo tratamento a nomes de colunas
 decodificados de schemas.
 
-### S6. `flush()` não garante durabilidade — **P1** — ⏸️ Adiado (depende do refator de I/O)
+### S6. `flush()` não garante durabilidade — **P1** — ✅ Feito
 
-**Status:** não implementado. `FlushFileBuffers`/`fsync` exigem o handle nativo do SO, que o
-`std::fstream` não expõe de forma portável. Uma extração de handle por baixo do fstream é
-frágil e específica de implementação; o caminho correto é migrar o `PageFile` para I/O
-posicional nativo (o mesmo refator citado no P8/proposta) e sincronizar sobre o handle nativo.
-Além disso, durabilidade real não é verificável em teste unitário. Fica atrelado ao refator de
-I/O, com decisão explícita.
+**Status:** implementado via o refator de I/O que estava adiado. Nova classe
+[NativeFile](include/modb/storage/native_file.hpp)/[native_file.cpp](src/storage/native_file.cpp)
+encapsula um descritor nativo do SO com I/O posicional (`ReadFile`/`WriteFile` com `OVERLAPPED`
+no Windows; `pread`/`pwrite` no POSIX) e, o ponto central, sincronização real ao dispositivo:
+`FlushFileBuffers` no Windows e `fsync` no POSIX. Todo o código específico de plataforma fica
+isolado nessa classe (`#ifdef _WIN32`). O `PageFile` trocou o `std::fstream` pelo `NativeFile`:
+`read`/`write_at`/`write_page_count` viraram leituras/escritas posicionais (sem cursor
+compartilhado, some o par `clear()`+`seek`), `create` grava o superbloco e sincroniza, e
+`PageFile::flush()` agora chama `NativeFile::sync()` — depois de um flush bem-sucedido os dados
+sobrevivem a uma queda de energia. Verificado: build limpo com `-Werror -Wconversion
+-Wsign-conversion`, suíte 26/26 (incluindo os testes de reabertura), e smoke test end-to-end
+pelo CLI — registro inserido num processo é lido de volta em processos separados após reabrir.
+Durabilidade real contra queda de energia não é verificável em teste unitário, como esperado.
 
 **Onde:** [page_file.cpp:372](src/storage/page_file.cpp:372).
 
@@ -553,7 +560,11 @@ mantido por insert/erase → `record_count` O(1); no `insert`, uma única varred
 slot livre e memoriza o que `insertion_capacity` precisaria; em `layout`, chamar
 `record_count` uma vez e reutilizar.
 
-### P10. `ScratchPagePool`: mutex + condition_variable por load em motor single-thread — **P2**
+### P10. `ScratchPagePool`: mutex + condition_variable por load em motor single-thread — **P2** — ✅ Feito
+
+**Status:** resolvido junto com o C6. O `std::mutex` e o `std::condition_variable` foram
+removidos do `ScratchPagePool` (o motor é single-thread por escopo), eliminando lock/wait/notify
+por `load`. Detalhes na seção C6.
 
 **Onde:** [scratch_page_pool.cpp](src/storage/scratch_page_pool.cpp);
 capacidade padrão 1 em [table_heap.hpp:53](include/modb/storage/table_heap.hpp:53).
@@ -583,7 +594,16 @@ O código já é bastante idiomático — `std::expected` consistente, `std::byt
 (`PageId`, `SlotId`), spans, `[[nodiscard]]` nas APIs de storage. As propostas abaixo
 fecham as lacunas restantes.
 
-### C1. Codec little-endian implementado três vezes — **P2**
+### C1. Codec little-endian implementado três vezes — **P2** — ✅ Feito
+
+**Status:** implementado. Novo header [endian.hpp](include/modb/storage/endian.hpp) com
+`store_le<T>`/`load_le<T>` `constexpr`, restritos a `std::unsigned_integral` e operando sobre
+`std::span<std::byte>`. Os três sítios passaram a delegar: `BinaryWriter/Reader`
+([binary.cpp](src/storage/binary.cpp)), `encode_/decode_uNN` ([page_file.cpp](src/storage/page_file.cpp))
+e `write_/read_u16/u64` ([slotted_page.cpp](src/storage/slotted_page.cpp)) — as ~180 linhas
+duplicadas viraram wrappers de uma linha, mantendo assinaturas e semântica. Verificado: build
+limpo com `-Werror -Wconversion -Wsign-conversion` e suíte 26/26 (round-trips de codec cobrem
+os dois caminhos).
 
 **Onde:** [binary.cpp](src/storage/binary.cpp) (`write_/read_uNN`),
 [page_file.cpp:48-126](src/storage/page_file.cpp:48) (`encode_/decode_uNN`),
@@ -674,7 +694,17 @@ que importa. Nota adjacente: o move está `noexcept = default`, mas o move de
 destrutor documentado como best-effort, e a CLI chamando `close()` explicitamente ao fim
 dos comandos de escrita.
 
-### C6. `ScratchPagePool` lança exceção e `acquire()` bloqueia sem timeout — **P2**
+### C6. `ScratchPagePool` lança exceção e `acquire()` bloqueia sem timeout — **P2** — ✅ Feito
+
+**Status:** implementado. O construtor virou privado e a validação de capacidade passou para a
+fábrica `static Result<std::unique_ptr<ScratchPagePool>> create(std::size_t)` — capacidade zero
+agora retorna `ErrorCode::invalid_argument` em vez de lançar `std::invalid_argument`, e as
+checagens duplicadas em `TableHeap::create/open` foram removidas (a fábrica é o ponto único).
+O `acquire()` bloqueante foi eliminado: sobra `try_acquire()`, e `TableHeap::load/load_trusted`
+tratam a ausência de buffer como erro explícito. Como o motor é single-thread por escopo, o
+`std::mutex` + `std::condition_variable` (peso morto e origem do deadlock sem diagnóstico) foram
+removidos — resolvendo junto o P10. Teste em [storage_test.cpp](tests/storage_test.cpp) atualizado
+para a fábrica/`try_acquire`. Verificado: suíte 26/26.
 
 **Onde:** [scratch_page_pool.cpp](src/storage/scratch_page_pool.cpp) (construtor);
 validação duplicada nos chamadores em [table_heap.cpp:122 e 144](src/storage/table_heap.cpp:122).
@@ -704,7 +734,15 @@ cada um expondo `run(argc, argv)`, e um `main.cpp` fino com tabela
 
 ## 4. Build, testes e tooling
 
-### B1. Sanitizers dão `FATAL_ERROR` justamente no Windows — **P0**, esforço baixo
+### B1. Sanitizers dão `FATAL_ERROR` justamente no Windows — **P0**, esforço baixo — ✅ Feito
+
+**Status:** implementado. O bloco `MODB_ENABLE_SANITIZERS` em [CMakeLists.txt](CMakeLists.txt)
+agora ramifica por toolchain e nunca aborta a configuração: MSVC → `/fsanitize=address /Zi`
+(+ `/INCREMENTAL:NO`); Clang no Windows e Clang/GCC fora do Windows → `-fsanitize=address,undefined`;
+MinGW GCC → hardening viável (`_GLIBCXX_ASSERTIONS` + `-fstack-protector-strong`) com aviso
+explicando que ASan/UBSan não existem nesse toolchain; qualquer outro → aviso e segue. Verificado:
+o preset `sanitizers` configura, compila e roda a suíte (26/26) no MinGW, onde antes dava
+`FATAL_ERROR`.
 
 **Onde:** [CMakeLists.txt:74-81](CMakeLists.txt:74); preset `sanitizers` em
 [CMakePresets.json](CMakePresets.json).

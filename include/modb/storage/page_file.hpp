@@ -2,6 +2,8 @@
 
 // Importa Result para retornar erros de arquivo sem lançar exceções.
 #include "modb/error.hpp"
+// Importa o descritor nativo com I/O posicional e sincronização real.
+#include "modb/storage/native_file.hpp"
 // Importa Page e PageId.
 #include "modb/storage/page.hpp"
 
@@ -9,8 +11,6 @@
 #include <cstdint>
 // Disponibiliza caminhos portáveis.
 #include <filesystem>
-// Disponibiliza o fluxo que lê e escreve o mesmo arquivo.
-#include <fstream>
 // Disponibiliza a raiz de catálogo, que pode ainda não existir.
 #include <optional>
 
@@ -24,7 +24,7 @@ inline constexpr PageId superblock_page_id{0};
 // Gerencia um arquivo dividido em páginas de tamanho fixo.
 class PageFile {
 public:
-    // Impede a cópia porque dois objetos não devem possuir o mesmo fluxo.
+    // Impede a cópia porque dois objetos não devem possuir o mesmo descritor.
     PageFile(const PageFile&) = delete;
     // Impede a atribuição por cópia pelo mesmo motivo.
     PageFile& operator=(const PageFile&) = delete;
@@ -32,7 +32,7 @@ public:
     PageFile(PageFile&&) noexcept = default;
     // Permite atribuir por movimento.
     PageFile& operator=(PageFile&&) noexcept = default;
-    // Fecha o fluxo automaticamente quando o objeto é destruído.
+    // Fecha o descritor automaticamente quando o objeto é destruído.
     ~PageFile() = default;
 
     // Cria um arquivo novo contendo somente o superbloco.
@@ -48,7 +48,8 @@ public:
     [[nodiscard]] Result<void> read(PageId id, Page& destination);
     // Sobrescreve uma página de dados existente.
     [[nodiscard]] Result<void> write(PageId id, const Page& page);
-    // Entrega ao sistema operacional todas as escritas pendentes do fluxo.
+    // Persiste no dispositivo todas as escritas já aceitas (durabilidade real).
+    // Depois de um flush bem-sucedido, os dados sobrevivem a uma queda de energia.
     [[nodiscard]] Result<void> flush();
 
     // Retorna a página raiz do catálogo ou vazio quando ainda não existe.
@@ -63,10 +64,10 @@ public:
 
 private:
     // Constrói um PageFile somente depois que create ou open validou o arquivo.
-    PageFile(std::filesystem::path path, std::fstream stream, std::uint64_t page_count,
+    PageFile(std::filesystem::path path, NativeFile file, std::uint64_t page_count,
              std::optional<PageId> catalog_root = std::nullopt)
         : path_{std::move(path)},
-          stream_{std::move(stream)},
+          file_{std::move(file)},
           page_count_{page_count},
           catalog_root_{catalog_root} {}
 
@@ -79,8 +80,8 @@ private:
 
     // Guarda o caminho para mensagens e consultas.
     std::filesystem::path path_;
-    // Mantém o arquivo aberto para leitura e escrita binária.
-    std::fstream stream_;
+    // Mantém o arquivo aberto com I/O posicional e sincronização ao dispositivo.
+    NativeFile file_;
     // Mantém em memória a quantidade validada de páginas.
     std::uint64_t page_count_{};
     // Espelha a raiz do catálogo persistida no superbloco.

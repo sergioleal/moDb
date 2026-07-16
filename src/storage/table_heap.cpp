@@ -183,9 +183,10 @@ Result<TableHeapRepairReport> repair_table_heap(PageFile& file, PageId root) {
 
 // Cria a raiz dedicada de um novo heap vazio.
 Result<TableHeap> TableHeap::create(PageFile& file, std::size_t scratch_page_count) {
-    if (scratch_page_count == 0) {
-        return std::unexpected(Error{ErrorCode::invalid_argument,
-                                     "TableHeap scratch page count must be greater than zero"});
+    // A fábrica valida a capacidade num único ponto e sem lançar exceções.
+    auto pool = ScratchPagePool::create(scratch_page_count);
+    if (!pool) {
+        return std::unexpected(pool.error());
     }
     // Reserva uma nova página física no arquivo.
     auto root = file.allocate_page();
@@ -199,15 +200,16 @@ Result<TableHeap> TableHeap::create(PageFile& file, std::size_t scratch_page_cou
         return std::unexpected(written.error());
     }
     // Retorna o heap associado ao arquivo fornecido.
-    return TableHeap{file, *root, scratch_page_count};
+    return TableHeap{file, *root, std::move(*pool)};
 }
 
 // Abre um heap somente depois de validar toda a cadeia.
 Result<TableHeap> TableHeap::open(PageFile& file, PageId root,
                                   std::size_t scratch_page_count) {
-    if (scratch_page_count == 0) {
-        return std::unexpected(Error{ErrorCode::invalid_argument,
-                                     "TableHeap scratch page count must be greater than zero"});
+    // A fábrica valida a capacidade num único ponto e sem lançar exceções.
+    auto pool = ScratchPagePool::create(scratch_page_count);
+    if (!pool) {
+        return std::unexpected(pool.error());
     }
     // A página zero pertence ao superbloco e nunca pode ser raiz de heap.
     if (root.value == 0) {
@@ -223,7 +225,7 @@ Result<TableHeap> TableHeap::open(PageFile& file, PageId root,
         return std::unexpected(metadata.error());
     }
     // Monta o objeto com o estado persistido para validar toda a cadeia.
-    TableHeap heap{file, root, scratch_page_count, metadata->first, metadata->last,
+    TableHeap heap{file, root, std::move(*pool), metadata->first, metadata->last,
                    metadata->page_count, metadata->record_count};
     // Percorre assinatura, versões, ligações e ciclos antes de retornar.
     if (auto pages = heap.layout(); !pages) {
@@ -242,27 +244,38 @@ Result<void> TableHeap::persist_root() {
 // Lê uma página física e valida seu layout de registros.
 Result<SlottedPage> TableHeap::load(PageId id) {
     // Empresta uma área previamente alocada e lê diretamente sobre ela.
-    auto scratch = scratch_page_pool_->acquire();
-    auto read = file_->read(id, scratch.get());
+    auto scratch = scratch_page_pool_->try_acquire();
+    // Em uso single-thread com capacidade fixa isto nunca falta; reporta erro
+    // em vez de bloquear ou desreferenciar um buffer inexistente.
+    if (!scratch) {
+        return std::unexpected(
+            Error{ErrorCode::io_error, "no scratch page buffer available for read"});
+    }
+    auto read = file_->read(id, scratch->get());
     // Propaga PageId inexistente ou falha de I/O.
     if (!read) {
         return std::unexpected(read.error());
     }
     // SlottedPage mantém sua cópia proprietária; o scratch volta ao pool ao sair.
-    return SlottedPage::from_page(scratch.get());
+    return SlottedPage::from_page(scratch->get());
 }
 
 // Lê uma página confiável sem repetir a validação estrutural completa.
 Result<SlottedPage> TableHeap::load_trusted(PageId id) {
     // Reutiliza o mesmo buffer emprestado, evitando alocações por leitura.
-    auto scratch = scratch_page_pool_->acquire();
-    auto read = file_->read(id, scratch.get());
+    auto scratch = scratch_page_pool_->try_acquire();
+    // Mesmo contrato do load: falta de buffer vira erro explícito, não bloqueio.
+    if (!scratch) {
+        return std::unexpected(
+            Error{ErrorCode::io_error, "no scratch page buffer available for read"});
+    }
+    auto read = file_->read(id, scratch->get());
     if (!read) {
         return std::unexpected(read.error());
     }
     // A cadeia foi validada ao abrir e as escritas preservam as invariantes,
     // então pular validate_page aqui elimina o sort e a alocação por leitura.
-    return SlottedPage::from_trusted_page(scratch.get());
+    return SlottedPage::from_trusted_page(scratch->get());
 }
 
 // Insere um registro escolhendo ou criando a página necessária.

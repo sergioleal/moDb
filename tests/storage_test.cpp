@@ -81,28 +81,31 @@ int main() {
     // Acumula e mostra as falhas encontradas.
     TestSuite suite;
 
-    // O pool rejeita configurações que nunca poderiam entregar um buffer.
-    bool zero_capacity_rejected = false;
-    try {
-        ScratchPagePool invalid_pool{0};
-    } catch (const std::invalid_argument&) {
-        zero_capacity_rejected = true;
-    }
-    suite.check(zero_capacity_rejected, "scratch page pool rejects zero capacity");
+    // A fábrica rejeita, sem lançar exceção, uma capacidade que nunca entrega buffer.
+    suite.check_error(ScratchPagePool::create(0), ErrorCode::invalid_argument,
+                      "scratch page pool rejects zero capacity");
 
+    // Um pool válido é criado através da fábrica.
+    auto scratch_pool_result = ScratchPagePool::create(1);
+    suite.check(scratch_pool_result.has_value(), "scratch page pool with capacity is created");
+    if (!scratch_pool_result) {
+        return suite.finish();
+    }
     // Um buffer liberado volta ao pool sem criar outra área Page.
-    ScratchPagePool scratch_pool{1};
+    ScratchPagePool& scratch_pool = **scratch_pool_result;
     Page* first_address = nullptr;
     {
-        auto handle = scratch_pool.acquire();
-        first_address = &handle.get();
-        handle.get()[0] = std::byte{0x5aU};
+        auto handle = scratch_pool.try_acquire();
+        suite.check(handle.has_value(), "scratch page is acquired from an available pool");
+        first_address = &handle->get();
+        handle->get()[0] = std::byte{0x5aU};
         suite.check(!scratch_pool.try_acquire().has_value(),
                     "checked-out scratch page is unavailable");
     }
     {
-        auto handle = scratch_pool.acquire();
-        suite.check(&handle.get() == first_address && handle.get()[0] == std::byte{0x5aU},
+        auto handle = scratch_pool.try_acquire();
+        suite.check(handle.has_value() && &handle->get() == first_address &&
+                        handle->get()[0] == std::byte{0x5aU},
                     "released scratch page reuses the same storage");
     }
     // Reserva um caminho temporário para o teste principal de reabertura.
@@ -171,9 +174,10 @@ int main() {
             suite.check(actual.has_value() && *actual == expected,
                         "page bytes survive closing and reopening");
             // A sobrecarga reutilizável preenche diretamente o buffer fornecido.
-            auto scratch = scratch_pool.acquire();
-            suite.check(opened->read(PageId{1}, scratch.get()).has_value() &&
-                            scratch.get() == expected,
+            auto scratch = scratch_pool.try_acquire();
+            suite.check(scratch.has_value() &&
+                            opened->read(PageId{1}, scratch->get()).has_value() &&
+                            scratch->get() == expected,
                         "page file reads directly into reusable storage");
             // Lê a segunda página, que nunca recebeu outro conteúdo.
             auto zero_page = opened->read(PageId{2});

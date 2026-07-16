@@ -1,6 +1,5 @@
 #include "modb/storage/scratch_page_pool.hpp"
 
-#include <stdexcept>
 #include <utility>
 
 namespace modb::storage {
@@ -36,25 +35,22 @@ void ScratchPagePool::Handle::release() noexcept {
 }
 
 ScratchPagePool::ScratchPagePool(std::size_t capacity) : pages_(capacity) {
-    if (capacity == 0) {
-        throw std::invalid_argument{"ScratchPagePool capacity must be greater than zero"};
-    }
     free_indices_.reserve(capacity);
     for (std::size_t index = capacity; index > 0; --index) {
         free_indices_.push_back(index - 1);
     }
 }
 
-ScratchPagePool::Handle ScratchPagePool::acquire() {
-    std::unique_lock lock{mutex_};
-    available_.wait(lock, [this] { return !free_indices_.empty(); });
-    const auto index = free_indices_.back();
-    free_indices_.pop_back();
-    return Handle{this, index, &pages_[index]};
+Result<std::unique_ptr<ScratchPagePool>> ScratchPagePool::create(std::size_t capacity) {
+    if (capacity == 0) {
+        return std::unexpected(Error{ErrorCode::invalid_argument,
+                                     "ScratchPagePool capacity must be greater than zero"});
+    }
+    // O construtor é privado; usa new porque make_unique não o alcança.
+    return std::unique_ptr<ScratchPagePool>{new ScratchPagePool{capacity}};
 }
 
 std::optional<ScratchPagePool::Handle> ScratchPagePool::try_acquire() {
-    std::lock_guard lock{mutex_};
     if (free_indices_.empty()) {
         return std::nullopt;
     }
@@ -63,17 +59,8 @@ std::optional<ScratchPagePool::Handle> ScratchPagePool::try_acquire() {
     return Handle{this, index, &pages_[index]};
 }
 
-std::size_t ScratchPagePool::available() const {
-    std::lock_guard lock{mutex_};
-    return free_indices_.size();
-}
-
 void ScratchPagePool::release(std::size_t index) noexcept {
-    {
-        std::lock_guard lock{mutex_};
-        free_indices_.push_back(index);
-    }
-    available_.notify_one();
+    free_indices_.push_back(index);
 }
 
 } // namespace modb::storage
