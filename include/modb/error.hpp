@@ -71,6 +71,19 @@ enum class ErrorCode {
     page_chain_cycle,
     // O RecordId não pertence ao heap consultado.
     record_not_found,
+
+    // Modelo de objetos (ODB++, ver docs/decisions/ADR-00X e PROTOCOLO_FASES.md):
+    // Duas colunas/atributos de um mesmo tipo usam o mesmo FieldId.
+    duplicate_field,
+    // O FieldId consultado não existe no tipo.
+    field_not_found,
+    // Já existe um tipo registrado com o mesmo nome.
+    duplicate_type,
+    // O tipo consultado não existe no registro.
+    type_not_found,
+    // Um ObjectId/TypeDefinitionId/BaselineId igual a zero foi usado onde um
+    // identificador válido (não nulo) era exigido.
+    invalid_object_id,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

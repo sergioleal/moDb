@@ -124,25 +124,36 @@ persistência.
 
 Tarefas:
 
-- [ ] Implementar os identificadores fortes definidos na fase 0.
-- [ ] Evoluir `Value`/`DataType` para `AttributeValue` cobrindo os primitivos
+- [x] Implementar os identificadores fortes definidos na fase 0.
+      ([ids.hpp](../include/modb/object/ids.hpp))
+- [x] Evoluir `Value`/`DataType` para `AttributeValue` cobrindo os primitivos
       do MVP, incluindo `ObjectId` e `BlobId` como valores.
-- [ ] Implementar `AttributeDefinition` (FieldId, nome, tipo, nullable,
+      ([attribute_value.hpp](../include/modb/object/attribute_value.hpp))
+- [x] Implementar `AttributeDefinition` (FieldId, nome, tipo, nullable,
       default, collection, embedded).
-- [ ] Implementar `TypeDefinition` imutável (nome, atributos, relacionamentos,
-      herança, constraints) com identidade própria.
-- [ ] Implementar `Baseline` imutável (snapshot estrutural completo).
-- [ ] Implementar `TypeRegistry` em memória (criar, localizar, versionar).
-- [ ] Validar payloads lógicos contra a `TypeDefinition` (contagem, tipos,
-      nullability) antes de qualquer escrita.
-- [ ] Testes unitários de tipos, nulos, defaults, unicidade de FieldId e
-      definições inválidas.
+      ([type_definition.hpp](../include/modb/object/type_definition.hpp))
+- [x] Implementar `TypeDefinition` imutável com identidade própria.
+      Relacionamentos (`Ref`/`OwnedRef`/`Embedded`) e coleções chegam como
+      flags (`is_owned`/`is_embedded`/`is_collection`) nesta fase; a semântica
+      completa é da Fase 4. Herança e constraints não fazem parte do MVP OO e
+      ficam para uma fase futura, fora do escopo definido em
+      [PROTOCOLO_FASES.md](PROTOCOLO_FASES.md).
+- [x] Implementar `Baseline` imutável (snapshot estrutural completo).
+      ([baseline.hpp](../include/modb/object/baseline.hpp))
+- [x] Implementar `TypeRegistry` em memória (criar, localizar, versionar).
+      ([type_registry.hpp](../include/modb/object/type_registry.hpp))
+- [x] Validar payloads lógicos contra a `TypeDefinition` (contagem, tipos,
+      nullability) antes de qualquer escrita. (`validate_object`)
+- [x] Testes unitários de tipos, nulos, defaults, unicidade de FieldId e
+      definições inválidas. ([object_model_test.cpp](../tests/object_model_test.cpp))
 
 Entregáveis: API em memória para definir tipos e validar objetos lógicos;
 suíte de testes do modelo.
 
-Critério de aceite: uma `TypeDefinition` rejeita payloads incompatíveis e
-`Baseline`/`TypeDefinition` são imutáveis após criação.
+Critério de aceite: ✅ uma `TypeDefinition` rejeita payloads incompatíveis e
+`Baseline`/`TypeDefinition` são imutáveis após criação (nenhum mutador
+público; evolução é feita por estampagem de um novo objeto, nunca por
+mutação in-place).
 
 ### Fase 2 — Codec genérico e ObjectStore persistente
 
