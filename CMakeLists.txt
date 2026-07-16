@@ -23,9 +23,11 @@ add_library(modb
     src/model/value.cpp
     src/object/attribute_value.cpp
     src/object/baseline.cpp
+    src/object/catalog_store.cpp
     src/object/database_root.cpp
     src/object/identity_map.cpp
     src/object/object_codec.cpp
+    src/object/object_store.cpp
     src/object/type_definition.cpp
     src/object/type_registry.cpp
     src/storage/binary.cpp
@@ -144,6 +146,12 @@ if(BUILD_TESTING)
     add_executable(modb_identity_map_tests tests/identity_map_test.cpp)
     target_link_libraries(modb_identity_map_tests PRIVATE modb::modb)
 
+    add_executable(modb_object_store_tests tests/object_store_test.cpp)
+    target_link_libraries(modb_object_store_tests PRIVATE modb::modb)
+
+    add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
+    target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
+
     add_executable(modb_catalog_tests tests/catalog_test.cpp)
     target_link_libraries(modb_catalog_tests PRIVATE modb::modb)
 
@@ -191,6 +199,8 @@ if(BUILD_TESTING)
         target_link_options(modb_object_model_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_object_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_identity_map_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_object_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_catalog_persistence_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_catalog_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_storage_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
@@ -209,6 +219,8 @@ if(BUILD_TESTING)
     add_test(NAME modb.object_model COMMAND modb_object_model_tests)
     add_test(NAME modb.object_codec COMMAND modb_object_codec_tests)
     add_test(NAME modb.identity_map COMMAND modb_identity_map_tests)
+    add_test(NAME modb.object_store COMMAND modb_object_store_tests)
+    add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.catalog COMMAND modb_catalog_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.codec COMMAND modb_codec_tests)

@@ -33,6 +33,10 @@ public:
     // Registra um tipo ainda não persistido, atribuindo seu TypeDefinitionId.
     // Rejeita um nome já registrado.
     [[nodiscard]] Result<TypeDefinitionId> register_type(TypeDefinition definition);
+    // Registra um tipo com um id já decidido externamente (pelo contador
+    // persistente do DBRT, na Fase 2). Rejeita nome ou id já registrados.
+    // Usado tanto ao criar um tipo novo quanto ao reconstruir o catálogo.
+    [[nodiscard]] Result<void> register_with_id(TypeDefinitionId id, TypeDefinition definition);
     // Procura um tipo pelo identificador.
     [[nodiscard]] Result<std::reference_wrapper<const TypeDefinition>> find(
         TypeDefinitionId id) const;

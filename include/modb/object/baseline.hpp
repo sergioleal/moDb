@@ -32,6 +32,13 @@ public:
     [[nodiscard]] BaselineId id() const noexcept { return id_; }
     // Expõe os tipos somente para leitura e sem cópia.
     [[nodiscard]] std::span<const TypeDefinitionId> types() const noexcept { return types_; }
+    // Devolve uma cópia com o id estampado, sem revalidar. Usado ao persistir a
+    // baseline (o id vem do contador de ObjectId do DBRT).
+    [[nodiscard]] Baseline with_id(BaselineId id) const {
+        Baseline copy{*this};
+        copy.id_ = id;
+        return copy;
+    }
 
     // Permite comparar baselines em testes.
     friend bool operator==(const Baseline&, const Baseline&) = default;

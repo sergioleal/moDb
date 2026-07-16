@@ -29,6 +29,32 @@ Result<TypeDefinitionId> TypeRegistry::register_type(TypeDefinition definition) 
     return id;
 }
 
+// Registra um tipo com um id decidido externamente (contador do DBRT).
+Result<void> TypeRegistry::register_with_id(TypeDefinitionId id, TypeDefinition definition) {
+    if (id == invalid_object_id) {
+        return std::unexpected(
+            Error{ErrorCode::invalid_object_id, "cannot register a type with id 0"});
+    }
+    if (types_by_id_.contains(id.value)) {
+        return std::unexpected(Error{ErrorCode::duplicate_type,
+                                     "type id already registered: " + std::to_string(id.value)});
+    }
+    if (latest_id_by_name_.contains(definition.name())) {
+        return std::unexpected(
+            Error{ErrorCode::duplicate_type, "type already registered: " + definition.name()});
+    }
+    const std::string name = definition.name();
+    TypeDefinition stamped{id, std::move(definition)};
+    types_by_id_.emplace(id.value, std::move(stamped));
+    latest_id_by_name_.emplace(name, id.value);
+    // Mantém o contador interno à frente de qualquer id já visto, para o caso de
+    // o mesmo registro também ser usado com register_type (auto id).
+    if (id.value >= next_id_) {
+        next_id_ = id.value + 1;
+    }
+    return {};
+}
+
 // Procura um tipo pelo identificador atribuído no registro.
 Result<std::reference_wrapper<const TypeDefinition>> TypeRegistry::find(
     TypeDefinitionId id) const {

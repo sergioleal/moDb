@@ -22,11 +22,10 @@
 #include <utility>
 
 namespace modb::object {
-namespace {
 
 // Escreve tag (u8) + valor no encoding do ADR-003. Guarda o comprimento de
 // string/bytes contra o limite de u32 do formato.
-Result<void> encode_attribute_value(storage::BinaryWriter& writer, const AttributeValue& value) {
+Result<void> encode_value(storage::BinaryWriter& writer, const AttributeValue& value) {
     return std::visit(
         detail::Overloaded{
             [&](AttributeNull) -> Result<void> {
@@ -84,7 +83,7 @@ Result<void> encode_attribute_value(storage::BinaryWriter& writer, const Attribu
 
 // Lê tag (u8) + valor. Cada comprimento é validado por read_bytes contra os
 // bytes restantes antes de qualquer alocação.
-Result<AttributeValue> decode_attribute_value(storage::BinaryReader& reader) {
+Result<AttributeValue> decode_value(storage::BinaryReader& reader) {
     auto tag = reader.read_u8();
     if (!tag) {
         return std::unexpected(tag.error());
@@ -162,8 +161,6 @@ Result<AttributeValue> decode_attribute_value(storage::BinaryReader& reader) {
     return std::unexpected(Error{ErrorCode::invalid_encoding, "unknown attribute tag"});
 }
 
-} // namespace
-
 Result<std::vector<std::byte>> encode_object(ObjectId id, TypeDefinitionId type,
                                              const FieldValues& fields) {
     // O teto de campos por objeto é o mesmo de atributos por tipo (ADR-007).
@@ -181,7 +178,7 @@ Result<std::vector<std::byte>> encode_object(ObjectId id, TypeDefinitionId type,
     writer.write_u16(static_cast<std::uint16_t>(fields.size()));
     for (const auto& [field_id, value] : fields) {
         writer.write_u16(field_id.value);
-        if (auto result = encode_attribute_value(writer, value); !result) {
+        if (auto result = encode_value(writer, value); !result) {
             return std::unexpected(result.error());
         }
     }
@@ -234,7 +231,7 @@ Result<DecodedObject> decode_object(std::span<const std::byte> record) {
                     "duplicate FieldId " + std::to_string(*field_id) + " in object payload"});
             }
         }
-        auto value = decode_attribute_value(reader);
+        auto value = decode_value(reader);
         if (!value) {
             return std::unexpected(value.error());
         }

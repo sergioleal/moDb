@@ -7,6 +7,8 @@
 // Importa ObjectId/TypeDefinitionId e FieldValues.
 #include "modb/object/ids.hpp"
 #include "modb/object/type_definition.hpp"
+// Importa BinaryWriter/BinaryReader usados pelo codec de valor único.
+#include "modb/storage/binary.hpp"
 
 // Disponibiliza std::byte.
 #include <cstddef>
@@ -48,5 +50,12 @@ struct DecodedObject {
 // desconhecida, comprimento além do buffer, campo duplicado e bytes sobrando
 // viram erro, nunca acesso fora de faixa nem alocação gigante.
 [[nodiscard]] Result<DecodedObject> decode_object(std::span<const std::byte> record);
+
+// Escreve um único valor (tag u8 + conteúdo no encoding do ADR-003). Exposto
+// porque o catálogo (CatalogStore) reaproveita o mesmo encoding ao serializar
+// defaults de atributo dentro do seu sub-formato.
+[[nodiscard]] Result<void> encode_value(storage::BinaryWriter& writer, const AttributeValue& value);
+// Lê um único valor gravado por encode_value, validando limites.
+[[nodiscard]] Result<AttributeValue> decode_value(storage::BinaryReader& reader);
 
 } // namespace modb::object
