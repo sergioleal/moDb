@@ -4,9 +4,12 @@
 // Importa os limites compartilhados de identificador e contagem (ADR-007).
 #include "modb/limits.hpp"
 
+// Disponibiliza o bitset de tamanho fixo usado por validate_object (sem heap).
+#include <array>
 // Disponibiliza a montagem de mensagens com números.
 #include <string>
-// Disponibiliza um conjunto usado para detectar FieldIds e nomes repetidos.
+// Disponibiliza um conjunto usado por create() para detectar FieldIds e
+// nomes repetidos (executa uma única vez por tipo, não é caminho quente).
 #include <unordered_set>
 
 namespace modb::object {
@@ -128,18 +131,17 @@ const AttributeDefinition* TypeDefinition::find(std::string_view name) const noe
 }
 
 // Confere se os campos fornecidos respeitam o tipo antes de qualquer escrita.
+//
+// Roda por objeto a partir da Fase 2 (ObjectStore::create_object/update), por
+// isso não aloca no heap: em vez de um unordered_set<FieldId> para marcar
+// quais atributos já foram vistos, usa um array de tamanho fixo indexado pela
+// posição do atributo em type.attributes() — sempre seguro porque
+// TypeDefinition::create já garante attributes().size() <= max_columns_per_table.
 Result<void> validate_object(const TypeDefinition& type, const FieldValues& fields) {
-    // Registra quais atributos já foram vistos para checar duplicatas e, ao
-    // final, quais ficaram sem valor.
-    std::unordered_set<std::uint16_t> seen;
+    const auto attributes = type.attributes();
+    std::array<bool, modb::max_columns_per_table> seen{};
 
     for (const auto& [field_id, value] : fields) {
-        if (!seen.insert(field_id.value).second) {
-            return std::unexpected(Error{
-                ErrorCode::duplicate_field,
-                "duplicate FieldId " + std::to_string(field_id.value) + " in object payload",
-            });
-        }
         const auto* attribute = type.find(field_id);
         if (attribute == nullptr) {
             return std::unexpected(Error{
@@ -148,6 +150,16 @@ Result<void> validate_object(const TypeDefinition& type, const FieldValues& fiel
                     std::to_string(field_id.value),
             });
         }
+        // A posição do ponteiro dentro do span vira o índice do bitset.
+        const auto index = static_cast<std::size_t>(attribute - attributes.data());
+        if (seen[index]) {
+            return std::unexpected(Error{
+                ErrorCode::duplicate_field,
+                "duplicate FieldId " + std::to_string(field_id.value) + " in object payload",
+            });
+        }
+        seen[index] = true;
+
         if (value.is_null()) {
             if (!attribute->nullable) {
                 return std::unexpected(Error{
@@ -167,10 +179,11 @@ Result<void> validate_object(const TypeDefinition& type, const FieldValues& fiel
 
     // Um atributo ausente do payload só é aceitável se puder ser completado
     // sem perda de informação: por default, ou porque aceita null implícito.
-    for (const auto& attribute : type.attributes()) {
-        if (seen.contains(attribute.id.value)) {
+    for (std::size_t index = 0; index < attributes.size(); ++index) {
+        if (seen[index]) {
             continue;
         }
+        const auto& attribute = attributes[index];
         if (attribute.default_value.has_value()) {
             continue;
         }
