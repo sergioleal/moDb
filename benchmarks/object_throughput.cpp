@@ -59,9 +59,11 @@ int fail(std::string_view what, const Error& error) {
     return 1;
 }
 
-// Executa o benchmark completo. Recebe o arquivo por referência já criado, para
-// que PageFile/ObjectStore sejam destruídos por quem chama antes da limpeza.
-int run_benchmark(std::uint64_t total, const std::filesystem::path& path) {
+// Executa o benchmark completo. `stride` escolhe a ordem de remoção: <=1 apaga
+// em sequência (esvazia páginas rápido); >1 apaga em passada — a cada `stride`
+// posições, depois volta ao offset seguinte —, espalhando as remoções por
+// muitas páginas e mantendo-as vivas e fragmentadas por mais tempo.
+int run_benchmark(std::uint64_t total, std::uint64_t stride, const std::filesystem::path& path) {
     auto file = PageFile::create(path);
     if (!file) {
         return fail("PageFile::create", file.error());
@@ -95,6 +97,14 @@ int run_benchmark(std::uint64_t total, const std::filesystem::path& path) {
 
     std::cout << "moDb — benchmark de throughput do ObjectStore\n";
     std::cout << "Objetos:   " << total << "\n";
+    std::cout << "Delete:    " << (stride <= 1 ? "sequencial" : "em passada (stride " +
+                                                                    std::to_string(stride) + ")")
+              << "\n";
+#ifdef MODB_EAGER_COMPACT
+    std::cout << "Compact:   ANSIOSA (toggle de benchmark)\n";
+#else
+    std::cout << "Compact:   preguicosa\n";
+#endif
     std::cout << "Arquivo:   " << path.string() << "\n\n";
 
     // --- fase CREATE ---
@@ -121,10 +131,29 @@ int run_benchmark(std::uint64_t total, const std::filesystem::path& path) {
     const auto peak_bytes = std::filesystem::file_size(path, size_error);
 
     // --- fase DELETE ---
-    const auto delete_start = std::chrono::steady_clock::now();
-    for (const auto id : ids) {
+    // Remove um id e propaga um eventual erro, para reuso nas duas ordens.
+    const auto remove_at = [&store](ObjectId id) -> Result<void> {
         if (auto removed = store->remove(id); !removed) {
-            return fail("remove", removed.error());
+            return std::unexpected(removed.error());
+        }
+        return {};
+    };
+    const auto delete_start = std::chrono::steady_clock::now();
+    if (stride <= 1) {
+        // Sequencial: apaga na ordem de criação.
+        for (const auto id : ids) {
+            if (auto removed = remove_at(id); !removed) {
+                return fail("remove", removed.error());
+            }
+        }
+    } else {
+        // Em passada: offset 0 pega 0, stride, 2*stride...; depois offset 1, etc.
+        for (std::uint64_t offset = 0; offset < stride; ++offset) {
+            for (std::uint64_t i = offset; i < ids.size(); i += stride) {
+                if (auto removed = remove_at(ids[i]); !removed) {
+                    return fail("remove", removed.error());
+                }
+            }
         }
     }
     const auto delete_end = std::chrono::steady_clock::now();
@@ -170,9 +199,9 @@ int run_benchmark(std::uint64_t total, const std::filesystem::path& path) {
 } // namespace
 
 int main(int argc, char* argv[]) {
-    // --- argumentos ---
-    if (argc > 3) {
-        std::cerr << "Uso: modb_object_bench [milhares] [arquivo]\n";
+    // --- argumentos: [milhares] [stride] [arquivo] ---
+    if (argc > 4) {
+        std::cerr << "Uso: modb_object_bench [milhares] [stride] [arquivo]\n";
         return 2;
     }
 
@@ -189,11 +218,22 @@ int main(int argc, char* argv[]) {
     }
     const std::uint64_t total = thousands * 1000;
 
-    // Caminho: o segundo argumento, ou um arquivo temporário limpo ao final.
-    const bool cleanup = argc < 3;
-    std::filesystem::path path;
+    // stride de remoção: 0/1 = sequencial; >1 = em passada.
+    std::uint64_t stride = 0;
     if (argc >= 3) {
-        path = argv[2];
+        const std::string_view text{argv[2]};
+        auto result = std::from_chars(text.data(), text.data() + text.size(), stride);
+        if (result.ec != std::errc{} || result.ptr != text.data() + text.size()) {
+            std::cerr << "Argumento invalido: stride deve ser um numero.\n";
+            return 2;
+        }
+    }
+
+    // Caminho: o terceiro argumento, ou um arquivo temporário limpo ao final.
+    const bool cleanup = argc < 4;
+    std::filesystem::path path;
+    if (argc >= 4) {
+        path = argv[3];
         if (std::filesystem::exists(path)) {
             std::cerr << "O arquivo informado ja existe; escolha outro caminho: "
                       << path.string() << '\n';
@@ -208,7 +248,7 @@ int main(int argc, char* argv[]) {
 
     // run_benchmark destrói PageFile/ObjectStore ao retornar, liberando o
     // arquivo antes da limpeza (necessário no Windows).
-    const int status = run_benchmark(total, path);
+    const int status = run_benchmark(total, stride, path);
 
     if (cleanup) {
         std::filesystem::remove(path, ignored);

@@ -430,6 +430,11 @@ Result<void> SlottedPage::erase(SlotId slot) {
     // buraco "morto" recuperado sob demanda na próxima inserção (compactação
     // preguiçosa) — erase é O(1), sem compactar a cada remoção.
     write_slot(page_, slot, 0, 0, 0, generation);
+#ifdef MODB_EAGER_COMPACT
+    // Toggle exclusivo de benchmark (não definido em builds normais): restaura a
+    // compactação ansiosa para comparar contra a preguiçosa sob o mesmo padrão.
+    compact();
+#endif
     return {};
 }
 
