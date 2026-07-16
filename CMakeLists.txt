@@ -23,6 +23,8 @@ add_library(modb
     src/model/value.cpp
     src/object/attribute_value.cpp
     src/object/baseline.cpp
+    src/object/database_root.cpp
+    src/object/identity_map.cpp
     src/object/object_codec.cpp
     src/object/type_definition.cpp
     src/object/type_registry.cpp
@@ -139,6 +141,9 @@ if(BUILD_TESTING)
     add_executable(modb_object_codec_tests tests/object_codec_test.cpp)
     target_link_libraries(modb_object_codec_tests PRIVATE modb::modb)
 
+    add_executable(modb_identity_map_tests tests/identity_map_test.cpp)
+    target_link_libraries(modb_identity_map_tests PRIVATE modb::modb)
+
     add_executable(modb_catalog_tests tests/catalog_test.cpp)
     target_link_libraries(modb_catalog_tests PRIVATE modb::modb)
 
@@ -185,6 +190,7 @@ if(BUILD_TESTING)
         target_link_options(modb_model_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_object_model_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_object_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_identity_map_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_catalog_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_storage_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
@@ -202,6 +208,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.model COMMAND modb_model_tests)
     add_test(NAME modb.object_model COMMAND modb_object_model_tests)
     add_test(NAME modb.object_codec COMMAND modb_object_codec_tests)
+    add_test(NAME modb.identity_map COMMAND modb_identity_map_tests)
     add_test(NAME modb.catalog COMMAND modb_catalog_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.codec COMMAND modb_codec_tests)
