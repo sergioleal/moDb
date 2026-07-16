@@ -115,6 +115,23 @@ void write_slot(Page& page, SlotId slot, std::uint16_t offset, std::uint16_t siz
     write_u16(page, entry + 3 * sizeof(std::uint16_t), generation);
 }
 
+// Soma os bytes "mortos": capacidade ocupada por buracos de remoções que ainda
+// não foram recuperados por uma compactação. É a região [free_end, page_size)
+// menos a capacidade dos registros vivos. O(slots), no mesmo custo que a
+// varredura de slot já feita por insert/insertion_capacity.
+std::size_t dead_bytes(const Page& page) {
+    const auto count = read_u16(page, slot_count_offset);
+    std::size_t live_capacity = 0;
+    for (std::uint16_t index = 0; index < count; ++index) {
+        const SlotId slot{index};
+        if (record_size(page, slot) != 0) {
+            live_capacity += record_capacity(page, slot);
+        }
+    }
+    const auto allocated = page_size - static_cast<std::size_t>(read_u16(page, free_end_offset));
+    return allocated - live_capacity;
+}
+
 // Valida cabeçalho, diretório e intervalos dos registros.
 Result<void> validate_page(const Page& page) {
     // Confere a assinatura antes de interpretar os outros campos.
@@ -124,8 +141,9 @@ Result<void> validate_page(const Page& page) {
     }
     // Lê a versão armazenada diretamente em um byte.
     const auto version = std::to_integer<std::uint8_t>(page[version_offset]);
-    // Rejeita layouts que esta implementação não conhece.
-    if (version != format_version) {
+    // Aceita a versão atual e a anterior (v3 é um subconjunto sempre-compacto,
+    // válido sob as regras relaxadas da v4).
+    if (version != format_version && version != 3) {
         return std::unexpected(Error{
             ErrorCode::incompatible_page_version,
             "unsupported slotted page version: " + std::to_string(version),
@@ -193,33 +211,23 @@ Result<void> validate_page(const Page& page) {
         ranges.emplace_back(offset, offset + capacity);
     }
 
-    // Uma página vazia precisa manter o fim livre no final físico.
+    // Sem registros vivos a página é válida: o espaço livre e os buracos ainda
+    // não recuperados ocupam o resto — não se exige mais free_end no fim físico.
     if (ranges.empty()) {
-        if (free_end != page_size) {
-            return std::unexpected(
-                Error{ErrorCode::corrupt_page, "empty slotted page has an invalid free end"});
-        }
         return {};
     }
 
-    // Ordena os registros pela posição física, não pelo SlotId.
+    // Ordena por posição física só para detectar sobreposição. Diferente do
+    // layout sempre-compacto anterior, LACUNAS entre registros são permitidas:
+    // são os buracos deixados por remoções, recuperados sob demanda na próxima
+    // inserção (compactação preguiçosa). Os limites de cada registro (>= free_end
+    // e dentro da página) já foram verificados acima.
     std::sort(ranges.begin(), ranges.end());
-    // O primeiro registro físico precisa começar no fim do espaço livre.
-    if (ranges.front().first != free_end) {
-        return std::unexpected(
-            Error{ErrorCode::corrupt_page, "slotted page contains a gap before its records"});
-    }
-    // Registros consecutivos precisam encostar sem lacuna ou sobreposição.
     for (std::size_t index = 1; index < ranges.size(); ++index) {
-        if (ranges[index - 1].second != ranges[index].first) {
+        if (ranges[index - 1].second > ranges[index].first) {
             return std::unexpected(
-                Error{ErrorCode::corrupt_page, "slotted page record ranges overlap or contain gaps"});
+                Error{ErrorCode::corrupt_page, "slotted page record ranges overlap"});
         }
-    }
-    // O último registro precisa terminar no último byte da página.
-    if (ranges.back().second != page_size) {
-        return std::unexpected(
-            Error{ErrorCode::corrupt_page, "slotted page records do not reach the page end"});
     }
     // Todas as invariantes foram verificadas.
     return {};
@@ -292,9 +300,15 @@ Result<SlotId> SlottedPage::insert(std::span<const std::byte> record) {
     }
     // Uma nova entrada só é necessária quando não existe slot livre.
     const auto required = capacity + (reusable ? 0 : slot_size);
-    // Retorna uma condição normal de página cheia sem alterar os bytes.
+    // Se não cabe na região livre contígua, tenta recuperar os buracos de
+    // remoções anteriores (compactação preguiçosa): compacta apenas quando o
+    // espaço é de fato necessário, não a cada delete. Só então declara a página
+    // cheia — quando nem os buracos recuperados dariam conta.
     if (required > free_space()) {
-        return std::unexpected(Error{ErrorCode::page_full, "slotted page is full"});
+        if (required > free_space() + dead_bytes(page_)) {
+            return std::unexpected(Error{ErrorCode::page_full, "slotted page is full"});
+        }
+        compact();
     }
 
     // Reutiliza a entrada livre ou acrescenta uma ao diretório.
@@ -383,7 +397,9 @@ Result<void> SlottedPage::update(SlotId slot, std::span<const std::byte> record)
     const auto new_capacity = record.size();
     // Qualquer mudança de tamanho recupera a área antiga e realoca o mesmo slot.
     if (new_capacity != old_capacity) {
-        if (new_capacity > free_space() + old_capacity) {
+        // Após liberar este slot e compactar, o espaço livre será a região livre
+        // atual + todos os buracos + a capacidade antiga deste registro.
+        if (new_capacity > free_space() + dead_bytes(page_) + old_capacity) {
             return std::unexpected(Error{ErrorCode::page_full, "slotted page is full"});
         }
         // Retira temporariamente o intervalo antigo antes da compactação.
@@ -410,10 +426,10 @@ Result<void> SlottedPage::erase(SlotId slot) {
     }
     // Preserva a geração para que a próxima ocupação possa avançá-la.
     const auto generation = slot_generation(page_, slot);
-    // Zera a descrição física e mantém a entrada disponível.
+    // Zera a descrição física e mantém a entrada disponível. O espaço vira um
+    // buraco "morto" recuperado sob demanda na próxima inserção (compactação
+    // preguiçosa) — erase é O(1), sem compactar a cada remoção.
     write_slot(page_, slot, 0, 0, 0, generation);
-    // Elimina o buraco e devolve toda a capacidade ao espaço livre.
-    compact();
     return {};
 }
 
@@ -476,15 +492,19 @@ std::size_t SlottedPage::free_space() const noexcept {
 
 // Calcula a capacidade útil de uma próxima inserção, incluindo seu slot quando necessário.
 std::size_t SlottedPage::insertion_capacity() const noexcept {
+    // Espaço recuperável = região livre contígua + buracos que uma compactação
+    // sob demanda devolveria. Sem contar os buracos, o TableHeap acharia cheia
+    // uma página que ainda comporta o registro após compactar.
+    const auto reclaimable = free_space() + dead_bytes(page_);
     for (std::uint16_t index = 0; index < slot_count(); ++index) {
         const SlotId slot{index};
         if (record_size(page_, slot) == 0 &&
             slot_generation(page_, slot) != std::numeric_limits<std::uint16_t>::max()) {
-            return free_space();
+            // Há slot reutilizável: a inserção não precisa crescer o diretório.
+            return reclaimable;
         }
     }
-    const auto available = free_space();
-    return available >= slot_size ? available - slot_size : 0;
+    return reclaimable >= slot_size ? reclaimable - slot_size : 0;
 }
 
 // Lê a fronteira final do diretório de slots.

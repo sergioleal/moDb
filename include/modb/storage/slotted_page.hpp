@@ -21,7 +21,10 @@
 namespace modb::storage {
 
 // Define a versão persistida do layout de slotted page.
-inline constexpr std::uint8_t slotted_page_format_version = 3;
+// v4 relaxou a área de registros para permitir buracos (compactação
+// preguiçosa); v3 (sempre compacta) é um subconjunto válido e ainda é aceita
+// na leitura.
+inline constexpr std::uint8_t slotted_page_format_version = 4;
 // Define quantos bytes pertencem ao cabeçalho fixo.
 inline constexpr std::size_t slotted_page_header_size = 28;
 // Define quantos bytes pertencem a cada entrada do diretório.
