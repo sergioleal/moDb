@@ -41,8 +41,8 @@
 | Fase | Tema | Status | Progresso | Bloqueada por |
 |---|---|---|---|---|
 | [0](#fase-0--decisões-e-fundações) | Decisões e fundações | ✅ Concluída | 10/10 | — |
-| [1](#fase-1--modelo-de-objetos-e-catálogo-em-memória) | Modelo de objetos em memória | ⬜ Não iniciada | 0/8 | — |
-| [2](#fase-2--codec-genérico-e-objectstore-persistente) | Codec genérico + ObjectStore | ⬜ Não iniciada | 0/11 | Fase 1 |
+| [1](#fase-1--modelo-de-objetos-e-catálogo-em-memória) | Modelo de objetos em memória | ✅ Concluída | 8/8 | — |
+| [2](#fase-2--codec-genérico-e-objectstore-persistente) | Codec genérico + ObjectStore | ⬜ Não iniciada | 0/11 | — |
 | [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ⬜ Não iniciada | 0/10 | Fase 2 |
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ⬜ Não iniciada | 0/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ⬜ Não iniciada | 0/11 | Fase 2 |
@@ -51,10 +51,10 @@
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **10/103 (~10%)** | |
+| **Total** | | | **18/103 (~17%)** | |
 
-**MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 10/39
-tarefas (~26%).
+**MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 18/39
+tarefas (~46%).
 
 ---
 
@@ -82,29 +82,33 @@ Critério de aceite: ✅ demonstrado — decisões revisadas e consistentes entr
 
 ## Fase 1 — Modelo de objetos e catálogo em memória
 
-Status: ⬜ Não iniciada (0/8) — Definição completa:
+Status: ✅ **Concluída** (8/8) — commit `bfcc5ef`, 2026-07-16.
+Definição completa:
 [PLANO_ODB.md §Fase 1](PLANO_ODB.md#fase-1--modelo-de-objetos-e-catálogo-em-memória) ·
 [PROTOCOLO_FASES.md §Fase 1](PROTOCOLO_FASES.md#fase-1--modelo-de-objetos-e-catálogo-em-memória)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 1.1 | Identificadores fortes (`ids.hpp`) | ⬜ | |
-| 1.2 | `AttributeValue`/`AttributeType` (evolução de `Value`/`DataType`) | ⬜ | |
-| 1.3 | `AttributeDefinition` | ⬜ | |
-| 1.4 | `TypeDefinition` imutável | ⬜ | |
-| 1.5 | `Baseline` imutável | ⬜ | |
-| 1.6 | `TypeRegistry` em memória | ⬜ | |
-| 1.7 | `validate_object` (payload lógico × TypeDefinition) | ⬜ | |
-| 1.8 | Testes unitários do modelo | ⬜ | |
+| 1.1 | Identificadores fortes (`ids.hpp`) | ✅ | `include/modb/object/ids.hpp` — commit `bfcc5ef` |
+| 1.2 | `AttributeValue`/`AttributeType` (evolução de `Value`/`DataType`) | ✅ | `include/modb/object/attribute_value.hpp` |
+| 1.3 | `AttributeDefinition` | ✅ | `include/modb/object/type_definition.hpp` |
+| 1.4 | `TypeDefinition` imutável | ✅ | Herança/constraints ficam fora do escopo definido (não fazem parte do MVP OO) |
+| 1.5 | `Baseline` imutável | ✅ | `include/modb/object/baseline.hpp` |
+| 1.6 | `TypeRegistry` em memória | ✅ | `include/modb/object/type_registry.hpp` |
+| 1.7 | `validate_object` (payload lógico × TypeDefinition) | ✅ | `src/object/type_definition.cpp` |
+| 1.8 | Testes unitários do modelo | ✅ | `tests/object_model_test.cpp` |
 
 ### Testes automatizados desta fase
 
 | Teste (CTest) | Arquivo | Status |
 |---|---|---|
-| `modb.object_model` | `tests/object_model_test.cpp` | ⬜ |
+| `modb.object_model` | `tests/object_model_test.cpp` | ✅ |
 
-Critério de aceite: ⬜ `TypeDefinition` rejeita payloads incompatíveis;
-`Baseline`/`TypeDefinition` imutáveis após criação.
+Critério de aceite: ✅ `TypeDefinition::create`/`Baseline::create` rejeitam
+entradas incompatíveis (`duplicate_field`, `too_many_columns`,
+`invalid_identifier`, `type_mismatch`, `null_constraint_violation`,
+`duplicate_type`, `invalid_object_id`); ambas as classes não possuem mutador
+público — evolução é sempre um novo objeto estampado, nunca mutação in-place.
 
 ---
 
@@ -396,3 +400,4 @@ automaticamente, interfaces públicas documentadas.
 | Fase | Data de conclusão | Commit |
 |---|---|---|
 | 0 | 2026-07-16 | `4928468` |
+| 1 | 2026-07-16 | `bfcc5ef` |
