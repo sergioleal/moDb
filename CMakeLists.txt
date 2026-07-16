@@ -33,6 +33,7 @@ add_library(modb
     src/storage/page_file.cpp
     src/storage/database_check.cpp
     src/storage/native_file.cpp
+    src/storage/page_cache.cpp
     src/storage/scratch_page_pool.cpp
     src/storage/slotted_page.cpp
     src/storage/table_heap.cpp
@@ -124,8 +125,12 @@ add_executable(modb_cli apps/modb_cli/main.cpp)
 target_link_libraries(modb_cli PRIVATE modb::modb)
 set_target_properties(modb_cli PROPERTIES OUTPUT_NAME modb)
 
+add_executable(modb_object_bench benchmarks/object_throughput.cpp)
+target_link_libraries(modb_object_bench PRIVATE modb::modb)
+
 if(MINGW)
     target_link_options(modb_cli PRIVATE -static -static-libgcc -static-libstdc++)
+    target_link_options(modb_object_bench PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 
 if(BUILD_TESTING)
@@ -152,6 +157,9 @@ if(BUILD_TESTING)
 
     add_executable(modb_storage_tests tests/storage_test.cpp)
     target_link_libraries(modb_storage_tests PRIVATE modb::modb)
+
+    add_executable(modb_page_cache_tests tests/page_cache_test.cpp)
+    target_link_libraries(modb_page_cache_tests PRIVATE modb::modb)
 
     add_executable(modb_codec_tests tests/codec_test.cpp)
     target_link_libraries(modb_codec_tests PRIVATE modb::modb)
@@ -197,6 +205,7 @@ if(BUILD_TESTING)
         target_link_options(modb_object_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_catalog_persistence_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_storage_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_page_cache_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_text_escape_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_slotted_page_tests PRIVATE -static -static-libgcc -static-libstdc++)
@@ -216,6 +225,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.object_store COMMAND modb_object_store_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
+    add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)
     add_test(NAME modb.codec COMMAND modb_codec_tests)
     add_test(NAME modb.text_escape COMMAND modb_text_escape_tests)
     add_test(NAME modb.slotted_page COMMAND modb_slotted_page_tests)

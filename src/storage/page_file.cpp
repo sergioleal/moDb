@@ -302,8 +302,36 @@ Result<void> PageFile::read(PageId id, Page& destination) {
             Error{ErrorCode::page_not_found, "page does not exist: " + std::to_string(id.value)});
     }
 
-    // Lê a página inteira diretamente sobre o buffer, sem cursor compartilhado.
-    return file_.read_at(page_offset(id), destination.bytes());
+    // Acerto de cache: copia a página já residente e evita a syscall.
+    if (const Page* cached = cache_->get(id.value)) {
+        std::copy(cached->bytes().begin(), cached->bytes().end(), destination.bytes().begin());
+        return {};
+    }
+
+    // Erro de cache: traz a página pedida e as seguintes numa única leitura
+    // maior (read-ahead), limitada ao fim lógico do arquivo. Favorece varreduras
+    // sequenciais e o acesso repetido à mesma página (ex.: IDMP compartilhada).
+    const std::uint64_t first = id.value;
+    const std::uint64_t available = page_count_ - first;
+    const std::size_t count =
+        static_cast<std::size_t>(available < page_readahead ? available : page_readahead);
+    // Buffer contíguo para a leitura única; só a parte preenchida é usada.
+    std::array<std::byte, page_readahead * page_size> buffer;
+    const std::span<std::byte> block{buffer.data(), count * page_size};
+    if (auto read = file_.read_at(page_offset(id), block); !read) {
+        return std::unexpected(read.error());
+    }
+
+    // Copia a página pedida para o destino e popula o cache com todas as trazidas.
+    const auto requested = block.subspan(0, page_size);
+    std::copy(requested.begin(), requested.end(), destination.bytes().begin());
+    for (std::size_t index = 0; index < count; ++index) {
+        Page page;
+        const auto slice = block.subspan(index * page_size, page_size);
+        std::copy(slice.begin(), slice.end(), page.bytes().begin());
+        cache_->put(first + index, page);
+    }
+    return {};
 }
 
 // Sobrescreve uma página de dados existente.
@@ -339,7 +367,15 @@ Result<void> PageFile::write_page_count(std::uint64_t page_count) {
     std::array<std::byte, sizeof(std::uint64_t)> buffer{};
     store_le(std::span<std::byte>{buffer}, page_count);
     // Grava apenas os oito bytes do campo, na sua posição dentro do superbloco.
-    return file_.write_at(page_offset(superblock_page_id) + page_count_offset, buffer);
+    if (auto written =
+            file_.write_at(page_offset(superblock_page_id) + page_count_offset, buffer);
+        !written) {
+        return std::unexpected(written.error());
+    }
+    // A escrita parcial alterou 8 bytes da página zero; a cópia em cache (se
+    // houver) ficou desatualizada, então é descartada.
+    cache_->invalidate(superblock_page_id.value);
+    return {};
 }
 
 // Persiste a raiz do catálogo sem apagar os demais metadados do superbloco.
@@ -375,7 +411,13 @@ Result<void> PageFile::set_catalog_root(std::optional<PageId> root) {
 // Executa a escrita binária sem bloquear páginas reservadas.
 Result<void> PageFile::write_at(PageId id, const Page& page) {
     // Grava a página inteira na sua posição, sem cursor compartilhado.
-    return file_.write_at(page_offset(id), page.bytes());
+    if (auto written = file_.write_at(page_offset(id), page.bytes()); !written) {
+        return std::unexpected(written.error());
+    }
+    // Write-through: a cópia em cache passa a refletir exatamente o disco, sem
+    // nunca segurar dados sujos (a durabilidade continua a mesma).
+    cache_->put(id.value, page);
+    return {};
 }
 
 } // namespace modb::storage
