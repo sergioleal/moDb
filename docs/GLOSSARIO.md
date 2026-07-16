@@ -1,16 +1,79 @@
 # Glossário
 
-- **AST**: árvore que representa a estrutura sintática de um comando SQL.
-- **Binder**: etapa que resolve nomes de tabelas e colunas e valida seus tipos.
-- **Buffer pool**: cache em memória das páginas lidas do arquivo.
-- **Catálogo**: metadados persistentes sobre tabelas, colunas e outros objetos.
-- **Executor**: componente que executa operadores de um plano de consulta.
-- **MVP**: menor versão que comprova o fluxo persistente de ponta a ponta.
-- **Página**: bloco de tamanho fixo usado para leitura e escrita no arquivo.
-- **PageId**: identificador lógico e estável de uma página.
-- **Plano lógico**: representação das operações relacionais de uma consulta.
-- **RowId**: localização lógica de uma linha armazenada.
-- **Scan**: leitura sequencial das linhas de uma tabela.
-- **Superbloco**: página reservada com identidade, versão e raízes do banco.
-- **WAL**: log gravado antes das páginas de dados para permitir recuperação.
+> O produto é um banco Orientado a Objetos (ODB++). Os termos OO abaixo são os
+> vigentes; os termos relacionais ao final são legados, mantidos para leitura do
+> histórico. Ver [PLANO_ODB.md](PLANO_ODB.md).
 
+## Modelo Orientado a Objetos
+
+- **Objeto**: unidade persistente do banco; possui identidade, tipo e atributos.
+- **ObjectId**: identidade permanente de um objeto (u64, monotônico, nunca
+  reutilizada). Não muda mesmo que o objeto mude de página.
+- **Handle**: referência leve a um objeto (`DatabaseId` + `ObjectId`);
+  representa apenas identidade, nunca contém o objeto.
+- **TypeDefinition**: definição imutável de um tipo (nome, atributos,
+  relacionamentos, índices). Uma nova versão do tipo cria uma nova definição.
+- **AttributeDefinition**: definição de um atributo (FieldId, nome, tipo,
+  nullable, default, se é coleção/embedded/owned).
+- **FieldId**: identificador estável de um atributo dentro de um tipo (u16).
+- **Baseline**: snapshot estrutural completo e imutável do catálogo (conjunto
+  de TypeDefinitions).
+- **Binding**: ligação, na aplicação atual, entre FieldIds e membros de uma
+  classe C++. Existe apenas um binding por tipo por versão da aplicação.
+- **Codec genérico**: único codec binário; interpreta qualquer objeto a partir
+  do catálogo, sem conhecer classes C++.
+- **ProjectionPlan**: plano que reconcilia a TypeDefinition persistida com o
+  binding atual (copy, convert, default, ignore, resolve_reference); cacheado
+  por tipo.
+- **Migração preguiçosa**: objeto antigo permanece como está e só é regravado
+  com a definição atual quando modificado.
+- **Ref / OwnedRef / Embedded**: associação (referência por ObjectId),
+  composição (referência com remoção em cascata) e objeto sem identidade
+  serializado no pai.
+- **BlobStore**: armazenamento de dados grandes (textos, binários, coleções) em
+  páginas encadeadas; o objeto guarda apenas o `BlobId`.
+- **PersistentVector/Set/Map**: coleções com armazenamento próprio (via blob),
+  fora do payload do objeto.
+- **Snapshot**: visão consistente do banco numa época; leituras de um snapshot
+  não enxergam escritas posteriores.
+- **Operation**: unidade transacional de código de domínio executada dentro do
+  servidor (ex.: `TransferFunds`).
+- **ExecutionContext**: única porta de entrada de uma Operation para o banco
+  (transação, objetos, log); nunca expõe páginas ou WAL.
+- **TTFR**: *Time To First Result* — tempo até o primeiro objeto de uma
+  consulta; principal métrica de desempenho do streaming.
+- **Streaming**: modelo nativo de execução de consultas; resultados fluem assim
+  que produzidos, com memória O(1) e backpressure até o storage.
+
+## Termos gerais de armazenamento (vigentes)
+
+- **Página**: bloco de tamanho fixo (4096 bytes) para leitura e escrita no
+  arquivo.
+- **PageId**: identificador lógico e estável de uma página.
+- **Superbloco**: página zero com identidade, versão, tamanho de página e a
+  raiz do banco (`catalog_root`).
+- **Slotted page**: página que armazena registros de tamanho variável com um
+  diretório de slots.
+- **TableHeap**: cadeia de páginas que armazena registros; base física do
+  ObjectStore.
+- **Mapa de identidade**: tradução persistente `ObjectId → (página, slot)`.
+- **Buffer pool**: cache em memória das páginas lidas do arquivo.
+- **WAL**: log gravado e sincronizado antes das páginas de dados, para permitir
+  recuperação atômica e durável.
+- **Scan**: varredura sequencial dos objetos armazenados.
+- **Executor**: componente que executa os operadores de um plano de consulta.
+
+## Termos relacionais (legados)
+
+> Vocabulário do modelo relacional abandonado no pivô. Mantido apenas para
+> leitura do histórico e dos documentos supersedidos.
+
+- **AST**: árvore que representa a estrutura sintática de um comando SQL.
+- **Binder**: etapa que resolvia nomes de tabelas e colunas.
+- **Catálogo (relacional)**: metadados sobre tabelas, colunas e outros objetos.
+  No modelo OO, o catálogo é composto por objetos.
+- **Plano lógico**: representação das operações relacionais de uma consulta.
+- **RowId**: localização lógica de uma linha; substituído por ObjectId +
+  mapa de identidade.
+- **MVP (relacional)**: menor versão que comprovava o fluxo persistente
+  relacional; substituído pelo MVP OO (Fases 0–3 do PLANO_ODB).

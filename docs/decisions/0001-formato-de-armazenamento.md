@@ -1,6 +1,12 @@
 # ADR 0001 — Formato inicial de armazenamento
 
-- Estado: aceito para o MVP
+> ⚠️ **Parcialmente supersedida pelo pivô OO.** As decisões de storage físico
+> (página de 4096 bytes, superbloco, little-endian explícito, validação) seguem
+> válidas e foram reafirmadas pelas ADR-00X. As referências a metadados
+> relacionais são superadas por [ADR-004](ADR-004-pagina-raiz-do-banco.md) e
+> [ADR-005](ADR-005-mapa-de-identidade.md).
+
+- Estado: superseção parcial (ver aviso acima); storage físico ainda aceito
 - Data: 2026-07-13
 
 ## Contexto

@@ -1,6 +1,11 @@
 # ADR 0002 — Tipos SQL e tratamento de erros
 
-- Estado: aceito para o MVP
+> ⚠️ **Parcialmente supersedida pelo pivô OO.** A política de erros
+> (`std::expected`, sem exceções no fluxo normal, código estável + mensagem)
+> segue válida. Os tipos SQL são superados pelos tipos de atributo de objeto em
+> [ADR-003](ADR-003-tipos-e-encoding.md).
+
+- Estado: superseção parcial (ver aviso acima); política de erros ainda aceita
 - Data: 2026-07-13
 
 ## Contexto

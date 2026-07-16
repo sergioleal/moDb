@@ -1,5 +1,12 @@
 # moDb
 
+> ⚠️ **Documento supersedido.** O projeto pivotou de banco **relacional** para
+> banco **Orientado a Objetos** (ODB++). O conteúdo abaixo descreve o modelo
+> relacional abandonado e será reescrito na Fase 10. Para a arquitetura e o
+> plano vigentes, ver [docs/PLANO_ODB.md](docs/PLANO_ODB.md),
+> [docs/PROTOCOLO_FASES.md](docs/PROTOCOLO_FASES.md), [arquitetura.md](arquitetura.md),
+> [codigo-local.md](codigo-local.md) e [streaming.md](streaming.md).
+
 `moDb` será um banco de dados relacional embutido, persistente em arquivo e
 implementado em C++26.
 

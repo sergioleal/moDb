@@ -1,3 +1,8 @@
+> ⚠️ **Documento supersedido.** Este é o plano do modelo **relacional**
+> abandonado. O plano vigente (banco Orientado a Objetos) está em
+> [PLANO_ODB.md](PLANO_ODB.md), detalhado por fase em
+> [PROTOCOLO_FASES.md](PROTOCOLO_FASES.md). Mantido apenas para histórico.
+
 # Plano de desenvolvimento do moDb
 
 ## 1. Objetivo
