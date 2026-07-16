@@ -1,5 +1,6 @@
 #include "modb/catalog.hpp"
 #include "modb/object/attribute_value.hpp"
+#include "modb/object/object_store.hpp"
 #include "modb/object/type_definition.hpp"
 #include "modb/object/type_registry.hpp"
 #include "modb/row.hpp"
@@ -58,6 +59,8 @@ void print_heap_help();
 void print_codec_help();
 void print_catalog_help();
 void print_types_help();
+void print_type_help();
+void print_object_help();
 
 int command_demo();
 int command_demo_run(bool force);
@@ -97,6 +100,8 @@ int command_heap_repair(const std::filesystem::path& path, modb::storage::PageId
 int command_codec_run();
 int command_catalog_run();
 int command_types_run();
+int run_type_command(int argc, char* argv[]);
+int run_object_command(int argc, char* argv[]);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -137,6 +142,8 @@ void print_help() {
            "  codec    Encode and decode a row in memory.\n"
            "  catalog  Exercise the in-memory catalog.\n"
            "  types    Exercise the in-memory object model (ODB++).\n"
+           "  type     Define and list persistent object types (ODB++).\n"
+           "  object   Create, read and remove persistent objects (ODB++).\n"
            "\n"
            "Options:\n"
            "  -h, --help     Show this help.\n"
@@ -200,6 +207,21 @@ void print_codec_help() {
 void print_types_help() {
     std::cout << "Usage:\n"
                  "  modb types\n";
+}
+
+void print_type_help() {
+    std::cout << "Usage:\n"
+                 "  modb type define <file> <name> <attr:type[:null]>...\n"
+                 "  modb type list <file>\n"
+                 "\n"
+                 "Types: boolean, int64, float64, string, bytes\n";
+}
+
+void print_object_help() {
+    std::cout << "Usage:\n"
+                 "  modb object create <file> <type> <attr=value>...\n"
+                 "  modb object get <file> <object-id>\n"
+                 "  modb object remove <file> <object-id>\n";
 }
 
 void print_catalog_help() {
@@ -360,6 +382,7 @@ int command_db_check(const std::filesystem::path& path) {
     std::size_t unformatted = 0;
     std::size_t slotted = 0;
     std::size_t table_heap_roots = 0;
+    std::size_t object_pages = 0;
     std::size_t unknown = 0;
     for (const auto& page : report.pages) {
         switch (page.kind) {
@@ -371,6 +394,11 @@ int command_db_check(const std::filesystem::path& path) {
             break;
         case modb::storage::PageKind::table_heap_root:
             ++table_heap_roots;
+            break;
+        case modb::storage::PageKind::database_root:
+        case modb::storage::PageKind::identity_directory:
+        case modb::storage::PageKind::identity_entries:
+            ++object_pages;
             break;
         case modb::storage::PageKind::unknown:
             ++unknown;
@@ -385,6 +413,9 @@ int command_db_check(const std::filesystem::path& path) {
     std::cout << "Unformatted pages: " << unformatted << '\n';
     std::cout << "Slotted pages: " << slotted << '\n';
     std::cout << "TableHeap roots: " << table_heap_roots << '\n';
+    if (object_pages != 0) {
+        std::cout << "Object store pages (DBRT/IDMD/IDMP): " << object_pages << '\n';
+    }
     if (unknown != 0) {
         std::cout << "Unrecognized pages: " << unknown << '\n';
     }
@@ -1139,6 +1170,342 @@ int command_types_run() {
     return 0;
 }
 
+// Command groups: type and object (persistent ODB++ object store).
+
+// Converte o nome textual de um tipo de atributo do CLI para a tag.
+modb::Result<modb::object::AttributeType> parse_attribute_type(std::string_view name) {
+    using modb::object::AttributeType;
+    if (name == "boolean") {
+        return AttributeType::boolean;
+    }
+    if (name == "int64") {
+        return AttributeType::int64;
+    }
+    if (name == "float64") {
+        return AttributeType::float64;
+    }
+    if (name == "string") {
+        return AttributeType::string;
+    }
+    if (name == "bytes") {
+        return AttributeType::bytes;
+    }
+    return std::unexpected(modb::Error{
+        modb::ErrorCode::invalid_argument,
+        "unknown attribute type; use boolean, int64, float64, string or bytes"});
+}
+
+// Converte um valor textual do CLI conforme o tipo declarado do atributo.
+modb::Result<modb::object::AttributeValue> parse_attribute_value(
+    modb::object::AttributeType type, std::string_view text) {
+    using modb::object::AttributeType;
+    using modb::object::AttributeValue;
+    switch (type) {
+    case AttributeType::boolean:
+        if (text == "true") {
+            return AttributeValue{true};
+        }
+        if (text == "false") {
+            return AttributeValue{false};
+        }
+        return std::unexpected(
+            modb::Error{modb::ErrorCode::invalid_argument, "boolean must be true or false"});
+    case AttributeType::int64: {
+        auto value = parse_integer(text);
+        if (!value) {
+            return std::unexpected(value.error());
+        }
+        return AttributeValue{*value};
+    }
+    case AttributeType::float64: {
+        auto value = parse_real(text);
+        if (!value) {
+            return std::unexpected(value.error());
+        }
+        return AttributeValue{*value};
+    }
+    case AttributeType::string:
+        return AttributeValue{text};
+    case AttributeType::bytes:
+    case AttributeType::null:
+    case AttributeType::ref:
+    case AttributeType::blob:
+    case AttributeType::embedded:
+        break;
+    }
+    return std::unexpected(modb::Error{modb::ErrorCode::invalid_argument,
+                                       "this attribute type cannot be entered on the CLI yet"});
+}
+
+// Abre o ObjectStore de um arquivo existente, criando a hierarquia OO na
+// primeira vez (um arquivo recém-criado por `db create` ainda não tem DBRT).
+modb::Result<modb::object::ObjectStore> open_or_init_object_store(
+    modb::storage::PageFile& file) {
+    auto opened = modb::object::ObjectStore::open(file);
+    if (opened) {
+        return opened;
+    }
+    // Sem DBRT ainda: inicializa a hierarquia de objetos neste arquivo.
+    if (opened.error().code == modb::ErrorCode::invalid_file_format) {
+        return modb::object::ObjectStore::create(file);
+    }
+    return opened;
+}
+
+// Mostra os campos de um objeto decodificado.
+void print_decoded_object(const modb::object::DecodedObject& object) {
+    std::cout << "ObjectId: " << object.id.value << '\n';
+    std::cout << "TypeDefinitionId: " << object.type.value << '\n';
+    for (const auto& [field_id, value] : object.fields) {
+        std::cout << "  " << field_id.value << " = ";
+        print_attribute_value(value);
+        std::cout << '\n';
+    }
+}
+
+// modb type define <file> <name> <attr:type[:null]>...
+int command_type_define(int argc, char* argv[]) {
+    const std::filesystem::path path{argv[3]};
+    const std::string type_name{argv[4]};
+
+    // Cada argumento extra descreve um atributo; o FieldId é a posição (1-based).
+    std::vector<modb::object::AttributeDefinition> attributes;
+    for (int index = 5; index < argc; ++index) {
+        const std::string_view spec{argv[index]};
+        const auto first = spec.find(':');
+        if (first == std::string_view::npos) {
+            return print_usage_error("modb type define <file> <name> <attr:type[:null]>...");
+        }
+        const auto attr_name = spec.substr(0, first);
+        auto rest = spec.substr(first + 1);
+        bool nullable = false;
+        const auto second = rest.find(':');
+        if (second != std::string_view::npos) {
+            if (rest.substr(second + 1) != "null") {
+                return print_usage_error("modb type define <file> <name> <attr:type[:null]>...");
+            }
+            nullable = true;
+            rest = rest.substr(0, second);
+        }
+        auto type = parse_attribute_type(rest);
+        if (!type) {
+            return print_error(type.error());
+        }
+        attributes.push_back(modb::object::AttributeDefinition{
+            .id = modb::object::FieldId{static_cast<std::uint16_t>(index - 4)},
+            .name = std::string{attr_name},
+            .type = *type,
+            .nullable = nullable});
+    }
+
+    auto definition = modb::object::TypeDefinition::create(type_name, std::move(attributes));
+    if (!definition) {
+        return print_error(definition.error());
+    }
+
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+    auto store = open_or_init_object_store(*file);
+    if (!store) {
+        return print_error(store.error());
+    }
+    auto type_id = store->register_type(std::move(*definition));
+    if (!type_id) {
+        return print_error(type_id.error());
+    }
+    if (auto flushed = file->flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+    std::cout << "Type defined: " << type_name << " (id " << type_id->value << ")\n";
+    return 0;
+}
+
+// modb type list <file>
+int command_type_list(const std::filesystem::path& path) {
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+    auto store = modb::object::ObjectStore::open(*file);
+    if (!store) {
+        return print_error(store.error());
+    }
+    // A baseline corrente lista os tipos registrados.
+    const auto& baseline = store->current_baseline();
+    if (!baseline) {
+        std::cout << "No types defined.\n";
+        return 0;
+    }
+    for (const auto type_id : baseline->types()) {
+        auto type = store->find_type(type_id);
+        if (!type) {
+            return print_error(type.error());
+        }
+        std::cout << type->get().name() << " (id " << type_id.value << ")\n";
+        for (const auto& attribute : type->get().attributes()) {
+            std::cout << "  " << attribute.id.value << ": " << attribute.name << " ("
+                      << modb::object::attribute_type_name(attribute.type)
+                      << (attribute.nullable ? ", nullable" : ", not null") << ")\n";
+        }
+    }
+    return 0;
+}
+
+// modb object create <file> <type> <attr=value>...
+int command_object_create(int argc, char* argv[]) {
+    const std::filesystem::path path{argv[3]};
+    const std::string type_name{argv[4]};
+
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+    auto store = modb::object::ObjectStore::open(*file);
+    if (!store) {
+        return print_error(store.error());
+    }
+    auto type = store->find_type(type_name);
+    if (!type) {
+        return print_error(type.error());
+    }
+
+    // Cada argumento extra é um par attr=value; atributos ausentes usam default
+    // ou null (validado por create_object).
+    modb::object::FieldValues fields;
+    for (int index = 5; index < argc; ++index) {
+        const std::string_view pair{argv[index]};
+        const auto equals = pair.find('=');
+        if (equals == std::string_view::npos) {
+            return print_usage_error("modb object create <file> <type> <attr=value>...");
+        }
+        const auto attr_name = pair.substr(0, equals);
+        const auto text = pair.substr(equals + 1);
+        const auto* attribute = type->get().find(attr_name);
+        if (attribute == nullptr) {
+            return print_error(modb::Error{modb::ErrorCode::field_not_found,
+                                           "type has no attribute named " + std::string{attr_name}});
+        }
+        auto value = parse_attribute_value(attribute->type, text);
+        if (!value) {
+            return print_error(value.error());
+        }
+        fields.emplace_back(attribute->id, std::move(*value));
+    }
+
+    auto id = store->create_object(type->get(), std::move(fields));
+    if (!id) {
+        return print_error(id.error());
+    }
+    if (auto flushed = file->flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+    std::cout << "Object created: id " << id->value << '\n';
+    return 0;
+}
+
+// modb object get <file> <object-id>
+int command_object_get(const std::filesystem::path& path, std::uint64_t object_id) {
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+    auto store = modb::object::ObjectStore::open(*file);
+    if (!store) {
+        return print_error(store.error());
+    }
+    auto object = store->get(modb::object::ObjectId{object_id});
+    if (!object) {
+        return print_error(object.error());
+    }
+    print_decoded_object(*object);
+    return 0;
+}
+
+// modb object remove <file> <object-id>
+int command_object_remove(const std::filesystem::path& path, std::uint64_t object_id) {
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+    auto store = modb::object::ObjectStore::open(*file);
+    if (!store) {
+        return print_error(store.error());
+    }
+    if (auto removed = store->remove(modb::object::ObjectId{object_id}); !removed) {
+        return print_error(removed.error());
+    }
+    if (auto flushed = file->flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+    std::cout << "Object removed: id " << object_id << '\n';
+    return 0;
+}
+
+// Interpreta um ObjectId (u64 positivo) vindo da linha de comando.
+modb::Result<std::uint64_t> parse_object_id(std::string_view text) {
+    auto value = parse_integer(text);
+    if (!value) {
+        return std::unexpected(value.error());
+    }
+    if (*value < 0) {
+        return std::unexpected(
+            modb::Error{modb::ErrorCode::invalid_argument, "object id must not be negative"});
+    }
+    return static_cast<std::uint64_t>(*value);
+}
+
+int run_type_command(int argc, char* argv[]) {
+    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+        print_type_help();
+        return 0;
+    }
+    const std::string_view subcommand{argv[2]};
+    if (subcommand == "define") {
+        if (argc < 5) {
+            return print_usage_error("modb type define <file> <name> <attr:type[:null]>...");
+        }
+        return command_type_define(argc, argv);
+    }
+    if (subcommand == "list") {
+        if (argc != 4) {
+            return print_usage_error("modb type list <file>");
+        }
+        return command_type_list(argv[3]);
+    }
+    std::cerr << "Unknown type command: " << subcommand << '\n';
+    return 2;
+}
+
+int run_object_command(int argc, char* argv[]) {
+    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+        print_object_help();
+        return 0;
+    }
+    const std::string_view subcommand{argv[2]};
+    if (subcommand == "create") {
+        if (argc < 5) {
+            return print_usage_error("modb object create <file> <type> <attr=value>...");
+        }
+        return command_object_create(argc, argv);
+    }
+    if (subcommand == "get" || subcommand == "remove") {
+        if (argc != 5) {
+            return print_usage_error("modb object " + std::string{subcommand} +
+                                     " <file> <object-id>");
+        }
+        auto object_id = parse_object_id(argv[4]);
+        if (!object_id) {
+            return print_error(object_id.error());
+        }
+        return subcommand == "get" ? command_object_get(argv[3], *object_id)
+                                   : command_object_remove(argv[3], *object_id);
+    }
+    std::cerr << "Unknown object command: " << subcommand << '\n';
+    return 2;
+}
+
 // Group dispatchers, kept after the command implementations.
 int run_db_command(int argc, char* argv[]) {
     if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
@@ -1464,6 +1831,12 @@ int run(int argc, char* argv[]) {
             return print_usage_error("modb types");
         }
         return command_types_run();
+    }
+    if (command == "type") {
+        return run_type_command(argc, argv);
+    }
+    if (command == "object") {
+        return run_object_command(argc, argv);
     }
     std::cerr << "Unknown command: " << command << "\nUse --help for usage.\n";
     return 2;

@@ -28,6 +28,12 @@ enum class PageKind {
     slotted,
     // Raiz dedicada de TableHeap com assinatura THRP.
     table_heap_root,
+    // Página raiz do banco OO com assinatura DBRT (ADR-004).
+    database_root,
+    // Página de diretório do mapa de identidade com assinatura IDMD (ADR-005).
+    identity_directory,
+    // Página de entradas do mapa de identidade com assinatura IDMP (ADR-005).
+    identity_entries,
     // Assinatura não reconhecida.
     unknown,
 };

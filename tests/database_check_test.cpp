@@ -143,7 +143,7 @@ int main() {
             if (!slotted_id) {
                 return suite.finish();
             }
-            // Um registro saudável precisa ser uma linha decodificável (agora o L4 valida).
+            // Insere um registro qualquer só para a página ter conteúdo válido.
             auto encoded_payload = encode_row(Row{Value{std::int64_t{1}}, Value{"ok"}});
             suite.check(encoded_payload.has_value(), "healthy sample row is encoded");
             if (!encoded_payload) {
@@ -247,7 +247,10 @@ int main() {
         }
     }
 
-    // L4: um registro com payload corrompido é estruturalmente válido mas indecodificável.
+    // L4: corromper apenas o CONTEÚDO de um registro (sem quebrar sua estrutura)
+    // não é acusado pelo verificador de armazenamento. Decodificar o payload é
+    // responsabilidade da camada que o possui (linha ou objeto), não do check
+    // estrutural — que, de propósito, não conhece o formato do conteúdo.
     {
         TemporaryDatabase database;
         PageId slotted_id{};
@@ -264,43 +267,30 @@ int main() {
                 return suite.finish();
             }
             slotted_id = *id;
-            // Insere uma linha válida para depois corromper apenas seu conteúdo.
+            // Insere um registro qualquer; seu conteúdo será corrompido depois.
             auto encoded = encode_row(Row{Value{std::int64_t{7}}, Value{"x"}});
-            suite.check(encoded.has_value(), "L4 sample row is encoded");
+            suite.check(encoded.has_value(), "L4 sample record is encoded");
             if (!encoded) {
                 return suite.finish();
             }
             payload_size = encoded->size();
             auto page = SlottedPage::create();
-            suite.check(page.insert(*encoded).has_value(), "L4 row is inserted");
+            suite.check(page.insert(*encoded).has_value(), "L4 record is inserted");
             suite.check(file->write(slotted_id, page.page()).has_value(), "L4 page is written");
             suite.check(file->flush().has_value(), "L4 database is flushed");
         }
-        // O registro ocupa o fim físico da página; a tag do primeiro valor está
-        // logo após o u16 de contagem, no offset (page_size - payload_size) + 2.
-        const auto tag_offset = static_cast<std::streamoff>(
+        // Corrompe um byte de conteúdo, deixando slot/offset/tamanho intactos.
+        const auto content_offset = static_cast<std::streamoff>(
             slotted_id.value * page_size + (page_size - payload_size) + 2);
-        overwrite_byte(database.path(), tag_offset, static_cast<char>(0xffU));
+        overwrite_byte(database.path(), content_offset, static_cast<char>(0xffU));
         auto checked = check_database(database.path());
         suite.check(checked.has_value(), "L4 check still opens the file");
         if (checked) {
-            // A estrutura da página continua íntegra: L2 não acusa erro nela.
-            bool page_ok = true;
-            for (const auto& page : checked->pages) {
-                if (page.id == slotted_id && page.error) {
-                    page_ok = false;
-                }
-            }
-            suite.check(page_ok, "corrupted record keeps a structurally valid page");
-            // Mas o L4 detecta o registro indecodificável e o reporta.
-            suite.check(!checked->ok(), "L4 report is not ok");
-            bool found = false;
-            for (const auto& record : checked->record_errors) {
-                if (record.page == slotted_id && record.error.code == ErrorCode::invalid_encoding) {
-                    found = true;
-                }
-            }
-            suite.check(found, "L4 reports the undecodable record with its address");
+            // A estrutura permanece íntegra e o check permanece OK: conteúdo não
+            // é da alçada do verificador de armazenamento.
+            suite.check(checked->ok(), "content-only corruption keeps a valid structural check");
+            suite.check(checked->record_errors.empty(),
+                        "the storage check does not decode record content");
         }
     }
 

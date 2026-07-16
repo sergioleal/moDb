@@ -1,7 +1,5 @@
 // Importa a API pública do verificador de integridade.
 #include "modb/storage/database_check.hpp"
-// Importa a decodificação de linha usada no nível L4.
-#include "modb/storage/codec.hpp"
 // Importa PageFile para a abertura em L1.
 #include "modb/storage/page_file.hpp"
 // Importa SlottedPage para validar páginas SLPG em L2.
@@ -31,6 +29,13 @@ constexpr std::array<std::byte, 4> slotted_magic{
 // Assinatura das raízes dedicadas de TableHeap.
 constexpr std::array<std::byte, 4> table_heap_root_magic{
     std::byte{'T'}, std::byte{'H'}, std::byte{'R'}, std::byte{'P'}};
+// Assinaturas das páginas do modelo de objetos (ADR-004/ADR-005).
+constexpr std::array<std::byte, 4> database_root_magic{
+    std::byte{'D'}, std::byte{'B'}, std::byte{'R'}, std::byte{'T'}};
+constexpr std::array<std::byte, 4> identity_directory_magic{
+    std::byte{'I'}, std::byte{'D'}, std::byte{'M'}, std::byte{'D'}};
+constexpr std::array<std::byte, 4> identity_entries_magic{
+    std::byte{'I'}, std::byte{'D'}, std::byte{'M'}, std::byte{'P'}};
 
 // Compara os quatro primeiros bytes com um magic conhecido.
 bool starts_with_magic(const Page& page, const std::array<std::byte, 4>& magic) noexcept {
@@ -55,6 +60,15 @@ PageKind classify_page(const Page& page) noexcept {
     }
     if (starts_with_magic(page, table_heap_root_magic)) {
         return PageKind::table_heap_root;
+    }
+    if (starts_with_magic(page, database_root_magic)) {
+        return PageKind::database_root;
+    }
+    if (starts_with_magic(page, identity_directory_magic)) {
+        return PageKind::identity_directory;
+    }
+    if (starts_with_magic(page, identity_entries_magic)) {
+        return PageKind::identity_entries;
     }
     return PageKind::unknown;
 }
@@ -98,6 +112,12 @@ Result<DatabaseCheckReport> check_database(const std::filesystem::path& path) {
             }
             break;
         }
+        case PageKind::database_root:
+        case PageKind::identity_directory:
+        case PageKind::identity_entries:
+            // Páginas do modelo de objetos são reconhecidas estruturalmente;
+            // a validação profunda das suas cadeias fica para um nível futuro.
+            break;
         case PageKind::unknown:
             entry.error = Error{
                 ErrorCode::invalid_page_format,
@@ -152,8 +172,10 @@ Result<DatabaseCheckReport> check_database(const std::filesystem::path& path) {
         }
     }
 
-    // L4: decodifica cada registro vivo para detectar payloads corrompidos que
-    // passam pela validação estrutural mas explodiriam na leitura pelo usuário.
+    // L4: confere que cada registro vivo é legível dentro dos limites da sua
+    // página. A validação semântica do conteúdo (é uma linha? um objeto?)
+    // pertence à camada que possui os registros, não ao verificador de
+    // armazenamento — que não conhece, de propósito, o formato do payload.
     for (const auto& entry : report.pages) {
         if (entry.kind != PageKind::slotted || entry.error) {
             continue;
@@ -170,13 +192,8 @@ Result<DatabaseCheckReport> check_database(const std::filesystem::path& path) {
             if (!slot.occupied()) {
                 continue;
             }
-            auto bytes = slotted->read(slot.id);
-            if (!bytes) {
+            if (auto bytes = slotted->read(slot.id); !bytes) {
                 report.record_errors.push_back(RecordCheckError{entry.id, slot.id, bytes.error()});
-                continue;
-            }
-            if (auto row = decode_row(*bytes); !row) {
-                report.record_errors.push_back(RecordCheckError{entry.id, slot.id, row.error()});
             }
         }
     }
