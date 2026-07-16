@@ -53,6 +53,11 @@ Relação entre os dois: `PLANO_ODB.md` é o "o quê e por quê" (nível de
 gerência/arquitetura); `PROTOCOLO_FASES.md` é o "como", fase a fase (nível de
 implementação). As fases e a numeração são as mesmas nos dois documentos.
 
+- **[USO_DA_CLI.md](USO_DA_CLI.md)** — referência de uso da CLI **atual**
+  (`demo`, `db`, `page`, `record`, `heap`, `codec`, `catalog`). É a CLI do
+  modelo relacional legado, ainda a única que existe até a Fase 2 introduzir
+  os comandos OO; será revisado quando isso acontecer.
+
 ## 3. Decisões arquiteturais — `decisions/`
 
 Registram decisões pontuais e suas justificativas, no formato ADR (Contexto →
