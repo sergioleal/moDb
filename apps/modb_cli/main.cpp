@@ -1,10 +1,8 @@
-#include "modb/catalog.hpp"
 #include "modb/object/attribute_value.hpp"
 #include "modb/object/object_store.hpp"
 #include "modb/object/type_definition.hpp"
 #include "modb/object/type_registry.hpp"
 #include "modb/row.hpp"
-#include "modb/schema.hpp"
 #include "modb/text_escape.hpp"
 #include "modb/value.hpp"
 #include "modb/storage/codec.hpp"
@@ -57,7 +55,6 @@ void print_page_help();
 void print_record_help();
 void print_heap_help();
 void print_codec_help();
-void print_catalog_help();
 void print_types_help();
 void print_type_help();
 void print_object_help();
@@ -98,7 +95,6 @@ int command_heap_delete(const std::filesystem::path& path,
                         modb::storage::RecordId record_id);
 int command_heap_repair(const std::filesystem::path& path, modb::storage::PageId root_page);
 int command_codec_run();
-int command_catalog_run();
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
 int run_object_command(int argc, char* argv[]);
@@ -140,7 +136,6 @@ void print_help() {
            "  record   Manage records stored in one page.\n"
            "  heap     Manage multi-page table heaps.\n"
            "  codec    Encode and decode a row in memory.\n"
-           "  catalog  Exercise the in-memory catalog.\n"
            "  types    Exercise the in-memory object model (ODB++).\n"
            "  type     Define and list persistent object types (ODB++).\n"
            "  object   Create, read and remove persistent objects (ODB++).\n"
@@ -224,11 +219,6 @@ void print_object_help() {
                  "  modb object remove <file> <object-id>\n";
 }
 
-void print_catalog_help() {
-    std::cout << "Usage:\n"
-                 "  modb catalog\n";
-}
-
 // Command group: demo.
 // Mostra um roteiro reproduzivel para explorar a CLI sem alterar arquivos.
 int command_demo() {
@@ -269,7 +259,6 @@ int command_demo() {
            "\n"
            "[6/7] Try the in-memory tools\n"
            "  modb codec\n"
-           "  modb catalog\n"
            "  modb types\n"
            "\n"
            "[7/7] Validate, repair and remove the demonstration database\n"
@@ -327,7 +316,6 @@ int command_demo_run(bool force) {
         {"modb", "heap", "delete", "demo.modb", "3", "4", "1", "1"},
         {"modb", "heap", "scan", "demo.modb", "3"},
         {"modb", "codec"},
-        {"modb", "catalog"},
         {"modb", "types"},
         {"modb", "db", "check", "demo.modb"},
         {"modb", "db", "repair", "demo.modb"},
@@ -1041,47 +1029,6 @@ int command_codec_run() {
     print_row(*decoded);
     std::cout << "Round-trip: " << (*decoded == original ? "OK" : "FAILED") << '\n';
     return *decoded == original ? 0 : 1;
-}
-
-// Command group: catalog.
-
-// Exercita criacao, insercao e scan do catalogo sem tocar no storage em disco.
-int command_catalog_run() {
-    // Cria e valida o schema da tabela users.
-    auto schema = modb::Schema::create({
-        modb::ColumnDefinition{"id", modb::DataType::integer, false},
-        modb::ColumnDefinition{"name", modb::DataType::text, false},
-    });
-    if (!schema) {
-        return print_error(schema.error());
-    }
-
-    modb::Catalog catalog;
-    if (auto created = catalog.create_table("users", *schema); !created) {
-        return print_error(created.error());
-    }
-    std::cout << "Created table: users\n";
-
-    // Insere uma linha que respeita o schema.
-    if (auto inserted = catalog.insert(
-            "users", modb::Row{modb::Value{std::int64_t{1}}, modb::Value{"Ana"}});
-        !inserted) {
-        return print_error(inserted.error());
-    }
-    std::cout << "Inserted row\n";
-
-    auto rows = catalog.scan("users");
-    if (!rows) {
-        return print_error(rows.error());
-    }
-    std::cout << "Rows in users:\n";
-    // Imprime cada linha retornada pelo scan.
-    for (const auto& row : *rows) {
-        print_row(row);
-    }
-    std::cout << "Note: this catalog exists only in memory.\n";
-    // Encerra o comando com sucesso.
-    return 0;
 }
 
 // Command group: types.
@@ -1811,16 +1758,6 @@ int run(int argc, char* argv[]) {
             return print_usage_error("modb codec");
         }
         return command_codec_run();
-    }
-    if (command == "catalog") {
-        if (argc == 3 && is_help_argument(argv[2])) {
-            print_catalog_help();
-            return 0;
-        }
-        if (argc != 2) {
-            return print_usage_error("modb catalog");
-        }
-        return command_catalog_run();
     }
     if (command == "types") {
         if (argc == 3 && is_help_argument(argv[2])) {

@@ -16,8 +16,6 @@ set(MODB_PAGE_SIZE 4096 CACHE STRING "Database page size in bytes")
 set(MODB_CHURN_RECORD_TOTAL 10000 CACHE STRING "Record count used by churn tests")
 
 add_library(modb
-    src/catalog/catalog.cpp
-    src/catalog/table.cpp
     src/model/data_type.cpp
     src/model/schema.cpp
     src/model/value.cpp
@@ -152,9 +150,6 @@ if(BUILD_TESTING)
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
-    add_executable(modb_catalog_tests tests/catalog_test.cpp)
-    target_link_libraries(modb_catalog_tests PRIVATE modb::modb)
-
     add_executable(modb_storage_tests tests/storage_test.cpp)
     target_link_libraries(modb_storage_tests PRIVATE modb::modb)
 
@@ -201,7 +196,6 @@ if(BUILD_TESTING)
         target_link_options(modb_identity_map_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_object_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_catalog_persistence_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_catalog_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_storage_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_text_escape_tests PRIVATE -static -static-libgcc -static-libstdc++)
@@ -221,7 +215,6 @@ if(BUILD_TESTING)
     add_test(NAME modb.identity_map COMMAND modb_identity_map_tests)
     add_test(NAME modb.object_store COMMAND modb_object_store_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
-    add_test(NAME modb.catalog COMMAND modb_catalog_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.codec COMMAND modb_codec_tests)
     add_test(NAME modb.text_escape COMMAND modb_text_escape_tests)
@@ -247,8 +240,8 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.heap_help COMMAND modb_cli heap --help)
     add_test(NAME modb.cli.codec COMMAND modb_cli codec)
     add_test(NAME modb.cli.codec_help COMMAND modb_cli codec --help)
-    add_test(NAME modb.cli.catalog COMMAND modb_cli catalog)
-    add_test(NAME modb.cli.catalog_help COMMAND modb_cli catalog --help)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
     add_test(NAME modb.cli.types_help COMMAND modb_cli types --help)
+    add_test(NAME modb.cli.type_help COMMAND modb_cli type --help)
+    add_test(NAME modb.cli.object_help COMMAND modb_cli object --help)
 endif()

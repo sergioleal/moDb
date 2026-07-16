@@ -1,16 +1,19 @@
 # Uso da CLI (`modb`)
 
-> ⚠️ **A maior parte desta CLI ainda é do modelo relacional legado** — os
-> comandos `db`, `page`, `record`, `heap` e `codec` que existem hoje no
-> código. O projeto pivotou para um banco Orientado a Objetos (ver
-> [PLANO_ODB.md](PLANO_ODB.md)). O comando **`types`** já é OO: demonstra em
-> memória o modelo da Fase 1 (`TypeDefinition`/`TypeRegistry`/
-> `validate_object`), mas ainda **não persiste nada** — é o mesmo espírito do
-> `catalog` relacional (uma vitrine em memória). Os primeiros comandos OO
-> persistentes (`type define`, `object create/get`) só chegam ao final da
-> **Fase 2** (ver [RASTREADOR.md](RASTREADOR.md)). Este documento será
-> revisado quando a Fase 2 aposentar os comandos relacionais (decisão
-> registrada na [ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md)).
+> A CLI mistura dois grupos de comandos:
+>
+> - **Orientado a Objetos (ODB++), persistente** — `type` e `object` criam e
+>   recuperam tipos e objetos que sobrevivem a fechar/reabrir o arquivo. É o
+>   caminho vigente do produto (Fase 2 do [PLANO_ODB.md](PLANO_ODB.md)).
+> - **Ferramentas de armazenamento cru** — `db`, `page`, `record`, `heap` e
+>   `codec` operam nas camadas físicas (páginas, slotted pages, TableHeap) e
+>   usam `Row`/`Value` como registro de exemplo. Úteis para inspeção/depuração.
+> - **`types`** é uma vitrine **em memória** do modelo de objetos (não
+>   persiste); os equivalentes persistentes são `type`/`object`.
+>
+> O modelo de dados relacional (`Catalog`/`Table`/o antigo comando `catalog`)
+> foi removido no pivô (ver
+> [ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md)).
 
 ## Compilar
 
@@ -36,8 +39,9 @@ Commands:
   record   Manage records stored in one page.
   heap     Manage multi-page table heaps.
   codec    Encode and decode a row in memory.
-  catalog  Exercise the in-memory catalog.
   types    Exercise the in-memory object model (ODB++).
+  type     Define and list persistent object types (ODB++).
+  object   Create, read and remove persistent objects (ODB++).
 
 Options:
   -h, --help     Show this help.
@@ -358,27 +362,6 @@ Decoded row: 1 | Ana
 Round-trip: OK
 ```
 
-## `modb catalog` — catálogo em memória
-
-```text
-modb catalog
-```
-
-Sem argumentos: cria uma tabela e insere uma linha usando o
-[`Catalog`](../include/modb/catalog.hpp) **só em memória** — nada é
-persistido (o aviso final da saída é literal: o catálogo relacional atual
-não sobrevive ao fechamento do processo; ver
-[ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md)).
-
-```text
-$ modb catalog
-Created table: users
-Inserted row
-Rows in users:
-1 | Ana
-Note: this catalog exists only in memory.
-```
-
 ## `modb types` — modelo de objetos em memória (ODB++)
 
 ```text
@@ -391,8 +374,8 @@ obrigatórios e `country` opcional com default `"BR"`), registra no
 objetos lógicos contra o tipo — um completo e outro que omite `country` e é
 completado pelo default — usando
 [`validate_object`](../include/modb/object/type_definition.hpp). **Nada é
-persistido**: é a vitrine em memória do modelo da Fase 1, no mesmo espírito
-do `modb catalog` acima.
+persistido** — é uma vitrine em memória. Os equivalentes **persistentes** são
+os comandos `type` e `object` documentados adiante.
 
 ```text
 $ modb types
@@ -404,6 +387,67 @@ Attributes:
 Valid object: 1=Ana | 2=15000 | 3=US
 Valid object (country omitted, covered by its default): 1=Beatriz | 2=12000
 Note: this type registry exists only in memory; persistence arrives in Fase 2 (see docs/PLANO_ODB.md).
+```
+
+## `modb type` — tipos persistentes (ODB++)
+
+```text
+modb type define <file> <name> <attr:type[:null]>...
+modb type list <file>
+```
+
+- **`define`**: registra um tipo persistente. Cada `attr:type` vira um atributo
+  (o FieldId é a posição, 1-based); o sufixo `:null` marca o atributo como
+  nullable. Tipos: `boolean`, `int64`, `float64`, `string`, `bytes`. Cria a
+  hierarquia do object store (DBRT/mapa/heaps) na primeira vez, num arquivo
+  criado por `db create`.
+- **`list`**: lista os tipos registrados e seus atributos.
+
+```text
+$ modb db create loja.modb
+$ modb type define loja.modb Employee name:string salary:float64 country:string:null
+Type defined: Employee (id 16)
+
+$ modb type list loja.modb
+Employee (id 16)
+  1: name (STRING, not null)
+  2: salary (FLOAT64, not null)
+  3: country (STRING, nullable)
+```
+
+## `modb object` — objetos persistentes (ODB++)
+
+```text
+modb object create <file> <type> <attr=value>...
+modb object get <file> <object-id>
+modb object remove <file> <object-id>
+```
+
+- **`create`**: cria um objeto do tipo dado. Cada `attr=value` casa com um
+  atributo pelo nome; atributos ausentes usam o default ou `null` (validado
+  contra o tipo). Devolve o `ObjectId` atribuído.
+- **`get`**: recupera e imprime um objeto pelo id.
+- **`remove`**: remove um objeto (o id nunca é reutilizado).
+
+O exemplo abaixo prova a persistência: cada comando é um **processo separado**;
+o `get` reabre o arquivo do zero.
+
+```text
+$ modb object create loja.modb Employee name=Ana salary=15000 country=US
+Object created: id 18
+
+$ modb object get loja.modb 18
+ObjectId: 18
+TypeDefinitionId: 16
+  1 = Ana
+  2 = 15000
+  3 = US
+
+$ modb object remove loja.modb 18
+Object removed: id 18
+
+$ modb object get loja.modb 18
+Error: no object with id 18
 ```
 
 ## Roteiro completo (equivalente a `modb demo run`)
@@ -435,7 +479,6 @@ modb heap delete demo.modb 3 4 1 1
 modb heap scan demo.modb 3
 
 modb codec
-modb catalog
 modb types
 
 modb db check demo.modb
@@ -443,14 +486,5 @@ modb db repair demo.modb
 modb db delete demo.modb
 ```
 
-## O que vem a seguir
-
-Segundo o [RASTREADOR.md](RASTREADOR.md), a Fase 2 do plano OO
-(`docs/PLANO_ODB.md`) prevê explicitamente:
-
-- remoção dos comandos relacionais (`record`/`catalog` no sentido atual);
-- comandos OO **persistentes**: `modb type define <db> <nome> <campo:tipo[:null]>...`,
-  `modb type list <db>`, `modb object create/get/remove <db> ...` — o
-  `modb types` atual (em memória) provavelmente é absorvido por eles.
-
-Este documento será reescrito quando isso acontecer.
+(O roteiro do `demo` exercita as ferramentas de armazenamento cru. Para o
+caminho OO persistente, veja os exemplos de `type`/`object` acima.)

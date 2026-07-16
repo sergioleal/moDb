@@ -162,30 +162,33 @@ primeiro caminho vertical OO.
 
 Tarefas:
 
-- [ ] Implementar o codec binário genérico: payload ↔ valores de atributo,
-      dirigido pela `TypeDefinition` (o codec não conhece classes C++).
-- [ ] Implementar `ObjectHeader` + payload sobre `SlottedPage`/`TableHeap`.
-- [ ] Implementar o mapa de identidade persistente (ObjectId → RecordId),
-      com atualização quando um registro muda de página.
-- [ ] Implementar `ObjectStore`: create/get/update/remove por `ObjectId`.
-- [ ] Alocação de `ObjectId` monotônica e persistida (sem reuso no MVP).
-- [ ] Persistir o catálogo como objetos, usando o próprio codec e os
-      meta-tipos primordiais da fase 0 (bootstrap).
-- [ ] Ligar a raiz do catálogo ao campo `catalog_root` do superbloco.
-- [ ] Reconstruir `TypeRegistry`/`Baseline` ao abrir o banco.
-- [ ] Estender `database_check` para validar headers de objeto, mapa de
-      identidade e raiz de catálogo.
-- [ ] Aposentar o modelo relacional (`Catalog`/`Table`/`Schema`/`Row`) e os
-      comandos relacionais da CLI; adicionar comandos OO mínimos
-      (`type define`, `object create/get`).
-- [ ] Teste de integração: centenas de objetos em múltiplas páginas,
-      fechamento e reabertura.
+- [x] Implementar o codec binário genérico: payload ↔ valores de atributo
+      (o codec não conhece classes C++). ([object_codec](../src/object/object_codec.cpp))
+- [x] Implementar `ObjectHeader` + payload sobre `SlottedPage`/`TableHeap`.
+- [x] Implementar o mapa de identidade persistente (ObjectId → RecordId),
+      com atualização quando um registro muda de página. (`IdentityMap`)
+- [x] Implementar `ObjectStore`: create/get/update/remove por `ObjectId`.
+- [x] Alocação de `ObjectId` monotônica e persistida (sem reuso no MVP).
+- [x] Persistir o catálogo como objetos, usando o próprio codec e os
+      meta-tipos primordiais da fase 0 (bootstrap). (`CatalogStore`)
+- [x] Ligar a raiz do catálogo ao campo `catalog_root` do superbloco. (`DatabaseRoot`)
+- [x] Reconstruir `TypeRegistry`/`Baseline` ao abrir o banco.
+- [x] Estender `database_check` para reconhecer as páginas DBRT/IDMD/IDMP.
+- [x] Aposentar o modelo relacional e adicionar comandos OO mínimos
+      (`type define/list`, `object create/get/remove`). Removido o Anel 1
+      (`Catalog`/`Table`/comando `catalog`/`catalog_test`); `Row`/`Value`/
+      `Schema` e o codec relacional ficam como tooling de storage cru
+      ([ADR-006, Atualização](decisions/ADR-006-destino-do-codigo-relacional.md)).
+- [x] Teste de integração: centenas de objetos em múltiplas páginas,
+      fechamento e reabertura. (500 objetos em `object_store_test`)
 
 Entregáveis: objetos e catálogo persistentes; arquivo reabrível; CLI OO
 mínima.
 
-Critério de aceite: o teste cria um tipo e objetos, destrói a instância,
-reabre o arquivo e recupera exatamente os mesmos objetos e definições.
+Critério de aceite: ✅ o teste cria um tipo e objetos, destrói a instância,
+reabre o arquivo e recupera exatamente os mesmos objetos e definições
+(`modb.object_store`, 500 objetos; e verificação end-to-end pela CLI entre
+processos com `type`/`object`).
 
 ### Fase 3 — Binding, Handle e ProjectionPlan
 

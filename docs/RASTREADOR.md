@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | [0](#fase-0--decisões-e-fundações) | Decisões e fundações | ✅ Concluída | 10/10 | — |
 | [1](#fase-1--modelo-de-objetos-e-catálogo-em-memória) | Modelo de objetos em memória | ✅ Concluída | 8/8 | — |
-| [2](#fase-2--codec-genérico-e-objectstore-persistente) | Codec genérico + ObjectStore | 🔄 Quase concluída | 10/11 | — |
+| [2](#fase-2--codec-genérico-e-objectstore-persistente) | Codec genérico + ObjectStore | ✅ Concluída | 11/11 | — |
 | [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ⬜ Não iniciada | 0/10 | Fase 2 |
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ⬜ Não iniciada | 0/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ⬜ Não iniciada | 0/11 | Fase 2 |
@@ -51,10 +51,10 @@
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **28/103 (~27%)** | |
+| **Total** | | | **29/103 (~28%)** | |
 
-**MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 28/39
-tarefas (~72%).
+**MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
+tarefas (~74%).
 
 ---
 
@@ -120,9 +120,9 @@ chega. Ver [USO_DA_CLI.md](USO_DA_CLI.md#modb-types--modelo-de-objetos-em-memór
 
 ## Fase 2 — Codec genérico e ObjectStore persistente
 
-Status: 🔄 **Quase concluída** (10/11) — critério de aceite verde; falta só a
-remoção do modelo relacional (2.10, decisão destrutiva pendente). Commits
-`8d23923`, `2266503`, `cc6ee9b`, `85a5712`. Definição completa:
+Status: ✅ **Concluída** (11/11) — critério de aceite verde. Commits
+`8d23923`, `2266503`, `cc6ee9b`, `85a5712` e a remoção do Anel 1 relacional.
+Definição completa:
 [PLANO_ODB.md §Fase 2](PLANO_ODB.md#fase-2--codec-genérico-e-objectstore-persistente) ·
 [PROTOCOLO_FASES.md §Fase 2](PROTOCOLO_FASES.md#fase-2--codec-genérico-e-objectstore-persistente)
 
@@ -137,7 +137,7 @@ remoção do modelo relacional (2.10, decisão destrutiva pendente). Commits
 | 2.7 | Ligar raiz do catálogo ao `catalog_root` do superbloco | ✅ | via DBRT (ADR-004) |
 | 2.8 | Reconstruir `TypeRegistry`/`Baseline` na abertura | ✅ | `CatalogStore::load_all` |
 | 2.9 | Estender `database_check` (DBRT/IDMD/IDMP) | ✅ | commit `85a5712` |
-| 2.10 | Aposentar modelo relacional + CLI OO mínima | 🔄 | CLI OO (`type`/`object`) ✅; **remoção do relacional pendente** (decisão destrutiva) |
+| 2.10 | Aposentar modelo relacional + CLI OO mínima | ✅ | CLI OO (`type`/`object`) ✅; Anel 1 relacional removido (Catalog/Table/comando `catalog`/catalog_test). Row/Value/codec relacional mantidos como tooling de storage cru (ADR-006, Atualização) |
 | 2.11 | Teste de integração (centenas de objetos, reabertura) | ✅ | critério de aceite (500 objetos) |
 
 ### Testes automatizados desta fase
@@ -410,3 +410,4 @@ automaticamente, interfaces públicas documentadas.
 |---|---|---|
 | 0 | 2026-07-16 | `4928468` |
 | 1 | 2026-07-16 | `bfcc5ef` |
+| 2 | 2026-07-16 | `8d23923`…`cc6ee9b`…`85a5712` + remoção do Anel 1 |

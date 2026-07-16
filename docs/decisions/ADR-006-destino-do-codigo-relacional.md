@@ -1,7 +1,25 @@
 # ADR-006 — Destino do código relacional
 
-- Estado: aceito para o MVP OO
+- Estado: aceito para o MVP OO; execução em duas etapas (ver Atualização)
 - Data: 2026-07-16
+
+## Atualização (Fase 2)
+
+A remoção foi dividida em dois anéis para não derrubar a cobertura de testes da
+camada de armazenamento, da qual o ObjectStore depende:
+
+- **Anel 1 — removido na Fase 2:** o modelo de dados relacional propriamente
+  dito — `Catalog`, `Table`, o comando `catalog` da CLI e o teste
+  `catalog_test`. É o que competia diretamente com o catálogo/ObjectStore OO.
+- **Anel 2 — mantido por ora, como ferramenta de armazenamento cru:**
+  `Row`, `Value`/`DataType`, o codec relacional (`encode_row`/`decode_row`,
+  `encode_schema`/`decode_schema`) e os comandos `record`/`heap`/`codec`.
+  Esses exercitam `SlottedPage`/`TableHeap` (a fundação física do ObjectStore)
+  e são usados por vários testes de storage. Reenquadrados como tooling de
+  registro cru; a remoção plena fica como continuação, quando/se houver
+  substituto equivalente para exercitar o storage.
+
+O restante da decisão abaixo permanece a intenção de longo prazo.
 
 ## Contexto
 
