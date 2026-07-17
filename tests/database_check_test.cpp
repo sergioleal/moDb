@@ -10,6 +10,8 @@
 #include "modb/storage/table_heap.hpp"
 // Importa a codificação de linha para montar um registro válido e depois corrompê-lo.
 #include "modb/storage/codec.hpp"
+// Importa o BlobStore para exercitar a classificação de páginas BLBP (Fase 4).
+#include "modb/object/blob_store.hpp"
 // Importa Row e Value usados no registro do teste L4.
 #include "modb/row.hpp"
 #include "modb/value.hpp"
@@ -291,6 +293,68 @@ int main() {
             suite.check(checked->ok(), "content-only corruption keeps a valid structural check");
             suite.check(checked->record_errors.empty(),
                         "the storage check does not decode record content");
+        }
+    }
+
+    // Páginas de blob (BLBP) são reconhecidas e validadas estruturalmente; um
+    // banco com blobs saudáveis passa no check sem falsos positivos.
+    {
+        TemporaryDatabase database;
+        {
+            auto file = PageFile::create(database.path());
+            suite.check(file.has_value(), "blob database is created");
+            if (!file) {
+                return suite.finish();
+            }
+            modb::object::BlobStore blobs{*file};
+            // Blob multi-página para exercitar mais de uma página BLBP.
+            std::vector<std::byte> data(10 * 1024, std::byte{0xAB});
+            suite.check(blobs.create(data).has_value(), "blob is written");
+            suite.check(file->flush().has_value(), "blob database is flushed");
+        }
+        auto checked = check_database(database.path());
+        suite.check(checked.has_value(), "blob database check succeeds");
+        if (checked) {
+            suite.check(checked->ok(), "healthy blob database report has no errors");
+            suite.check(count_kind(*checked, PageKind::blob) >= 2,
+                        "blob database contains multiple BLBP pages");
+        }
+    }
+
+    // Uma versão inválida no cabeçalho BLBP é acusada em L2.
+    {
+        TemporaryDatabase database;
+        PageId blob_page{};
+        {
+            auto file = PageFile::create(database.path());
+            suite.check(file.has_value(), "corrupt-blob database is created");
+            if (!file) {
+                return suite.finish();
+            }
+            modb::object::BlobStore blobs{*file};
+            auto id = blobs.create(std::vector<std::byte>(50, std::byte{0x01}));
+            suite.check(id.has_value(), "corrupt-blob base is written");
+            if (!id) {
+                return suite.finish();
+            }
+            blob_page = PageId{id->value};
+            suite.check(file->flush().has_value(), "corrupt-blob database is flushed");
+        }
+        // Versão está no offset 4 do cabeçalho: grava um valor não suportado.
+        overwrite_byte(database.path(),
+                       static_cast<std::streamoff>(blob_page.value * page_size + 4), 9);
+        auto checked = check_database(database.path());
+        suite.check(checked.has_value(), "corrupt-blob check still opens the file");
+        if (checked) {
+            suite.check(!checked->ok(), "corrupt-blob report is not ok");
+            bool found = false;
+            for (const auto& page : checked->pages) {
+                if (page.id == blob_page && page.error &&
+                    page.error->code == ErrorCode::incompatible_page_version) {
+                    found = true;
+                }
+            }
+            suite.check(found, "an unsupported blob version is reported");
         }
     }
 

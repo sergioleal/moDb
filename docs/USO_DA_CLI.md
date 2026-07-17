@@ -2,9 +2,10 @@
 
 > A CLI mistura dois grupos de comandos:
 >
-> - **Orientado a Objetos (ODB++), persistente** — `type` e `object` criam e
->   recuperam tipos e objetos que sobrevivem a fechar/reabrir o arquivo. É o
->   caminho vigente do produto (Fase 2 do [PLANO_ODB.md](PLANO_ODB.md)).
+> - **Orientado a Objetos (ODB++), persistente** — `oo` usa classes C++ reais,
+>   `Binding`, `Handle` e `ProjectionPlan`; `type`, `baseline` e `object`
+>   inspecionam o formato genérico persistente. É o caminho vigente do produto
+>   (Fase 3 do [PLANO_ODB.md](PLANO_ODB.md)).
 > - **Ferramentas de armazenamento cru** — `db`, `page`, `record`, `heap` e
 >   `codec` operam nas camadas físicas (páginas, slotted pages, TableHeap) e
 >   usam `Row`/`Value` como registro de exemplo. Úteis para inspeção/depuração.
@@ -41,7 +42,9 @@ Commands:
   codec    Encode and decode a row in memory.
   types    Exercise the in-memory object model (ODB++).
   type     Define and list persistent object types (ODB++).
+  baseline Inspect immutable catalog baselines (ODB++).
   object   Create, read and remove persistent objects (ODB++).
+  oo       Use compiled C++ bindings, handles and schema projection.
 
 Options:
   -h, --help     Show this help.
@@ -386,47 +389,51 @@ Attributes:
   3: country (STRING, nullable, default: BR)
 Valid object: 1=Ana | 2=15000 | 3=US
 Valid object (country omitted, covered by its default): 1=Beatriz | 2=12000
-Note: this type registry exists only in memory; persistence arrives in Fase 2 (see docs/PLANO_ODB.md).
+Note: this example is in memory; use type/object/oo for persistence.
 ```
 
 ## `modb type` — tipos persistentes (ODB++)
 
 ```text
-modb type define <file> <name> <attr:type[:null]>...
+modb type define <file> <name> <attr[#id]:type[:null][=default]>...
 modb type list <file>
+modb type history <file> <name>
 ```
 
-- **`define`**: registra um tipo persistente. Cada `attr:type` vira um atributo
-  (o FieldId é a posição, 1-based); o sufixo `:null` marca o atributo como
-  nullable. Tipos: `boolean`, `int64`, `float64`, `string`, `bytes`. Cria a
+- **`define`**: registra uma versão persistente. `#id` mantém o FieldId estável
+  entre versões; quando omitido, usa a posição por compatibilidade. `:null`
+  marca nullable e `=valor` declara o default. Tipos: `boolean`, `int64`,
+  `float64`, `string`, `bytes`. Cria a
   hierarquia do object store (DBRT/mapa/heaps) na primeira vez, num arquivo
   criado por `db create`.
 - **`list`**: lista os tipos registrados e seus atributos.
+- **`history`**: lista todas as versões, marcando a ativa.
 
 ```text
 $ modb db create loja.modb
-$ modb type define loja.modb Employee name:string salary:float64 country:string:null
+$ modb type define loja.modb Employee name#1:string salary#2:float64 country#3:string=BR
 Type defined: Employee (id 16)
 
 $ modb type list loja.modb
 Employee (id 16)
   1: name (STRING, not null)
   2: salary (FLOAT64, not null)
-  3: country (STRING, nullable)
+  3: country (STRING, not null)
 ```
 
 ## `modb object` — objetos persistentes (ODB++)
 
 ```text
 modb object create <file> <type> <attr=value>...
-modb object get <file> <object-id>
+modb object get <file> <object-id> [--definition]
 modb object remove <file> <object-id>
 ```
 
 - **`create`**: cria um objeto do tipo dado. Cada `attr=value` casa com um
   atributo pelo nome; atributos ausentes usam o default ou `null` (validado
   contra o tipo). Devolve o `ObjectId` atribuído.
-- **`get`**: recupera e imprime um objeto pelo id.
+- **`get`**: recupera e imprime um objeto pelo id; `--definition` inclui a
+  TypeDefinition histórica usada pelo registro.
 - **`remove`**: remove um objeto (o id nunca é reutilizado).
 
 O exemplo abaixo prova a persistência: cada comando é um **processo separado**;
@@ -449,6 +456,53 @@ Object removed: id 18
 $ modb object get loja.modb 18
 Error: no object with id 18
 ```
+
+## `modb baseline` — snapshots imutáveis do catálogo
+
+```text
+modb baseline list <file>
+modb baseline show <file> <baseline-id>
+```
+
+`list` mostra todas as baselines e marca a corrente. `show` resolve os
+TypeDefinitionIds históricos que compõem um snapshot.
+
+## `modb oo employee` — API tipada da Fase 3
+
+Este grupo contém `EmployeeV1` e `EmployeeV2` compilados na própria CLI. Assim,
+ele exercita a API que depende de ponteiros para membros C++ reais:
+
+```text
+modb oo employee init <file> --schema <1|2>
+modb oo employee create <file> <name> <salary> [country] --schema <1|2>
+modb oo employee evolve <file> --schema <1|2>
+modb oo employee get <file> <object-id> --schema <1|2>
+modb oo employee set-salary <file> <object-id> <salary> --schema <1|2>
+modb oo employee demo <file> [--force]
+```
+
+O caminho mais curto para comprovar a Fase 3 é:
+
+```text
+$ modb oo employee demo phase3.modb --force
+v1 wrote Employee{id=18, name=Ana, salary=15000}
+v2 projected old object: country=BR annual_salary=180000
+lazy migration rewrote Employee 18 as v2
+v2 wrote Employee{id=21, country=PT}
+Phase 3 OO demo: OK
+
+$ modb type history phase3.modb Employee
+Employee (id 16)
+Employee (id 19) [current]
+
+$ modb baseline list phase3.modb
+Baseline 17 (1 types)
+Baseline 20 (1 types) [current]
+```
+
+`get --schema 2` materializa objetos da versão 1 através do `ProjectionPlan`; o
+default de `country` é `"BR"`. `set-salary --schema 2` usa `Handle::set` e regrava o
+objeto antigo com a definição corrente, demonstrando a migração preguiçosa.
 
 ## Roteiro completo (equivalente a `modb demo run`)
 
@@ -481,10 +535,15 @@ modb heap scan demo.modb 3
 modb codec
 modb types
 
+modb oo employee demo phase3-demo.modb --force
+modb type history phase3-demo.modb Employee
+modb baseline list phase3-demo.modb
+
 modb db check demo.modb
 modb db repair demo.modb
 modb db delete demo.modb
+modb db delete phase3-demo.modb
 ```
 
-(O roteiro do `demo` exercita as ferramentas de armazenamento cru. Para o
-caminho OO persistente, veja os exemplos de `type`/`object` acima.)
+O roteiro combina as ferramentas de armazenamento cru com o cenário tipado
+completo da Fase 3.

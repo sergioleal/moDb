@@ -197,24 +197,24 @@ de schema sem migração imediata.
 
 Tarefas:
 
-- [ ] Implementar o `Binding` fluente
+- [x] Implementar o `Binding` fluente
       (`db.bind<Employee>().field<1>(&Employee::name)...`), único por tipo na
       versão atual da aplicação.
-- [ ] Implementar a materialização payload → objeto C++ (leitura) e
+- [x] Implementar a materialização payload → objeto C++ (leitura) e
       objeto C++ → payload (escrita) via Binding + codec genérico.
-- [ ] Implementar o `ProjectionPlan` com as operações `Copy`, `Convert`,
+- [x] Implementar o `ProjectionPlan` com as operações `Copy`, `Convert`,
       `Default`, `Ignore` e `ResolveReference`.
-- [ ] Implementar o cache de ProjectionPlans por
+- [x] Implementar o cache de ProjectionPlans por
       (`TypeDefinitionId`, Binding atual).
-- [ ] Implementar evolução de schema: registrar um Binding divergente cria uma
+- [x] Implementar evolução de schema: registrar um Binding divergente cria uma
       nova `TypeDefinition`/`Baseline`; as antigas permanecem.
-- [ ] Implementar migração preguiçosa: objeto antigo regravado passa a usar a
+- [x] Implementar migração preguiçosa: objeto antigo regravado passa a usar a
       definição atual.
-- [ ] Implementar `registerMigration(...)` para mudanças semânticas.
-- [ ] Implementar `Database`/`DatabaseRegistry` (`DatabaseId` → instância).
-- [ ] Implementar `Handle<T>` (DatabaseId + ObjectId) com
+- [x] Implementar `registerMigration(...)` para mudanças semânticas.
+- [x] Implementar `Database`/`DatabaseRegistry` (`DatabaseId` → instância).
+- [x] Implementar `Handle<T>` (DatabaseId + ObjectId) com
       `get<&T::campo>()`/`set<&T::campo>(...)`.
-- [ ] Testes de evolução: campo adicionado (default), removido (ignore),
+- [x] Testes de evolução: campo adicionado (default), removido (ignore),
       convertido (int↔double) e migração semântica registrada.
 
 Entregáveis: API pública OO utilizável (`db.get<Employee>(id)`); evolução de
@@ -224,27 +224,33 @@ Critério de aceite: **cenário do MVP OO completo** — aplicação v1 grava
 `Employee{name,salary}`; aplicação v2 com campo `country` lê o objeto antigo
 recebendo o default, sem qualquer migração manual.
 
+Implementação validada com warnings como erros e com a configuração
+`sanitizers`/hardening do MinGW: 36/36 testes passam, incluindo o cenário MVP.
+
 ### Fase 4 — Relacionamentos, coleções e BlobStore
 
 Objetivo: dar semântica OO real a grafos de objetos e dados grandes.
 
 Tarefas:
 
-- [ ] Implementar `Ref<T>` (associação): persiste `ObjectId`, resolve para
+- [x] Implementar `Ref<T>` (associação): persiste `ObjectId`, resolve para
       `Handle<T>` via `ResolveReference`.
-- [ ] Implementar `Embedded<T>`: sem identidade, serializado no payload do
+- [x] Implementar `Embedded<T>`: sem identidade, serializado no payload do
       pai.
-- [ ] Implementar `OwnedRef<T>` (composição): remoção do pai remove o filho
+- [x] Implementar `OwnedRef<T>` (composição): remoção do pai remove o filho
       em cascata.
-- [ ] Implementar o `BlobStore`: páginas de blob encadeadas, `BlobId`,
+- [x] Implementar o `BlobStore`: páginas de blob encadeadas, `BlobId`,
       escrita/leitura em streaming de binários maiores que uma página.
-- [ ] Implementar `PersistentVector<T>` com armazenamento próprio via
+- [x] Implementar `PersistentVector<T>` com armazenamento próprio via
       `BlobId` (o objeto pai guarda apenas a referência).
-- [ ] Implementar `PersistentSet<T>` e `PersistentMap<K,V>`.
-- [ ] Regras de integridade: remoção de objeto referenciado por `Ref` (política
-      definida em ADR — proibir ou permitir referência pendente detectável).
-- [ ] Estender `database_check` para blobs, coleções e cascatas.
-- [ ] Testes: grafo com associações e composições, cascade delete, coleção
+- [x] Implementar `PersistentSet<T>` e `PersistentMap<K,V>`.
+- [x] Regras de integridade: remoção de objeto referenciado por `Ref`
+      ([ADR-008](decisions/ADR-008-integridade-de-referencias.md): referência
+      pendente permitida e detectável na resolução).
+- [x] Estender `database_check` para blobs (reconhecimento + validação
+      estrutural de BLBP). Checagem semântica (cadeia de blob, refs órfãs,
+      invariantes de catálogo) deferida a um verificador da camada de objetos.
+- [x] Testes: grafo com associações e composições, cascade delete, coleção
       com milhares de elementos em múltiplas páginas, blob multi-página.
 
 Entregáveis: modelo de relacionamentos completo; coleções e blobs persistentes.

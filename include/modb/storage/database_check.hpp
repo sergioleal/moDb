@@ -34,6 +34,8 @@ enum class PageKind {
     identity_directory,
     // Página de entradas do mapa de identidade com assinatura IDMP (ADR-005).
     identity_entries,
+    // Página de blob encadeado com assinatura BLBP (Fase 4).
+    blob,
     // Assinatura não reconhecida.
     unknown,
 };

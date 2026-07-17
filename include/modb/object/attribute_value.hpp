@@ -47,16 +47,21 @@ struct AttributeNull {
     friend bool operator==(AttributeNull, AttributeNull) = default;
 };
 
+// Objeto embutido (Embedded<T>, Fase 4): guarda o sub-objeto já codificado
+// (`field_count u16 | (field_id u16, valor)*`), opaco no nível do codec. A
+// estrutura aninhada é reconstruída pelo Binding do tipo embutido, não aqui —
+// isso evita um variant recursivo em AttributeValue.
+struct EmbeddedValue {
+    std::vector<std::byte> payload;
+    friend bool operator==(const EmbeddedValue&, const EmbeddedValue&) = default;
+};
+
 // Armazena um único valor de atributo com seu tipo preservado.
-//
-// A tag `embedded` (ADR-003) ainda não possui alternativa de armazenamento
-// nesta fase — objetos embutidos chegam na Fase 4. A tag já existe no enum
-// para o formato binário não precisar mudar quando isso acontecer.
 class AttributeValue {
 public:
     // Define todas as representações que um AttributeValue pode conter.
     using Storage = std::variant<AttributeNull, bool, std::int64_t, double, std::string,
-                                 std::vector<std::byte>, ObjectId, BlobId>;
+                                 std::vector<std::byte>, ObjectId, BlobId, EmbeddedValue>;
 
     // Cria o valor ausente (tag null) por padrão.
     AttributeValue() noexcept;
@@ -85,6 +90,8 @@ public:
     AttributeValue(ObjectId value) noexcept;
     // Cria uma referência (tag blob) para dados grandes na BlobStore.
     AttributeValue(BlobId value) noexcept;
+    // Cria um objeto embutido (tag embedded) a partir do sub-objeto codificado.
+    AttributeValue(EmbeddedValue value);
 
     // Impede que um ponteiro qualquer vire BOOLEAN silenciosamente via T*->bool,
     // preservando a construção a partir de char*/const char* (texto).
@@ -108,6 +115,8 @@ public:
     [[nodiscard]] Result<std::span<const std::byte>> as_bytes() const;
     [[nodiscard]] Result<ObjectId> as_ref() const;
     [[nodiscard]] Result<BlobId> as_blob() const;
+    // Devolve o sub-objeto codificado de um valor embedded, sem copiá-lo.
+    [[nodiscard]] Result<std::span<const std::byte>> as_embedded() const;
 
     // Compara o tipo e o conteúdo de dois valores.
     friend bool operator==(const AttributeValue&, const AttributeValue&) = default;

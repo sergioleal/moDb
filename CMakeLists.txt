@@ -21,11 +21,16 @@ add_library(modb
     src/model/value.cpp
     src/object/attribute_value.cpp
     src/object/baseline.cpp
+    src/object/binding.cpp
+    src/object/blob_store.cpp
     src/object/catalog_store.cpp
+    src/object/collection.cpp
+    src/object/database.cpp
     src/object/database_root.cpp
     src/object/identity_map.cpp
     src/object/object_codec.cpp
     src/object/object_store.cpp
+    src/object/projection_plan.cpp
     src/object/type_definition.cpp
     src/object/type_registry.cpp
     src/storage/binary.cpp
@@ -129,6 +134,10 @@ add_executable(modb_object_bench benchmarks/object_throughput.cpp)
 target_link_libraries(modb_object_bench PRIVATE modb::modb)
 
 if(MINGW)
+    # O build estático do MinGW pode emitir type_info::operator== tanto nos
+    # consumidores de std::function quanto em libstdc++. O motor não depende
+    # de RTTI; desativá-lo evita a definição duplicada e mantém a ABI coerente.
+    target_compile_options(modb PUBLIC -fno-rtti)
     target_link_options(modb_cli PRIVATE -static -static-libgcc -static-libstdc++)
     target_link_options(modb_object_bench PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
@@ -145,6 +154,24 @@ if(BUILD_TESTING)
 
     add_executable(modb_object_codec_tests tests/object_codec_test.cpp)
     target_link_libraries(modb_object_codec_tests PRIVATE modb::modb)
+
+    add_executable(modb_binding_tests tests/binding_test.cpp)
+    target_link_libraries(modb_binding_tests PRIVATE modb::modb)
+
+    add_executable(modb_projection_tests tests/projection_test.cpp)
+    target_link_libraries(modb_projection_tests PRIVATE modb::modb)
+
+    add_executable(modb_schema_evolution_tests tests/schema_evolution_test.cpp)
+    target_link_libraries(modb_schema_evolution_tests PRIVATE modb::modb)
+
+    add_executable(modb_blob_store_tests tests/blob_store_test.cpp)
+    target_link_libraries(modb_blob_store_tests PRIVATE modb::modb)
+
+    add_executable(modb_relationship_tests tests/relationship_test.cpp)
+    target_link_libraries(modb_relationship_tests PRIVATE modb::modb)
+
+    add_executable(modb_collection_tests tests/collection_test.cpp)
+    target_link_libraries(modb_collection_tests PRIVATE modb::modb)
 
     add_executable(modb_identity_map_tests tests/identity_map_test.cpp)
     target_link_libraries(modb_identity_map_tests PRIVATE modb::modb)
@@ -201,6 +228,13 @@ if(BUILD_TESTING)
         target_link_options(modb_model_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_object_model_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_object_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_binding_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_projection_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_schema_evolution_tests
+            PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_blob_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_relationship_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_collection_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_identity_map_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_object_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
         target_link_options(modb_catalog_persistence_tests PRIVATE -static -static-libgcc -static-libstdc++)
@@ -221,6 +255,12 @@ if(BUILD_TESTING)
     add_test(NAME modb.model COMMAND modb_model_tests)
     add_test(NAME modb.object_model COMMAND modb_object_model_tests)
     add_test(NAME modb.object_codec COMMAND modb_object_codec_tests)
+    add_test(NAME modb.binding COMMAND modb_binding_tests)
+    add_test(NAME modb.projection COMMAND modb_projection_tests)
+    add_test(NAME modb.schema_evolution COMMAND modb_schema_evolution_tests)
+    add_test(NAME modb.blob_store COMMAND modb_blob_store_tests)
+    add_test(NAME modb.relationship COMMAND modb_relationship_tests)
+    add_test(NAME modb.collection COMMAND modb_collection_tests)
     add_test(NAME modb.identity_map COMMAND modb_identity_map_tests)
     add_test(NAME modb.object_store COMMAND modb_object_store_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
@@ -253,5 +293,10 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
     add_test(NAME modb.cli.types_help COMMAND modb_cli types --help)
     add_test(NAME modb.cli.type_help COMMAND modb_cli type --help)
+    add_test(NAME modb.cli.baseline_help COMMAND modb_cli baseline --help)
     add_test(NAME modb.cli.object_help COMMAND modb_cli object --help)
+    add_test(NAME modb.cli.oo_help COMMAND modb_cli oo --help)
+    add_test(NAME modb.cli.oo_demo
+        COMMAND modb_cli oo employee demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --force)
 endif()

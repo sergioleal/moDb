@@ -77,6 +77,16 @@ Result<void> encode_value(storage::BinaryWriter& writer, const AttributeValue& v
                 writer.write_u64(blob.value);
                 return {};
             },
+            [&](const EmbeddedValue& embedded) -> Result<void> {
+                if (embedded.payload.size() > std::numeric_limits<std::uint32_t>::max()) {
+                    return std::unexpected(
+                        Error{ErrorCode::value_too_large, "embedded object is too large to encode"});
+                }
+                writer.write_u8(static_cast<std::uint8_t>(AttributeType::embedded));
+                writer.write_u32(static_cast<std::uint32_t>(embedded.payload.size()));
+                writer.write_bytes(embedded.payload);
+                return {};
+            },
         },
         value.storage());
 }
@@ -153,10 +163,17 @@ Result<AttributeValue> decode_value(storage::BinaryReader& reader) {
         }
         return AttributeValue{BlobId{*raw}};
     }
-    case AttributeType::embedded:
-        // Objetos embutidos só ganham representação na Fase 4.
-        return std::unexpected(
-            Error{ErrorCode::invalid_encoding, "EMBEDDED values are not supported yet"});
+    case AttributeType::embedded: {
+        auto length = reader.read_u32();
+        if (!length) {
+            return std::unexpected(length.error());
+        }
+        auto data = reader.read_bytes(*length);
+        if (!data) {
+            return std::unexpected(data.error());
+        }
+        return AttributeValue{EmbeddedValue{std::vector<std::byte>{data->begin(), data->end()}}};
+    }
     }
     return std::unexpected(Error{ErrorCode::invalid_encoding, "unknown attribute tag"});
 }

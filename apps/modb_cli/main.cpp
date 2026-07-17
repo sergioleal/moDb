@@ -1,4 +1,5 @@
 #include "modb/object/attribute_value.hpp"
+#include "modb/object/database.hpp"
 #include "modb/object/object_store.hpp"
 #include "modb/object/type_definition.hpp"
 #include "modb/object/type_registry.hpp"
@@ -27,6 +28,8 @@
 // Disponibiliza std::reference_wrapper usado pelo visitor.
 #include <functional>
 #include <limits>
+#include <memory>
+#include <optional>
 // Disponibiliza o armazenamento de mensagens e nomes.
 #include <string>
 #include <string_view>
@@ -57,7 +60,9 @@ void print_heap_help();
 void print_codec_help();
 void print_types_help();
 void print_type_help();
+void print_baseline_help();
 void print_object_help();
+void print_oo_help();
 
 int command_demo();
 int command_demo_run(bool force);
@@ -97,7 +102,9 @@ int command_heap_repair(const std::filesystem::path& path, modb::storage::PageId
 int command_codec_run();
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
+int run_baseline_command(int argc, char* argv[]);
 int run_object_command(int argc, char* argv[]);
+int run_oo_command(int argc, char* argv[]);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -138,7 +145,9 @@ void print_help() {
            "  codec    Encode and decode a row in memory.\n"
            "  types    Exercise the in-memory object model (ODB++).\n"
            "  type     Define and list persistent object types (ODB++).\n"
+           "  baseline Inspect immutable catalog baselines (ODB++).\n"
            "  object   Create, read and remove persistent objects (ODB++).\n"
+           "  oo       Use compiled C++ bindings, handles and schema projection.\n"
            "\n"
            "Options:\n"
            "  -h, --help     Show this help.\n"
@@ -206,17 +215,36 @@ void print_types_help() {
 
 void print_type_help() {
     std::cout << "Usage:\n"
-                 "  modb type define <file> <name> <attr:type[:null]>...\n"
+                 "  modb type define <file> <name> <attr[#id]:type[:null][=default]>...\n"
                  "  modb type list <file>\n"
+                 "  modb type history <file> <name>\n"
                  "\n"
                  "Types: boolean, int64, float64, string, bytes\n";
+}
+
+void print_baseline_help() {
+    std::cout << "Usage:\n"
+                 "  modb baseline list <file>\n"
+                 "  modb baseline show <file> <baseline-id>\n";
 }
 
 void print_object_help() {
     std::cout << "Usage:\n"
                  "  modb object create <file> <type> <attr=value>...\n"
-                 "  modb object get <file> <object-id>\n"
+                 "  modb object get <file> <object-id> [--definition]\n"
                  "  modb object remove <file> <object-id>\n";
+}
+
+void print_oo_help() {
+    std::cout << "Usage:\n"
+                 "  modb oo employee init <file> --schema <1|2>\n"
+                 "  modb oo employee create <file> <name> <salary> [country] "
+                 "--schema <1|2>\n"
+                 "  modb oo employee evolve <file> --schema <1|2>\n"
+                 "  modb oo employee get <file> <object-id> --schema <1|2>\n"
+                 "  modb oo employee set-salary <file> <object-id> <salary> "
+                 "--schema <1|2>\n"
+                 "  modb oo employee demo <file> [--force]\n";
 }
 
 // Command group: demo.
@@ -227,19 +255,19 @@ int command_demo() {
            "\n"
            "Run the commands below in order. They assume demo.modb does not exist.\n"
            "\n"
-           "[1/7] Discover the CLI\n"
+           "[1/8] Discover the CLI\n"
            "  modb --version\n"
            "  modb --help\n"
            "\n"
-           "[2/7] Create and inspect the database\n"
+           "[2/8] Create and inspect the database\n"
            "  modb db create demo.modb\n"
            "  modb db info demo.modb\n"
            "\n"
-           "[3/7] Create and inspect a raw page (page 1)\n"
+           "[3/8] Create and inspect a raw page (page 1)\n"
            "  modb page create demo.modb\n"
            "  modb page info demo.modb 1\n"
            "\n"
-           "[4/7] Work with records in one slotted page (page 2)\n"
+           "[4/8] Work with records in one slotted page (page 2)\n"
            "  modb record page-create demo.modb\n"
            "  modb record insert demo.modb 2 1 \"Ana\"\n"
            "  modb record insert-values demo.modb 2 integer:2 text:Beatriz boolean:true\n"
@@ -247,7 +275,7 @@ int command_demo() {
            "  modb record list demo.modb 2\n"
            "  modb record page-layout demo.modb 2\n"
            "\n"
-           "[5/7] Work with a multi-page heap (root page 3)\n"
+           "[5/8] Work with a multi-page heap (root page 3)\n"
            "  modb heap create demo.modb\n"
            "  modb heap insert-values demo.modb 3 integer:10 text:Ana\n"
            "  modb heap insert-values demo.modb 3 integer:20 text:Beatriz\n"
@@ -257,14 +285,20 @@ int command_demo() {
            "  modb heap delete demo.modb 3 4 1 1\n"
            "  modb heap scan demo.modb 3\n"
            "\n"
-           "[6/7] Try the in-memory tools\n"
+           "[6/8] Try the in-memory tools\n"
            "  modb codec\n"
            "  modb types\n"
            "\n"
-           "[7/7] Validate, repair and remove the demonstration database\n"
+           "[7/8] Run the Phase 3 typed OO scenario\n"
+           "  modb oo employee demo phase3-demo.modb --force\n"
+           "  modb type history phase3-demo.modb Employee\n"
+           "  modb baseline list phase3-demo.modb\n"
+           "\n"
+           "[8/8] Validate, repair and remove the demonstration databases\n"
            "  modb db check demo.modb\n"
            "  modb db repair demo.modb\n"
-           "  modb db delete demo.modb\n";
+           "  modb db delete demo.modb\n"
+           "  modb db delete phase3-demo.modb\n";
     return 0;
 }
 
@@ -317,9 +351,13 @@ int command_demo_run(bool force) {
         {"modb", "heap", "scan", "demo.modb", "3"},
         {"modb", "codec"},
         {"modb", "types"},
+        {"modb", "oo", "employee", "demo", "phase3-demo.modb", "--force"},
+        {"modb", "type", "history", "phase3-demo.modb", "Employee"},
+        {"modb", "baseline", "list", "phase3-demo.modb"},
         {"modb", "db", "check", "demo.modb"},
         {"modb", "db", "repair", "demo.modb"},
         {"modb", "db", "delete", "demo.modb"},
+        {"modb", "db", "delete", "phase3-demo.modb"},
     };
 
     for (const auto& step : steps) {
@@ -1035,7 +1073,7 @@ int command_codec_run() {
 
 // Exercita o modelo de objetos do ODB++ (TypeDefinition/TypeRegistry/
 // validate_object) inteiramente em memoria, sem tocar em armazenamento.
-// A persistencia real chega na Fase 2 do plano ODB++ (docs/PLANO_ODB.md).
+// A persistência real é exercitada pelos grupos type/object/oo.
 int command_types_run() {
     using modb::object::AttributeDefinition;
     using modb::object::AttributeType;
@@ -1112,8 +1150,7 @@ int command_types_run() {
     std::cout << "Valid object (country omitted, covered by its default): ";
     print_field_values(using_default);
 
-    std::cout << "Note: this type registry exists only in memory; persistence arrives in "
-                 "Fase 2 (see docs/PLANO_ODB.md).\n";
+    std::cout << "Note: this example is in memory; use type/object/oo for persistence.\n";
     return 0;
 }
 
@@ -1210,26 +1247,48 @@ void print_decoded_object(const modb::object::DecodedObject& object) {
     }
 }
 
-// modb type define <file> <name> <attr:type[:null]>...
+// modb type define <file> <name> <attr[#id]:type[:null][=default]>...
 int command_type_define(int argc, char* argv[]) {
     const std::filesystem::path path{argv[3]};
     const std::string type_name{argv[4]};
 
-    // Cada argumento extra descreve um atributo; o FieldId é a posição (1-based).
+    // O #id explícito mantém a identidade do campo estável entre versões. A
+    // sintaxe antiga sem # continua usando a posição para compatibilidade.
     std::vector<modb::object::AttributeDefinition> attributes;
     for (int index = 5; index < argc; ++index) {
-        const std::string_view spec{argv[index]};
+        std::string_view spec{argv[index]};
+        std::optional<std::string_view> default_text;
+        const auto equals = spec.find('=');
+        if (equals != std::string_view::npos) {
+            default_text = spec.substr(equals + 1);
+            spec = spec.substr(0, equals);
+        }
         const auto first = spec.find(':');
         if (first == std::string_view::npos) {
-            return print_usage_error("modb type define <file> <name> <attr:type[:null]>...");
+            return print_usage_error(
+                "modb type define <file> <name> <attr[#id]:type[:null][=default]>...");
         }
-        const auto attr_name = spec.substr(0, first);
+        auto attr_name = spec.substr(0, first);
+        std::uint16_t field_id = static_cast<std::uint16_t>(index - 4);
+        const auto hash = attr_name.rfind('#');
+        if (hash != std::string_view::npos) {
+            auto parsed = parse_page_id(attr_name.substr(hash + 1));
+            if (!parsed || parsed->value == 0 ||
+                parsed->value > std::numeric_limits<std::uint16_t>::max()) {
+                return print_error(modb::Error{
+                    modb::ErrorCode::invalid_argument,
+                    "FieldId must be an integer between 1 and 65535"});
+            }
+            field_id = static_cast<std::uint16_t>(parsed->value);
+            attr_name = attr_name.substr(0, hash);
+        }
         auto rest = spec.substr(first + 1);
         bool nullable = false;
         const auto second = rest.find(':');
         if (second != std::string_view::npos) {
             if (rest.substr(second + 1) != "null") {
-                return print_usage_error("modb type define <file> <name> <attr:type[:null]>...");
+                return print_usage_error(
+                    "modb type define <file> <name> <attr[#id]:type[:null][=default]>...");
             }
             nullable = true;
             rest = rest.substr(0, second);
@@ -1238,11 +1297,19 @@ int command_type_define(int argc, char* argv[]) {
         if (!type) {
             return print_error(type.error());
         }
-        attributes.push_back(modb::object::AttributeDefinition{
-            .id = modb::object::FieldId{static_cast<std::uint16_t>(index - 4)},
+        modb::object::AttributeDefinition attribute{
+            .id = modb::object::FieldId{field_id},
             .name = std::string{attr_name},
             .type = *type,
-            .nullable = nullable});
+            .nullable = nullable};
+        if (default_text) {
+            auto value = parse_attribute_value(*type, *default_text);
+            if (!value) {
+                return print_error(value.error());
+            }
+            attribute.default_value = std::move(*value);
+        }
+        attributes.push_back(std::move(attribute));
     }
 
     auto definition = modb::object::TypeDefinition::create(type_name, std::move(attributes));
@@ -1300,6 +1367,87 @@ int command_type_list(const std::filesystem::path& path) {
     return 0;
 }
 
+int command_type_history(const std::filesystem::path& path, std::string_view name) {
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+    auto store = modb::object::ObjectStore::open(*file);
+    if (!store) {
+        return print_error(store.error());
+    }
+    const auto versions = store->type_history(name);
+    if (versions.empty()) {
+        return print_error(
+            modb::Error{modb::ErrorCode::type_not_found, "type not found: " + std::string{name}});
+    }
+    auto current = store->find_type(name);
+    for (const auto& version : versions) {
+        const auto& type = version.get();
+        std::cout << type.name() << " (id " << type.id().value << ')';
+        if (current && current->get().id() == type.id()) {
+            std::cout << " [current]";
+        }
+        std::cout << '\n';
+        for (const auto& attribute : type.attributes()) {
+            std::cout << "  " << attribute.id.value << ": " << attribute.name << " ("
+                      << modb::object::attribute_type_name(attribute.type);
+            if (attribute.default_value) {
+                std::cout << ", default: ";
+                print_attribute_value(*attribute.default_value);
+            }
+            std::cout << ")\n";
+        }
+    }
+    return 0;
+}
+
+int command_baseline_list(const std::filesystem::path& path) {
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+    auto store = modb::object::ObjectStore::open(*file);
+    if (!store) {
+        return print_error(store.error());
+    }
+    const auto current =
+        store->current_baseline() ? store->current_baseline()->id() : modb::object::BaselineId{};
+    for (const auto& baseline : store->baselines()) {
+        std::cout << "Baseline " << baseline.id().value << " (" << baseline.types().size()
+                  << " types)";
+        if (baseline.id() == current) {
+            std::cout << " [current]";
+        }
+        std::cout << '\n';
+    }
+    return 0;
+}
+
+int command_baseline_show(const std::filesystem::path& path, std::uint64_t baseline_id) {
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
+    }
+    auto store = modb::object::ObjectStore::open(*file);
+    if (!store) {
+        return print_error(store.error());
+    }
+    auto baseline = store->find_baseline(modb::object::BaselineId{baseline_id});
+    if (!baseline) {
+        return print_error(baseline.error());
+    }
+    std::cout << "Baseline " << baseline_id << '\n';
+    for (const auto type_id : baseline->get().types()) {
+        auto type = store->find_type(type_id);
+        if (!type) {
+            return print_error(type.error());
+        }
+        std::cout << "  " << type_id.value << ": " << type->get().name() << '\n';
+    }
+    return 0;
+}
+
 // modb object create <file> <type> <attr=value>...
 int command_object_create(int argc, char* argv[]) {
     const std::filesystem::path path{argv[3]};
@@ -1353,7 +1501,8 @@ int command_object_create(int argc, char* argv[]) {
 }
 
 // modb object get <file> <object-id>
-int command_object_get(const std::filesystem::path& path, std::uint64_t object_id) {
+int command_object_get(const std::filesystem::path& path, std::uint64_t object_id,
+                       bool show_definition) {
     auto file = modb::storage::PageFile::open(path);
     if (!file) {
         return print_error(file.error());
@@ -1367,6 +1516,17 @@ int command_object_get(const std::filesystem::path& path, std::uint64_t object_i
         return print_error(object.error());
     }
     print_decoded_object(*object);
+    if (show_definition) {
+        auto type = store->find_type(object->type);
+        if (!type) {
+            return print_error(type.error());
+        }
+        std::cout << "Definition: " << type->get().name() << '\n';
+        for (const auto& attribute : type->get().attributes()) {
+            std::cout << "  " << attribute.id.value << ": " << attribute.name << " ("
+                      << modb::object::attribute_type_name(attribute.type) << ")\n";
+        }
+    }
     return 0;
 }
 
@@ -1387,6 +1547,319 @@ int command_object_remove(const std::filesystem::path& path, std::uint64_t objec
         return print_error(flushed.error());
     }
     std::cout << "Object removed: id " << object_id << '\n';
+    return 0;
+}
+
+// Command group: oo employee — bindings C++ compilados que exercitam a Fase 3.
+struct EmployeeV1 {
+    std::string name;
+    double salary{};
+
+    [[nodiscard]] double annual_salary() const noexcept { return salary * 12.0; }
+};
+
+struct EmployeeV2 {
+    std::string name;
+    double salary{};
+    std::string country;
+
+    [[nodiscard]] double annual_salary() const noexcept { return salary * 12.0; }
+};
+
+modb::object::BindingBuilder<EmployeeV1> employee_v1_binding() {
+    modb::object::BindingBuilder<EmployeeV1> builder{"Employee"};
+    builder.field<1>("name", &EmployeeV1::name).field<2>("salary", &EmployeeV1::salary);
+    return builder;
+}
+
+modb::object::BindingBuilder<EmployeeV2> employee_v2_binding() {
+    modb::object::BindingBuilder<EmployeeV2> builder{"Employee"};
+    builder.field<1>("name", &EmployeeV2::name)
+        .field<2>("salary", &EmployeeV2::salary)
+        .field<3>("country", &EmployeeV2::country, "BR");
+    return builder;
+}
+
+class DatabaseSession {
+public:
+    static modb::Result<DatabaseSession> create(const std::filesystem::path& path) {
+        return attach(modb::object::Database::create(path));
+    }
+    static modb::Result<DatabaseSession> open(const std::filesystem::path& path) {
+        return attach(modb::object::Database::open(path));
+    }
+
+    DatabaseSession(const DatabaseSession&) = delete;
+    DatabaseSession& operator=(const DatabaseSession&) = delete;
+    DatabaseSession(DatabaseSession&& other) noexcept
+        : database_{std::move(other.database_)}, id_{std::exchange(other.id_, {})} {}
+    DatabaseSession& operator=(DatabaseSession&&) = delete;
+    ~DatabaseSession() {
+        if (id_.value != 0) {
+            modb::object::DatabaseRegistry::instance().detach(id_);
+        }
+    }
+
+    [[nodiscard]] modb::object::Database& database() const { return *database_; }
+
+private:
+    DatabaseSession(std::shared_ptr<modb::object::Database> database,
+                    modb::object::DatabaseId id)
+        : database_{std::move(database)}, id_{id} {}
+
+    static modb::Result<DatabaseSession> attach(modb::Result<modb::object::Database> opened) {
+        if (!opened) {
+            return std::unexpected(opened.error());
+        }
+        auto database = std::make_shared<modb::object::Database>(std::move(*opened));
+        auto id = modb::object::DatabaseRegistry::instance().attach(database);
+        if (!id) {
+            return std::unexpected(id.error());
+        }
+        return DatabaseSession{std::move(database), *id};
+    }
+
+    std::shared_ptr<modb::object::Database> database_;
+    modb::object::DatabaseId id_{};
+};
+
+int command_employee_init(const std::filesystem::path& path, int schema) {
+    auto session = DatabaseSession::create(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    if (schema == 1) {
+        if (auto bound = session->database().bind(employee_v1_binding()); !bound) {
+            return print_error(bound.error());
+        }
+    } else {
+        if (auto bound = session->database().bind(employee_v2_binding()); !bound) {
+            return print_error(bound.error());
+        }
+    }
+    if (auto flushed = session->database().flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+    std::cout << "Employee schema " << schema << " initialized\n";
+    return 0;
+}
+
+int command_employee_create_v1(const std::filesystem::path& path, std::string name,
+                               double salary) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    if (auto bound = session->database().bind(employee_v1_binding()); !bound) {
+        return print_error(bound.error());
+    }
+    const EmployeeV1 employee{std::move(name), salary};
+    auto handle = session->database().create(employee);
+    if (!handle) {
+        return print_error(handle.error());
+    }
+    if (auto flushed = session->database().flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+    std::cout << "Employee created with schema 1: id " << handle->id().value << '\n';
+    return 0;
+}
+
+int command_employee_evolve(const std::filesystem::path& path, int schema) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    if (schema == 1) {
+        if (auto bound = session->database().bind(employee_v1_binding()); !bound) {
+            return print_error(bound.error());
+        }
+    } else {
+        if (auto bound = session->database().bind(employee_v2_binding()); !bound) {
+            return print_error(bound.error());
+        }
+    }
+    if (auto flushed = session->database().flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+    std::cout << "Employee schema evolved to " << schema;
+    if (schema == 2) {
+        std::cout << " (country default: BR)";
+    }
+    std::cout << '\n';
+    return 0;
+}
+
+int command_employee_create_v2(const std::filesystem::path& path, std::string name,
+                               double salary, std::string country) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    if (auto bound = session->database().bind(employee_v2_binding()); !bound) {
+        return print_error(bound.error());
+    }
+    const EmployeeV2 employee{std::move(name), salary, std::move(country)};
+    auto handle = session->database().create(employee);
+    if (!handle) {
+        return print_error(handle.error());
+    }
+    if (auto flushed = session->database().flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+    std::cout << "Employee created with schema 2: id " << handle->id().value << '\n';
+    return 0;
+}
+
+int command_employee_get(const std::filesystem::path& path, std::uint64_t object_id, int schema) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    if (schema == 1) {
+        if (auto bound = session->database().bind(employee_v1_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        auto handle = session->database().get<EmployeeV1>(modb::object::ObjectId{object_id});
+        if (!handle) {
+            return print_error(handle.error());
+        }
+        auto employee = session->database().materialize(*handle);
+        if (!employee) {
+            return print_error(employee.error());
+        }
+        std::cout << "Employee " << object_id << ": name="
+                  << modb::escape_for_terminal(employee->name) << " salary=" << employee->salary
+                  << " annual_salary=" << employee->annual_salary() << " schema=1\n";
+        return 0;
+    }
+    if (auto bound = session->database().bind(employee_v2_binding()); !bound) {
+        return print_error(bound.error());
+    }
+    auto handle = session->database().get<EmployeeV2>(modb::object::ObjectId{object_id});
+    if (!handle) {
+        return print_error(handle.error());
+    }
+    auto employee = session->database().materialize(*handle);
+    if (!employee) {
+        return print_error(employee.error());
+    }
+    std::cout << "Employee " << object_id << ": name="
+              << modb::escape_for_terminal(employee->name) << " salary=" << employee->salary
+              << " annual_salary=" << employee->annual_salary()
+              << " country=" << modb::escape_for_terminal(employee->country)
+              << " schema=2\n";
+    return 0;
+}
+
+int command_employee_set_salary(const std::filesystem::path& path, std::uint64_t object_id,
+                                double salary, int schema) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    if (schema == 1) {
+        if (auto bound = session->database().bind(employee_v1_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        auto handle = session->database().get<EmployeeV1>(modb::object::ObjectId{object_id});
+        if (!handle) {
+            return print_error(handle.error());
+        }
+        auto transaction = session->database().begin();
+        if (auto updated = handle->set<&EmployeeV1::salary>(transaction, salary); !updated) {
+            return print_error(updated.error());
+        }
+    } else {
+        if (auto bound = session->database().bind(employee_v2_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        auto handle = session->database().get<EmployeeV2>(modb::object::ObjectId{object_id});
+        if (!handle) {
+            return print_error(handle.error());
+        }
+        auto transaction = session->database().begin();
+        if (auto updated = handle->set<&EmployeeV2::salary>(transaction, salary); !updated) {
+            return print_error(updated.error());
+        }
+    }
+    if (auto flushed = session->database().flush(); !flushed) {
+        return print_error(flushed.error());
+    }
+    std::cout << "Employee " << object_id << " salary updated to " << salary
+              << " using schema " << schema << '\n';
+    return 0;
+}
+
+int command_employee_demo(const std::filesystem::path& path, bool force) {
+    std::error_code filesystem_error;
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            return print_error(modb::Error{
+                modb::ErrorCode::file_already_exists,
+                "demo file exists; use --force to replace it"});
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            return print_error(
+                modb::Error{modb::ErrorCode::io_error, "cannot replace demo database"});
+        }
+    }
+
+    modb::object::ObjectId old_id{};
+    {
+        auto session = DatabaseSession::create(path);
+        if (!session) {
+            return print_error(session.error());
+        }
+        if (auto bound = session->database().bind(employee_v1_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        const EmployeeV1 employee{"Ana", 15000.0};
+        auto old = session->database().create(employee);
+        if (!old) {
+            return print_error(old.error());
+        }
+        old_id = old->id();
+        if (auto flushed = session->database().flush(); !flushed) {
+            return print_error(flushed.error());
+        }
+        std::cout << "v1 wrote Employee{id=" << old_id.value
+                  << ", name=Ana, salary=15000}\n";
+    }
+    {
+        auto session = DatabaseSession::open(path);
+        if (!session) {
+            return print_error(session.error());
+        }
+        if (auto bound = session->database().bind(employee_v2_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        auto old = session->database().get<EmployeeV2>(old_id);
+        if (!old) {
+            return print_error(old.error());
+        }
+        auto projected = session->database().materialize(*old);
+        if (!projected) {
+            return print_error(projected.error());
+        }
+        std::cout << "v2 projected old object: country=" << projected->country
+                  << " annual_salary=" << projected->annual_salary() << '\n';
+        auto transaction = session->database().begin();
+        if (auto updated = old->set<&EmployeeV2::salary>(transaction, 16000.0); !updated) {
+            return print_error(updated.error());
+        }
+        const EmployeeV2 employee{"Bia", 18000.0, "PT"};
+        auto current = session->database().create(employee);
+        if (!current) {
+            return print_error(current.error());
+        }
+        if (auto flushed = session->database().flush(); !flushed) {
+            return print_error(flushed.error());
+        }
+        std::cout << "lazy migration rewrote Employee " << old_id.value << " as v2\n"
+                  << "v2 wrote Employee{id=" << current->id().value << ", country=PT}\n";
+    }
+    std::cout << "Phase 3 OO demo: OK\n";
     return 0;
 }
 
@@ -1411,7 +1884,8 @@ int run_type_command(int argc, char* argv[]) {
     const std::string_view subcommand{argv[2]};
     if (subcommand == "define") {
         if (argc < 5) {
-            return print_usage_error("modb type define <file> <name> <attr:type[:null]>...");
+            return print_usage_error(
+                "modb type define <file> <name> <attr[#id]:type[:null][=default]>...");
         }
         return command_type_define(argc, argv);
     }
@@ -1421,7 +1895,39 @@ int run_type_command(int argc, char* argv[]) {
         }
         return command_type_list(argv[3]);
     }
+    if (subcommand == "history") {
+        if (argc != 5) {
+            return print_usage_error("modb type history <file> <name>");
+        }
+        return command_type_history(argv[3], argv[4]);
+    }
     std::cerr << "Unknown type command: " << subcommand << '\n';
+    return 2;
+}
+
+int run_baseline_command(int argc, char* argv[]) {
+    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+        print_baseline_help();
+        return 0;
+    }
+    const std::string_view subcommand{argv[2]};
+    if (subcommand == "list") {
+        if (argc != 4) {
+            return print_usage_error("modb baseline list <file>");
+        }
+        return command_baseline_list(argv[3]);
+    }
+    if (subcommand == "show") {
+        if (argc != 5) {
+            return print_usage_error("modb baseline show <file> <baseline-id>");
+        }
+        auto id = parse_object_id(argv[4]);
+        if (!id) {
+            return print_error(id.error());
+        }
+        return command_baseline_show(argv[3], *id);
+    }
+    std::cerr << "Unknown baseline command: " << subcommand << '\n';
     return 2;
 }
 
@@ -1437,19 +1943,133 @@ int run_object_command(int argc, char* argv[]) {
         }
         return command_object_create(argc, argv);
     }
-    if (subcommand == "get" || subcommand == "remove") {
-        if (argc != 5) {
-            return print_usage_error("modb object " + std::string{subcommand} +
-                                     " <file> <object-id>");
+    if (subcommand == "get") {
+        if (argc != 5 && !(argc == 6 && std::string_view{argv[5]} == "--definition")) {
+            return print_usage_error("modb object get <file> <object-id> [--definition]");
         }
         auto object_id = parse_object_id(argv[4]);
         if (!object_id) {
             return print_error(object_id.error());
         }
-        return subcommand == "get" ? command_object_get(argv[3], *object_id)
-                                   : command_object_remove(argv[3], *object_id);
+        return command_object_get(argv[3], *object_id, argc == 6);
+    }
+    if (subcommand == "remove") {
+        if (argc != 5) {
+            return print_usage_error("modb object remove <file> <object-id>");
+        }
+        auto object_id = parse_object_id(argv[4]);
+        if (!object_id) {
+            return print_error(object_id.error());
+        }
+        return command_object_remove(argv[3], *object_id);
     }
     std::cerr << "Unknown object command: " << subcommand << '\n';
+    return 2;
+}
+
+modb::Result<int> parse_employee_schema(std::string_view value) {
+    auto parsed = parse_integer(value);
+    if (parsed && (*parsed == 1 || *parsed == 2)) {
+        return static_cast<int>(*parsed);
+    }
+    return std::unexpected(
+        modb::Error{modb::ErrorCode::invalid_argument, "schema must be 1 or 2"});
+}
+
+int run_oo_command(int argc, char* argv[]) {
+    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+        print_oo_help();
+        return 0;
+    }
+    if (std::string_view{argv[2]} != "employee") {
+        std::cerr << "Unknown oo model: " << argv[2] << '\n';
+        return 2;
+    }
+    if (argc == 3 || (argc == 4 && is_help_argument(argv[3]))) {
+        print_oo_help();
+        return 0;
+    }
+    const std::string_view subcommand{argv[3]};
+    if (subcommand == "init" || subcommand == "evolve") {
+        if (argc != 7 || std::string_view{argv[5]} != "--schema") {
+            return print_usage_error(
+                "modb oo employee <init|evolve> <file> --schema <1|2>");
+        }
+        auto schema = parse_employee_schema(argv[6]);
+        if (!schema) {
+            return print_error(schema.error());
+        }
+        return subcommand == "init" ? command_employee_init(argv[4], *schema)
+                                     : command_employee_evolve(argv[4], *schema);
+    }
+    if (subcommand == "create") {
+        const bool v1_shape =
+            argc == 9 && std::string_view{argv[7]} == "--schema";
+        const bool v2_shape =
+            argc == 10 && std::string_view{argv[8]} == "--schema";
+        if (!v1_shape && !v2_shape) {
+            return print_usage_error(
+                "modb oo employee create <file> <name> <salary> [country] "
+                "--schema <1|2>");
+        }
+        auto salary = parse_real(argv[6]);
+        if (!salary) {
+            return print_error(salary.error());
+        }
+        auto schema = parse_employee_schema(argv[v1_shape ? 8 : 9]);
+        if (!schema) {
+            return print_error(schema.error());
+        }
+        if (*schema == 1 && !v1_shape) {
+            return print_usage_error(
+                "schema 1 does not accept country; omit that argument");
+        }
+        if (*schema == 2 && !v2_shape) {
+            return print_usage_error(
+                "schema 2 requires country before --schema");
+        }
+        return *schema == 1
+                   ? command_employee_create_v1(argv[4], argv[5], *salary)
+                   : command_employee_create_v2(argv[4], argv[5], *salary, argv[7]);
+    }
+    if (subcommand == "get") {
+        if (argc != 8 || std::string_view{argv[6]} != "--schema") {
+            return print_usage_error(
+                "modb oo employee get <file> <object-id> --schema <1|2>");
+        }
+        auto id = parse_object_id(argv[5]);
+        auto schema = parse_employee_schema(argv[7]);
+        if (!id) {
+            return print_error(id.error());
+        }
+        return schema ? command_employee_get(argv[4], *id, *schema)
+                      : print_error(schema.error());
+    }
+    if (subcommand == "set-salary") {
+        if (argc != 9 || std::string_view{argv[7]} != "--schema") {
+            return print_usage_error(
+                "modb oo employee set-salary <file> <object-id> <salary> "
+                "--schema <1|2>");
+        }
+        auto id = parse_object_id(argv[5]);
+        auto salary = parse_real(argv[6]);
+        auto schema = parse_employee_schema(argv[8]);
+        if (!id) {
+            return print_error(id.error());
+        }
+        if (!salary) {
+            return print_error(salary.error());
+        }
+        return schema ? command_employee_set_salary(argv[4], *id, *salary, *schema)
+                      : print_error(schema.error());
+    }
+    if (subcommand == "demo") {
+        if (argc != 5 && !(argc == 6 && std::string_view{argv[5]} == "--force")) {
+            return print_usage_error("modb oo employee demo <file> [--force]");
+        }
+        return command_employee_demo(argv[4], argc == 6);
+    }
+    std::cerr << "Unknown oo employee command: " << subcommand << '\n';
     return 2;
 }
 
@@ -1772,8 +2392,14 @@ int run(int argc, char* argv[]) {
     if (command == "type") {
         return run_type_command(argc, argv);
     }
+    if (command == "baseline") {
+        return run_baseline_command(argc, argv);
+    }
     if (command == "object") {
         return run_object_command(argc, argv);
+    }
+    if (command == "oo") {
+        return run_oo_command(argc, argv);
     }
     std::cerr << "Unknown command: " << command << "\nUse --help for usage.\n";
     return 2;
@@ -2048,6 +2674,9 @@ void print_attribute_value(const modb::object::AttributeValue& value) {
             },
             [](modb::object::ObjectId id) { std::cout << "ObjectId(" << id.value << ")"; },
             [](modb::object::BlobId id) { std::cout << "BlobId(" << id.value << ")"; },
+            [](const modb::object::EmbeddedValue& embedded) {
+                std::cout << "Embedded(" << embedded.payload.size() << " bytes)";
+            },
         },
         value.storage());
 }

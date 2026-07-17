@@ -36,10 +36,50 @@ constexpr std::array<std::byte, 4> identity_directory_magic{
     std::byte{'I'}, std::byte{'D'}, std::byte{'M'}, std::byte{'D'}};
 constexpr std::array<std::byte, 4> identity_entries_magic{
     std::byte{'I'}, std::byte{'D'}, std::byte{'M'}, std::byte{'P'}};
+// Assinatura das páginas de blob (Fase 4). O formato do blob pertence à camada
+// de objetos, mas o verificador de armazenamento reconhece a página pelos
+// mesmos magic bytes que já usa para DBRT/IDMD/IDMP.
+constexpr std::array<std::byte, 4> blob_magic{
+    std::byte{'B'}, std::byte{'L'}, std::byte{'B'}, std::byte{'P'}};
+
+// Campos do cabeçalho de blob validáveis sem conhecer o conteúdo.
+constexpr std::uint16_t blob_page_version = 1;
+constexpr std::size_t blob_header_bytes = 24;
+constexpr std::size_t blob_payload_capacity = page_size - blob_header_bytes;
 
 // Compara os quatro primeiros bytes com um magic conhecido.
 bool starts_with_magic(const Page& page, const std::array<std::byte, 4>& magic) noexcept {
     return std::equal(magic.begin(), magic.end(), page.bytes().begin());
+}
+
+// Lê um u16/u32 little-endian a partir de um offset já validado do cabeçalho.
+std::uint16_t read_u16_at(const Page& page, std::size_t offset) noexcept {
+    return static_cast<std::uint16_t>(std::to_integer<std::uint16_t>(page[offset]) |
+                                      (std::to_integer<std::uint16_t>(page[offset + 1]) << 8));
+}
+std::uint32_t read_u32_at(const Page& page, std::size_t offset) noexcept {
+    std::uint32_t value = 0;
+    for (std::size_t i = 0; i < 4; ++i) {
+        value |= std::to_integer<std::uint32_t>(page[offset + i]) << (8 * i);
+    }
+    return value;
+}
+
+// Valida os campos do cabeçalho BLBP que não dependem do conteúdo: versão e
+// comprimento declarado. A cadeia (next/ciclo) e as refs órfãs são semânticas
+// e ficam para o verificador da camada de objetos (ver nota da Fase 4).
+Result<void> validate_blob_page(const Page& page) {
+    const auto version = read_u16_at(page, 4);
+    if (version != blob_page_version) {
+        return std::unexpected(Error{ErrorCode::incompatible_page_version,
+                                     "blob page has an unsupported version"});
+    }
+    const auto payload_length = read_u32_at(page, 16);
+    if (payload_length > blob_payload_capacity) {
+        return std::unexpected(
+            Error{ErrorCode::corrupt_page, "blob page payload length exceeds page capacity"});
+    }
+    return {};
 }
 
 // Identifica páginas alocadas que ainda não receberam formato.
@@ -69,6 +109,9 @@ PageKind classify_page(const Page& page) noexcept {
     }
     if (starts_with_magic(page, identity_entries_magic)) {
         return PageKind::identity_entries;
+    }
+    if (starts_with_magic(page, blob_magic)) {
+        return PageKind::blob;
     }
     return PageKind::unknown;
 }
@@ -117,6 +160,13 @@ Result<DatabaseCheckReport> check_database(const std::filesystem::path& path) {
         case PageKind::identity_entries:
             // Páginas do modelo de objetos são reconhecidas estruturalmente;
             // a validação profunda das suas cadeias fica para um nível futuro.
+            break;
+        case PageKind::blob:
+            // Valida o cabeçalho BLBP (versão e comprimento); a cadeia e as
+            // refs órfãs são semânticas (verificador da camada de objetos).
+            if (auto validated = validate_blob_page(*page); !validated) {
+                entry.error = validated.error();
+            }
             break;
         case PageKind::unknown:
             entry.error = Error{

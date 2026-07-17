@@ -67,6 +67,9 @@ AttributeValue::AttributeValue(ObjectId value) noexcept : storage_{value} {}
 // Armazena uma referência a um blob.
 AttributeValue::AttributeValue(BlobId value) noexcept : storage_{value} {}
 
+// Move o sub-objeto codificado de um valor embedded para o variant.
+AttributeValue::AttributeValue(EmbeddedValue value) : storage_{std::move(value)} {}
+
 // Verifica se o tipo ativo do variant é o marcador de ausência.
 bool AttributeValue::is_null() const noexcept {
     return std::holds_alternative<AttributeNull>(storage_);
@@ -88,6 +91,7 @@ AttributeType AttributeValue::type() const noexcept {
             [](const std::vector<std::byte>&) { return AttributeType::bytes; },
             [](ObjectId) { return AttributeType::ref; },
             [](BlobId) { return AttributeType::blob; },
+            [](const EmbeddedValue&) { return AttributeType::embedded; },
         },
         storage_);
 }
@@ -155,6 +159,13 @@ Result<BlobId> AttributeValue::as_blob() const {
         return *value;
     }
     return std::unexpected(type_mismatch_for(type(), "BLOB"));
+}
+
+Result<std::span<const std::byte>> AttributeValue::as_embedded() const {
+    if (const auto* value = std::get_if<EmbeddedValue>(&storage_)) {
+        return std::span<const std::byte>{value->payload};
+    }
+    return std::unexpected(type_mismatch_for(type(), "EMBEDDED"));
 }
 
 } // namespace modb::object

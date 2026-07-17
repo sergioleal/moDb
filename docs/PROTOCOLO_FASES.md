@@ -506,7 +506,7 @@ reconstrói o `TypeRegistry` + baseline corrente na abertura).
 |---|---|
 | save/load de tipo | TypeDefinition com todos os recursos (defaults, flags) sobrevive à reabertura |
 | baseline | baseline corrente restaurada |
-| tipo duplicado | segunda gravação do mesmo nome na mesma baseline → `duplicate_type` |
+| versão de tipo | segunda gravação do mesmo nome cria nova definição/baseline; busca por nome retorna a versão ativa |
 | arquivo v. relacional antigo | abrir um arquivo sem DBRT → erro claro, sem crash |
 
 ## Critério de conclusão
@@ -610,8 +610,9 @@ public:
     template <typename T> Result<T> materialize(Handle<T>) const;
     Result<void> remove(ObjectId);
 
-    void register_migration(std::string type_name, std::uint64_t from_type_id,
-                            std::function<Result<FieldValues>(const DecodedObject&)>);
+    Result<void> register_migration(
+        std::string type_name, std::uint64_t from_type_id,
+        std::function<Result<FieldValues>(const DecodedObject&)>);
 };
 
 class DatabaseRegistry { // doc §5

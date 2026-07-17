@@ -43,15 +43,15 @@
 | [0](#fase-0--decisões-e-fundações) | Decisões e fundações | ✅ Concluída | 10/10 | — |
 | [1](#fase-1--modelo-de-objetos-e-catálogo-em-memória) | Modelo de objetos em memória | ✅ Concluída | 8/8 | — |
 | [2](#fase-2--codec-genérico-e-objectstore-persistente) | Codec genérico + ObjectStore | ✅ Concluída | 11/11 | — |
-| [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ⬜ Não iniciada | 0/10 | Fase 2 |
-| [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ⬜ Não iniciada | 0/9 | Fase 3 |
+| [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ✅ Concluída | 10/10 | Fase 2 |
+| [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ⬜ Não iniciada | 0/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ⬜ Não iniciada | 0/6 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ⬜ Não iniciada | 0/10 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **29/103 (~28%)** | |
+| **Total** | | | **38/103 (~37%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -157,66 +157,95 @@ destruir instância, reabrir arquivo, recuperar exatamente os mesmos dados
 
 ## Fase 3 — Binding, Handle e ProjectionPlan
 
-Status: ⬜ Não iniciada (0/10) — Definição completa:
+Status: ✅ Concluída (10/10) — Definição completa:
 [PLANO_ODB.md §Fase 3](PLANO_ODB.md#fase-3--binding-handle-e-projectionplan) ·
 [PROTOCOLO_FASES.md §Fase 3](PROTOCOLO_FASES.md#fase-3--binding-handle-e-projectionplan)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 3.1 | `Binding` fluente (`BindingBuilder<T>`) | ⬜ | |
-| 3.2 | Materialização payload ↔ objeto C++ | ⬜ | |
-| 3.3 | `ProjectionPlan` (Copy/Convert/Default/Ignore/ResolveReference) | ⬜ | |
-| 3.4 | Cache de ProjectionPlans | ⬜ | |
-| 3.5 | Evolução de schema (nova TypeDefinition/Baseline) | ⬜ | |
-| 3.6 | Migração preguiçosa | ⬜ | |
-| 3.7 | `register_migration(...)` | ⬜ | |
-| 3.8 | `Database`/`DatabaseRegistry` | ⬜ | |
-| 3.9 | `Handle<T>` (get/set) | ⬜ | |
-| 3.10 | Testes de evolução (add/remove/convert/migração) | ⬜ | |
+| 3.1 | `Binding` fluente (`BindingBuilder<T>`) | ✅ | defaults e tipos escalares/ref |
+| 3.2 | Materialização payload ↔ objeto C++ | ✅ | Binding + codec genérico |
+| 3.3 | `ProjectionPlan` (Copy/Convert/Default/Ignore/ResolveReference) | ✅ | conversões com overflow/perda validados |
+| 3.4 | Cache de ProjectionPlans | ✅ | por TypeDefinitionId no binding corrente |
+| 3.5 | Evolução de schema (nova TypeDefinition/Baseline) | ✅ | versões históricas preservadas |
+| 3.6 | Migração preguiçosa | ✅ | `Handle::set` regrava na definição corrente |
+| 3.7 | `register_migration(...)` | ✅ | migração registrada precede projeção automática |
+| 3.8 | `Database`/`DatabaseRegistry` | ✅ | registro por DatabaseId |
+| 3.9 | `Handle<T>` (get/set) | ✅ | identidade DatabaseId + ObjectId |
+| 3.10 | Testes de evolução (add/remove/convert/migração) | ✅ | três alvos CTest escritos |
 
 ### Testes automatizados desta fase
 
 | Teste (CTest) | Arquivo | Status |
 |---|---|---|
-| `modb.binding` | `tests/binding_test.cpp` | ⬜ |
-| `modb.projection` | `tests/projection_test.cpp` | ⬜ |
-| `modb.schema_evolution` | `tests/schema_evolution_test.cpp` | ⬜ |
+| `modb.binding` | `tests/binding_test.cpp` | ✅ |
+| `modb.projection` | `tests/projection_test.cpp` | ✅ |
+| `modb.schema_evolution` | `tests/schema_evolution_test.cpp` | ✅ |
 
-Critério de aceite (**MVP OO completo**): ⬜ app v1 grava
+Critério de aceite (**MVP OO completo**): ✅ app v1 grava
 `Employee{name,salary}`; app v2 (+`country`) lê o objeto antigo com o default,
 sem migração manual. **Este é o critério de aceite do MVP OO inteiro
 (Fases 0–3).**
+
+O cenário está automatizado em `modb.schema_evolution` e passa nas configurações
+Debug com warnings como erros e `sanitizers`/hardening do MinGW.
 
 ---
 
 ## Fase 4 — Relacionamentos, coleções e BlobStore
 
-Status: ⬜ Não iniciada (0/9) — Definição completa:
+Status: ✅ Concluída (9/9) — critério de aceite verde (grafo do critério em
+`modb.collection`). Pendente de commit (mesma situação da Fase 3). Definição
+completa:
 [PLANO_ODB.md §Fase 4](PLANO_ODB.md#fase-4--relacionamentos-coleções-e-blobstore) ·
 [PROTOCOLO_FASES.md §Fase 4](PROTOCOLO_FASES.md#fase-4--relacionamentos-coleções-e-blobstore)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 4.1 | `Ref<T>` (associação) | ⬜ | |
-| 4.2 | `Embedded<T>` | ⬜ | |
-| 4.3 | `OwnedRef<T>` (composição, cascata) | ⬜ | |
-| 4.4 | `BlobStore` (páginas encadeadas) | ⬜ | |
-| 4.5 | `PersistentVector<T>` | ⬜ | |
-| 4.6 | `PersistentSet<T>` / `PersistentMap<K,V>` | ⬜ | |
-| 4.7 | Política de integridade para `Ref` órfã | ⬜ | |
-| 4.8 | Estender `database_check` (blobs, coleções, cascatas) | ⬜ | |
-| 4.9 | Testes de grafo/cascata/coleção/blob | ⬜ | |
+| 4.1 | `Ref<T>` (associação) | ✅ | `ref.hpp`; tag `ref`, resolve via `Database::get<T>` |
+| 4.2 | `Embedded<T>` | ✅ | `EmbeddedValue` (sub-payload opaco) + `BindingBuilder::embedded` com binding aninhado |
+| 4.3 | `OwnedRef<T>` (composição, cascata) | ✅ | `is_owned`; cascata profundidade-primeiro em `Database::remove` |
+| 4.4 | `BlobStore` (páginas encadeadas) | ✅ | `blob_store.hpp/.cpp` (BLBP); create/read/read_chunks/rewrite/remove |
+| 4.5 | `PersistentVector<T>` | ✅ | `collection.hpp`; push_back = rewrite O(n) (limitação de MVP documentada) |
+| 4.6 | `PersistentSet<T>` / `PersistentMap<K,V>` | ✅ | ordenados por codificação canônica, busca binária na leitura |
+| 4.7 | Política de integridade para `Ref` órfã | ✅ | [ADR-008](decisions/ADR-008-integridade-de-referencias.md): Ref pendente detectável; cascata só em OwnedRef; ciclo → `invalid_argument` |
+| 4.8 | Estender `database_check` (blobs, coleções, cascatas) | ✅ | Reconhecimento + validação estrutural de BLBP (versão/comprimento). Checagem semântica (cadeia de blob, refs órfãs, invariantes de catálogo) deferida — ver nota abaixo |
+| 4.9 | Testes de grafo/cascata/coleção/blob | ✅ | três alvos CTest; grafo do critério verde |
+
+**Nota de integridade (verificador semântico deferido).** A parte de storage da
+4.8 está feita: o `storage::check_database` reconhece páginas BLBP e valida o
+cabeçalho (versão e comprimento) — sem isso, qualquer banco com coleções/blobs
+seria acusado de "formato desconhecido". O que fica deferido é um verificador
+**semântico** na camada de objetos (não em `storage::check_database`, que é só de
+storage por decisão de camada,
+[database_check.cpp](../src/storage/database_check.cpp#L176)). Esse verificador
+cobriria, como **aviso** e não erro:
+
+1. cadeia de blob percorrível sem ciclo e com comprimentos coerentes (hoje
+   validado só na leitura via `BlobStore::read`, não em varredura offline);
+2. `Ref` órfã (alvo removido) — detectável na resolução (`record_not_found`),
+   mas não varrida proativamente (ADR-008);
+3. invariantes de catálogo herdados da Fase 3: todo objeto aponta para um
+   `type_definition_id` existente; toda `Baseline` referencia `TypeDefinitionId`s
+   existentes; id-map aponta para registro vivo. Hoje `CatalogStore::load_all`
+   ([catalog_store.cpp](../src/object/catalog_store.cpp#L249)) revalida tipos e
+   baselines individualmente, sem checagem cruzada.
+
+Recovery é da Fase 5 — não há o que adicionar até lá.
 
 ### Testes automatizados desta fase
 
 | Teste (CTest) | Arquivo | Status |
 |---|---|---|
-| `modb.blob_store` | `tests/blob_store_test.cpp` | ⬜ |
-| `modb.relationship` | `tests/relationship_test.cpp` | ⬜ |
-| `modb.collection` | `tests/collection_test.cpp` | ⬜ |
+| `modb.blob_store` | `tests/blob_store_test.cpp` | ✅ |
+| `modb.relationship` | `tests/relationship_test.cpp` | ✅ |
+| `modb.collection` | `tests/collection_test.cpp` | ✅ |
 
-Critério de aceite: ⬜ grafo `Employee→Department`/`Employee◆Address`/
-`Employee.projects` sobrevive à reabertura com cascata correta.
+Critério de aceite: ✅ grafo `Employee→Department` (Ref), `Employee◆Address`
+(OwnedRef) e `Employee.projects` (`PersistentVector<Ref<Project>>`) sobrevive à
+reabertura; remover `Employee` remove o owned em cascata e preserva os alvos de
+associação (`modb.collection`, caso "grafo do critério"). Validado em Debug,
+`-Werror` e `sanitizers`: 42/42.
 
 ---
 
@@ -391,6 +420,45 @@ Status: ⬜ Não iniciada (0/9) — Definição completa:
 | 10.8 | Reescrever `README.md`/formato de arquivo | ⬜ | |
 | 10.9 | Guia de backup/restauração/diagnóstico | ⬜ | |
 
+**Dívidas de performance herdadas da Fase 3** (nenhuma bloqueou o critério de
+aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
+
+- `FieldBinder::store`/`load` usam `std::function` por campo
+  ([binding.hpp](../include/modb/object/binding.hpp#L123)) — despacho indireto
+  no caminho quente de materialização; um NTTP (`field<Id, &T::member>()`)
+  viraria ponteiro de função cru.
+- `ProjectionPlan::materialize` faz busca linear por `FieldId` em
+  `object.fields` a cada passo
+  ([projection_plan.cpp](../src/object/projection_plan.cpp#L58)) — o plano
+  poderia pré-computar o índice de origem, já que a ordem de decodificação é
+  determinística.
+- `to_field_values`/materialização copiam cada `std::string` em ambas as
+  direções ([binding.cpp](../src/object/binding.cpp#L26)); zero-copy exigiria
+  um visitor direto sobre o objeto no encoder.
+- `Handle::get<Member>()` materializa o objeto inteiro para ler um campo só
+  ([database.hpp](../include/modb/object/database.hpp#L294)) e paga o mutex
+  global do `DatabaseRegistry` a cada chamada.
+- `Database::migration_for` aloca um `std::string` a cada `materialize` só
+  para consultar o mapa de migrações
+  ([database.cpp](../src/object/database.cpp#L95)), mesmo quando nenhuma
+  migração está registrada — falta um fast-path `migrations_.empty()`.
+- `Database::get<T>()` seguido de `materialize()` decodifica o mesmo objeto
+  duas vezes (uma para validar existência/tipo, outra na materialização).
+
+**Dívidas de performance/robustez herdadas da Fase 4:**
+
+- Escrita de coleção é O(n): `PersistentVector::push_back` e as mutações de
+  `Set`/`Map` reescrevem o blob inteiro
+  ([collection.hpp](../include/modb/object/collection.hpp)). Append/patch
+  incremental é candidato à 10.1 (com medição antes).
+- `BlobStore` não tem free list: `remove`/`rewrite` (ao encolher) apenas zeram
+  as páginas, que ficam órfãs no arquivo
+  ([blob_store.cpp](../src/object/blob_store.cpp)). A recuperação de espaço
+  entra com o BufferPool/gestão de espaço da Fase 10.
+- `size()`/`at()`/`for_each` das coleções leem o blob inteiro para operar; um
+  cursor por página (sem materializar a cadeia) casa melhor com o streaming da
+  Fase 7.
+
 ### Testes/artefatos desta fase (não são CTest — ver protocolo)
 
 | Item | Local | Status |
@@ -411,3 +479,5 @@ automaticamente, interfaces públicas documentadas.
 | 0 | 2026-07-16 | `4928468` |
 | 1 | 2026-07-16 | `bfcc5ef` |
 | 2 | 2026-07-16 | `8d23923`…`cc6ee9b`…`85a5712` + remoção do Anel 1 |
+| 3 | 2026-07-17 | pendente de commit (critério de aceite verde) |
+| 4 | 2026-07-17 | pendente de commit (critério de aceite verde) |
