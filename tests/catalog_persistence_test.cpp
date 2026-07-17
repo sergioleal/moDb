@@ -1,5 +1,9 @@
 // Importa o ObjectStore (que orquestra o catálogo) e o PageFile.
+#include <sstream>
+
+#define private public
 #include "modb/object/object_store.hpp"
+#undef private
 #include "modb/storage/page_file.hpp"
 
 // Importa as funções simples de verificação dos testes.
@@ -15,6 +19,7 @@
 using namespace modb;
 using namespace modb::object;
 using modb::storage::PageFile;
+
 
 namespace {
 

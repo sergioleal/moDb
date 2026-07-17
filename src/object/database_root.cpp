@@ -8,6 +8,7 @@
 #include <array>
 // Disponibiliza std::equal ao comparar o magic.
 #include <algorithm>
+#include <limits>
 // Disponibiliza std::to_string nas mensagens de erro.
 #include <string>
 
@@ -21,7 +22,8 @@ using storage::PageId;
 constexpr std::array<std::byte, 4> dbrt_magic{std::byte{'D'}, std::byte{'B'}, std::byte{'R'},
                                               std::byte{'T'}};
 // Versão do layout da página raiz.
-constexpr std::uint16_t dbrt_version = 1;
+constexpr std::uint16_t dbrt_version = 2;
+constexpr std::uint16_t legacy_dbrt_version = 1;
 
 // Converte um campo de página persistido (0 = ausente) em PageId opcional.
 std::optional<PageId> optional_page(std::uint64_t value) {
@@ -78,7 +80,7 @@ Result<DatabaseRoot> DatabaseRoot::open(storage::PageFile& file) {
     if (!version) {
         return std::unexpected(version.error());
     }
-    if (*version != dbrt_version) {
+    if (*version != dbrt_version && *version != legacy_dbrt_version) {
         return std::unexpected(Error{ErrorCode::incompatible_format_version,
                                      "unsupported database root version: " +
                                          std::to_string(*version)});
@@ -106,6 +108,18 @@ Result<DatabaseRoot> DatabaseRoot::open(storage::PageFile& file) {
     root.data_heap_root_ = *data_heap_root;
     root.next_object_id_ = *next_object_id;
     root.current_baseline_ = *current_baseline;
+    // DBRT v1 não carregava época; sua primeira abertura na 6A a inicializa
+    // explicitamente como zero e regrava o layout v2.
+    if (*version == dbrt_version) {
+        auto epoch = reader.read_u64();
+        if (!epoch) {
+            return std::unexpected(Error{ErrorCode::corrupt_page,
+                                         "database root page is truncated before epoch"});
+        }
+        root.epoch_ = *epoch;
+    } else if (auto upgraded = root.persist(); !upgraded) {
+        return std::unexpected(upgraded.error());
+    }
     return root;
 }
 
@@ -129,6 +143,7 @@ Result<void> DatabaseRoot::persist() {
     writer.write_u64(data_heap_root_);
     writer.write_u64(next_object_id_);
     writer.write_u64(current_baseline_);
+    writer.write_u64(epoch_);
 
     Page page;
     const auto bytes = writer.bytes();
@@ -181,6 +196,19 @@ Result<void> DatabaseRoot::set_current_baseline(BaselineId baseline) {
     current_baseline_ = baseline.value;
     if (auto persisted = persist(); !persisted) {
         current_baseline_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+Result<void> DatabaseRoot::advance_epoch() {
+    if (epoch_ == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(Error{ErrorCode::value_too_large, "database epoch is exhausted"});
+    }
+    const auto previous = epoch_;
+    ++epoch_;
+    if (auto persisted = persist(); !persisted) {
+        epoch_ = previous;
         return std::unexpected(persisted.error());
     }
     return {};

@@ -39,6 +39,8 @@ public:
     [[nodiscard]] BaselineId current_baseline() const noexcept {
         return BaselineId{current_baseline_};
     }
+    // Época MVCC global, incrementada uma vez por commit durável (Fase 6A).
+    [[nodiscard]] std::uint64_t epoch() const noexcept { return epoch_; }
 
     // Cada setter atualiza o espelho e regrava a página imediatamente, para que
     // a raiz em disco nunca fique atrás do estado observável.
@@ -47,6 +49,7 @@ public:
     [[nodiscard]] Result<void> set_data_heap_root(storage::PageId id);
     [[nodiscard]] Result<void> set_next_object_id(std::uint64_t next);
     [[nodiscard]] Result<void> set_current_baseline(BaselineId baseline);
+    [[nodiscard]] Result<void> advance_epoch();
 
 private:
     DatabaseRoot(storage::PageFile& file, storage::PageId page) noexcept
@@ -65,6 +68,7 @@ private:
     std::uint64_t data_heap_root_{};
     std::uint64_t next_object_id_{first_user_object_id};
     std::uint64_t current_baseline_{};
+    std::uint64_t epoch_{};
 };
 
 } // namespace modb::object

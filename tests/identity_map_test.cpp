@@ -2,12 +2,15 @@
 #include "modb/object/identity_map.hpp"
 // Importa PageFile para criar/reabrir o arquivo.
 #include "modb/storage/page_file.hpp"
+#include "modb/storage/endian.hpp"
 
 // Importa as funções simples de verificação dos testes.
 #include "test_support.hpp"
 
 // Disponibiliza o relógio usado no nome único do arquivo.
 #include <chrono>
+#include <algorithm>
+#include <array>
 // Disponibiliza caminhos temporários.
 #include <filesystem>
 // Disponibiliza std::error_code na limpeza.
@@ -19,6 +22,7 @@ using modb::storage::PageFile;
 using modb::storage::PageId;
 using modb::storage::RecordId;
 using modb::storage::SlotId;
+using modb::storage::store_le;
 
 namespace {
 
@@ -141,6 +145,59 @@ int main() {
                         "the chained-directory binding survives reopening");
             suite.check_error(map->find(ObjectId{16}), ErrorCode::record_not_found,
                               "the erased id stays erased after reopening");
+        }
+    }
+
+    // --- migração de formato: IDMP v1 (16 bytes) -> v2 (48 bytes) ---
+    {
+        TemporaryDatabase legacy_database{"legacy-v1"};
+        auto legacy_file = PageFile::create(legacy_database.path());
+        suite.check(legacy_file.has_value(), "legacy fixture file is created");
+        if (!legacy_file) {
+            return suite.finish();
+        }
+        auto directory_id = legacy_file->allocate_page();
+        auto entries_id = legacy_file->allocate_page();
+        suite.check(directory_id.has_value() && entries_id.has_value(),
+                    "legacy directory and entries pages are allocated");
+        if (!directory_id || !entries_id) {
+            return suite.finish();
+        }
+        constexpr std::array<std::byte, 4> idmd_magic{std::byte{'I'}, std::byte{'D'},
+                                                        std::byte{'M'}, std::byte{'D'}};
+        constexpr std::array<std::byte, 4> idmp_magic{std::byte{'I'}, std::byte{'D'},
+                                                        std::byte{'M'}, std::byte{'P'}};
+        storage::Page directory;
+        std::copy(idmd_magic.begin(), idmd_magic.end(), directory.bytes().begin());
+        store_le<std::uint16_t>(directory.bytes().subspan(4, 2), 1);
+        store_le<std::uint64_t>(directory.bytes().subspan(16, 8), entries_id->value);
+        storage::Page entries;
+        std::copy(idmp_magic.begin(), idmp_magic.end(), entries.bytes().begin());
+        store_le<std::uint16_t>(entries.bytes().subspan(4, 2), 1);
+        constexpr std::size_t legacy_offset = 16 + first_user_object_id * 16;
+        store_le<std::uint64_t>(entries.bytes().subspan(legacy_offset, 8), 77);
+        store_le<std::uint16_t>(entries.bytes().subspan(legacy_offset + 8, 2), 3);
+        store_le<std::uint16_t>(entries.bytes().subspan(legacy_offset + 10, 2), 9);
+        store_le<std::uint32_t>(entries.bytes().subspan(legacy_offset + 12, 4), 1);
+        suite.check(legacy_file->write(*directory_id, directory).has_value() &&
+                        legacy_file->write(*entries_id, entries).has_value(),
+                    "legacy v1 fixture is written");
+
+        auto migrated = IdentityMap::open(*legacy_file, *directory_id);
+        suite.check(migrated.has_value() && migrated->directory_root() != *directory_id,
+                    "opening v1 creates a distinct v2 identity map");
+        const RecordId expected{PageId{77}, SlotId{3}, 9};
+        suite.check(migrated && migrated->find(ObjectId{first_user_object_id}) ==
+                                    Result<RecordId>{expected},
+                    "v1 binding survives the v2 migration");
+        if (migrated) {
+            suite.check(legacy_file->flush().has_value(), "migrated v2 map is flushed");
+            auto reopened_map = IdentityMap::open(*legacy_file, migrated->directory_root());
+            suite.check(reopened_map.has_value() && reopened_map->directory_root() ==
+                                                    migrated->directory_root() &&
+                            reopened_map->find(ObjectId{first_user_object_id}) ==
+                                Result<RecordId>{expected},
+                        "v2 map reopens without a second migration");
         }
     }
 

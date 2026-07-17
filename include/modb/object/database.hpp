@@ -310,6 +310,9 @@ public:
     // (single-writer) ou se o banco não estiver anexado ao registro.
     [[nodiscard]] Result<Transaction> begin();
 
+    [[nodiscard]] Result<TypeDefinitionId> define_type(Transaction& tx,
+                                                        TypeDefinition definition);
+
     // Executa `fn(Transaction&)` sob uma transação: término normal com Ok →
     // commit; retorno de erro → rollback; exceção → rollback (via RAII do
     // destrutor da Transaction, que reverte quando não houve commit). É o
@@ -358,6 +361,7 @@ public:
     [[nodiscard]] const std::optional<Baseline>& current_baseline() const noexcept {
         return store_.current_baseline();
     }
+    [[nodiscard]] std::uint64_t epoch() const noexcept { return store_.epoch(); }
     [[nodiscard]] Result<std::reference_wrapper<const Baseline>> find_baseline(
         BaselineId id) const {
         return store_.find_baseline(id);

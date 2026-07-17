@@ -966,9 +966,9 @@ O ADR-009 deve fixar o modelo inicial **single-writer / multi-reader por
 o comportamento de versões após reabertura.
 
 - `epoch` global u64 no DBRT, incrementado a cada commit.
-- A entrada do IdentityMap ganha uma segunda localização: layout novo de 32
-  bytes por entrada — `{ current: (page,slot,gen), current_epoch u64,
-  previous: (page,slot,gen), previous_epoch u64 }` (IDMP versão 2; migração:
+- A entrada do IdentityMap ganha uma segunda localização: layout novo de 48
+  bytes por entrada — `{ current: (page,slot,gen,flags), current_epoch u64,
+  previous: (page,slot,gen,flags), previous_epoch u64 }` (IDMP versão 2; migração:
   regravar o mapa na primeira abertura pós-upgrade).
 
 ### Critério de conclusão 6A

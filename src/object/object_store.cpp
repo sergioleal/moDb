@@ -81,6 +81,17 @@ Result<ObjectStore> ObjectStore::open(storage::PageFile& file) {
     if (!identity) {
         return std::unexpected(identity.error());
     }
+    if (identity->directory_root() != *identity_dir) {
+        // A migração v1→v2 publica a nova raiz por último. Se houver queda
+        // antes daqui, a raiz antiga continua íntegra e a abertura apenas
+        // refaz a migração; depois daqui o mapa v2 já está completo.
+        if (auto linked = root->set_identity_dir(identity->directory_root()); !linked) {
+            return std::unexpected(linked.error());
+        }
+        if (auto flushed = file.flush(); !flushed) {
+            return std::unexpected(flushed.error());
+        }
+    }
     auto data_heap = storage::TableHeap::open(file, *data_root);
     if (!data_heap) {
         return std::unexpected(data_heap.error());

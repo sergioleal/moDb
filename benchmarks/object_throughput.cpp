@@ -8,8 +8,7 @@
 //     milhares : quantos MIL objetos criar/apagar (padrao 10 => 10.000)
 //     arquivo  : caminho do banco (padrao: temp, removido ao final)
 
-#include "modb/object/object_store.hpp"
-#include "modb/storage/page_file.hpp"
+#include "modb/object/database.hpp"
 
 // Relógio monotônico para medir tempo de parede.
 #include <chrono>
@@ -24,6 +23,7 @@
 #include <iostream>
 // Limites usados para impedir overflow no argumento em milhares.
 #include <limits>
+#include <memory>
 // std::error_code na limpeza.
 #include <system_error>
 // Nome e montagem de rótulos.
@@ -34,7 +34,6 @@
 
 using namespace modb;
 using namespace modb::object;
-using modb::storage::PageFile;
 
 namespace {
 
@@ -59,38 +58,34 @@ int fail(std::string_view what, const Error& error) {
     return 1;
 }
 
+struct Item {
+    std::int64_t seq{};
+    std::string label;
+};
+
+BindingBuilder<Item> item_binding() {
+    BindingBuilder<Item> builder{"Item"};
+    builder.field<1>("seq", &Item::seq).field<2>("label", &Item::label);
+    return builder;
+}
+
 // Executa o benchmark completo. `stride` escolhe a ordem de remoção: <=1 apaga
 // em sequência (esvazia páginas rápido); >1 apaga em passada — a cada `stride`
 // posições, depois volta ao offset seguinte —, espalhando as remoções por
 // muitas páginas e mantendo-as vivas e fragmentadas por mais tempo.
 int run_benchmark(std::uint64_t total, std::uint64_t stride, const std::filesystem::path& path) {
-    auto file = PageFile::create(path);
-    if (!file) {
-        return fail("PageFile::create", file.error());
+    auto created = Database::create(path);
+    if (!created) {
+        return fail("Database::create", created.error());
     }
-    auto store = ObjectStore::create(*file);
-    if (!store) {
-        return fail("ObjectStore::create", store.error());
+    auto database = std::make_shared<Database>(std::move(*created));
+    auto database_id = DatabaseRegistry::instance().attach(database);
+    if (!database_id) {
+        return fail("DatabaseRegistry::attach", database_id.error());
     }
-    auto type = TypeDefinition::create(
-        "Item", std::vector<AttributeDefinition>{
-                    AttributeDefinition{.id = FieldId{1}, .name = "seq",
-                                      .type = AttributeType::int64, .nullable = false},
-                    AttributeDefinition{.id = FieldId{2}, .name = "label",
-                                      .type = AttributeType::string, .nullable = false},
-                });
-    if (!type) {
-        return fail("TypeDefinition::create", type.error());
+    if (auto bound = database->bind(item_binding()); !bound) {
+        return fail("bind", bound.error());
     }
-    auto type_id = store->register_type(std::move(*type));
-    if (!type_id) {
-        return fail("register_type", type_id.error());
-    }
-    auto type_ref = store->find_type(*type_id);
-    if (!type_ref) {
-        return fail("find_type", type_ref.error());
-    }
-    const auto& item_type = type_ref->get();
 
     std::vector<ObjectId> ids;
     ids.reserve(total);
@@ -108,21 +103,21 @@ int run_benchmark(std::uint64_t total, std::uint64_t stride, const std::filesyst
     std::cout << "Arquivo:   " << path.string() << "\n\n";
 
     // --- fase CREATE ---
+    auto create_tx = database->begin();
+    if (!create_tx) {
+        return fail("begin (create)", create_tx.error());
+    }
     const auto create_start = std::chrono::steady_clock::now();
     for (std::uint64_t i = 0; i < total; ++i) {
-        FieldValues fields{
-            {FieldId{1}, AttributeValue{static_cast<std::int64_t>(i)}},
-            {FieldId{2}, AttributeValue{"item-" + std::to_string(i)}},
-        };
-        auto id = store->create_object(item_type, std::move(fields));
+        auto id = database->create(*create_tx, Item{static_cast<std::int64_t>(i), "item-" + std::to_string(i)});
         if (!id) {
-            return fail("create_object", id.error());
+            return fail("create", id.error());
         }
-        ids.push_back(*id);
+        ids.push_back(id->id());
     }
     const auto create_end = std::chrono::steady_clock::now();
-    if (auto flushed = file->flush(); !flushed) {
-        return fail("flush (create)", flushed.error());
+    if (auto committed = create_tx->commit(); !committed) {
+        return fail("commit (create)", committed.error());
     }
     const auto create_flush_end = std::chrono::steady_clock::now();
 
@@ -132,8 +127,12 @@ int run_benchmark(std::uint64_t total, std::uint64_t stride, const std::filesyst
 
     // --- fase DELETE ---
     // Remove um id e propaga um eventual erro, para reuso nas duas ordens.
-    const auto remove_at = [&store](ObjectId id) -> Result<void> {
-        if (auto removed = store->remove(id); !removed) {
+    auto delete_tx = database->begin();
+    if (!delete_tx) {
+        return fail("begin (delete)", delete_tx.error());
+    }
+    const auto remove_at = [&database, &delete_tx](ObjectId id) -> Result<void> {
+        if (auto removed = database->remove(*delete_tx, id); !removed) {
             return std::unexpected(removed.error());
         }
         return {};
@@ -157,20 +156,18 @@ int run_benchmark(std::uint64_t total, std::uint64_t stride, const std::filesyst
         }
     }
     const auto delete_end = std::chrono::steady_clock::now();
-    if (auto flushed = file->flush(); !flushed) {
-        return fail("flush (delete)", flushed.error());
+    if (auto committed = delete_tx->commit(); !committed) {
+        return fail("commit (delete)", committed.error());
     }
     const auto delete_flush_end = std::chrono::steady_clock::now();
 
     // A verificação fica fora da medição: o benchmark só termina com sucesso
     // quando todos os objetos criados foram efetivamente apagados.
     std::uint64_t remaining = 0;
-    auto scanned = store->scan([&remaining](const DecodedObject&) -> Result<void> {
-        ++remaining;
-        return {};
-    });
-    if (!scanned) {
-        return fail("scan de verificacao", scanned.error());
+    for (const auto id : ids) {
+        if (database->get<Item>(id)) {
+            ++remaining;
+        }
     }
     if (remaining != 0) {
         std::cerr << "Erro: " << remaining << " objeto(s) permaneceram apos o delete.\n";

@@ -53,6 +53,9 @@ private:
         std::uint64_t entry_page) const;
     // Garante (criando se preciso) a página IDMP que contém `entry_page`.
     [[nodiscard]] Result<storage::PageId> ensure_idmp(std::uint64_t entry_page);
+    // Regrava um mapa v1 em páginas v2 e devolve a nova raiz de diretório.
+    [[nodiscard]] static Result<IdentityMap> migrate_v1(storage::PageFile& file,
+                                                         storage::PageId directory_root);
 
     // Arquivo cuja vida é controlada pelo chamador.
     storage::PageFile* file_;

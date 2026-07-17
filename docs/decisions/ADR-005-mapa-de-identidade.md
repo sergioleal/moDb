@@ -52,7 +52,7 @@ entrada             = indice_global % entradas_por_pagina
 - `rebind` (objeto mudou de página) atualiza só a entrada, sem tocar em quem
   referencia o objeto.
 - `erase` marca o tombstone (bit1); o id não é reaproveitado.
-- Versão 2 da IDMP (Fase 6, MVCC) amplia a entrada para 32 bytes com uma versão
+- Versão 2 da IDMP (Fase 6, MVCC) amplia a entrada para 48 bytes com uma versão
   anterior; a migração regrava o mapa na primeira abertura pós-upgrade.
 
 ## Consequências

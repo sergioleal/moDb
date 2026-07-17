@@ -1,5 +1,9 @@
 // Importa o ObjectStore exercitado neste teste.
+#include <sstream>
+
+#define private public
 #include "modb/object/object_store.hpp"
+#undef private
 // Importa PageFile para criar/reabrir o arquivo.
 #include "modb/storage/page_file.hpp"
 
@@ -18,6 +22,7 @@
 using namespace modb;
 using namespace modb::object;
 using modb::storage::PageFile;
+
 
 namespace {
 

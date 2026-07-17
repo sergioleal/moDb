@@ -76,6 +76,7 @@ void print_blob_help();
 void print_graph_help();
 void print_coll_help();
 void print_tx_help();
+void print_mvcc_help();
 
 int command_demo();
 int command_demo_run(bool force);
@@ -122,6 +123,7 @@ int run_blob_command(int argc, char* argv[]);
 int run_graph_command(int argc, char* argv[]);
 int run_coll_command(int argc, char* argv[]);
 int run_tx_command(int argc, char* argv[]);
+int run_mvcc_command(int argc, char* argv[]);
 int command_blob_put(const std::filesystem::path& path, std::string_view text);
 int command_blob_get(const std::filesystem::path& path, std::uint64_t blob_id);
 int command_blob_info(const std::filesystem::path& path, std::uint64_t blob_id);
@@ -131,6 +133,8 @@ int command_tx_demo(const std::filesystem::path& path, bool force);
 int command_tx_crash(const std::filesystem::path& path, std::string_view phase, bool force);
 int command_tx_wal_info(const std::filesystem::path& path);
 int command_tx_get(const std::filesystem::path& path, std::uint64_t object_id);
+int command_mvcc_status(const std::filesystem::path& path, bool explicit_upgrade);
+int command_mvcc_tick(const std::filesystem::path& path);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -178,6 +182,7 @@ void print_help() {
            "  graph    Demo an object graph: refs, embedded, cascade (ODB++ Fase 4).\n"
            "  coll     Demo persistent vector/set/map collections (ODB++ Fase 4).\n"
            "  tx       Exercise transactions, the WAL and recovery (ODB++ Fase 5).\n"
+           "  mvcc     Inspect, upgrade and advance the MVCC epoch (ODB++ Fase 6A).\n"
            "\n"
            "Options:\n"
            "  -h, --help     Show this help.\n"
@@ -447,16 +452,21 @@ int command_demo_run(bool force) {
 
 // Command group: db.
 
-// Cria o arquivo pela camada de storage e mostra o cabecalho ja validado.
+// Cria um Database OO completo para que os comandos de schema usem o mesmo
+// caminho transacional/WAL desde o primeiro acesso.
 int command_db_create(const std::filesystem::path& path) {
-    // PageFile::create protege arquivos existentes.
-    auto created = modb::storage::PageFile::create(path);
-    // Mostra a falha produzida pela camada de armazenamento.
-    if (!created) {
-        return print_error(created.error());
+    {
+        auto created = modb::object::Database::create(path);
+        if (!created) {
+            return print_error(created.error());
+        }
+    }
+    auto file = modb::storage::PageFile::open(path);
+    if (!file) {
+        return print_error(file.error());
     }
     std::cout << "Database created\n";
-    print_database_info(*created);
+    print_database_info(*file);
     // Encerra o comando com sucesso.
     return 0;
 }
@@ -518,6 +528,22 @@ int command_db_check(const std::filesystem::path& path) {
     std::cout << "TableHeap roots: " << table_heap_roots << '\n';
     if (object_pages != 0) {
         std::cout << "Object store pages (DBRT/IDMD/IDMP): " << object_pages << '\n';
+    }
+    if (report.object_format) {
+        const auto& format = *report.object_format;
+        std::cout << "DBRT version: " << *format.dbrt_version << '\n';
+        if (format.idmp_version) {
+            std::cout << "IDMP version: " << *format.idmp_version << '\n';
+        } else {
+            std::cout << "IDMP version: not allocated\n";
+        }
+        if (format.epoch) {
+            std::cout << "Epoch: " << *format.epoch << '\n';
+        } else {
+            std::cout << "Epoch: unavailable in DBRT v1\n";
+        }
+        std::cout << "Migration: "
+                  << (format.migration_required() ? "required" : "not required") << '\n';
     }
     if (unknown != 0) {
         std::cout << "Unrecognized pages: " << unknown << '\n';
@@ -1394,21 +1420,32 @@ int command_type_define(int argc, char* argv[]) {
         return print_error(definition.error());
     }
 
-    auto file = modb::storage::PageFile::open(path);
-    if (!file) {
-        return print_error(file.error());
+    auto opened = modb::object::Database::open(path);
+    if (!opened) {
+        return print_error(opened.error());
     }
-    auto store = open_or_init_object_store(*file);
-    if (!store) {
-        return print_error(store.error());
+    auto database = std::make_shared<modb::object::Database>(std::move(*opened));
+    auto database_id = modb::object::DatabaseRegistry::instance().attach(database);
+    if (!database_id) {
+        return print_error(database_id.error());
     }
-    auto type_id = store->register_type(std::move(*definition));
+    auto detach = [&] { modb::object::DatabaseRegistry::instance().detach(*database_id); };
+    auto transaction = database->begin();
+    if (!transaction) {
+        detach();
+        return print_error(transaction.error());
+    }
+    auto type_id = database->define_type(*transaction, std::move(*definition));
     if (!type_id) {
+        (void)transaction->rollback();
+        detach();
         return print_error(type_id.error());
     }
-    if (auto flushed = file->flush(); !flushed) {
-        return print_error(flushed.error());
+    if (auto committed = transaction->commit(); !committed) {
+        detach();
+        return print_error(committed.error());
     }
+    detach();
     std::cout << "Type defined: " << type_name << " (id " << type_id->value << ")\n";
     return 0;
 }
@@ -1570,6 +1607,17 @@ int command_object_remove(const std::filesystem::path& path, std::uint64_t objec
                                    "object remove is unavailable without a Database transaction"});
 }
 
+void print_mvcc_help() {
+    std::cout << "Usage:\n"
+                 "  modb mvcc status <file>\n"
+                 "  modb mvcc upgrade <file>\n"
+                 "  modb mvcc tick <file>\n"
+                 "\n"
+                 "Exercises Fase 6A: status opens and validates DBRT/IDMP v2; upgrade\n"
+                 "opens legacy v1 files and persists their compatible upgrade; tick commits\n"
+                 "an epoch-only transaction through the WAL.\n";
+}
+
 // Command group: oo employee — bindings C++ compilados que exercitam a Fase 3.
 struct EmployeeV1 {
     std::string name;
@@ -1642,6 +1690,38 @@ private:
     std::shared_ptr<modb::object::Database> database_;
     modb::object::DatabaseId id_{};
 };
+
+int command_mvcc_status(const std::filesystem::path& path, bool explicit_upgrade) {
+    // Database::open executa a migração compatível DBRT/IDMP antes de expor
+    // qualquer estado ao chamador.
+    auto opened = modb::object::Database::open(path);
+    if (!opened) {
+        return print_error(opened.error());
+    }
+    std::cout << (explicit_upgrade ? "MVCC format upgrade: complete\n" : "MVCC status\n")
+              << "DBRT version: 2\n"
+              << "IDMP version: 2\n"
+              << "Epoch: " << opened->epoch() << '\n';
+    return 0;
+}
+
+int command_mvcc_tick(const std::filesystem::path& path) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    auto& database = session->database();
+    const auto before = database.epoch();
+    auto transaction = database.begin();
+    if (!transaction) {
+        return print_error(transaction.error());
+    }
+    if (auto committed = transaction->commit(); !committed) {
+        return print_error(committed.error());
+    }
+    std::cout << "Epoch committed: " << before << " -> " << database.epoch() << '\n';
+    return 0;
+}
 
 int command_employee_init(const std::filesystem::path& path, int schema) {
     auto session = DatabaseSession::create(path);
@@ -3040,6 +3120,28 @@ int run_tx_command(int argc, char* argv[]) {
     return 2;
 }
 
+int run_mvcc_command(int argc, char* argv[]) {
+    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+        print_mvcc_help();
+        return 0;
+    }
+    const std::string_view subcommand{argv[2]};
+    if (subcommand == "status" || subcommand == "upgrade") {
+        if (argc != 4) {
+            return print_usage_error("modb mvcc <status|upgrade> <file>");
+        }
+        return command_mvcc_status(argv[3], subcommand == "upgrade");
+    }
+    if (subcommand == "tick") {
+        if (argc != 4) {
+            return print_usage_error("modb mvcc tick <file>");
+        }
+        return command_mvcc_tick(argv[3]);
+    }
+    std::cerr << "Unknown mvcc command: " << subcommand << '\n';
+    return 2;
+}
+
 // Group dispatchers, kept after the command implementations.
 int run_db_command(int argc, char* argv[]) {
     if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
@@ -3379,6 +3481,9 @@ int run(int argc, char* argv[]) {
     }
     if (command == "tx") {
         return run_tx_command(argc, argv);
+    }
+    if (command == "mvcc") {
+        return run_mvcc_command(argc, argv);
     }
     std::cerr << "Unknown command: " << command << "\nUse --help for usage.\n";
     return 2;

@@ -663,3 +663,34 @@ modb db delete phase3-demo.modb
 
 O roteiro combina as ferramentas de armazenamento cru com o cenário tipado
 completo da Fase 3.
+
+## MVCC — Fase 6A
+
+```text
+modb mvcc status <file>
+modb mvcc upgrade <file>
+modb mvcc tick <file>
+```
+
+`status` abre o banco e informa a época global. `upgrade` exercita a abertura
+compatível que converte DBRT/IDMP v1 para v2 quando necessário. `tick` faz um
+commit sem objetos para demonstrar que a época avança pelo WAL.
+
+Roteiro passo a passo:
+
+```text
+# 1. Crie o banco (só na primeira vez).
+modb db create exemplo-6a.modb
+
+# 2. Confirme que a época inicial é zero e o formato é v2.
+modb mvcc status exemplo-6a.modb
+
+# 3. Execute um commit WAL que avança somente a época.
+modb mvcc tick exemplo-6a.modb
+
+# 4. Consulte novamente; a época deve ter avançado de 0 para 1.
+modb mvcc status exemplo-6a.modb
+
+# 5. Em um banco criado por versão anterior, execute a atualização compatível.
+modb mvcc upgrade exemplo-6a.modb
+```

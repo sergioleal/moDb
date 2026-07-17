@@ -27,6 +27,8 @@
 
 namespace modb::object {
 
+class Database;
+
 // Amarra o modelo de objetos ao armazenamento persistente: aloca ObjectIds,
 // codifica/decodifica objetos, mantém o mapa de identidade, o catálogo e o
 // heap de dados. É o primeiro caminho vertical OO — um objeto criado aqui
@@ -43,7 +45,6 @@ public:
 
     // Registra um tipo novo, atribuindo seu TypeDefinitionId a partir do
     // contador persistente, gravando-o no catálogo e atualizando a baseline.
-    [[nodiscard]] Result<TypeDefinitionId> register_type(TypeDefinition definition);
     // Busca um tipo registrado por id ou por nome.
     [[nodiscard]] Result<std::reference_wrapper<const TypeDefinition>> find_type(
         TypeDefinitionId id) const;
@@ -60,13 +61,10 @@ public:
 
     // Cria um objeto do tipo dado, validando o payload, persistindo-o e
     // registrando sua identidade. Devolve o ObjectId atribuído.
-    [[nodiscard]] Result<ObjectId> create_object(const TypeDefinition& type, FieldValues fields);
     // Recupera um objeto vivo pelo id.
     [[nodiscard]] Result<DecodedObject> get(ObjectId id);
     // Substitui o conteúdo de um objeto, preservando sua identidade.
-    [[nodiscard]] Result<void> update(ObjectId id, const TypeDefinition& type, FieldValues fields);
     // Remove um objeto (o id nunca é reutilizado).
-    [[nodiscard]] Result<void> remove(ObjectId id);
     // Visita cada objeto de dados vivo, na ordem física.
     [[nodiscard]] Result<void> scan(
         const std::function<Result<void>(const DecodedObject&)>& visitor);
@@ -75,6 +73,7 @@ public:
     [[nodiscard]] const std::optional<Baseline>& current_baseline() const noexcept {
         return current_baseline_;
     }
+    [[nodiscard]] std::uint64_t epoch() const noexcept { return root_.epoch(); }
 
     // Próximo ObjectId a ser alocado (contador persistido). Exposto para o
     // rollback de transação (Fase 5) preservar a garantia de não-reuso mesmo
@@ -94,6 +93,12 @@ public:
     }
 
 private:
+    friend class Database;
+    [[nodiscard]] Result<TypeDefinitionId> register_type(TypeDefinition definition);
+    [[nodiscard]] Result<ObjectId> create_object(const TypeDefinition& type, FieldValues fields);
+    [[nodiscard]] Result<void> update(ObjectId id, const TypeDefinition& type, FieldValues fields);
+    [[nodiscard]] Result<void> remove(ObjectId id);
+    [[nodiscard]] Result<void> advance_epoch() { return root_.advance_epoch(); }
     ObjectStore(storage::PageFile& file, DatabaseRoot root, IdentityMap identity,
                 storage::TableHeap data_heap, CatalogStore catalog, TypeRegistry registry,
                 std::vector<TypeDefinitionId> type_ids, std::vector<Baseline> baselines,

@@ -12,6 +12,7 @@
 #include "modb/storage/codec.hpp"
 // Importa o BlobStore para exercitar a classificação de páginas BLBP (Fase 4).
 #include "modb/object/blob_store.hpp"
+#include "modb/object/object_store.hpp"
 // Importa Row e Value usados no registro do teste L4.
 #include "modb/row.hpp"
 #include "modb/value.hpp"
@@ -105,6 +106,32 @@ int main() {
             suite.check(checked->ok(), "empty database report has no errors");
             suite.check(checked->page_count == 1, "empty database has only the superblock");
             suite.check(checked->pages.empty(), "empty database has no data pages");
+        }
+    }
+
+    // DBRT v2 é identificado sem abrir Database, portanto sem recovery nem
+    // migração; a época inicial fica visível no relatório somente leitura.
+    {
+        TemporaryDatabase database;
+        {
+            auto file = PageFile::create(database.path());
+            suite.check(file.has_value(), "ODB++ database file is created");
+            if (!file) {
+                return suite.finish();
+            }
+            auto store = modb::object::ObjectStore::create(*file);
+            suite.check(store.has_value(), "ODB++ root is created");
+            suite.check(file->flush().has_value(), "ODB++ root is flushed");
+        }
+        auto checked = check_database(database.path());
+        suite.check(checked.has_value() && checked->object_format.has_value(),
+                    "check reports the object format");
+        if (checked && checked->object_format) {
+            const auto& format = *checked->object_format;
+            suite.check(format.dbrt_version == 2 && format.epoch == 0,
+                        "check reports DBRT v2 and epoch zero");
+            suite.check(!format.migration_required(),
+                        "a newly created ODB++ database needs no migration");
         }
     }
 

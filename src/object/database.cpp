@@ -138,6 +138,13 @@ Result<void> Database::remove(Transaction& tx, ObjectId id) {
     return remove_cascade(id, visited);
 }
 
+Result<TypeDefinitionId> Database::define_type(Transaction& tx, TypeDefinition definition) {
+    if (auto writable = check_writable(tx); !writable) {
+        return std::unexpected(writable.error());
+    }
+    return store_.register_type(std::move(definition));
+}
+
 Result<Transaction> Database::begin() {
     if (auto usable = check_usable(); !usable) {
         return std::unexpected(usable.error());
@@ -160,6 +167,11 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
     if (!file_->in_transaction()) {
         return std::unexpected(
             Error{ErrorCode::transaction_required, "no active transaction to commit"});
+    }
+    // A época faz parte da mesma imagem DBRT protegida pelo WAL. Uma falha
+    // pré-commit é descartada com a transação; só o commit durável a publica.
+    if (auto advanced = store_.advance_epoch(); !advanced) {
+        return std::unexpected(advanced.error());
     }
     {
         // Mantém o descritor do WAL em um escopo próprio. Ele precisa estar

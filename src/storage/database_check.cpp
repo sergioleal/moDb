@@ -64,6 +64,13 @@ std::uint32_t read_u32_at(const Page& page, std::size_t offset) noexcept {
     }
     return value;
 }
+std::uint64_t read_u64_at(const Page& page, std::size_t offset) noexcept {
+    std::uint64_t value = 0;
+    for (std::size_t i = 0; i < 8; ++i) {
+        value |= std::to_integer<std::uint64_t>(page[offset + i]) << (8 * i);
+    }
+    return value;
+}
 
 // Valida os campos do cabeçalho BLBP que não dependem do conteúdo: versão e
 // comprimento declarado. A cadeia (next/ciclo) e as refs órfãs são semânticas
@@ -156,11 +163,37 @@ Result<DatabaseCheckReport> check_database(const std::filesystem::path& path) {
             break;
         }
         case PageKind::database_root:
+            {
+            const auto version = read_u16_at(*page, 4);
+            if (version != 1 && version != 2) {
+                entry.error = Error{ErrorCode::incompatible_page_version,
+                                    "database root page has an unsupported version"};
+                break;
+            }
+            ObjectFormatCheck format;
+            format.dbrt_version = version;
+            if (version == 2) {
+                format.epoch = read_u64_at(*page, 48);
+            }
+            report.object_format = format;
+            break;
+            }
         case PageKind::identity_directory:
-        case PageKind::identity_entries:
             // Páginas do modelo de objetos são reconhecidas estruturalmente;
             // a validação profunda das suas cadeias fica para um nível futuro.
             break;
+        case PageKind::identity_entries: {
+            const auto version = read_u16_at(*page, 4);
+            if (version != 1 && version != 2) {
+                entry.error = Error{ErrorCode::incompatible_page_version,
+                                    "identity map entries page has an unsupported version"};
+                break;
+            }
+            if (report.object_format) {
+                report.object_format->idmp_version = version;
+            }
+            break;
+        }
         case PageKind::blob:
             // Valida o cabeçalho BLBP (versão e comprimento); a cadeia e as
             // refs órfãs são semânticas (verificador da camada de objetos).

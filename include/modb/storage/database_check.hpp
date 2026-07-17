@@ -66,6 +66,18 @@ struct RecordCheckError {
     friend bool operator==(const RecordCheckError&, const RecordCheckError&) = default;
 };
 
+// Metadados MVCC lidos sem abrir Database: a inspeção não executa recovery ou
+// migração de formato.
+struct ObjectFormatCheck {
+    std::optional<std::uint16_t> dbrt_version;
+    std::optional<std::uint16_t> idmp_version;
+    std::optional<std::uint64_t> epoch;
+
+    [[nodiscard]] bool migration_required() const noexcept {
+        return dbrt_version == 1 || idmp_version == 1;
+    }
+};
+
 // Agrupa o inventário e as falhas das camadas L2, L3 e L4.
 struct DatabaseCheckReport {
     // Quantidade total de páginas, incluindo o superbloco.
@@ -76,6 +88,8 @@ struct DatabaseCheckReport {
     std::vector<Error> heap_errors;
     // Registros que falharam ao ser decodificados (nível L4).
     std::vector<RecordCheckError> record_errors;
+    // Presente quando o arquivo contém uma raiz DBRT reconhecida.
+    std::optional<ObjectFormatCheck> object_format;
 
     // Indica ausência de erros nas camadas L2, L3 e L4.
     [[nodiscard]] bool ok() const noexcept {

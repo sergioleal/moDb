@@ -342,6 +342,7 @@ if(BUILD_TESTING)
         COMMAND modb_cli coll demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-coll.modb --force)
     add_test(NAME modb.cli.tx_help COMMAND modb_cli tx --help)
+    add_test(NAME modb.cli.mvcc_help COMMAND modb_cli mvcc --help)
     add_test(NAME modb.cli.tx_demo
         COMMAND modb_cli tx demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-tx-demo.modb --force)
