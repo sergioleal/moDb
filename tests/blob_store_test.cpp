@@ -1,5 +1,6 @@
 // Importa o BlobStore exercitado aqui.
 #include "modb/object/blob_store.hpp"
+#include "modb/object/database.hpp"
 // Importa PageFile para criar o arquivo de teste.
 #include "modb/storage/page_file.hpp"
 // Importa as verificações mínimas.
@@ -11,6 +12,8 @@
 #include <cstddef>
 // Disponibiliza caminhos temporários.
 #include <filesystem>
+// Disponibiliza shared_ptr para anexar o Database ao registro.
+#include <memory>
 // Disponibiliza std::error_code na limpeza.
 #include <system_error>
 // Disponibiliza std::vector.
@@ -52,6 +55,34 @@ std::vector<std::byte> pattern(std::size_t n) {
 
 int main() {
     TestSuite suite;
+
+    // --- BlobStore exposto por Database exige a transação do banco ---
+    {
+        TemporaryFile file{"database-owner"};
+        auto created = Database::create(file.path());
+        suite.check(created.has_value(), "database for owned blob store is created");
+        if (!created) {
+            return suite.finish();
+        }
+        auto database = std::make_shared<Database>(std::move(*created));
+        auto database_id = DatabaseRegistry::instance().attach(database);
+        suite.check(database_id.has_value(), "database for owned blob store is attached");
+        if (!database_id) {
+            return suite.finish();
+        }
+        auto blobs = database->blobs();
+        const auto data = pattern(100);
+        suite.check_error(blobs.create(data), ErrorCode::transaction_required,
+                          "database blob store rejects direct writes without a transaction");
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "owned blob transaction begins");
+        if (transaction) {
+            suite.check(blobs.create(data).has_value(),
+                        "database blob store accepts a write during its transaction");
+            suite.check(transaction->commit().has_value(), "owned blob transaction commits");
+        }
+        DatabaseRegistry::instance().detach(*database_id);
+    }
 
     // --- round-trip pequeno (< 1 página) ---
     {

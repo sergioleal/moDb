@@ -35,7 +35,13 @@ inline constexpr std::size_t blob_page_capacity = storage::page_size - blob_head
 class BlobStore {
 public:
     // Liga a store ao arquivo; não aloca nada até a primeira gravação.
-    explicit BlobStore(storage::PageFile& file) noexcept : file_{&file} {}
+    explicit BlobStore(storage::PageFile& file, DatabaseId owner = {},
+                       bool transaction_required = false) noexcept
+        : file_{&file}, owner_{owner}, transaction_required_{transaction_required} {}
+
+    // Banco que originou esta fachada; {0} identifica uma store crua, usada
+    // apenas por diagnósticos e ferramentas de baixo nível.
+    [[nodiscard]] DatabaseId owner() const noexcept { return owner_; }
 
     // Informa se há uma transação ativa no arquivo de respaldo. As coleções
     // usam isto para exigir uma transação antes de qualquer escrita (Fase 5).
@@ -62,8 +68,12 @@ public:
     [[nodiscard]] Result<void> remove(BlobId id);
 
 private:
+    [[nodiscard]] Result<void> require_write_transaction() const;
+
     // Arquivo cuja vida é controlada pelo chamador.
     storage::PageFile* file_;
+    DatabaseId owner_{};
+    bool transaction_required_{false};
 };
 
 } // namespace modb::object

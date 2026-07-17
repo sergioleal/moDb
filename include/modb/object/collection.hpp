@@ -40,14 +40,18 @@ namespace modb::object {
 [[nodiscard]] bool encoded_less(std::span<const std::byte> a, std::span<const std::byte> b);
 
 // Exige uma transação válida antes de qualquer escrita de coleção (Fase 5): o
-// token precisa pertencer a um banco (id != 0) e precisa haver uma transação
-// ativa no arquivo de respaldo. Sob single-writer, a transação ativa neste
-// arquivo é necessariamente a do banco que criou a coleção.
+// token precisa pertencer ao banco dono da store e precisa haver uma transação
+// ativa no arquivo de respaldo. Uma store crua (sem dono) é reservada a
+// diagnósticos e continua aceitando qualquer token anexado.
 [[nodiscard]] inline Result<void> require_collection_transaction(const BlobStore& blobs,
                                                                  const Transaction& tx) {
     if (tx.database().value == 0) {
         return std::unexpected(
             Error{ErrorCode::invalid_argument, "transaction is not attached to a database"});
+    }
+    if (blobs.owner().value != 0 && tx.database() != blobs.owner()) {
+        return std::unexpected(
+            Error{ErrorCode::invalid_argument, "transaction belongs to a different database"});
     }
     if (!blobs.in_transaction()) {
         return std::unexpected(Error{ErrorCode::transaction_required,
@@ -87,8 +91,11 @@ public:
     // Abre um vetor existente por seu BlobId.
     PersistentVector(BlobStore& blobs, BlobId id) noexcept : blobs_{&blobs}, id_{id} {}
 
-    // Cria o blob de respaldo vazio (count = 0) e devolve o vetor pronto.
-    [[nodiscard]] static Result<PersistentVector> create(BlobStore& blobs) {
+    // Cria o blob de respaldo vazio (count = 0) sob uma transação válida.
+    [[nodiscard]] static Result<PersistentVector> create(BlobStore& blobs, Transaction& tx) {
+        if (auto ready = require_collection_transaction(blobs, tx); !ready) {
+            return std::unexpected(ready.error());
+        }
         storage::BinaryWriter writer;
         writer.write_u32(0);
         auto id = blobs.create(std::move(writer).take());
@@ -200,7 +207,10 @@ class PersistentSet {
 public:
     PersistentSet(BlobStore& blobs, BlobId id) noexcept : blobs_{&blobs}, id_{id} {}
 
-    [[nodiscard]] static Result<PersistentSet> create(BlobStore& blobs) {
+    [[nodiscard]] static Result<PersistentSet> create(BlobStore& blobs, Transaction& tx) {
+        if (auto ready = require_collection_transaction(blobs, tx); !ready) {
+            return std::unexpected(ready.error());
+        }
         storage::BinaryWriter writer;
         writer.write_u32(0);
         auto id = blobs.create(std::move(writer).take());
@@ -374,7 +384,10 @@ class PersistentMap {
 public:
     PersistentMap(BlobStore& blobs, BlobId id) noexcept : blobs_{&blobs}, id_{id} {}
 
-    [[nodiscard]] static Result<PersistentMap> create(BlobStore& blobs) {
+    [[nodiscard]] static Result<PersistentMap> create(BlobStore& blobs, Transaction& tx) {
+        if (auto ready = require_collection_transaction(blobs, tx); !ready) {
+            return std::unexpected(ready.error());
+        }
         storage::BinaryWriter writer;
         writer.write_u32(0);
         auto id = blobs.create(std::move(writer).take());

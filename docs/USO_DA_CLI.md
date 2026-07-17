@@ -428,38 +428,15 @@ Employee (id 16)
 ## `modb object` — objetos persistentes (ODB++)
 
 ```text
-modb object create <file> <type> <attr=value>...
 modb object get <file> <object-id> [--definition]
-modb object remove <file> <object-id>
 ```
 
-- **`create`**: cria um objeto do tipo dado. Cada `attr=value` casa com um
-  atributo pelo nome; atributos ausentes usam o default ou `null` (validado
-  contra o tipo). Devolve o `ObjectId` atribuído.
 - **`get`**: recupera e imprime um objeto pelo id; `--definition` inclui a
   TypeDefinition histórica usada pelo registro.
-- **`remove`**: remove um objeto (o id nunca é reutilizado).
 
-O exemplo abaixo prova a persistência: cada comando é um **processo separado**;
-o `get` reabre o arquivo do zero.
-
-```text
-$ modb object create loja.modb Employee name=Ana salary=15000 country=US
-Object created: id 18
-
-$ modb object get loja.modb 18
-ObjectId: 18
-TypeDefinitionId: 16
-  1 = Ana
-  2 = 15000
-  3 = US
-
-$ modb object remove loja.modb 18
-Object removed: id 18
-
-$ modb object get loja.modb 18
-Error: no object with id 18
-```
+As antigas escritas cruas `object create` e `object remove` estão desabilitadas:
+elas não possuíam `Transaction` e podiam contornar o WAL. Escritas devem passar
+pela API `Database` transacional.
 
 ## `modb baseline` — snapshots imutáveis do catálogo
 

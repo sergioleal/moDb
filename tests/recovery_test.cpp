@@ -5,7 +5,9 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -83,6 +85,50 @@ void detach(const Result<DatabaseId>& id) {
 int main() {
     TestSuite suite;
 
+    // Um WAL estruturalmente ilegível não pode ser descartado automaticamente:
+    // pode conter um commit durável que precisa de diagnóstico/repair.
+    {
+        TemporaryDatabase temporary{"corrupt-wal"};
+        {
+            auto created = Database::create(temporary.path());
+            suite.check(created.has_value(), "database for corrupt WAL is created");
+            if (!created) {
+                return suite.finish();
+            }
+        }
+        {
+            std::ofstream wal{temporary.wal_path(), std::ios::binary | std::ios::trunc};
+            wal.put('\x01');
+            suite.check(wal.good(), "corrupt WAL header is written");
+        }
+        auto opened = Database::open(temporary.path());
+        suite.check_error(opened, ErrorCode::wal_corrupt,
+                          "opening with an unreadable WAL fails loudly");
+        suite.check(std::filesystem::exists(temporary.wal_path()),
+                    "an unreadable WAL is preserved for diagnosis");
+    }
+
+    // Um WAL de zero bytes pode resultar de criação interrompida antes do
+    // header; não contém record algum e deve ser descartado como log vazio.
+    {
+        TemporaryDatabase temporary{"empty-wal"};
+        {
+            auto created = Database::create(temporary.path());
+            suite.check(created.has_value(), "database for empty WAL is created");
+            if (!created) {
+                return suite.finish();
+            }
+        }
+        {
+            std::ofstream wal{temporary.wal_path(), std::ios::binary | std::ios::trunc};
+            suite.check(wal.good(), "zero-byte WAL is created");
+        }
+        auto opened = Database::open(temporary.path());
+        suite.check(opened.has_value(), "opening with a zero-byte WAL succeeds");
+        suite.check(!std::filesystem::exists(temporary.wal_path()),
+                    "recovery removes the zero-byte WAL");
+    }
+
     // Uma transação com commit durável, mas sem páginas aplicadas, é refeita
     // integralmente na abertura.
     {
@@ -135,6 +181,55 @@ int main() {
         }
         suite.check(!std::filesystem::exists(temporary.wal_path()),
                     "successful recovery removes the WAL");
+        detach(database_id);
+    }
+
+    // Update também precisa sobreviver quando só o WAL possui o commit durável.
+    {
+        TemporaryDatabase temporary{"update-redo"};
+        ObjectId employee_id{};
+        {
+            auto created = Database::create(temporary.path());
+            auto database = share(created);
+            if (!database) {
+                suite.check(false, "update-redo database is created");
+                return suite.finish();
+            }
+            auto database_id = attach(database);
+            suite.check(database->bind(employee_builder()).has_value(), "update-redo type is bound");
+            auto seed = database->begin();
+            if (!seed) {
+                return suite.finish();
+            }
+            auto employee = database->create(*seed, Employee{"Before", 1});
+            suite.check(employee.has_value() && seed->commit().has_value(),
+                        "update-redo seed is committed");
+            if (!employee) {
+                return suite.finish();
+            }
+            employee_id = employee->id();
+            auto update = database->begin();
+            if (!update) {
+                return suite.finish();
+            }
+            suite.check(database->update(*update, *employee, Employee{"After", 2}).has_value(),
+                        "update-redo change is staged");
+            suite.check(update->commit(CommitPhase::stop_after_commit_record).has_value(),
+                        "update-redo commit record is durable before apply");
+            detach(database_id);
+        }
+        auto opened = Database::open(temporary.path());
+        auto database = share(opened);
+        suite.check(database != nullptr, "update-redo database recovers");
+        if (!database) {
+            return suite.finish();
+        }
+        auto database_id = attach(database);
+        suite.check(database->bind(employee_builder()).has_value(), "update-redo type is rebound");
+        auto handle = database->get<Employee>(employee_id);
+        auto employee = handle ? database->materialize(*handle) : Result<Employee>{std::unexpected(handle.error())};
+        suite.check(employee.has_value() && *employee == Employee{"After", 2},
+                    "recovery reapplies the committed update");
         detach(database_id);
     }
 
@@ -332,6 +427,14 @@ int main() {
             suite.check(employee.has_value() && *employee == Employee{"Dora", 5},
                         "rolled-back values remain absent after reopening");
         }
+        auto after_reopen = database->begin();
+        suite.check(after_reopen.has_value(), "post-rollback transaction begins after reopening");
+        if (after_reopen) {
+            auto employee = database->create(*after_reopen, Employee{"Fresh", 6});
+            suite.check(employee.has_value() && employee->id().value > rolled_back_id.value,
+                        "durable rollback watermark prevents ObjectId reuse after reopening");
+            suite.check(after_reopen->commit().has_value(), "post-rollback object commits");
+        }
         detach(database_id);
     }
 
@@ -341,6 +444,7 @@ int main() {
         TemporaryDatabase temporary{"transact"};
         ObjectId committed_id{};
         ObjectId aborted_id{};
+        ObjectId exception_id{};
         {
             auto created = Database::create(temporary.path());
             auto database = share(created);
@@ -377,6 +481,22 @@ int main() {
                         "transact propagates the failure verbatim");
             suite.check_error(database->get<Employee>(aborted_id), ErrorCode::record_not_found,
                               "transact rolls back when the function returns an error");
+
+            bool exception_propagated = false;
+            try {
+                (void)database->transact([&](Transaction& tx) -> Result<void> {
+                    auto handle = database->create(tx, Employee{"Hana", 3});
+                    if (handle) {
+                        exception_id = handle->id();
+                    }
+                    throw std::runtime_error{"aborted by exception"};
+                });
+            } catch (const std::runtime_error&) {
+                exception_propagated = true;
+            }
+            suite.check(exception_propagated, "transact propagates callback exceptions");
+            suite.check_error(database->get<Employee>(exception_id), ErrorCode::record_not_found,
+                              "transact rolls back when the callback throws");
             detach(database_id);
         }
 
@@ -397,6 +517,8 @@ int main() {
         }
         suite.check_error(database->get<Employee>(aborted_id), ErrorCode::record_not_found,
                           "the aborted transact object is absent after reopening");
+        suite.check_error(database->get<Employee>(exception_id), ErrorCode::record_not_found,
+                          "the exception-aborted transact object is absent after reopening");
         detach(database_id);
     }
 

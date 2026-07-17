@@ -83,10 +83,9 @@ public:
         return root_.next_object_id();
     }
     // Garante que o contador nunca retroceda: se `at_least` for maior que o
-    // valor persistido atual, avança e persiste imediatamente. Seguro fora de
-    // uma transação — a escrita é durável na hora, sem vazar nenhum outro
-    // campo do DBRT ainda em voo (não há transação ativa quando isto é
-    // chamado, pelo próprio contrato do rollback).
+    // valor persistido atual, avança e o grava. Seguro fora de uma transação
+    // — não vaza outro campo do DBRT ainda em voo; o Database faz o flush
+    // subsequente quando este caminho é usado no rollback.
     [[nodiscard]] Result<void> ensure_next_object_id_at_least(std::uint64_t at_least) {
         if (at_least <= root_.next_object_id()) {
             return {};

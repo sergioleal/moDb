@@ -59,24 +59,34 @@ próxima abertura (testado em `modb.recovery`, caso "idempotent").
 - **Durabilidade.** Depois que `commit()` retorna `Ok`, os efeitos sobrevivem a
   uma queda (o registro `commit` está sincronizado no WAL antes de `commit()`
   retornar; a recuperação o reaplica se as páginas ainda não tinham sido gravadas).
-- **Rollback.** `Transaction::rollback()` descarta o buffer e remove qualquer WAL
-  residual. Uma transação que sai de escopo **sem** commit é revertida no
-  destrutor (RAII). Um commit que **falha** de verdade (I/O) mantém a transação
-  ativa para o destrutor revertê-la — o `PageFile` nunca fica preso em transação.
+- **Rollback e commit durável.** Antes de o registro de commit chegar ao WAL,
+  `Transaction::rollback()` descarta o buffer e remove qualquer WAL residual; a
+  transação que sai de escopo sem commit também é revertida pelo destrutor (RAII).
+  Depois que o commit está durável, a transação é consumida mesmo se o `apply` ou
+  `flush` falhar: o WAL é preservado, `rollback()` é recusado e a instância exige
+  reabertura (`commit_recovery_required`) para fazer o redo idempotente. Assim o
+  destrutor nunca apaga um commit já durável.
 - **Contrato `transact(fn)`.** Término normal com `Ok` → commit; retorno de erro
   → rollback; exceção → rollback (via destrutor). É o contrato reutilizado pela
   Fase 9. Testado em `modb.recovery` (caso "transact").
 - **Toda escrita da API pública exige transação.** `create`, `update`, `remove`
-  e as mutações de coleção (`push_back`/`insert`/`put`/`remove`) checam que há
-  uma transação ativa (`transaction_required`) e que o token pertence a um banco.
-  `bind()` grava o catálogo sob uma **transação interna** (registrar/evoluir um
-  tipo é atômico e passa pelo WAL como qualquer outra escrita).
+  e a criação/mutações de coleção (`Persistent*::create`,
+  `push_back`/`insert`/`put`/`remove`) recebem `Transaction&` e checam que há
+  uma transação ativa (`transaction_required`) e que o token pertence ao mesmo
+  banco que originou a coleção.
+  `bind()` é configuração e só é aceito sem transação do chamador; ele grava o
+  catálogo sob uma **transação interna** e atualiza o binding em memória apenas
+  depois da persistência confirmada (registrar/evoluir um tipo é atômico e passa
+  pelo WAL como qualquer outra escrita).
+  `Database::blobs()` também exige transação para `create`/`rewrite`/`remove`;
+  o `BlobStore` cru construído sobre um `PageFile` permanece disponível para
+  diagnóstico e ferramentas de baixo nível.
 
 ## 5. Matriz de failpoints (`modb.failpoint`)
 
 Cada linha monta o cenário e reabre com o arquivo real, verificando tudo-ou-nada.
 Dois mecanismos genuínos de "morte" são usados: **falha de I/O real** (um
-`FailpointWalSink` faz uma escrita do WAL retornar `io_error`,
+`FailpointWalSink` faz escrita ou `sync` do WAL retornar `io_error`,
 [tests/failpoint_file.hpp](../tests/failpoint_file.hpp)) e **queda pós-sync**
 (interrompe-se num ponto e "abandona-se" a instância — detach do registro, para o
 destrutor não reverter, e destrói-se o `Database`; o buffer em memória some, o
@@ -85,14 +95,26 @@ disco permanece).
 | Ponto de falha | Mecanismo | Estado após reabertura |
 |---|---|---|
 | Falha de I/O na escrita do WAL | `FailpointWalSink` (io_error real) | transação revertida; banco não preso; objeto ausente |
+| Falha no `sync` antes/depois do record `commit` | `FailpointWalSink` (io_error real) | transação revertida; WAL incompleto removido |
 | Antes do registro de commit | interrupção + abandono | transação ausente por completo |
 | Após o commit durável, antes de aplicar | interrupção + abandono | transação presente por completo (redo) |
-| No meio da aplicação das páginas | apply-failpoint real + abandono | presente por completo (reaplicação idempotente) |
+| No meio da aplicação das páginas | apply-failpoint real + destrutor normal | presente por completo (reaplicação idempotente) |
 | Durante o checkpoint (WAL residual) | interrupção + abandono | presente; WAL reaplicado e removido |
+
+A matriz também executa queda pós-commit para `update`, remoção com cascata de
+`OwnedRef` e um `PersistentMap` apoiado por `BlobStore`; após reabrir, cada
+resultado é verificado no arquivo real. `transact()` é coberto para sucesso,
+retorno de erro e exceção lançada pelo callback.
 
 O apply-failpoint (`PageFile::set_apply_failpoint`) aplica só N páginas ao
 arquivo de dados e então falha, deixando o estado parcial real no disco — a
-recuperação reaplica tudo. Nenhuma página é escrita à mão pelo teste.
+recuperação reaplica tudo. O caso pós-commit deixa o destrutor real rodar para
+provar que ele não remove o WAL durável. Nenhuma página é escrita à mão pelo teste.
+
+Um WAL de zero bytes é descartado como log vazio. Já um cabeçalho parcial ou
+ilegível não é considerado fim lógico: a abertura falha com `wal_corrupt` e
+preserva `<db>.wal` para diagnóstico. Um registro final truncado ou com CRC
+inválido mantém a semântica de fim lógico do formato.
 
 ## 6. Limitações e desvios documentados (MVP)
 
@@ -122,7 +144,10 @@ recuperação reaplica tudo. Nenhuma página é escrita à mão pelo teste.
 - **`allocate_page` é imediato.** Páginas alocadas por uma transação abortada
   ficam órfãs no arquivo (sem free list no MVP), visíveis ao `database_check`.
 - **Checkpoint = remoção do WAL.** Não há checkpoint incremental; o WAL é
-  removido inteiro após a aplicação. Suficiente para single-writer.
+  removido inteiro após a aplicação. Falha ao removê-lo não é silenciosa: o
+  commit/abertura retorna erro e o WAL fica para redo idempotente na reabertura;
+  um commit futuro recria o WAL normalmente. Não há teste portável que force
+  essa falha de `std::filesystem::remove`.
 - **`BlobStore` é primitivo de baixo nível.** Não recebe `Transaction&`: quando
   usado pelas coleções (API pública OO), as escritas são capturadas pela
   transação ativa do `PageFile` (as coleções exigem transação); usado direto

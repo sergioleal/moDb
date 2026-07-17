@@ -93,6 +93,17 @@ enum class ErrorCode {
     transaction_required,
     // Uma segunda transação foi iniciada com uma já em andamento (single-writer).
     transaction_active,
+    // A transação já alcançou o ponto de commit durável e não pode mais reverter.
+    transaction_committed,
+    // O commit está durável no WAL, mas a aplicação local falhou; reabra o banco
+    // para a recuperação refazer as páginas pendentes.
+    commit_recovery_required,
+    // Esta instância observou uma falha depois de um commit durável e só pode
+    // voltar a ser usada após reabrir o banco.
+    database_recovery_required,
+    // O WAL presente não pode ser interpretado com segurança; ele é preservado
+    // para diagnóstico e a abertura do banco é interrompida.
+    wal_corrupt,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

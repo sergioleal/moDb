@@ -104,7 +104,7 @@ int main() {
                 return suite.finish();
             }
             auto blobs = database->blobs();
-            auto vector = PersistentVector<std::int64_t>::create(blobs);
+            auto vector = PersistentVector<std::int64_t>::create(blobs, *transaction);
             suite.check(vector.has_value(), "vector is created");
             if (!vector) {
                 return suite.finish();
@@ -124,6 +124,15 @@ int main() {
             suite.check(middle.has_value() && *middle == 10000, "at() reads the right element");
             vector_id = vector->id();
             suite.check(transaction->commit().has_value(), "vector transaction committed");
+            suite.check_error(PersistentVector<std::int64_t>::create(blobs, *transaction),
+                              ErrorCode::transaction_required,
+                              "vector creation rejects an inactive transaction");
+            suite.check_error(PersistentSet<std::int64_t>::create(blobs, *transaction),
+                              ErrorCode::transaction_required,
+                              "set creation rejects an inactive transaction");
+            suite.check_error(PersistentMap<std::string, std::int64_t>::create(blobs, *transaction),
+                              ErrorCode::transaction_required,
+                              "map creation rejects an inactive transaction");
             if (database_id) {
                 registry.detach(*database_id);
             }
@@ -165,7 +174,7 @@ int main() {
             return suite.finish();
         }
         auto blobs = database->blobs();
-        auto set = PersistentSet<std::int64_t>::create(blobs);
+        auto set = PersistentSet<std::int64_t>::create(blobs, *transaction);
         suite.check(set.has_value(), "set is created");
         if (set) {
             for (std::int64_t value : {5, 3, 5, 1, 3, 9, 1}) {
@@ -201,7 +210,7 @@ int main() {
                 return suite.finish();
             }
             auto blobs = database->blobs();
-            auto map = PersistentMap<std::string, std::int64_t>::create(blobs);
+            auto map = PersistentMap<std::string, std::int64_t>::create(blobs, *transaction);
             suite.check(map.has_value(), "map is created");
             if (!map) {
                 return suite.finish();
@@ -216,7 +225,8 @@ int main() {
             auto missing = map->get("bia");
             suite.check(missing.has_value() && !missing->has_value(), "removed key is absent");
             map_id = map->id();
-            suite.check(transaction->commit().has_value(), "map transaction committed");
+            suite.check(transaction->commit(CommitPhase::stop_after_commit_record).has_value(),
+                        "map commit record is durable before collection pages apply");
             if (database_id) {
                 registry.detach(*database_id);
             }
@@ -232,6 +242,44 @@ int main() {
             suite.check(ana.has_value() && ana->has_value() && **ana == 15 && size.has_value() &&
                             *size == 1,
                         "map survives reopening with the right state");
+        }
+    }
+
+    // --- isolamento: token de outro banco não pode escrever na coleção ---
+    {
+        TemporaryDatabase first{"owner-a"};
+        TemporaryDatabase second{"owner-b"};
+        auto first_created = Database::create(first.path());
+        auto second_created = Database::create(second.path());
+        auto database_a = share_database(first_created);
+        auto database_b = share_database(second_created);
+        suite.check(database_a != nullptr && database_b != nullptr, "owner databases are created");
+        if (!database_a || !database_b) {
+            return suite.finish();
+        }
+        auto database_a_id = registry.attach(database_a);
+        auto database_b_id = registry.attach(database_b);
+        auto transaction_a = database_a->begin();
+        auto transaction_b = database_b->begin();
+        suite.check(transaction_a.has_value() && transaction_b.has_value(),
+                    "both owner transactions begin");
+        if (!transaction_a || !transaction_b) {
+            return suite.finish();
+        }
+        auto blobs_a = database_a->blobs();
+        auto vector = PersistentVector<std::int64_t>::create(blobs_a, *transaction_a);
+        suite.check(vector.has_value(), "owner vector is created");
+        if (vector) {
+            suite.check_error(vector->push_back(*transaction_b, 7), ErrorCode::invalid_argument,
+                              "collection rejects a transaction from another database");
+        }
+        (void)transaction_a->rollback();
+        (void)transaction_b->rollback();
+        if (database_a_id) {
+            registry.detach(*database_a_id);
+        }
+        if (database_b_id) {
+            registry.detach(*database_b_id);
         }
     }
 
@@ -276,7 +324,7 @@ int main() {
 
             // Monta a coleção de refs de projetos e guarda o BlobId no Employee.
             auto blobs = database->blobs();
-            auto projects = PersistentVector<Ref<Project>>::create(blobs);
+            auto projects = PersistentVector<Ref<Project>>::create(blobs, *transaction);
             suite.check(projects.has_value(), "projects vector created");
             if (!projects) {
                 return suite.finish();
@@ -350,12 +398,38 @@ int main() {
                 return suite.finish();
             }
             suite.check(database->remove(*transaction, emp_id).has_value(), "employee removed");
-            suite.check(transaction->commit().has_value(), "remove transaction committed");
+            suite.check(transaction->commit(CommitPhase::stop_after_commit_record).has_value(),
+                        "cascade remove commit record is durable before pages apply");
             suite.check_error(database->get<Address>(office_id), ErrorCode::record_not_found,
                               "owned office removed in cascade");
             for (auto id : project_ids) {
                 suite.check(database->get<Project>(id).has_value(),
                             "project survives (not owned)");
+            }
+            registry.detach(*database_id);
+        }
+
+        // A reabertura precisa refazer a remoção em cascata a partir do WAL,
+        // não apenas enxergar o buffer da instância que simulou a queda.
+        {
+            auto opened = Database::open(temp.path());
+            auto database = share_database(opened);
+            suite.check(database != nullptr, "cascade-crash database recovers");
+            if (!database) {
+                return suite.finish();
+            }
+            auto database_id = registry.attach(database);
+            suite.check(database_id.has_value() && database->bind(project_builder()).has_value() &&
+                            database->bind(address_builder()).has_value() &&
+                            database->bind(employee_builder()).has_value(),
+                        "cascade-crash types rebound");
+            suite.check_error(database->get<Employee>(emp_id), ErrorCode::record_not_found,
+                              "recovery keeps the removed parent absent");
+            suite.check_error(database->get<Address>(office_id), ErrorCode::record_not_found,
+                              "recovery keeps the owned child absent");
+            for (auto id : project_ids) {
+                suite.check(database->get<Project>(id).has_value(),
+                            "recovery preserves associated projects");
             }
             registry.detach(*database_id);
         }

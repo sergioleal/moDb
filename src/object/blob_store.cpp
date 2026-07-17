@@ -82,7 +82,18 @@ storage::Page build_page(storage::PageId next, std::span<const std::byte> chunk)
 
 } // namespace
 
+Result<void> BlobStore::require_write_transaction() const {
+    if (transaction_required_ && !file_->in_transaction()) {
+        return std::unexpected(
+            Error{ErrorCode::transaction_required, "blob writes require an active transaction"});
+    }
+    return {};
+}
+
 Result<BlobId> BlobStore::create(std::span<const std::byte> data) {
+    if (auto ready = require_write_transaction(); !ready) {
+        return std::unexpected(ready.error());
+    }
     // Um blob sempre ocupa ao menos uma página, mesmo vazio.
     const std::size_t pages_needed =
         data.empty() ? 1 : (data.size() + blob_page_capacity - 1) / blob_page_capacity;
@@ -155,6 +166,9 @@ Result<std::vector<std::byte>> BlobStore::read(BlobId id) const {
 }
 
 Result<BlobId> BlobStore::rewrite(BlobId id, std::span<const std::byte> data) {
+    if (auto ready = require_write_transaction(); !ready) {
+        return std::unexpected(ready.error());
+    }
     if (id.value == 0) {
         return create(data);
     }
@@ -222,6 +236,9 @@ Result<BlobId> BlobStore::rewrite(BlobId id, std::span<const std::byte> data) {
 }
 
 Result<void> BlobStore::remove(BlobId id) {
+    if (auto ready = require_write_transaction(); !ready) {
+        return std::unexpected(ready.error());
+    }
     if (id.value == 0) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "null blob id"});
     }

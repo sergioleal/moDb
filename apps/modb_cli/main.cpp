@@ -260,9 +260,10 @@ void print_baseline_help() {
 
 void print_object_help() {
     std::cout << "Usage:\n"
-                 "  modb object create <file> <type> <attr=value>...\n"
                  "  modb object get <file> <object-id> [--definition]\n"
-                 "  modb object remove <file> <object-id>\n";
+                 "\n"
+                 "Object writes require a Database transaction; the legacy raw create/remove\n"
+                 "commands are disabled to avoid bypassing WAL recovery.\n";
 }
 
 void print_oo_help() {
@@ -1526,54 +1527,9 @@ int command_baseline_show(const std::filesystem::path& path, std::uint64_t basel
 
 // modb object create <file> <type> <attr=value>...
 int command_object_create(int argc, char* argv[]) {
-    const std::filesystem::path path{argv[3]};
-    const std::string type_name{argv[4]};
-
-    auto file = modb::storage::PageFile::open(path);
-    if (!file) {
-        return print_error(file.error());
-    }
-    auto store = modb::object::ObjectStore::open(*file);
-    if (!store) {
-        return print_error(store.error());
-    }
-    auto type = store->find_type(type_name);
-    if (!type) {
-        return print_error(type.error());
-    }
-
-    // Cada argumento extra é um par attr=value; atributos ausentes usam default
-    // ou null (validado por create_object).
-    modb::object::FieldValues fields;
-    for (int index = 5; index < argc; ++index) {
-        const std::string_view pair{argv[index]};
-        const auto equals = pair.find('=');
-        if (equals == std::string_view::npos) {
-            return print_usage_error("modb object create <file> <type> <attr=value>...");
-        }
-        const auto attr_name = pair.substr(0, equals);
-        const auto text = pair.substr(equals + 1);
-        const auto* attribute = type->get().find(attr_name);
-        if (attribute == nullptr) {
-            return print_error(modb::Error{modb::ErrorCode::field_not_found,
-                                           "type has no attribute named " + std::string{attr_name}});
-        }
-        auto value = parse_attribute_value(attribute->type, text);
-        if (!value) {
-            return print_error(value.error());
-        }
-        fields.emplace_back(attribute->id, std::move(*value));
-    }
-
-    auto id = store->create_object(type->get(), std::move(fields));
-    if (!id) {
-        return print_error(id.error());
-    }
-    if (auto flushed = file->flush(); !flushed) {
-        return print_error(flushed.error());
-    }
-    std::cout << "Object created: id " << id->value << '\n';
-    return 0;
+    (void)argc;
+    return print_error(modb::Error{modb::ErrorCode::transaction_required,
+                                   "object create is unavailable without a Database transaction"});
 }
 
 // modb object get <file> <object-id>
@@ -1608,22 +1564,10 @@ int command_object_get(const std::filesystem::path& path, std::uint64_t object_i
 
 // modb object remove <file> <object-id>
 int command_object_remove(const std::filesystem::path& path, std::uint64_t object_id) {
-    auto file = modb::storage::PageFile::open(path);
-    if (!file) {
-        return print_error(file.error());
-    }
-    auto store = modb::object::ObjectStore::open(*file);
-    if (!store) {
-        return print_error(store.error());
-    }
-    if (auto removed = store->remove(modb::object::ObjectId{object_id}); !removed) {
-        return print_error(removed.error());
-    }
-    if (auto flushed = file->flush(); !flushed) {
-        return print_error(flushed.error());
-    }
-    std::cout << "Object removed: id " << object_id << '\n';
-    return 0;
+    (void)path;
+    (void)object_id;
+    return print_error(modb::Error{modb::ErrorCode::transaction_required,
+                                   "object remove is unavailable without a Database transaction"});
 }
 
 // Command group: oo employee — bindings C++ compilados que exercitam a Fase 3.
@@ -2166,7 +2110,7 @@ int command_graph_demo(const std::filesystem::path& path, bool force) {
 
         auto blobs = database.blobs();
         auto projects = modb::object::PersistentVector<modb::object::Ref<GraphProject>>::create(
-            blobs);
+            blobs, *transaction);
         if (!projects) {
             return print_error(projects.error());
         }
@@ -2324,7 +2268,7 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
         }
         auto blobs = database.blobs();
 
-        auto vector = modb::object::PersistentVector<std::int64_t>::create(blobs);
+        auto vector = modb::object::PersistentVector<std::int64_t>::create(blobs, *transaction);
         if (!vector) {
             return print_error(vector.error());
         }
@@ -2335,7 +2279,7 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
         }
         vector_blob = vector->id();
 
-        auto set = modb::object::PersistentSet<std::int64_t>::create(blobs);
+        auto set = modb::object::PersistentSet<std::int64_t>::create(blobs, *transaction);
         if (!set) {
             return print_error(set.error());
         }
@@ -2345,7 +2289,7 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
             }
         }
 
-        auto map = modb::object::PersistentMap<std::string, std::int64_t>::create(blobs);
+        auto map = modb::object::PersistentMap<std::string, std::int64_t>::create(blobs, *transaction);
         if (!map) {
             return print_error(map.error());
         }
@@ -2662,7 +2606,7 @@ int command_tx_crash(const std::filesystem::path& path, std::string_view phase, 
         if (result) {
             std::cout << "every dirty page fit within the 1-page failpoint budget; nothing to "
                          "crash mid-apply this time\n";
-        } else if (result.error().code == modb::ErrorCode::io_error) {
+        } else if (result.error().code == modb::ErrorCode::commit_recovery_required) {
             std::cout << "commit stopped MID-APPLY: some pages reached the data file, the rest "
                          "stayed pending in the WAL\nrecovery will redo the missing pages "
                          "(idempotent)\n";
@@ -2688,9 +2632,8 @@ int command_tx_crash(const std::filesystem::path& path, std::string_view phase, 
     // exatamente o que uma queda real faria. Um retorno normal daqui rodaria o
     // destrutor de Transaction: nas costuras before-commit/after-commit/
     // before-cleanup ele é inofensivo (a Transaction já foi consumida pelo
-    // commit bem-sucedido), mas em mid-apply o commit retornou erro, a
-    // Transaction continua ativa, e o destrutor reverteria exatamente o estado
-    // parcial que este comando existe para deixar no disco.
+    // commit bem-sucedido). Em mid-apply, o commit já é durável no WAL e a
+    // Transaction é consumida, preservando o WAL para a recuperação obrigatória.
     std::cout.flush();
     std::exit(0);
 }

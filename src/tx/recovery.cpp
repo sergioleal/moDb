@@ -28,12 +28,11 @@ Result<void> recover(storage::PageFile& file, const std::filesystem::path& wal_p
 
     auto records = Wal::read_all(wal_path);
     if (!records) {
-        // Cabeçalho ilegível: um WAL que não dá para interpretar não pode ser
-        // aplicado com segurança. Descarta-o (nada foi aplicado ao arquivo de
-        // dados sem um commit correspondente).
-        std::error_code remove_error;
-        std::filesystem::remove(wal_path, remove_error);
-        return {};
+        // Um WAL ilegível pode conter um commit durável. Não o apaga: interrompe
+        // a abertura para preservar a evidência e permitir diagnóstico/repair.
+        return std::unexpected(Error{ErrorCode::wal_corrupt,
+                                     "cannot recover unreadable WAL: " +
+                                         records.error().message});
     }
 
     // Identifica quais transações alcançaram o registro de commit.
@@ -75,6 +74,12 @@ Result<void> recover(storage::PageFile& file, const std::filesystem::path& wal_p
     // (idempotente) na próxima abertura.
     std::error_code remove_error;
     std::filesystem::remove(wal_path, remove_error);
+    if (remove_error) {
+        // As páginas já foram durabilizadas; manter o WAL é seguro para redo
+        // idempotente, mas a abertura informa o checkpoint incompleto.
+        return std::unexpected(
+            Error{ErrorCode::io_error, "could not remove recovered WAL: " + remove_error.message()});
+    }
     return {};
 }
 

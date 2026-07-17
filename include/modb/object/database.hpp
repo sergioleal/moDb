@@ -57,8 +57,9 @@ public:
     Transaction(const Transaction&) = delete;
     Transaction& operator=(const Transaction&) = delete;
     Transaction(Transaction&& other) noexcept
-        : database_{other.database_}, active_{other.active_} {
+        : database_{other.database_}, active_{other.active_}, committed_{other.committed_} {
         other.active_ = false;
+        other.committed_ = false;
     }
     Transaction& operator=(Transaction&&) = delete;
     ~Transaction();
@@ -76,6 +77,8 @@ private:
     explicit Transaction(DatabaseId database) noexcept : database_{database}, active_{true} {}
     DatabaseId database_;
     bool active_{false};
+    // Verdadeiro quando o commit foi sincronizado no WAL; não há rollback possível.
+    bool committed_{false};
 };
 
 // Registro de processo que mantém bancos vivos e permite que Handles resolvam
@@ -128,6 +131,16 @@ public:
     // grava uma nova TypeDefinition e uma nova Baseline.
     template <typename T>
     [[nodiscard]] Result<void> bind(BindingBuilder<T> builder) {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        // Binding é configuração de catálogo: não participa da transação do
+        // chamador, pois o estado em memória só é atualizado após persistência
+        // confirmada pela transação interna.
+        if (file_->in_transaction()) {
+            return std::unexpected(Error{ErrorCode::transaction_active,
+                                         "cannot bind a type while a transaction is active"});
+        }
         if (bound_.contains(type_key<T>())) {
             return std::unexpected(
                 Error{ErrorCode::binding_mismatch, "C++ type is already bound in this database"});
@@ -175,6 +188,9 @@ public:
     // Devolve um Handle para um objeto existente (verifica a existência).
     template <typename T>
     [[nodiscard]] Result<Handle<T>> get(ObjectId id) {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
         if (database_id_.value == 0) {
             return std::unexpected(
                 Error{ErrorCode::invalid_argument, "database must be attached before use"});
@@ -202,6 +218,9 @@ public:
     // default-constructible (o materializador preenche cada membro bound).
     template <typename T>
     [[nodiscard]] Result<T> materialize(const Handle<T>& handle) {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
         if (database_id_.value == 0 || handle.database() != database_id_) {
             return std::unexpected(
                 Error{ErrorCode::invalid_argument, "handle belongs to a different database"});
@@ -326,6 +345,9 @@ public:
     }
 
     [[nodiscard]] Result<TypeDefinitionId> object_type(ObjectId id) {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
         auto object = store_.get(id);
         if (!object) {
             return std::unexpected(object.error());
@@ -351,11 +373,16 @@ public:
     // Persiste no dispositivo tudo que foi escrito fora de transação. Dentro de
     // uma transação, a durabilidade vem do commit; este flush é para o catálogo
     // gravado por bind() (que não passa por transação nesta fase).
-    [[nodiscard]] Result<void> flush() { return file_->flush(); }
+    [[nodiscard]] Result<void> flush() {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        return file_->flush();
+    }
 
     // Devolve um BlobStore sobre o mesmo arquivo, base das coleções e binários
     // grandes. É leve (só referencia o PageFile) e pode ser criado sob demanda.
-    [[nodiscard]] BlobStore blobs() noexcept { return BlobStore{*file_}; }
+    [[nodiscard]] BlobStore blobs() noexcept { return BlobStore{*file_, database_id_, true}; }
 
 private:
     // Um tipo C++ ligado ao seu binding e ao id de tipo persistido.
@@ -372,6 +399,9 @@ private:
     // Confere que uma escrita pode prosseguir: banco anexado, transação da mesma
     // instância e de fato ativa no PageFile.
     [[nodiscard]] Result<void> check_writable(const Transaction& tx) const {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
         if (database_id_.value == 0) {
             return std::unexpected(
                 Error{ErrorCode::invalid_argument, "database must be attached before use"});
@@ -386,6 +416,20 @@ private:
         }
         return {};
     }
+
+    // Depois de uma falha pós-commit, o WAL é a fonte de verdade. Esta instância
+    // pode ter páginas e metadados em memória parcialmente aplicados, portanto
+    // só uma reabertura (que roda recovery) volta a expor o banco com segurança.
+    [[nodiscard]] Result<void> check_usable() const {
+        if (recovery_required_) {
+            return std::unexpected(Error{ErrorCode::database_recovery_required,
+                                         "database must be reopened after a durable commit failure"});
+        }
+        return {};
+    }
+
+    [[nodiscard]] bool commit_is_durable() const noexcept { return commit_durable_; }
+    void require_recovery() noexcept { recovery_required_ = true; }
 
     // Grava o buffer da transação no WAL, aplica-o e (em full) remove o WAL.
     [[nodiscard]] Result<void> commit_transaction(CommitPhase phase);
@@ -432,6 +476,10 @@ private:
     std::uint64_t next_tx_id_{1};
     // Fábrica do arquivo do WAL; produção usa NativeFile, testes injetam falhas.
     tx::WalFileFactory wal_factory_{tx::open_native_wal_sink};
+    // Ativado após o sync do registro commit no WAL. A partir daí rollback não
+    // pode apagar o log: qualquer falha posterior exige reabertura e redo.
+    bool commit_durable_{false};
+    bool recovery_required_{false};
 };
 
 template <typename T>

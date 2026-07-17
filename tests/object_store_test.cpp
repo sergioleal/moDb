@@ -88,6 +88,10 @@ int main() {
             return suite.finish();
         }
 
+        suite.check_error(store->create_object(type->get(), employee("Ana", 15000.0)),
+                          ErrorCode::transaction_required,
+                          "object creation without a transaction is rejected");
+        file->begin_transaction();
         auto ana = store->create_object(type->get(), employee("Ana", 15000.0));
         suite.check(ana.has_value() && ana->value >= first_user_object_id,
                     "object created with a user ObjectId");
@@ -125,6 +129,8 @@ int main() {
             return {};
         });
         suite.check(scanned.has_value() && seen == 2, "scan enumerates exactly the live objects");
+        suite.check(file->apply_transaction().has_value(), "object transaction is applied");
+        suite.check(file->flush().has_value(), "object transaction is flushed");
     }
 
     // --- critério de aceite da fase: 500 objetos, fechar, reabrir, verificar ---
@@ -153,6 +159,7 @@ int main() {
             }
             auto type = store->find_type(*type_id);
             bool all_created = type.has_value();
+            file->begin_transaction();
             for (int i = 0; i < total && all_created; ++i) {
                 // Nomes de comprimento variado exercitam múltiplas páginas.
                 const std::string name = "employee-" + std::to_string(i) +
@@ -165,6 +172,7 @@ int main() {
                 }
             }
             suite.check(all_created, "reopen: 500 objects created across many pages");
+            suite.check(file->apply_transaction().has_value(), "reopen: object transaction is applied");
             suite.check(file->flush().has_value(), "reopen: changes flushed");
         }
 

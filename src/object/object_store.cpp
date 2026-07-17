@@ -243,6 +243,10 @@ Result<std::reference_wrapper<const Baseline>> ObjectStore::find_baseline(Baseli
 }
 
 Result<ObjectId> ObjectStore::create_object(const TypeDefinition& type, FieldValues fields) {
+    if (!file_->in_transaction()) {
+        return std::unexpected(
+            Error{ErrorCode::transaction_required, "object creation requires an active transaction"});
+    }
     // O tipo precisa estar registrado (id atribuído) para ter um id persistente.
     if (type.id() == invalid_object_id) {
         return std::unexpected(
@@ -283,6 +287,10 @@ Result<DecodedObject> ObjectStore::get(ObjectId id) {
 }
 
 Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldValues fields) {
+    if (!file_->in_transaction()) {
+        return std::unexpected(
+            Error{ErrorCode::transaction_required, "object update requires an active transaction"});
+    }
     if (auto valid = validate_object(type, fields); !valid) {
         return std::unexpected(valid.error());
     }
@@ -308,6 +316,10 @@ Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldV
 }
 
 Result<void> ObjectStore::remove(ObjectId id) {
+    if (!file_->in_transaction()) {
+        return std::unexpected(
+            Error{ErrorCode::transaction_required, "object removal requires an active transaction"});
+    }
     auto location = identity_.find(id);
     if (!location) {
         return std::unexpected(location.error());

@@ -97,6 +97,41 @@ void check_item(TestSuite& suite, const std::shared_ptr<Database>& database, Obj
 int main() {
     TestSuite suite;
 
+    auto check_precommit_failure = [&](std::string_view suffix, tx::WalFileFactory factory,
+                                       bool dirty_pages, std::string_view label) {
+        TemporaryDatabase temporary{suffix};
+        auto created = Database::create(temporary.path());
+        auto database = share(created);
+        suite.check(database != nullptr, std::string{label} + ": database is created");
+        if (!database) {
+            return;
+        }
+        auto database_id = attach(database);
+        if (dirty_pages) {
+            suite.check(database->bind(item_builder()).has_value(),
+                        std::string{label} + ": type is bound");
+        }
+        database->set_wal_file_factory(std::move(factory));
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), std::string{label} + ": transaction begins");
+        if (!transaction) {
+            detach(database_id);
+            return;
+        }
+        if (dirty_pages) {
+            suite.check(database->create(*transaction, Item{9, "failpoint"}).has_value(),
+                        std::string{label} + ": page image is staged");
+        }
+        auto committed = transaction->commit();
+        suite.check(!committed && committed.error().code == ErrorCode::io_error,
+                    std::string{label} + ": failure is not reported as durable");
+        suite.check(transaction->rollback().has_value(),
+                    std::string{label} + ": rollback remains available");
+        suite.check(!std::filesystem::exists(temporary.wal_path()),
+                    std::string{label} + ": rollback removes incomplete WAL");
+        detach(database_id);
+    };
+
     // (A) Falha de I/O REAL no WAL: uma escrita do log retorna io_error. O commit
     // falha, a transação é revertida no destrutor e o PageFile não fica preso em
     // transação (uma nova begin funciona). Após reabrir, o objeto nunca aparece.
@@ -154,6 +189,53 @@ int main() {
                           "the rolled-back object never appears");
         detach(database_id);
     }
+
+    // (A1) A primeira imagem de página é a terceira escrita (header, begin,
+    // image). Sua falha ainda é pré-commit e reverte normalmente.
+    check_precommit_failure("page-image-write-failure", modb::test::failing_wal_factory(2), true,
+                            "page-image write failure");
+
+    // (A2) A falha ao escrever o próprio registro de commit ocorre antes da
+    // durabilidade: a transação continua ativa e pode fazer rollback normal.
+    {
+        TemporaryDatabase temporary{"commit-record-write-failure"};
+        auto created = Database::create(temporary.path());
+        auto database = share(created);
+        suite.check(database != nullptr, "commit-record failure database is created");
+        if (!database) {
+            return suite.finish();
+        }
+        auto database_id = attach(database);
+        // Sem páginas sujas, as escritas são: header, begin, commit. Falhar
+        // depois de duas permite provar exatamente a costura do commit record.
+        database->set_wal_file_factory(modb::test::failing_wal_factory(2));
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "commit-record failure transaction begins");
+        if (!transaction) {
+            detach(database_id);
+            return suite.finish();
+        }
+        auto committed = transaction->commit();
+        suite.check(!committed && committed.error().code == ErrorCode::io_error,
+                    "failed commit-record write is not reported as durable");
+        suite.check(transaction->rollback().has_value(),
+                    "transaction rolls back after the failed commit-record write");
+        suite.check(!std::filesystem::exists(temporary.wal_path()),
+                    "rollback removes the WAL without a durable commit record");
+        auto next = database->begin();
+        suite.check(next.has_value(), "database remains usable after commit-record write failure");
+        if (next) {
+            (void)next->rollback();
+        }
+        detach(database_id);
+    }
+
+    // (A3/A4) Os dois syncs são costuras distintas: falhar antes ou depois de
+    // gravar o record commit não pode marcar o commit como durável.
+    check_precommit_failure("first-sync-failure", modb::test::failing_wal_factory(~std::size_t{0}, 0),
+                            false, "first WAL sync failure");
+    check_precommit_failure("commit-sync-failure", modb::test::failing_wal_factory(~std::size_t{0}, 1),
+                            false, "commit WAL sync failure");
 
     // (B) Queda ANTES do registro de commit: imagens no WAL, sem commit. A
     // transação inteira deve permanecer ausente.
@@ -242,9 +324,10 @@ int main() {
         detach(database_id);
     }
 
-    // (D) Queda no MEIO da aplicação: o WAL commitou, mas o apply-failpoint
-    // aplica só uma página antes de "morrer". A recuperação reaplica tudo
-    // (idempotente) — sem nenhuma página escrita à mão pelo teste.
+    // (D) Falha no MEIO da aplicação depois do commit durável: o apply-failpoint
+    // aplica só uma página e retorna io_error. O destrutor real da Transaction
+    // roda; ele não pode apagar o WAL já commitado. A instância fica envenenada
+    // até reabrir e recovery reaplica tudo.
     {
         TemporaryDatabase temporary{"during-apply"};
         std::vector<ObjectId> ids;
@@ -259,6 +342,7 @@ int main() {
             }
             auto database_id = attach(database);
             suite.check(database->bind(item_builder()).has_value(), "during-apply type is bound");
+            {
             auto transaction = database->begin();
             if (!transaction) {
                 suite.check(false, "during-apply transaction begins");
@@ -279,9 +363,20 @@ int main() {
             // Aplica só 1 página e então falha, simulando a queda no meio do apply.
             database->set_apply_failpoint(1);
             auto committed = transaction->commit();
-            suite.check(!committed && committed.error().code == ErrorCode::io_error,
-                        "apply stops midway with a simulated crash");
-            // Abandona sem reverter: o WAL commitado e as páginas parciais ficam.
+            suite.check(!committed && committed.error().code == ErrorCode::commit_recovery_required,
+                        "apply failure after durable commit requires recovery");
+            suite.check(std::filesystem::exists(temporary.wal_path()),
+                        "the durable WAL remains before the transaction destructor runs");
+            suite.check_error(transaction->rollback(), ErrorCode::transaction_committed,
+                              "a durably committed transaction cannot roll back");
+            // O objeto Transaction sai de escopo normalmente: não há detach nem
+            // std::exit para esconder um rollback que apagaria o WAL.
+            }
+            suite.check(std::filesystem::exists(temporary.wal_path()),
+                        "the transaction destructor preserves the durable WAL");
+            auto blocked = database->begin();
+            suite.check_error(blocked, ErrorCode::database_recovery_required,
+                              "database rejects new work until it is reopened");
             detach(database_id);
         }
 

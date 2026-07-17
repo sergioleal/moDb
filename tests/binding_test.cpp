@@ -116,8 +116,10 @@ int main() {
             auto unbound_tx = db->begin();
             suite.check(unbound_tx.has_value(), "a transaction begins");
             if (unbound_tx) {
+                suite.check_error(db->bind(employee_builder()), ErrorCode::transaction_active,
+                                  "binding during a transaction is rejected");
                 suite.check_error(db->create(*unbound_tx, ana), ErrorCode::type_not_found,
-                                  "creating an unbound type is rejected");
+                                  "rejected binding does not leave the type bound");
                 (void)unbound_tx->rollback();
             }
         }

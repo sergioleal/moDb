@@ -888,7 +888,8 @@ Toda a API de escrita (`create`, `set`, `remove`, `push_back`) passa a exigir
 1. Se `<db>.wal` não existe ou é vazio → nada a fazer.
 2. Varrer registros válidos até o fim lógico; agrupar `page_image` por tx.
 3. Para cada tx **com** `commit`: reaplicar as after-images (idempotente).
-4. `flush()` do arquivo de dados; truncar o WAL; pronto.
+4. `flush()` do arquivo de dados; remover o WAL; pronto. Se a remoção falhar,
+   reportar o erro e preservar o WAL para redo idempotente na próxima abertura.
 
 ### Failpoints (infraestrutura de teste)
 
@@ -922,6 +923,7 @@ para o teste injetar o failpoint.
 | round-trip de registros | begin/image/commit lidos de volta idênticos |
 | CRC corrompido | flip de 1 byte → registro rejeitado, fim lógico correto |
 | WAL truncado no meio de um registro | leitura para no último registro íntegro |
+| cabeçalho WAL ilegível | abertura falha com `wal_corrupt` e preserva o arquivo |
 
 **`tests/recovery_test.cpp`** (`modb.recovery`)
 
@@ -953,23 +955,35 @@ Matriz de failpoints 100% verde: nenhuma linha exibe transação parcial.
 
 # Fase 6 — Snapshots e MVCC
 
-## Design
+A implementação é dividida em 6A–6D. Cada incremento deve terminar verde e
+utilizável antes do início do seguinte; não se considera a Fase 6 parcialmente
+concluída apenas porque o formato novo foi gravado.
 
-Modelo inicial **single-writer / multi-reader por época** (ADR-009):
+## Fase 6A — Épocas e formato versionado
+
+O ADR-009 deve fixar o modelo inicial **single-writer / multi-reader por
+época**, o limite de uma versão anterior por objeto, os conflitos esperados e
+o comportamento de versões após reabertura.
 
 - `epoch` global u64 no DBRT, incrementado a cada commit.
 - A entrada do IdentityMap ganha uma segunda localização: layout novo de 32
   bytes por entrada — `{ current: (page,slot,gen), current_epoch u64,
   previous: (page,slot,gen), previous_epoch u64 }` (IDMP versão 2; migração:
   regravar o mapa na primeira abertura pós-upgrade).
+
+### Critério de conclusão 6A
+
+Banco v1 migra para IDMP v2 sem alterar objetos, banco v2 reabre sem nova
+migração e a época global permanece monotônica através de commits e reabertura.
+
+## Fase 6B — Snapshot e leituras consistentes
+
 - Escrita (update/remove) move `current`→`previous` antes de gravar a nova
   versão; o registro antigo no heap **não** é apagado enquanto houver snapshot
   com `epoch < current_epoch`.
 - `Snapshot{ epoch }`: leituras escolhem `current` se
   `current_epoch ≤ snapshot.epoch`, senão `previous` (se também não servir →
   objeto não existia no snapshot).
-- GC: ao fechar o último snapshot antigo (contagem por época em memória),
-  registros `previous` obsoletos são apagados do heap e a entrada compactada.
 
 ```cpp
 class Snapshot { public: std::uint64_t epoch() const; /* RAII: libera no destrutor */ };
@@ -978,12 +992,42 @@ Result<DecodedObject> ObjectStore::get(ObjectId, const Snapshot&) const;
 Result<void> ObjectStore::scan(const Snapshot&, ...) const;
 ```
 
+Criações posteriores não aparecem no snapshot; atualizações e remoções
+posteriores continuam expondo a versão anterior. Leituras sem `Snapshot`
+continuam usando `current`.
+
+Como há somente uma posição `previous`, uma segunda alteração do mesmo objeto
+enquanto essa versão estiver visível retorna `snapshot_conflict`; essa proteção
+faz parte da primeira entrega pública de snapshots.
+
+### Critério de conclusão 6B
+
+`get` e `scan`, com commits intercalados de forma determinística, devolvem
+exatamente o estado lógico da época capturada, e nenhuma sequência aceita
+sobrescreve uma versão ainda visível.
+
+## Fase 6C — Retenção, GC e concorrência
+
+- GC: ao fechar o último snapshot antigo (contagem por época em memória),
+  registros `previous` obsoletos são apagados do heap e a entrada compactada.
+- Um único lock de escritor serializa commits. Abertura/fechamento de snapshots
+  e GC sincronizam o registro de épocas sem bloquear a duração completa das
+  leituras.
+
 Limitação documentada: **uma** versão anterior por objeto; um escritor que
 modifica o mesmo objeto duas vezes enquanto um snapshot antigo está aberto
 recebe `snapshot_conflict` (novo ErrorCode) — restrição aceitável para
-single-writer, removida quando o MVCC completo chegar (fase 8 revisita).
+single-writer, removida somente quando o MVCC completo for planejado.
 
-## Testes automatizados — `tests/snapshot_test.cpp` (`modb.snapshot`)
+### Critério de conclusão 6C
+
+Nenhuma versão ainda visível é descartada; ao fechar o último snapshot
+dependente, versões obsoletas são recuperadas; uma segunda alteração
+incompatível retorna `snapshot_conflict` sem escrita parcial.
+
+## Fase 6D — Integração e recuperação
+
+### Testes automatizados — `tests/snapshot_test.cpp` (`modb.snapshot`)
 
 | Caso | Verificação |
 |---|---|
@@ -995,7 +1039,16 @@ single-writer, removida quando o MVCC completo chegar (fase 8 revisita).
 | GC | fechar o snapshot libera as versões antigas (scan físico não as encontra) |
 | reabertura | snapshot não sobrevive ao processo; abertura limpa `previous` órfãos |
 
-## Critério de conclusão
+Além desses casos, a matriz deve cobrir migração IDMP v1→v2, época após
+reabertura, recovery de commits com versões e falhas nos limites entre
+publicação de `current`, retenção de `previous` e atualização da época.
+
+### Critério de conclusão 6D
+
+A matriz automatizada passa sem leitura mista, versão perdida, vazamento
+persistente ou corrupção após recovery.
+
+## Critério de conclusão da Fase 6
 
 Scan sob snapshot produz estado idêntico ao da época, com commits concorrentes
 intercalados no mesmo processo.
@@ -1143,9 +1196,10 @@ tests/protocol_test.cpp
 tests/server_streaming_test.cpp
 ```
 
-ADR-010: rede via sockets nativos próprios (`NativeSocket`, mesmo padrão do
-`NativeFile`) — sem dependência externa no MVP; asio reavaliado se a
-complexidade crescer. ADR-011: modelo de concorrência — 1 thread de aceitação
+[ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md):
+rede via sockets nativos próprios (`NativeSocket`, mesmo padrão do
+`NativeFile`) e protocolo próximo do armazenamento lógico — sem dependência
+externa no MVP; asio reavaliado se a complexidade crescer. ADR-011: modelo de concorrência — 1 thread de aceitação
 + 1 thread por conexão no MVP (instância dedicada a uma aplicação; poucas
 conexões); o motor continua com um escritor; o `DatabaseRegistry` ganha o lock
 que o escopo single-thread dispensava (revisar `ScratchPagePool` etc. sob a
@@ -1158,24 +1212,55 @@ máx 16 MiB — frame maior → erro de protocolo). Mensagens:
 
 | Tipo | Nome | Payload |
 |---|---|---|
-| 1 | `Hello` | versão do protocolo u16; nome do banco (string) |
-| 2 | `HelloOk` | versão u16; BaselineId u64 |
+| 1 | `Hello` | versão do protocolo u16; nome do banco (string); codecs de compressão aceitos |
+| 2 | `HelloOk` | versão u16; BaselineId u64; codecs e limites selecionados |
 | 3 | `Query` | query_id u32 + descrição serializada da consulta |
 | 4 | `StreamBegin` | query_id u32 |
-| 5 | `Object` | query_id u32 + payload do objeto (codec ADR-003) |
+| 5 | `ObjectFrame` | query_id u32 + diretório de slots + `ObjectEnvelope`s |
 | 6 | `StreamEnd` | query_id u32 + total u64 |
 | 7 | `StreamError` | query_id u32 + ErrorCode u16 + mensagem (string) |
 | 8 | `Cancel` | query_id u32 |
 | 9 | `OpCall` | op_id (string) + argumentos serializados (Fase 9) |
 | 10 | `OpResult` | sucesso u8 + payload ou erro |
 
-Não existem lotes lógicos: cada `Object` é elegível para envio assim que
-produzido; o framing é só transporte (doc streaming §Framing).
+`ObjectEnvelope`, independente de página física:
+
+```text
+| object_id u64 | type_definition_id u64 | payload_length u32 | payload |
+```
+
+O payload reutiliza o codec lógico da ADR-003. Não contém `PageId`, `SlotId`,
+`RecordId`, generation, offset de arquivo ou header de página.
+
+`ObjectFrame` usa um diretório inspirado em slotted pages:
+
+```text
+| query_id u32 | record_count u32 | compression u8 | reservado[3] |
+| uncompressed_size u32 | encoded_size u32                         |
+| record_count × { offset u32, length u32 }                        |
+| encoded_data[encoded_size]                                       |
+```
+
+Offsets são relativos ao início da área de dados descomprimida. Intervalos devem
+estar dentro de `uncompressed_size`, não podem se sobrepor e preservam a ordem
+de produção. O diretório de slots não é comprimido. Um frame com um único slot
+é válido. Não existem lotes lógicos: cada objeto é
+elegível para envio assim que produzido; o serializer pode apenas coalescer
+objetos já disponíveis, sem aguardar quantidade ou tamanho mínimo
+(doc streaming §Framing e ADR-010).
+
+`compression=none` é obrigatório e implica
+`encoded_size == uncompressed_size`. Outros codecs são anunciados pelo cliente
+no `Hello` e selecionados no `HelloOk`. A primeira implementação não mantém
+estado nem dicionário entre frames. O servidor só tenta comprimir acima de um
+limiar configurável e volta a `none` se não houver redução material. O receptor
+valida tamanhos, razão máxima de expansão e codec negociado antes de alocar ou
+descomprimir.
 
 ### Backpressure
 
-O laço de envio escreve um `Object` por vez no socket **bloqueante**; quando o
-cliente não consome, `send` bloqueia → o generator não avança → scan suspenso.
+O laço de envio escreve um `ObjectFrame` limitado no socket **bloqueante**;
+quando o cliente não consome, `send` bloqueia → o generator não avança → scan suspenso.
 A propagação é natural porque o pipeline é preguiçoso (Fase 7) — não há fila
 intermediária além de 1 objeto em trânsito. Teste comprova.
 
@@ -1200,6 +1285,9 @@ frames em buffers
 |---|---|
 | round-trip de cada mensagem | encode→decode idêntico |
 | frame truncado / length mentiroso / >16 MiB | erros específicos, sem alocação gigante |
+| compressão negociada | frame compressível → round-trip; mesmo conteúdo lógico que `none` |
+| frame pequeno/incompressível | enviado como `none`, sem expansão inútil |
+| compressão inválida | codec não negociado, stream truncado, tamanho ou razão de expansão inválidos → `protocol_error` sem alocação excessiva |
 | lixo | bytes aleatórios → erro de protocolo, nunca crash (base p/ fuzzing F10) |
 
 **`tests/server_streaming_test.cpp`** (`modb.server_streaming`) — servidor em
@@ -1207,7 +1295,9 @@ thread + cliente no mesmo processo de teste, porta efêmera de loopback
 
 | Caso | Verificação |
 |---|---|
-| fluxo completo | 10 000 objetos: Begin → 10 000×Object → End; conteúdo íntegro |
+| fluxo completo | 10 000 objetos: Begin → `ObjectFrame`(s) → End; conteúdo íntegro e ordem preservada |
+| diretório inválido | offset fora da área de dados, sobreposição ou envelope truncado → `protocol_error` |
+| independência física | nenhum frame contém `PageId`/`SlotId`/`RecordId`; realocação física não altera bytes lógicos do objeto |
 | **backpressure (critério)** | cliente consome 1 obj/50 ms com janela TCP pequena: instrumentar o servidor com contador de objetos produzidos − enviados ≤ pequena constante (produção acompanha consumo; sem acúmulo) |
 | cancelamento | Cancel no meio → produção para (contador), conexão utilizável para nova consulta |
 | desconexão abrupta | fechar socket no meio do fluxo → servidor libera cursor/snapshot sem vazar (contadores de recursos) |
@@ -1230,6 +1320,7 @@ include/modb/ops/operation.hpp
 include/modb/ops/execution_context.hpp
 include/modb/ops/operation_registry.hpp   src/ops/operation_registry.cpp
 include/modb/ops/module_manifest.hpp      src/ops/module_manifest.cpp
+include/modb/ops/module_loader.hpp        src/ops/module_loader.cpp
 examples/transfer_funds/                   (módulo exemplo completo)
 tests/operation_test.cpp
 tests/operation_server_test.cpp
@@ -1264,18 +1355,29 @@ public:
                                      Database&);        // begin -> execute -> commit/rollback
 };
 
-struct ModuleManifest { std::uint32_t module_version; BaselineId baseline;
-                        std::uint32_t api_version; };
+struct ModuleManifest { ModuleId id; std::uint32_t module_version;
+                        BaselineId baseline; std::uint32_t api_version;
+                        BinaryHash hash; std::vector<ExportedMethod> methods; };
 // Na carga: api_version == corrente do motor; baseline compatível com a do
-// banco (igual, ou marcada como migradora) — senão ErrorCode::incompatible_module.
+// banco (igual, ou marcada como migradora), hash admitido e exports válidos
+// — senão ErrorCode::incompatible_module.
 ```
 
 Contrato transacional do `dispatch` (doc codigo-local §Commit): sucesso →
-commit; `Result` de erro **ou** exceção capturada → rollback. Módulos no MVP
-são **linkados estaticamente** ao servidor (registro na inicialização);
-carregamento dinâmico (.dll/.so) fica pós-MVP — o manifesto e a validação já
-existem para os dois casos. Migrações usam a mesma infraestrutura: uma
+commit; `Result` de erro **ou** exceção capturada → rollback. Conforme a
+[ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md), módulos no
+primeiro runtime são carregados **dentro do processo** a partir de uma origem
+confiável configurada pelo operador. O `ModuleLoader` valida id, versão da API,
+baseline, exports e hash antes do registro; o cliente nunca envia binários nem
+escolhe caminhos. Sandbox, workers isolados e atualização a quente ficam para
+avaliação posterior. Migrações usam a mesma infraestrutura: uma
 `MigrationOperation` registrada e despachada como qualquer operação.
+
+Consultas permanecem internas ao motor. `ObjectAccess::query<T>()` pode usar
+índices, planejamento e streaming, mas não existe interface SQL pública. Métodos
+`read_only` recebem `Snapshot`; métodos `read_write`, `Transaction`. Argumentos
+e resultados sempre usam o codec versionado, sem ponteiros ou dependência do
+layout C++ em memória, preservando uma futura fronteira para workers.
 
 Protocolo: mensagens `OpCall`/`OpResult` da Fase 8;
 `client.call<TransferFunds>(args...)` serializa argumentos pelo codec.
@@ -1297,6 +1399,7 @@ Saldo insuficiente → erro → rollback comprovado.
 | exceção do módulo | operação que lança `std::runtime_error` → rollback + erro; motor segue utilizável |
 | id desconhecido | dispatch("nao.existe") → `operation_not_found` |
 | manifesto incompatível | api_version divergente → `incompatible_module` na carga |
+| origem/hash não admitido | loader rejeita antes de registrar ou executar qualquer método |
 | migração como operação | MigrationOperation converte objetos v1→v2 dentro de uma transação; falha no meio → nada migrado |
 
 **`tests/operation_server_test.cpp`** (`modb.operation_server`)
@@ -1317,11 +1420,13 @@ recuperação pós-crash.
 
 ## Frentes e protocolo
 
-1. **Benchmarks** (`benchmarks/`, alvo CMake separado, nunca no ctest):
-   TTFR, throughput de streaming local e via rede, materialização/s
-   (Binding+plano cacheado vs decodificação crua — meta: caminho cacheado
-   ≥ 5× o dinâmico), inserções/s com e sem transação explícita, blob MB/s.
-   Saída em formato estável (CSV) para comparar execuções.
+1. **Benchmarks** (`benchmarks/`, alvo CMake separado, nunca no ctest): seguir
+   integralmente [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md). O runner cobre
+   todas as camadas, preserva amostras brutas e gera um único JSONL autocontido
+   por campanha: `modb-benchmark-YYYYMMDDTHHMMSS.mmmZ-<commit>-<host>.jsonl`.
+   TTFR, throughput, p99, CPU, memória, I/O, espaço, rede e correção são métricas
+   de primeira classe; datasets, seeds, ambiente e configuração acompanham os
+   resultados.
 2. **BufferPool completo**: evoluir `PageCache` — capacidade configurável,
    LRU, pin/unpin, write-back integrado ao WAL, métricas (hits/misses/
    evictions). Testes: banco 10× maior que o cache mantém corretude

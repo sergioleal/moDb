@@ -105,6 +105,7 @@ Result<TypeDefinitionId> Database::persist_binding(const Binding& binding) {
     // Caso contrário, envolve as escritas de catálogo numa transação interna,
     // para que registrar/evoluir um tipo seja atômico e passe pelo WAL.
     current_tx_id_ = next_tx_id_++;
+    commit_durable_ = false;
     file_->begin_transaction();
     auto type_id = register_or_adopt(binding);
     if (!type_id) {
@@ -112,6 +113,12 @@ Result<TypeDefinitionId> Database::persist_binding(const Binding& binding) {
         return std::unexpected(type_id.error());
     }
     if (auto committed = commit_transaction(CommitPhase::full); !committed) {
+        if (commit_is_durable()) {
+            require_recovery();
+            return std::unexpected(Error{ErrorCode::commit_recovery_required,
+                                         "binding commit is durable in WAL but requires recovery: " +
+                                             committed.error().message});
+        }
         (void)rollback_transaction();
         return std::unexpected(committed.error());
     }
@@ -132,6 +139,9 @@ Result<void> Database::remove(Transaction& tx, ObjectId id) {
 }
 
 Result<Transaction> Database::begin() {
+    if (auto usable = check_usable(); !usable) {
+        return std::unexpected(usable.error());
+    }
     if (database_id_.value == 0) {
         return std::unexpected(
             Error{ErrorCode::invalid_argument, "database must be attached before begin"});
@@ -141,6 +151,7 @@ Result<Transaction> Database::begin() {
             Error{ErrorCode::transaction_active, "a transaction is already in progress"});
     }
     current_tx_id_ = next_tx_id_++;
+    commit_durable_ = false;
     file_->begin_transaction();
     return Transaction{database_id_};
 }
@@ -185,6 +196,10 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
         if (auto synced = wal->sync(); !synced) {
             return std::unexpected(synced.error());
         }
+        // Só agora o registro commit chegou duravelmente ao WAL. Antes disso,
+        // falhas de escrita/sync ainda permitem rollback normal e remoção do
+        // log incompleto.
+        commit_durable_ = true;
         // Costura: parar aqui simula queda após o commit durável, antes de aplicar;
         // a recuperação reaplica (tudo-ou-nada → tudo).
         if (phase == CommitPhase::stop_after_commit_record) {
@@ -206,10 +221,20 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
     // 4. Checkpoint: as páginas já estão duráveis, o WAL pode ser removido.
     std::error_code remove_error;
     std::filesystem::remove(wal_path_, remove_error);
+    if (remove_error) {
+        // O commit já é durável e o WAL residual é seguro (redo idempotente),
+        // mas não escondemos a falha: o chamador deve reabrir para recuperá-lo.
+        return std::unexpected(
+            Error{ErrorCode::io_error, "could not remove checkpoint WAL: " + remove_error.message()});
+    }
     return {};
 }
 
 Result<void> Database::rollback_transaction() {
+    if (commit_durable_) {
+        return std::unexpected(Error{ErrorCode::transaction_committed,
+                                     "a durable commit cannot be rolled back"});
+    }
     // O contador de ObjectId vive na mesma página (DBRT) que os demais campos
     // gravados transacionalmente; reconstruir store_ a partir do disco (abaixo)
     // reverteria o avanço que a transação abortada fez nele. Guarda o watermark
@@ -229,7 +254,12 @@ Result<void> Database::rollback_transaction() {
     // Não há transação ativa aqui (discard_transaction já rodou), então esta
     // escrita é imediatamente durável, sem risco de vazar outro campo do DBRT
     // ainda em voo numa transação diferente.
-    return store_.ensure_next_object_id_at_least(watermark_before_rollback);
+    if (auto restored = store_.ensure_next_object_id_at_least(watermark_before_rollback);
+        !restored) {
+        return std::unexpected(restored.error());
+    }
+    // write_at sozinho não confirma a durabilidade do watermark no dispositivo.
+    return file_->flush();
 }
 
 Result<void> Database::resync_store_after_rollback() {
@@ -250,6 +280,12 @@ Transaction::~Transaction() {
 Result<void> Transaction::commit() { return commit(CommitPhase::full); }
 
 Result<void> Transaction::commit(CommitPhase phase) {
+    if (!active_) {
+        return std::unexpected(Error{committed_ ? ErrorCode::transaction_committed
+                                                 : ErrorCode::transaction_required,
+                                     committed_ ? "transaction is already durably committed"
+                                                : "transaction is no longer active"});
+    }
     auto database = DatabaseRegistry::instance().find(database_);
     if (!database) {
         // Sem banco não há como reverter nem aplicar; consome a transação.
@@ -261,13 +297,26 @@ Result<void> Transaction::commit(CommitPhase phase) {
     // intencional, que também retorna Ok). Se o commit falhar de verdade,
     // `active_` permanece e o destrutor executa o rollback — nunca deixando o
     // PageFile preso numa transação nem o buffer aplicado pela metade.
-    if (committed) {
+    if ((*database)->commit_is_durable()) {
         active_ = false;
+        committed_ = true;
+        if (!committed) {
+            (*database)->require_recovery();
+            return std::unexpected(Error{ErrorCode::commit_recovery_required,
+                                         "commit is durable in WAL but requires recovery: " +
+                                             committed.error().message});
+        }
     }
     return committed;
 }
 
 Result<void> Transaction::rollback() {
+    if (!active_) {
+        return std::unexpected(Error{committed_ ? ErrorCode::transaction_committed
+                                                 : ErrorCode::transaction_required,
+                                     committed_ ? "a durable commit cannot be rolled back"
+                                                : "transaction is no longer active"});
+    }
     active_ = false;
     auto database = DatabaseRegistry::instance().find(database_);
     if (!database) {

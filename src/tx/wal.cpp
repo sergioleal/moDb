@@ -160,6 +160,11 @@ Result<std::vector<WalRecord>> Wal::read_all(const std::filesystem::path& path) 
     if (size_error) {
         return std::unexpected(io_error("could not read WAL size: " + size_error.message()));
     }
+    // Um arquivo criado mas ainda sem header/registro equivale a log vazio:
+    // não há nenhuma transação que possa ser reaplicada.
+    if (size == 0) {
+        return std::vector<WalRecord>{};
+    }
     if (size < wal_header_size) {
         return std::unexpected(Error{ErrorCode::corrupt_file, "WAL is smaller than its header"});
     }
