@@ -341,4 +341,36 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.coll_demo
         COMMAND modb_cli coll demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-coll.modb --force)
+    add_test(NAME modb.cli.tx_help COMMAND modb_cli tx --help)
+    add_test(NAME modb.cli.tx_demo
+        COMMAND modb_cli tx demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-tx-demo.modb --force)
+    add_test(NAME modb.cli.tx_crash_before_commit
+        COMMAND modb_cli tx crash
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-crash-before-commit.modb
+                before-commit --force)
+    add_test(NAME modb.cli.tx_crash_after_commit
+        COMMAND modb_cli tx crash
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-crash-after-commit.modb
+                after-commit --force)
+    add_test(NAME modb.cli.tx_crash_mid_apply
+        COMMAND modb_cli tx crash
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-crash-mid-apply.modb
+                mid-apply --force)
+    add_test(NAME modb.cli.tx_crash_before_cleanup
+        COMMAND modb_cli tx crash
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-crash-before-cleanup.modb
+                before-cleanup --force)
+    # wal-info roda com o WAL da queda ainda pendente; get roda depois e
+    # dispara a recuperação (que remove o WAL) — ordem fixada via DEPENDS para
+    # o cenário demonstrado ser sempre o mesmo.
+    add_test(NAME modb.cli.tx_wal_info
+        COMMAND modb_cli tx wal-info
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-crash-after-commit.modb)
+    add_test(NAME modb.cli.tx_get
+        COMMAND modb_cli tx get
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-crash-after-commit.modb 18)
+    set_tests_properties(modb.cli.tx_wal_info PROPERTIES
+        DEPENDS modb.cli.tx_crash_after_commit)
+    set_tests_properties(modb.cli.tx_get PROPERTIES DEPENDS modb.cli.tx_wal_info)
 endif()

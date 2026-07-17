@@ -76,6 +76,24 @@ public:
         return current_baseline_;
     }
 
+    // Próximo ObjectId a ser alocado (contador persistido). Exposto para o
+    // rollback de transação (Fase 5) preservar a garantia de não-reuso mesmo
+    // depois de reconstruir o ObjectStore a partir do disco.
+    [[nodiscard]] std::uint64_t next_object_id_watermark() const noexcept {
+        return root_.next_object_id();
+    }
+    // Garante que o contador nunca retroceda: se `at_least` for maior que o
+    // valor persistido atual, avança e persiste imediatamente. Seguro fora de
+    // uma transação — a escrita é durável na hora, sem vazar nenhum outro
+    // campo do DBRT ainda em voo (não há transação ativa quando isto é
+    // chamado, pelo próprio contrato do rollback).
+    [[nodiscard]] Result<void> ensure_next_object_id_at_least(std::uint64_t at_least) {
+        if (at_least <= root_.next_object_id()) {
+            return {};
+        }
+        return root_.set_next_object_id(at_least);
+    }
+
 private:
     ObjectStore(storage::PageFile& file, DatabaseRoot root, IdentityMap identity,
                 storage::TableHeap data_heap, CatalogStore catalog, TypeRegistry registry,

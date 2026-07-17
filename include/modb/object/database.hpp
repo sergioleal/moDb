@@ -391,6 +391,15 @@ private:
     [[nodiscard]] Result<void> commit_transaction(CommitPhase phase);
     // Descarta o buffer da transação e remove qualquer WAL residual.
     [[nodiscard]] Result<void> rollback_transaction();
+    // Reconstrói `store_` a partir do que está atualmente no arquivo. Chamado
+    // após o descarte de uma transação: TableHeap/IdentityMap/CatalogStore
+    // guardam contadores em memória (record_count, page_count, cadeia de
+    // páginas) atualizados otimisticamente durante a transação; só o buffer de
+    // páginas do PageFile é revertido no rollback, então sem isto a próxima
+    // escrita real usaria contadores que nunca existiram em disco, corrompendo
+    // a raiz do heap. `ObjectStore::open` é puramente leitura (sem alocar
+    // páginas), então é seguro chamá-lo de novo a qualquer momento.
+    [[nodiscard]] Result<void> resync_store_after_rollback();
     friend class Transaction;
 
     // Remove um objeto e, recursivamente, os filhos referenciados por OwnedRef.

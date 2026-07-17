@@ -1,11 +1,14 @@
 #include "modb/object/database.hpp"
+#include "modb/storage/database_check.hpp"
 #include "test_support.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <system_error>
+#include <vector>
 
 using namespace modb;
 using namespace modb::object;
@@ -395,6 +398,108 @@ int main() {
         suite.check_error(database->get<Employee>(aborted_id), ErrorCode::record_not_found,
                           "the aborted transact object is absent after reopening");
         detach(database_id);
+    }
+
+    // Regressão: contadores em memória do TableHeap/IdentityMap não eram
+    // revertidos no rollback (só o buffer de páginas do PageFile era
+    // descartado), corrompendo a raiz do heap na escrita real seguinte; e o
+    // contador de ObjectId revertia junto, permitindo que um id já entregue por
+    // uma transação abortada fosse reatribuído. Corrigidos por
+    // Database::resync_store_after_rollback + o watermark do ObjectId.
+    {
+        TemporaryDatabase temporary{"rollback-then-write"};
+        std::vector<ObjectId> committed_ids;
+        ObjectId rolled_back_id{};
+        {
+            auto created = Database::create(temporary.path());
+            auto database = share(created);
+            if (!database) {
+                suite.check(false, "regression database is created");
+                return suite.finish();
+            }
+            auto database_id = attach(database);
+            suite.check(database->bind(employee_builder()).has_value(),
+                        "regression type is bound");
+
+            // Uma transação que reverte, seguida por uma que de fato escreve —
+            // o cenário que expôs o bug, repetido para várias páginas/rounds.
+            for (int round = 0; round < 3; ++round) {
+                auto doomed = database->begin();
+                if (!doomed) {
+                    suite.check(false, "doomed transaction begins");
+                    detach(database_id);
+                    return suite.finish();
+                }
+                auto transient =
+                    database->create(*doomed, Employee{"Transient", static_cast<std::int64_t>(round)});
+                if (transient) {
+                    rolled_back_id = transient->id();
+                }
+                suite.check(doomed->rollback().has_value(), "doomed transaction rolls back");
+
+                auto real = database->begin();
+                if (!real) {
+                    suite.check(false, "real transaction begins");
+                    detach(database_id);
+                    return suite.finish();
+                }
+                auto employee =
+                    database->create(*real, Employee{"Real", static_cast<std::int64_t>(round)});
+                if (!employee) {
+                    suite.check(false, "real object is staged after a rollback");
+                    detach(database_id);
+                    return suite.finish();
+                }
+                committed_ids.push_back(employee->id());
+                suite.check(real->commit().has_value(),
+                            "real transaction commits after a preceding rollback");
+            }
+
+            bool any_reused = false;
+            for (const auto id : committed_ids) {
+                any_reused = any_reused || id == rolled_back_id;
+            }
+            suite.check(!any_reused,
+                        "an ObjectId from a rolled-back transaction is never reused");
+
+            bool all_correct = true;
+            for (std::size_t index = 0; index < committed_ids.size(); ++index) {
+                auto handle = database->get<Employee>(committed_ids[index]);
+                auto employee = handle ? database->materialize(*handle) : Result<Employee>{
+                    std::unexpected(Error{ErrorCode::record_not_found, "missing"})};
+                all_correct = all_correct && employee.has_value() &&
+                              employee->level == static_cast<std::int64_t>(index);
+            }
+            suite.check(all_correct,
+                        "each real object after a rollback keeps its own value in the same session");
+            detach(database_id);
+        }
+
+        // A raiz do heap não pode ter ficado corrompida pelas escritas
+        // fantasmas das transações revertidas.
+        auto checked = modb::storage::check_database(temporary.path());
+        suite.check(checked.has_value() && checked->ok(),
+                    "the data heap survives repeated rollback-then-write cycles uncorrupted");
+
+        auto reopened = Database::open(temporary.path());
+        auto database = share(reopened);
+        suite.check(database != nullptr, "regression database reopens");
+        if (database) {
+            auto database_id = attach(database);
+            suite.check(database->bind(employee_builder()).has_value(),
+                        "regression type is rebound");
+            bool all_correct_after_reopen = true;
+            for (std::size_t index = 0; index < committed_ids.size(); ++index) {
+                auto handle = database->get<Employee>(committed_ids[index]);
+                auto employee = handle ? database->materialize(*handle) : Result<Employee>{
+                    std::unexpected(Error{ErrorCode::record_not_found, "missing"})};
+                all_correct_after_reopen = all_correct_after_reopen && employee.has_value() &&
+                                           employee->level == static_cast<std::int64_t>(index);
+            }
+            suite.check(all_correct_after_reopen,
+                        "every real object survives reopening with the right value");
+            detach(database_id);
+        }
     }
 
     return suite.finish();

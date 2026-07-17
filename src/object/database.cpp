@@ -210,9 +210,34 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
 }
 
 Result<void> Database::rollback_transaction() {
+    // O contador de ObjectId vive na mesma página (DBRT) que os demais campos
+    // gravados transacionalmente; reconstruir store_ a partir do disco (abaixo)
+    // reverteria o avanço que a transação abortada fez nele. Guarda o watermark
+    // ANTES do resync para restaurá-lo depois — um ObjectId já entregue (ainda
+    // que nunca durável) nunca deve ser reatribuído a outro objeto (ADR-001).
+    const auto watermark_before_rollback = store_.next_object_id_watermark();
     file_->discard_transaction();
     std::error_code remove_error;
     std::filesystem::remove(wal_path_, remove_error);
+    // O buffer de páginas do PageFile já foi descartado (o arquivo voltou ao
+    // estado pré-transação); agora reconstrói store_ para casar com ele — sem
+    // isto, os contadores em memória do TableHeap/IdentityMap ficariam
+    // avançados como se as escritas descartadas tivessem acontecido.
+    if (auto resynced = resync_store_after_rollback(); !resynced) {
+        return std::unexpected(resynced.error());
+    }
+    // Não há transação ativa aqui (discard_transaction já rodou), então esta
+    // escrita é imediatamente durável, sem risco de vazar outro campo do DBRT
+    // ainda em voo numa transação diferente.
+    return store_.ensure_next_object_id_at_least(watermark_before_rollback);
+}
+
+Result<void> Database::resync_store_after_rollback() {
+    auto reopened = ObjectStore::open(*file_);
+    if (!reopened) {
+        return std::unexpected(reopened.error());
+    }
+    store_ = std::move(*reopened);
     return {};
 }
 

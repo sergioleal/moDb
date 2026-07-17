@@ -96,12 +96,29 @@ recuperação reaplica tudo. Nenhuma página é escrita à mão pelo teste.
 
 ## 6. Limitações e desvios documentados (MVP)
 
-- **Contadores em memória não são revertidos.** O contador de `ObjectId` (no
-  `DatabaseRoot`) avança em memória mesmo numa transação revertida; a escrita no
-  disco é descartada. O efeito é um **gap** de ids (nunca reuso), permitido pelo
-  [ADR-001](decisions/ADR-001-identidade.md). Leituras após rollback são
-  consistentes porque `IdentityMap`/`TableHeap` são respaldados por página (o
-  descarte do buffer restaura o estado do disco).
+- **Rollback ressincroniza o `ObjectStore` inteiro a partir do disco.**
+  `TableHeap`/`IdentityMap`/`CatalogStore`/`TypeRegistry` guardam contadores e
+  cadeias em memória (`record_count`, `page_count`, `first`/`last`, mapas de
+  capacidade) atualizados otimisticamente durante a transação — só o buffer de
+  páginas do `PageFile` é descartado num rollback. Sem mais nada, a PRÓXIMA
+  escrita real usaria esses contadores avançados (que nunca existiram em disco),
+  corrompendo a raiz do heap na primeira reabertura seguinte. Corrigido:
+  `Database::rollback_transaction()` chama `resync_store_after_rollback()`
+  (reconstrói `store_` via `ObjectStore::open`, uma operação puramente de
+  leitura) depois de descartar o buffer. Isto foi um bug real, encontrado ao
+  exercitar `rollback → create → commit → reopen` pela CLI (`modb tx demo`) —
+  a suíte de testes anterior não cobria esse caminho.
+- **O contador de `ObjectId` nunca retrocede, mesmo com o resync acima.** Como
+  o contador vive na mesma página (DBRT) que os demais campos gravados
+  transacionalmente, reconstruir `store_` do disco reverteria também o avanço
+  que a transação abortada fez nele — permitindo que um id já entregue por
+  `create()` (ainda que nunca durável) fosse reatribuído a um objeto diferente
+  depois. `rollback_transaction()` guarda esse contador (`watermark`) antes do
+  resync e, se o valor em disco for menor, restaura-o com uma escrita imediata
+  e durável (não há transação ativa nesse ponto, então não há risco de vazar
+  outro campo do DBRT ainda em voo). Preserva a garantia do
+  [ADR-001](decisions/ADR-001-identidade.md): `ObjectId` nunca é reutilizado,
+  mesmo através de um rollback — apenas cria um **gap**.
 - **`allocate_page` é imediato.** Páginas alocadas por uma transação abortada
   ficam órfãs no arquivo (sem free list no MVP), visíveis ao `database_check`.
 - **Checkpoint = remoção do WAL.** Não há checkpoint incremental; o WAL é
@@ -123,4 +140,4 @@ recuperação reaplica tudo. Nenhuma página é escrita à mão pelo teste.
 ## 7. Critério de conclusão
 
 ✅ Matriz de failpoints 100% verde: nenhuma linha exibe transação parcial. Suíte
-completa (51 testes) verde em Debug, `-Werror` e `sanitizers`.
+completa (59 testes) verde em Debug, `-Werror` e `sanitizers`.

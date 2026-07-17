@@ -48,6 +48,7 @@ Commands:
   blob     Store and read chained BLBP blobs (ODB++ Fase 4).
   graph    Demo an object graph: refs, embedded, cascade (ODB++ Fase 4).
   coll     Demo persistent vector/set/map collections (ODB++ Fase 4).
+  tx       Exercise transactions, the WAL and recovery (ODB++ Fase 5).
 
 Options:
   -h, --help     Show this help.
@@ -585,6 +586,62 @@ reopened collections:
 
 Phase 4 collection demo: OK
 ```
+
+## `modb tx` — transações, WAL e recuperação (ODB++ Fase 5)
+
+```text
+modb tx demo <file> [--force]
+modb tx crash <file> <before-commit|after-commit|mid-apply|before-cleanup> [--force]
+modb tx wal-info <file>
+modb tx get <file> <object-id>
+```
+
+- **`demo`**: narra commit, rollback explícito, rollback por destrutor (sem
+  `commit()`) e o contrato `transact()` (Ok → commit; erro → rollback
+  automático) num único processo. Reabre o arquivo ao final e confere que só o
+  que foi commitado sobrevive.
+- **`crash`**: grava um `Account` numa transação, leva o commit até a fase
+  pedida e então chama `std::exit` — **nenhum destrutor roda**, simulando de
+  verdade um processo morto (não é um truque de teste; é o processo real
+  terminando). Imprime o `ObjectId` gravado, para inspecionar depois.
+- **`wal-info`**: leitura pura do arquivo `<file>.wal` (sem abrir o banco nem
+  disparar recuperação) — mostra quantos registros existem, de que tipo, e
+  quais transações têm registro de `commit`.
+- **`get`**: abre o banco (o que **dispara a recuperação automaticamente**,
+  antes de qualquer outra coisa) e busca o objeto pelo id — é assim que se
+  observa o resultado de um `crash`.
+
+O par `crash`/`wal-info`/`get` é a forma mais direta de ver o WAL e a
+recuperação funcionando de verdade, através de processos separados (o "crash"
+é real, não simulado dentro do mesmo processo):
+
+```text
+$ modb tx crash conta.modb before-commit --force
+staged Account{id=18, owner=Ana, balance=1000}
+commit stopped BEFORE the commit record: only page images reached the WAL
+recovery will discard this transaction entirely
+WAL present: yes
+exiting now without further cleanup (simulated crash) -- inspect with:
+  modb tx wal-info conta.modb
+  modb tx get conta.modb 18
+
+$ modb tx wal-info conta.modb
+WAL: conta.modb.wal
+records: 6 (begin=1 page_image=5 commit=0 checkpoint=0)
+transactions seen: 1
+  tx 2: NOT committed (recovery will discard it)
+
+$ modb tx get conta.modb 18
+WAL before opening: present
+WAL after opening (recovery already ran): absent
+Account 18: absent -- that transaction never became durable
+```
+
+Repita com `after-commit`, `mid-apply` ou `before-cleanup` no lugar de
+`before-commit`: nesses três casos o `Account` **aparece** depois do `get`
+(`owner=Ana balance=1000 -- present after recovery`) — a recuperação refaz a
+transação inteira porque o registro de commit já estava durável no WAL antes
+da queda simulada.
 
 ## Roteiro completo (equivalente a `modb demo run`)
 

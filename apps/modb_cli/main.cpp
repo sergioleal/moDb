@@ -6,6 +6,7 @@
 #include "modb/object/ref.hpp"
 #include "modb/object/type_definition.hpp"
 #include "modb/object/type_registry.hpp"
+#include "modb/tx/wal.hpp"
 #include "modb/row.hpp"
 #include "modb/text_escape.hpp"
 #include "modb/value.hpp"
@@ -24,6 +25,9 @@
 #include <cstddef>
 // Disponibiliza inteiros com largura definida.
 #include <cstdint>
+// Disponibiliza std::exit, usado por `tx crash` para simular uma queda real
+// (pula os destrutores locais, ao contrário de um retorno normal de main).
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <iomanip>
@@ -33,6 +37,8 @@
 #include <limits>
 #include <memory>
 #include <optional>
+// Disponibiliza a lista ordenada e sem duplicatas de tx ids em `tx wal-info`.
+#include <set>
 // Disponibiliza o armazenamento de mensagens e nomes.
 #include <string>
 #include <string_view>
@@ -69,6 +75,7 @@ void print_oo_help();
 void print_blob_help();
 void print_graph_help();
 void print_coll_help();
+void print_tx_help();
 
 int command_demo();
 int command_demo_run(bool force);
@@ -114,11 +121,16 @@ int run_oo_command(int argc, char* argv[]);
 int run_blob_command(int argc, char* argv[]);
 int run_graph_command(int argc, char* argv[]);
 int run_coll_command(int argc, char* argv[]);
+int run_tx_command(int argc, char* argv[]);
 int command_blob_put(const std::filesystem::path& path, std::string_view text);
 int command_blob_get(const std::filesystem::path& path, std::uint64_t blob_id);
 int command_blob_info(const std::filesystem::path& path, std::uint64_t blob_id);
 int command_graph_demo(const std::filesystem::path& path, bool force);
 int command_coll_demo(const std::filesystem::path& path, bool force);
+int command_tx_demo(const std::filesystem::path& path, bool force);
+int command_tx_crash(const std::filesystem::path& path, std::string_view phase, bool force);
+int command_tx_wal_info(const std::filesystem::path& path);
+int command_tx_get(const std::filesystem::path& path, std::uint64_t object_id);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -165,6 +177,7 @@ void print_help() {
            "  blob     Store and read chained BLBP blobs (ODB++ Fase 4).\n"
            "  graph    Demo an object graph: refs, embedded, cascade (ODB++ Fase 4).\n"
            "  coll     Demo persistent vector/set/map collections (ODB++ Fase 4).\n"
+           "  tx       Exercise transactions, the WAL and recovery (ODB++ Fase 5).\n"
            "\n"
            "Options:\n"
            "  -h, --help     Show this help.\n"
@@ -291,6 +304,23 @@ void print_coll_help() {
                  "Exercises the persistent collections (Fase 4): PersistentVector,\n"
                  "PersistentSet (dedup + order) and PersistentMap (put/get/remove),\n"
                  "surviving a reopen of the file.\n";
+}
+
+void print_tx_help() {
+    std::cout << "Usage:\n"
+                 "  modb tx demo <file> [--force]\n"
+                 "  modb tx crash <file> <before-commit|after-commit|mid-apply|before-cleanup> "
+                 "[--force]\n"
+                 "  modb tx wal-info <file>\n"
+                 "  modb tx get <file> <object-id>\n"
+                 "\n"
+                 "Exercises transactions, the write-ahead log and recovery (ODB++ Fase 5).\n"
+                 "`demo` runs commit/rollback/transact() in one process. `crash` stages a\n"
+                 "transaction, reaches the given commit phase, then calls std::exit — no\n"
+                 "destructor runs, genuinely simulating a crashed process (it prints the\n"
+                 "staged ObjectId). Inspect the aftermath with `wal-info` (raw WAL records,\n"
+                 "no recovery) and `get <object-id>` (reopens the file, which runs recovery\n"
+                 "automatically, then fetches the object).\n";
 }
 
 // Command group: demo.
@@ -2389,6 +2419,374 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
     return 0;
 }
 
+// ===================== Fase 5: transações, WAL e recuperação ===============
+
+struct TxAccount {
+    std::string owner;
+    std::int64_t balance{};
+};
+
+modb::object::BindingBuilder<TxAccount> tx_account_binding() {
+    modb::object::BindingBuilder<TxAccount> builder{"Account"};
+    builder.field<1>("owner", &TxAccount::owner).field<2>("balance", &TxAccount::balance);
+    return builder;
+}
+
+int command_tx_demo(const std::filesystem::path& path, bool force) {
+    std::error_code filesystem_error;
+    auto wal_path = path;
+    wal_path += ".wal";
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            return print_error(modb::Error{modb::ErrorCode::file_already_exists,
+                                           "tx demo file exists; use --force to replace it"});
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            return print_error(
+                modb::Error{modb::ErrorCode::io_error, "cannot replace tx demo database"});
+        }
+        std::filesystem::remove(wal_path, filesystem_error);
+    }
+
+    modb::object::ObjectId ana_id{};
+    modb::object::ObjectId bia_id{};
+    modb::object::ObjectId transient_id{};
+    modb::object::ObjectId scoped_id{};
+    modb::object::ObjectId transact_ok_id{};
+    modb::object::ObjectId transact_aborted_id{};
+
+    {
+        auto session = DatabaseSession::create(path);
+        if (!session) {
+            return print_error(session.error());
+        }
+        auto& database = session->database();
+        if (auto bound = database.bind(tx_account_binding()); !bound) {
+            return print_error(bound.error());
+        }
+
+        // --- commit: as duas contas ficam persistidas ---
+        {
+            auto transaction = database.begin();
+            if (!transaction) {
+                return print_error(transaction.error());
+            }
+            auto ana = database.create(*transaction, TxAccount{"Ana", 1000});
+            auto bia = database.create(*transaction, TxAccount{"Bia", 500});
+            if (!ana || !bia) {
+                return print_error(
+                    modb::Error{modb::ErrorCode::io_error, "failed to stage accounts"});
+            }
+            ana_id = ana->id();
+            bia_id = bia->id();
+            if (auto committed = transaction->commit(); !committed) {
+                return print_error(committed.error());
+            }
+        }
+        std::cout << "commit persists Account{id=" << ana_id.value
+                  << ", owner=Ana, balance=1000}\n"
+                  << "commit persists Account{id=" << bia_id.value
+                  << ", owner=Bia, balance=500}\n";
+
+        // --- rollback explícito: a conta transitória nunca existiu de verdade ---
+        {
+            auto transaction = database.begin();
+            if (!transaction) {
+                return print_error(transaction.error());
+            }
+            auto transient = database.create(*transaction, TxAccount{"Transient", 1});
+            if (transient) {
+                transient_id = transient->id();
+            }
+            if (auto rolled = transaction->rollback(); !rolled) {
+                return print_error(rolled.error());
+            }
+        }
+        const bool transient_gone = !database.get<TxAccount>(transient_id).has_value();
+        std::cout << "explicit rollback discards Account{id=" << transient_id.value
+                  << "}: " << (transient_gone ? "yes" : "no") << '\n';
+
+        // --- destrutor sem commit: mesmo efeito do rollback explícito ---
+        {
+            auto transaction = database.begin();
+            if (!transaction) {
+                return print_error(transaction.error());
+            }
+            auto scoped = database.create(*transaction, TxAccount{"Scoped", 2});
+            if (scoped) {
+                scoped_id = scoped->id();
+            }
+            // `transaction` sai de escopo aqui sem commit -> rollback automático.
+        }
+        const bool scoped_gone = !database.get<TxAccount>(scoped_id).has_value();
+        std::cout << "destructor rollback discards Account{id=" << scoped_id.value
+                  << "}: " << (scoped_gone ? "yes" : "no") << '\n';
+
+        // --- transact(): término normal com Ok faz commit ---
+        auto committed_via_transact = database.transact(
+            [&](modb::object::Transaction& tx) -> modb::Result<modb::object::ObjectId> {
+                auto handle = database.create(tx, TxAccount{"Caio", 300});
+                if (!handle) {
+                    return std::unexpected(handle.error());
+                }
+                return handle->id();
+            });
+        if (committed_via_transact) {
+            transact_ok_id = *committed_via_transact;
+        }
+        std::cout << "transact() commits on success -> Account{id=" << transact_ok_id.value
+                  << "}: " << (committed_via_transact.has_value() ? "committed" : "FAILED")
+                  << '\n';
+
+        // --- transact(): retorno de erro faz rollback automático ---
+        auto aborted_via_transact =
+            database.transact([&](modb::object::Transaction& tx) -> modb::Result<void> {
+                auto handle = database.create(tx, TxAccount{"Doomed", 999});
+                if (!handle) {
+                    return std::unexpected(handle.error());
+                }
+                transact_aborted_id = handle->id();
+                return std::unexpected(
+                    modb::Error{modb::ErrorCode::invalid_argument, "aborted on purpose"});
+            });
+        const bool transact_aborted_gone =
+            !database.get<TxAccount>(transact_aborted_id).has_value();
+        std::cout << "transact() rolls back on error -> Account{id=" << transact_aborted_id.value
+                  << "}: "
+                  << (aborted_via_transact.has_value()
+                          ? "unexpectedly committed"
+                          : (transact_aborted_gone ? "discarded" : "STILL PRESENT"))
+                  << '\n';
+
+        if (!transient_gone || !scoped_gone || aborted_via_transact.has_value() ||
+            !transact_aborted_gone) {
+            return print_error(
+                modb::Error{modb::ErrorCode::corrupt_file, "tx demo invariants violated"});
+        }
+    }
+
+    // --- reabre: só o que foi commitado sobrevive ---
+    {
+        auto session = DatabaseSession::open(path);
+        if (!session) {
+            return print_error(session.error());
+        }
+        auto& database = session->database();
+        if (auto bound = database.bind(tx_account_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        auto ana = database.get<TxAccount>(ana_id);
+        auto bia = database.get<TxAccount>(bia_id);
+        const bool transient_absent = !database.get<TxAccount>(transient_id).has_value();
+        const bool scoped_absent = !database.get<TxAccount>(scoped_id).has_value();
+        const bool transact_ok_present = database.get<TxAccount>(transact_ok_id).has_value();
+        const bool transact_aborted_absent =
+            !database.get<TxAccount>(transact_aborted_id).has_value();
+        std::cout << "\nreopened: Ana and Bia present: "
+                  << (ana.has_value() && bia.has_value() ? "yes" : "no")
+                  << "; transient/scoped/aborted absent: "
+                  << (transient_absent && scoped_absent && transact_aborted_absent ? "yes" : "no")
+                  << "; transact() commit present: " << (transact_ok_present ? "yes" : "no")
+                  << '\n';
+        if (!ana || !bia || !transient_absent || !scoped_absent || !transact_ok_present ||
+            !transact_aborted_absent) {
+            return print_error(modb::Error{modb::ErrorCode::corrupt_file,
+                                           "tx demo invariants violated after reopening"});
+        }
+    }
+
+    std::cout << "\nPhase 5 transaction demo: OK\n";
+    return 0;
+}
+
+int command_tx_crash(const std::filesystem::path& path, std::string_view phase, bool force) {
+    if (phase != "before-commit" && phase != "after-commit" && phase != "mid-apply" &&
+        phase != "before-cleanup") {
+        return print_error(modb::Error{
+            modb::ErrorCode::invalid_argument,
+            "phase must be one of: before-commit, after-commit, mid-apply, before-cleanup"});
+    }
+
+    std::error_code filesystem_error;
+    auto wal_path = path;
+    wal_path += ".wal";
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            return print_error(modb::Error{modb::ErrorCode::file_already_exists,
+                                           "tx crash file exists; use --force to replace it"});
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            return print_error(
+                modb::Error{modb::ErrorCode::io_error, "cannot replace tx crash database"});
+        }
+        std::filesystem::remove(wal_path, filesystem_error);
+    }
+
+    auto session = DatabaseSession::create(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    auto& database = session->database();
+    if (auto bound = database.bind(tx_account_binding()); !bound) {
+        return print_error(bound.error());
+    }
+
+    auto transaction = database.begin();
+    if (!transaction) {
+        return print_error(transaction.error());
+    }
+    auto account = database.create(*transaction, TxAccount{"Ana", 1000});
+    if (!account) {
+        return print_error(account.error());
+    }
+    const auto account_id = account->id();
+    std::cout << "staged Account{id=" << account_id.value << ", owner=Ana, balance=1000}\n";
+
+    if (phase == "before-commit") {
+        auto result = transaction->commit(modb::object::CommitPhase::stop_after_images);
+        if (!result) {
+            return print_error(result.error());
+        }
+        std::cout << "commit stopped BEFORE the commit record: only page images reached the "
+                     "WAL\nrecovery will discard this transaction entirely\n";
+    } else if (phase == "after-commit") {
+        auto result = transaction->commit(modb::object::CommitPhase::stop_after_commit_record);
+        if (!result) {
+            return print_error(result.error());
+        }
+        std::cout << "commit stopped AFTER the durable commit record, before applying "
+                     "pages\nrecovery will redo it: the transaction reappears whole\n";
+    } else if (phase == "mid-apply") {
+        database.set_apply_failpoint(1);
+        auto result = transaction->commit();
+        if (result) {
+            std::cout << "every dirty page fit within the 1-page failpoint budget; nothing to "
+                         "crash mid-apply this time\n";
+        } else if (result.error().code == modb::ErrorCode::io_error) {
+            std::cout << "commit stopped MID-APPLY: some pages reached the data file, the rest "
+                         "stayed pending in the WAL\nrecovery will redo the missing pages "
+                         "(idempotent)\n";
+        } else {
+            return print_error(result.error());
+        }
+    } else {
+        auto result = transaction->commit(modb::object::CommitPhase::stop_before_wal_cleanup);
+        if (!result) {
+            return print_error(result.error());
+        }
+        std::cout << "commit stopped BEFORE the WAL cleanup: pages applied, WAL left "
+                     "behind\nrecovery will redo it again (idempotent) and remove the residual "
+                     "WAL\n";
+    }
+
+    std::cout << "WAL present: " << (std::filesystem::exists(wal_path) ? "yes" : "no") << '\n'
+              << "exiting now without further cleanup (simulated crash) -- inspect with:\n"
+              << "  modb tx wal-info " << path.string() << '\n'
+              << "  modb tx get " << path.string() << ' ' << account_id.value << '\n';
+
+    // std::exit pula os destrutores locais (transaction/session/database) --
+    // exatamente o que uma queda real faria. Um retorno normal daqui rodaria o
+    // destrutor de Transaction: nas costuras before-commit/after-commit/
+    // before-cleanup ele é inofensivo (a Transaction já foi consumida pelo
+    // commit bem-sucedido), mas em mid-apply o commit retornou erro, a
+    // Transaction continua ativa, e o destrutor reverteria exatamente o estado
+    // parcial que este comando existe para deixar no disco.
+    std::cout.flush();
+    std::exit(0);
+}
+
+int command_tx_wal_info(const std::filesystem::path& path) {
+    auto wal_path = path;
+    wal_path += ".wal";
+    std::error_code exists_error;
+    if (!std::filesystem::exists(wal_path, exists_error)) {
+        std::cout << "no WAL file at " << wal_path.string()
+                  << " (clean shutdown, or nothing pending)\n";
+        return 0;
+    }
+
+    auto records = modb::tx::Wal::read_all(wal_path);
+    if (!records) {
+        return print_error(records.error());
+    }
+
+    std::size_t begins = 0;
+    std::size_t images = 0;
+    std::size_t commits = 0;
+    std::size_t checkpoints = 0;
+    std::set<std::uint64_t> tx_ids;
+    std::set<std::uint64_t> committed_tx_ids;
+    for (const auto& record : *records) {
+        tx_ids.insert(record.tx_id);
+        switch (record.type) {
+        case modb::tx::WalRecordType::begin:
+            ++begins;
+            break;
+        case modb::tx::WalRecordType::page_image:
+            ++images;
+            break;
+        case modb::tx::WalRecordType::commit:
+            ++commits;
+            committed_tx_ids.insert(record.tx_id);
+            break;
+        case modb::tx::WalRecordType::checkpoint:
+            ++checkpoints;
+            break;
+        }
+    }
+
+    std::cout << "WAL: " << wal_path.string() << '\n'
+              << "records: " << records->size() << " (begin=" << begins
+              << " page_image=" << images << " commit=" << commits
+              << " checkpoint=" << checkpoints << ")\n"
+              << "transactions seen: " << tx_ids.size() << '\n';
+    for (const auto tx_id : tx_ids) {
+        std::cout << "  tx " << tx_id << ": "
+                  << (committed_tx_ids.contains(tx_id)
+                          ? "committed (durable; recovery will redo it)"
+                          : "NOT committed (recovery will discard it)")
+                  << '\n';
+    }
+    return 0;
+}
+
+int command_tx_get(const std::filesystem::path& path, std::uint64_t object_id) {
+    auto wal_path = path;
+    wal_path += ".wal";
+    std::error_code exists_error;
+    const bool wal_before = std::filesystem::exists(wal_path, exists_error);
+
+    // Database::open roda a recuperação automaticamente antes de reconstruir o
+    // catálogo (tx::recover, ver src/object/database.cpp).
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    auto& database = session->database();
+    if (auto bound = database.bind(tx_account_binding()); !bound) {
+        return print_error(bound.error());
+    }
+
+    const bool wal_after = std::filesystem::exists(wal_path, exists_error);
+    std::cout << "WAL before opening: " << (wal_before ? "present" : "absent") << '\n'
+              << "WAL after opening (recovery already ran): "
+              << (wal_after ? "present" : "absent") << '\n';
+
+    auto handle = database.get<TxAccount>(modb::object::ObjectId{object_id});
+    if (!handle) {
+        std::cout << "Account " << object_id
+                  << ": absent -- that transaction never became durable\n";
+        return 0;
+    }
+    auto account = database.materialize(*handle);
+    if (!account) {
+        return print_error(account.error());
+    }
+    std::cout << "Account " << object_id << ": owner=" << modb::escape_for_terminal(account->owner)
+              << " balance=" << account->balance << " -- present after recovery\n";
+    return 0;
+}
+
 // Interpreta um ObjectId (u64 positivo) vindo da linha de comando.
 modb::Result<std::uint64_t> parse_object_id(std::string_view text) {
     auto value = parse_integer(text);
@@ -2655,6 +3053,47 @@ int run_coll_command(int argc, char* argv[]) {
         return command_coll_demo(argv[3], argc == 5);
     }
     std::cerr << "Unknown coll command: " << subcommand << '\n';
+    return 2;
+}
+
+int run_tx_command(int argc, char* argv[]) {
+    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+        print_tx_help();
+        return 0;
+    }
+    const std::string_view subcommand{argv[2]};
+    if (subcommand == "demo") {
+        if (argc != 4 && !(argc == 5 && std::string_view{argv[4]} == "--force")) {
+            return print_usage_error("modb tx demo <file> [--force]");
+        }
+        return command_tx_demo(argv[3], argc == 5);
+    }
+    if (subcommand == "crash") {
+        const bool has_force = argc == 6 && std::string_view{argv[5]} == "--force";
+        if (argc != 5 && !has_force) {
+            return print_usage_error(
+                "modb tx crash <file> <before-commit|after-commit|mid-apply|before-cleanup> "
+                "[--force]");
+        }
+        return command_tx_crash(argv[3], argv[4], has_force);
+    }
+    if (subcommand == "wal-info") {
+        if (argc != 4) {
+            return print_usage_error("modb tx wal-info <file>");
+        }
+        return command_tx_wal_info(argv[3]);
+    }
+    if (subcommand == "get") {
+        if (argc != 5) {
+            return print_usage_error("modb tx get <file> <object-id>");
+        }
+        auto id = parse_object_id(argv[4]);
+        if (!id) {
+            return print_error(id.error());
+        }
+        return command_tx_get(argv[3], *id);
+    }
+    std::cerr << "Unknown tx command: " << subcommand << '\n';
     return 2;
 }
 
@@ -2994,6 +3433,9 @@ int run(int argc, char* argv[]) {
     }
     if (command == "coll") {
         return run_coll_command(argc, argv);
+    }
+    if (command == "tx") {
+        return run_tx_command(argc, argv);
     }
     std::cerr << "Unknown command: " << command << "\nUse --help for usage.\n";
     return 2;
