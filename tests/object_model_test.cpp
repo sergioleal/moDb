@@ -264,9 +264,11 @@ void test_type_registry(TestSuite& suite) {
     suite.check(first_id.has_value() && first_id->value == first_user_object_id,
                 "the first registered type receives the first user ObjectId");
 
-    // Um segundo tipo com o mesmo nome é rejeitado.
-    suite.check_error(registry.register_type(*employee), ErrorCode::duplicate_type,
-                      "registering the same type name twice is rejected");
+    // Um segundo tipo com o mesmo nome cria uma nova versão.
+    auto evolved_id = registry.register_type(*employee);
+    suite.check(evolved_id.has_value() && first_id.has_value() &&
+                    evolved_id->value == first_id->value + 1,
+                "registering the same type name creates a newer version");
 
     if (first_id) {
         auto by_id = registry.find(*first_id);
@@ -274,8 +276,8 @@ void test_type_registry(TestSuite& suite) {
                     "a registered type is found by id");
     }
     auto by_name = registry.find("Employee");
-    suite.check(by_name.has_value() && by_name->get().id() == first_id,
-                "a registered type is found by name and carries the assigned id");
+    suite.check(by_name.has_value() && by_name->get().id() == evolved_id,
+                "lookup by name returns the latest type version");
 
     suite.check_error(registry.find(TypeDefinitionId{999}), ErrorCode::type_not_found,
                       "an unknown id is reported");
@@ -290,7 +292,7 @@ void test_type_registry(TestSuite& suite) {
     if (department) {
         auto second_id = registry.register_type(*department);
         suite.check(second_id.has_value() && first_id.has_value() &&
-                        second_id->value == first_id->value + 1,
+                        evolved_id.has_value() && second_id->value == evolved_id->value + 1,
                     "distinct types receive monotonically increasing ids");
     }
 }

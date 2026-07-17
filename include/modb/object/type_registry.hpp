@@ -15,8 +15,10 @@
 #include <string>
 // Disponibiliza uma visão leve usada nas buscas por nome.
 #include <string_view>
+#include <span>
 // Disponibiliza o mapa que relaciona nomes ao id mais recente.
 #include <unordered_map>
+#include <vector>
 
 namespace modb::object {
 
@@ -30,11 +32,11 @@ namespace modb::object {
 // tipos antes de existir persistência.
 class TypeRegistry {
 public:
-    // Registra um tipo ainda não persistido, atribuindo seu TypeDefinitionId.
-    // Rejeita um nome já registrado.
+    // Registra uma versão de tipo ainda não persistida. Um nome existente cria
+    // nova versão e passa a ser devolvido pela busca por nome.
     [[nodiscard]] Result<TypeDefinitionId> register_type(TypeDefinition definition);
     // Registra um tipo com um id já decidido externamente (pelo contador
-    // persistente do DBRT, na Fase 2). Rejeita nome ou id já registrados.
+    // persistente do DBRT, na Fase 2). Rejeita apenas id já registrado.
     // Usado tanto ao criar um tipo novo quanto ao reconstruir o catálogo.
     [[nodiscard]] Result<void> register_with_id(TypeDefinitionId id, TypeDefinition definition);
     // Procura um tipo pelo identificador.
@@ -43,6 +45,12 @@ public:
     // Procura um tipo pelo nome, retornando sua versão mais recente.
     [[nodiscard]] Result<std::reference_wrapper<const TypeDefinition>> find(
         std::string_view name) const;
+    // Lista todas as versões de um nome em ordem crescente de identidade.
+    [[nodiscard]] std::vector<std::reference_wrapper<const TypeDefinition>> history(
+        std::string_view name) const;
+    // Define quais versões estão ativas na baseline corrente; versões
+    // históricas continuam acessíveis por id.
+    [[nodiscard]] Result<void> activate(std::span<const TypeDefinitionId> type_ids);
 
 private:
     // Relaciona cada id atribuído ao seu TypeDefinition completo.

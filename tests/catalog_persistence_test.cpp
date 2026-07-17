@@ -65,6 +65,7 @@ int main() {
     {
         TemporaryDatabase database{"types"};
         TypeDefinitionId employee_id{};
+        TypeDefinitionId latest_employee_id{};
         {
             auto file = PageFile::create(database.path());
             if (!file) {
@@ -82,9 +83,13 @@ int main() {
                 return suite.finish();
             }
             employee_id = *id;
-            // Tipo duplicado é rejeitado.
-            suite.check_error(store->register_type(rich_type()), ErrorCode::duplicate_type,
-                              "registering the same type name twice is rejected");
+            // O mesmo nome cria uma versão histórica nova.
+            auto evolved = store->register_type(rich_type());
+            suite.check(evolved.has_value() && evolved->value > employee_id.value,
+                        "registering the same name creates a newer type version");
+            if (evolved) {
+                latest_employee_id = *evolved;
+            }
             suite.check(store->current_baseline().has_value(),
                         "a baseline exists after registering a type");
             suite.check(file->flush().has_value(), "changes flushed");
@@ -129,8 +134,9 @@ int main() {
                             store->current_baseline()->types().size() == 1,
                         "the current baseline is restored");
             // find por nome também funciona.
-            suite.check(store->find_type("Employee").has_value(),
-                        "type restored is found by name");
+            auto latest = store->find_type("Employee");
+            suite.check(latest.has_value() && latest->get().id() == latest_employee_id,
+                        "type lookup by name restores the latest version");
         }
     }
 

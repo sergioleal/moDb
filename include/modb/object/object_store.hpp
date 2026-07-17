@@ -49,6 +49,14 @@ public:
         TypeDefinitionId id) const;
     [[nodiscard]] Result<std::reference_wrapper<const TypeDefinition>> find_type(
         std::string_view name) const;
+    [[nodiscard]] std::vector<std::reference_wrapper<const TypeDefinition>> type_history(
+        std::string_view name) const {
+        return registry_.history(name);
+    }
+    // Busca uma baseline histórica por identidade.
+    [[nodiscard]] Result<std::reference_wrapper<const Baseline>> find_baseline(
+        BaselineId id) const;
+    [[nodiscard]] std::span<const Baseline> baselines() const noexcept { return baselines_; }
 
     // Cria um objeto do tipo dado, validando o payload, persistindo-o e
     // registrando sua identidade. Devolve o ObjectId atribuído.
@@ -71,7 +79,8 @@ public:
 private:
     ObjectStore(storage::PageFile& file, DatabaseRoot root, IdentityMap identity,
                 storage::TableHeap data_heap, CatalogStore catalog, TypeRegistry registry,
-                std::vector<TypeDefinitionId> type_ids, std::optional<Baseline> baseline) noexcept
+                std::vector<TypeDefinitionId> type_ids, std::vector<Baseline> baselines,
+                std::optional<Baseline> baseline) noexcept
         : file_{&file},
           root_{std::move(root)},
           identity_{std::move(identity)},
@@ -79,6 +88,7 @@ private:
           catalog_{std::move(catalog)},
           registry_{std::move(registry)},
           type_ids_{std::move(type_ids)},
+          baselines_{std::move(baselines)},
           current_baseline_{std::move(baseline)} {}
 
     // Aloca o próximo ObjectId, persistindo o contador antes de devolvê-lo.
@@ -91,8 +101,10 @@ private:
     storage::TableHeap data_heap_;
     CatalogStore catalog_;
     TypeRegistry registry_;
-    // Ids de todos os tipos registrados, para reconstruir a baseline.
+    // Ids das versões ativas, usados ao construir a próxima baseline.
     std::vector<TypeDefinitionId> type_ids_;
+    // Baselines históricas imutáveis, inclusive a corrente.
+    std::vector<Baseline> baselines_;
     std::optional<Baseline> current_baseline_;
 };
 

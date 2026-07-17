@@ -1,6 +1,10 @@
 // Importa a interface de ObjectStore.
 #include "modb/object/object_store.hpp"
 
+// Disponibiliza o limite do espaço de ObjectIds.
+#include <limits>
+// Disponibiliza diagnósticos numéricos.
+#include <string>
 // Disponibiliza std::move.
 #include <utility>
 
@@ -51,6 +55,7 @@ Result<ObjectStore> ObjectStore::create(storage::PageFile& file) {
                        std::move(*catalog),
                        TypeRegistry{},
                        {},
+                       {},
                        std::nullopt};
 }
 
@@ -91,30 +96,35 @@ Result<ObjectStore> ObjectStore::open(storage::PageFile& file) {
         return std::unexpected(contents.error());
     }
     TypeRegistry registry;
-    std::vector<TypeDefinitionId> type_ids;
-    type_ids.reserve(contents->types.size());
     for (auto& decoded : contents->types) {
         if (auto registered = registry.register_with_id(decoded.id, std::move(decoded.definition));
             !registered) {
             return std::unexpected(registered.error());
         }
-        type_ids.push_back(decoded.id);
     }
 
     // Seleciona a baseline corrente indicada pelo DBRT, se houver.
     std::optional<Baseline> current;
+    std::vector<Baseline> baselines;
+    baselines.reserve(contents->baselines.size());
     const auto current_id = root->current_baseline();
     if (current_id != invalid_object_id) {
         for (auto& decoded : contents->baselines) {
+            auto baseline = decoded.baseline.with_id(decoded.id);
             if (decoded.id == current_id) {
-                current = decoded.baseline.with_id(decoded.id);
-                break;
+                current = baseline;
             }
+            baselines.push_back(std::move(baseline));
         }
         if (!current) {
             return std::unexpected(Error{ErrorCode::corrupt_file,
                                          "database root points to a missing baseline"});
         }
+    }
+    if (auto activated =
+            registry.activate(current ? current->types() : std::span<const TypeDefinitionId>{});
+        !activated) {
+        return std::unexpected(activated.error());
     }
 
     return ObjectStore{file,
@@ -123,12 +133,19 @@ Result<ObjectStore> ObjectStore::open(storage::PageFile& file) {
                        std::move(*data_heap),
                        std::move(*catalog),
                        std::move(registry),
-                       std::move(type_ids),
+                       current ? std::vector<TypeDefinitionId>{current->types().begin(),
+                                                              current->types().end()}
+                               : std::vector<TypeDefinitionId>{},
+                       std::move(baselines),
                        std::move(current)};
 }
 
 Result<ObjectId> ObjectStore::allocate_object_id() {
     const auto id = root_.next_object_id();
+    if (id == 0 || id == std::numeric_limits<std::uint64_t>::max()) {
+        return std::unexpected(
+            Error{ErrorCode::value_too_large, "ObjectId space exhausted"});
+    }
     // Persiste o contador ANTES de qualquer gravação do objeto: um crash entre
     // as duas escritas desperdiça um id, nunca o reutiliza (ADR-001/ADR-004).
     if (auto advanced = root_.set_next_object_id(id + 1); !advanced) {
@@ -138,25 +155,40 @@ Result<ObjectId> ObjectStore::allocate_object_id() {
 }
 
 Result<TypeDefinitionId> ObjectStore::register_type(TypeDefinition definition) {
-    // Rejeita nome duplicado antes de consumir um id.
-    if (registry_.find(definition.name())) {
-        return std::unexpected(
-            Error{ErrorCode::duplicate_type, "type already registered: " + definition.name()});
-    }
+    const auto previous = registry_.find(definition.name());
+    const std::optional<TypeDefinitionId> previous_id =
+        previous ? std::optional<TypeDefinitionId>{previous->get().id()} : std::nullopt;
 
     auto id = allocate_object_id();
     if (!id) {
         return std::unexpected(id.error());
     }
     const TypeDefinitionId type_id{id->value};
-    if (auto registered = registry_.register_with_id(type_id, std::move(definition));
+    auto candidate_registry = registry_;
+    if (auto registered = candidate_registry.register_with_id(type_id, std::move(definition));
         !registered) {
         return std::unexpected(registered.error());
     }
-    type_ids_.push_back(type_id);
+    auto candidate_type_ids = type_ids_;
+    if (previous_id) {
+        bool replaced = false;
+        for (auto& current_id : candidate_type_ids) {
+            if (current_id == *previous_id) {
+                current_id = type_id;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) {
+            return std::unexpected(
+                Error{ErrorCode::corrupt_file, "active type is absent from current baseline"});
+        }
+    } else {
+        candidate_type_ids.push_back(type_id);
+    }
 
     // Persiste o tipo recém-estampado.
-    auto stored = registry_.find(type_id);
+    auto stored = candidate_registry.find(type_id);
     if (!stored) {
         return std::unexpected(stored.error());
     }
@@ -165,7 +197,7 @@ Result<TypeDefinitionId> ObjectStore::register_type(TypeDefinition definition) {
     }
 
     // Cria e persiste uma nova baseline com todos os tipos atuais.
-    auto baseline = Baseline::create(type_ids_);
+    auto baseline = Baseline::create(candidate_type_ids);
     if (!baseline) {
         return std::unexpected(baseline.error());
     }
@@ -180,7 +212,12 @@ Result<TypeDefinitionId> ObjectStore::register_type(TypeDefinition definition) {
     if (auto linked = root_.set_current_baseline(BaselineId{baseline_id->value}); !linked) {
         return std::unexpected(linked.error());
     }
+    // O ponteiro da raiz é o commit point. Só agora publica o novo catálogo em
+    // memória; tipos/baselines órfãos de uma falha anterior não ficam ativos.
+    registry_ = std::move(candidate_registry);
+    type_ids_ = std::move(candidate_type_ids);
     current_baseline_ = stamped;
+    baselines_.push_back(stamped);
 
     return type_id;
 }
@@ -193,6 +230,16 @@ Result<std::reference_wrapper<const TypeDefinition>> ObjectStore::find_type(
 Result<std::reference_wrapper<const TypeDefinition>> ObjectStore::find_type(
     std::string_view name) const {
     return registry_.find(name);
+}
+
+Result<std::reference_wrapper<const Baseline>> ObjectStore::find_baseline(BaselineId id) const {
+    for (const auto& baseline : baselines_) {
+        if (baseline.id() == id) {
+            return std::cref(baseline);
+        }
+    }
+    return std::unexpected(
+        Error{ErrorCode::type_not_found, "baseline not found: " + std::to_string(id.value)});
 }
 
 Result<ObjectId> ObjectStore::create_object(const TypeDefinition& type, FieldValues fields) {

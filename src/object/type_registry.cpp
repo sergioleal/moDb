@@ -1,6 +1,10 @@
 // Importa a declaração de TypeRegistry.
 #include "modb/object/type_registry.hpp"
 
+// Disponibiliza o limite do contador de ids.
+#include <limits>
+// Disponibiliza ordenação do histórico por identidade.
+#include <algorithm>
 // Disponibiliza std::to_string para as mensagens de erro.
 #include <string>
 // Disponibiliza std::move.
@@ -8,15 +12,12 @@
 
 namespace modb::object {
 
-// Registra um tipo, validando unicidade de nome e atribuindo seu id.
+// Registra uma nova versão de tipo e atribui seu id.
 Result<TypeDefinitionId> TypeRegistry::register_type(TypeDefinition definition) {
-    // O nome já precisa ter sido validado por TypeDefinition::create; aqui só
-    // resta checar a unicidade entre os tipos já conhecidos deste registro.
-    if (latest_id_by_name_.contains(definition.name())) {
+    if (next_id_ == 0 || next_id_ == std::numeric_limits<std::uint64_t>::max()) {
         return std::unexpected(
-            Error{ErrorCode::duplicate_type, "type already registered: " + definition.name()});
+            Error{ErrorCode::value_too_large, "TypeDefinitionId space exhausted"});
     }
-
     // Copia o nome antes de mover a definição para dentro do mapa por id.
     const std::string name = definition.name();
     const TypeDefinitionId id{next_id_};
@@ -25,7 +26,7 @@ Result<TypeDefinitionId> TypeRegistry::register_type(TypeDefinition definition) 
     // Estampa o id sobre a definição já validada, sem revalidar nada.
     TypeDefinition stamped{id, std::move(definition)};
     types_by_id_.emplace(id.value, std::move(stamped));
-    latest_id_by_name_.emplace(name, id.value);
+    latest_id_by_name_.insert_or_assign(name, id.value);
     return id;
 }
 
@@ -39,17 +40,20 @@ Result<void> TypeRegistry::register_with_id(TypeDefinitionId id, TypeDefinition 
         return std::unexpected(Error{ErrorCode::duplicate_type,
                                      "type id already registered: " + std::to_string(id.value)});
     }
-    if (latest_id_by_name_.contains(definition.name())) {
-        return std::unexpected(
-            Error{ErrorCode::duplicate_type, "type already registered: " + definition.name()});
-    }
     const std::string name = definition.name();
     TypeDefinition stamped{id, std::move(definition)};
     types_by_id_.emplace(id.value, std::move(stamped));
-    latest_id_by_name_.emplace(name, id.value);
+    // A maior identidade é a versão mais recente. Isso também torna a
+    // reconstrução independente da ordem física dos registros do catálogo.
+    const auto latest = latest_id_by_name_.find(name);
+    if (latest == latest_id_by_name_.end() || id.value > latest->second) {
+        latest_id_by_name_.insert_or_assign(name, id.value);
+    }
     // Mantém o contador interno à frente de qualquer id já visto, para o caso de
     // o mesmo registro também ser usado com register_type (auto id).
-    if (id.value >= next_id_) {
+    if (id.value == std::numeric_limits<std::uint64_t>::max()) {
+        next_id_ = 0;
+    } else if (id.value >= next_id_) {
         next_id_ = id.value + 1;
     }
     return {};
@@ -75,6 +79,39 @@ Result<std::reference_wrapper<const TypeDefinition>> TypeRegistry::find(
             Error{ErrorCode::type_not_found, "type not found: " + std::string{name}});
     }
     return find(TypeDefinitionId{it->second});
+}
+
+std::vector<std::reference_wrapper<const TypeDefinition>> TypeRegistry::history(
+    std::string_view name) const {
+    std::vector<std::reference_wrapper<const TypeDefinition>> versions;
+    for (const auto& [id, type] : types_by_id_) {
+        (void)id;
+        if (type.name() == name) {
+            versions.push_back(std::cref(type));
+        }
+    }
+    std::ranges::sort(versions, {}, [](const auto& version) {
+        return version.get().id().value;
+    });
+    return versions;
+}
+
+Result<void> TypeRegistry::activate(std::span<const TypeDefinitionId> type_ids) {
+    std::unordered_map<std::string, std::uint64_t> active;
+    active.reserve(type_ids.size());
+    for (const auto id : type_ids) {
+        auto type = find(id);
+        if (!type) {
+            return std::unexpected(type.error());
+        }
+        if (!active.emplace(type->get().name(), id.value).second) {
+            return std::unexpected(
+                Error{ErrorCode::duplicate_type, "baseline contains two versions of type: " +
+                                                     type->get().name()});
+        }
+    }
+    latest_id_by_name_ = std::move(active);
+    return {};
 }
 
 } // namespace modb::object

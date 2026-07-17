@@ -84,6 +84,11 @@ enum class ErrorCode {
     // Um ObjectId/TypeDefinitionId/BaselineId igual a zero foi usado onde um
     // identificador válido (não nulo) era exigido.
     invalid_object_id,
+    // Um tipo C++ já possui outro binding ativo na instância.
+    binding_mismatch,
+    // Uma projeção não pôde reconciliar o tipo persistido com o binding atual
+    // (conversão de tipo não permitida sem migração registrada).
+    incompatible_projection,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.
