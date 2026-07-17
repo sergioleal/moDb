@@ -301,10 +301,10 @@ leituras e na concorrência, a fase é entregue em quatro incrementos completos:
 
 #### Fase 6A — Épocas e formato versionado
 
-- [ ] Registrar o ADR-009: modelo single-writer / multi-reader por época,
+- [x] Registrar o ADR-009: modelo single-writer / multi-reader por época,
       limite inicial de uma versão anterior, conflitos e comportamento após
       reabertura.
-- [ ] Persistir a época global no DBRT e implementar o IdentityMap v2 com
+- [x] Persistir a época global no DBRT e implementar o IdentityMap v2 com
       localizações `current`/`previous` e migração do formato v1.
 
 Entregável 6A: banco reabre e migra com segurança para o formato versionado,

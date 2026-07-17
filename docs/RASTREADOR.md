@@ -46,12 +46,12 @@
 | [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ✅ Concluída | 10/10 | Fase 2 |
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
-| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ⬜ Não iniciada | 0/9 | Fase 5 |
+| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | 🔄 Em andamento | 2/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ⬜ Não iniciada | 0/10 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **49/103 (~48%)** | |
+| **Total** | | | **51/103 (~50%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -324,21 +324,35 @@ Isso permitiu observar a garantia de atomicidade (`before-commit` → ausente;
 
 ## Fase 6 — Snapshots e MVCC
 
-Status: ⬜ Não iniciada (0/9) — quatro entregas incrementais. Definição completa:
+Status: 🔄 Em andamento (2/9) — quatro entregas incrementais; 6A concluída,
+6B–6D não iniciadas. Definição completa:
 [PLANO_ODB.md §Fase 6](PLANO_ODB.md#fase-6--snapshots-e-mvcc) ·
 [PROTOCOLO_FASES.md §Fase 6](PROTOCOLO_FASES.md#fase-6--snapshots-e-mvcc)
 
 ### Fase 6A — Épocas e formato versionado
 
-Status: ⬜ Não iniciada (0/3)
+Status: ✅ Concluída (2/2) — commit `1e08cf4`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 6A.1 | ADR-009: épocas single-writer, limite de versões e reabertura | ⬜ | |
-| 6A.2 | Época no DBRT, IdentityMap v2 e migração v1→v2 | ⬜ | |
+| 6A.1 | ADR-009: épocas single-writer, limite de versões e reabertura | ✅ | `ADR-009`; IDMP v2 de 48 bytes |
+| 6A.2 | Época no DBRT, IdentityMap v2 e migração v1→v2 | ✅ | DBRT v2; migração publicada pela raiz |
 
-Critério de aceite 6A: ⬜ bancos v1/v2 reabrem com os mesmos objetos e época
-monotônica.
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.identity_map` | migração IDMP v1→v2, objetos preservados, v2 reabre sem re-migrar | ✅ |
+| `modb.binding` | época 0→2→3 por commit, preservada na reabertura, DBRT v1 abre como v2 com época 0 | ✅ |
+| `modb.cli.mvcc_help` | grupo `modb mvcc` (status/upgrade/tick) | ✅ |
+
+Critério de aceite 6A: ✅ bancos v1/v2 reabrem com os mesmos objetos e época
+monotônica através de commit e reabertura — demonstrado por
+`modb.identity_map`/`modb.binding` e pela CLI (`modb mvcc status/upgrade/tick`,
+ver [USO_DA_CLI.md §MVCC](USO_DA_CLI.md#mvcc--fase-6a)). Suíte completa 60/60
+em Debug, `-Werror` e sanitizers. `database_check` estendido para diagnóstico
+somente-leitura de WAL/DBRT/IDMP (nunca migra/reaplica/apaga durante o check) —
+ver [RELATORIO_CHECK_RECOVERY_FASES_5_6.md](RELATORIO_CHECK_RECOVERY_FASES_5_6.md).
 
 ### Fase 6B — Snapshot e leituras consistentes
 
