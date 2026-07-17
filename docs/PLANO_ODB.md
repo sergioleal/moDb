@@ -315,11 +315,11 @@ permanece monotônica após commit e reabertura.
 
 #### Fase 6B — Snapshot e leituras consistentes
 
-- [ ] Implementar `Snapshot` RAII associado a transação/consulta e o registro
+- [x] Implementar `Snapshot` RAII associado a transação/consulta e o registro
       em memória das épocas ativas.
-- [ ] Fazer `get` e `scan` selecionarem a versão visível na época do snapshot,
+- [x] Fazer `get` e `scan` selecionarem a versão visível na época do snapshot,
       cobrindo criação, atualização e remoção posteriores.
-- [ ] Implementar `snapshot_conflict` para impedir que uma segunda alteração
+- [x] Implementar `snapshot_conflict` para impedir que uma segunda alteração
       sobrescreva a única versão anterior ainda visível.
 
 Entregável 6B: API de snapshot com leituras pontuais e varreduras consistentes.

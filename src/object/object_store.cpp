@@ -279,7 +279,9 @@ Result<ObjectId> ObjectStore::create_object(const TypeDefinition& type, FieldVal
     if (!location) {
         return std::unexpected(location.error());
     }
-    if (auto bound = identity_.bind(*id, *location); !bound) {
+    // A época deste objeto é a do commit que o tornará durável (Fase 6B): a
+    // mesma que advance_epoch() vai publicar, já que só há um escritor.
+    if (auto bound = identity_.bind(*id, *location, root_.epoch() + 1); !bound) {
         return std::unexpected(bound.error());
     }
     return *id;
@@ -297,7 +299,46 @@ Result<DecodedObject> ObjectStore::get(ObjectId id) {
     return decode_object(*record);
 }
 
-Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldValues fields) {
+Result<DecodedObject> ObjectStore::get_at(ObjectId id, std::uint64_t snapshot_epoch) {
+    auto location = identity_.find_at(id, snapshot_epoch);
+    if (!location) {
+        return std::unexpected(location.error());
+    }
+    auto record = data_heap_.read(*location);
+    if (!record) {
+        return std::unexpected(record.error());
+    }
+    return decode_object(*record);
+}
+
+Result<void> ObjectStore::check_snapshot_conflict(
+    ObjectId id, std::optional<std::uint64_t> oldest_open_snapshot_epoch) const {
+    if (!oldest_open_snapshot_epoch) {
+        return {};
+    }
+    auto current = identity_.current_epoch(id);
+    if (!current) {
+        return std::unexpected(current.error());
+    }
+    // Nenhum snapshot aberto precisa de algo anterior à época current: seguro.
+    if (*oldest_open_snapshot_epoch >= *current) {
+        return {};
+    }
+    auto occupied = identity_.has_previous(id);
+    if (!occupied) {
+        return std::unexpected(occupied.error());
+    }
+    if (*occupied) {
+        return std::unexpected(Error{
+            ErrorCode::snapshot_conflict,
+            "object " + std::to_string(id.value) +
+                " already has a previous version visible to an older open snapshot"});
+    }
+    return {};
+}
+
+Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldValues fields,
+                                 std::optional<std::uint64_t> oldest_open_snapshot_epoch) {
     if (!file_->in_transaction()) {
         return std::unexpected(
             Error{ErrorCode::transaction_required, "object update requires an active transaction"});
@@ -305,40 +346,38 @@ Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldV
     if (auto valid = validate_object(type, fields); !valid) {
         return std::unexpected(valid.error());
     }
-    auto location = identity_.find(id);
-    if (!location) {
-        return std::unexpected(location.error());
+    // Confere ANTES de qualquer escrita física: um conflito não deixa rastro.
+    if (auto conflict = check_snapshot_conflict(id, oldest_open_snapshot_epoch); !conflict) {
+        return std::unexpected(conflict.error());
     }
     auto record = encode_object(id, type.id(), fields);
     if (!record) {
         return std::unexpected(record.error());
     }
-    auto moved = data_heap_.update(*location, *record);
-    if (!moved) {
-        return std::unexpected(moved.error());
+    // Nunca reaproveita o registro antigo: um snapshot aberto pode depender
+    // dos bytes exatamente como estavam antes desta escrita (Fase 6B). A nova
+    // versão sempre ocupa um endereço físico próprio; o antigo permanece
+    // legível como `previous` até a Fase 6C decidir reciclá-lo.
+    auto location = data_heap_.insert(*record);
+    if (!location) {
+        return std::unexpected(location.error());
     }
-    // Só reescreve o mapa de identidade se o registro mudou de endereço.
-    if (*moved != *location) {
-        if (auto rebound = identity_.rebind(id, *moved); !rebound) {
-            return std::unexpected(rebound.error());
-        }
-    }
-    return {};
+    return identity_.rebind(id, *location, root_.epoch() + 1);
 }
 
-Result<void> ObjectStore::remove(ObjectId id) {
+Result<void> ObjectStore::remove(ObjectId id,
+                                 std::optional<std::uint64_t> oldest_open_snapshot_epoch) {
     if (!file_->in_transaction()) {
         return std::unexpected(
             Error{ErrorCode::transaction_required, "object removal requires an active transaction"});
     }
-    auto location = identity_.find(id);
-    if (!location) {
-        return std::unexpected(location.error());
+    if (auto conflict = check_snapshot_conflict(id, oldest_open_snapshot_epoch); !conflict) {
+        return std::unexpected(conflict.error());
     }
-    if (auto erased = data_heap_.erase(*location); !erased) {
-        return std::unexpected(erased.error());
-    }
-    return identity_.erase(id);
+    // O registro físico não é tocado: um snapshot mais antigo pode precisar
+    // dele via `previous`. A reciclagem do espaço é responsabilidade da Fase
+    // 6C (retenção e GC), não desta escrita.
+    return identity_.erase(id, root_.epoch() + 1);
 }
 
 Result<void> ObjectStore::scan(
@@ -351,6 +390,44 @@ Result<void> ObjectStore::scan(
         auto object = decode_object(record.bytes);
         if (!object) {
             return std::unexpected(object.error());
+        }
+        // Desde a Fase 6B, update() nunca reaproveita o registro antigo (e
+        // remove() nunca apaga o físico): ambos preservam a versão anterior
+        // como `previous`, para snapshots abertos. Isso significa que o heap
+        // físico pode conter, para o mesmo id, tanto o registro current quanto
+        // um previous órfão — só o que `identity_.find` resolve como current
+        // é visitado aqui; o resto é uma versão antiga preservada, não um
+        // objeto vivo.
+        auto current = identity_.find(object->id);
+        if (!current || *current != record.id) {
+            continue;
+        }
+        if (auto result = visitor(*object); !result) {
+            return std::unexpected(result.error());
+        }
+    }
+    return {};
+}
+
+Result<void> ObjectStore::scan_at(
+    std::uint64_t snapshot_epoch,
+    const std::function<Result<void>(const DecodedObject&)>& visitor) {
+    auto records = data_heap_.scan_records();
+    if (!records) {
+        return std::unexpected(records.error());
+    }
+    for (const auto& record : *records) {
+        auto object = decode_object(record.bytes);
+        if (!object) {
+            return std::unexpected(object.error());
+        }
+        // O heap físico pode conter, para o mesmo id, tanto a versão current
+        // quanto uma previous ainda preservada. Só o registro cuja localização
+        // é exatamente a que find_at resolveria para esta época é visitado —
+        // isso evita tanto duplicar o objeto quanto expor a versão errada.
+        auto resolved = identity_.find_at(object->id, snapshot_epoch);
+        if (!resolved || *resolved != record.id) {
+            continue;
         }
         if (auto result = visitor(*object); !result) {
             return std::unexpected(result.error());

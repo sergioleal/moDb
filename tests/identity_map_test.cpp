@@ -72,7 +72,7 @@ int main() {
 
         // bind/find: a localização volta idêntica.
         const auto record = make_record(42);
-        suite.check(map->bind(ObjectId{16}, record).has_value(), "an object binds");
+        suite.check(map->bind(ObjectId{16}, record, 1).has_value(), "an object binds");
         suite.check(map->find(ObjectId{16}) == Result<RecordId>{record},
                     "a bound object is found at the same location");
 
@@ -82,26 +82,26 @@ int main() {
 
         // rebind: atualiza a localização.
         const auto moved = make_record(99);
-        suite.check(map->rebind(ObjectId{16}, moved).has_value(), "a bound object rebinds");
+        suite.check(map->rebind(ObjectId{16}, moved, 2).has_value(), "a bound object rebinds");
         suite.check(map->find(ObjectId{16}) == Result<RecordId>{moved},
                     "a rebound object is found at the new location");
 
         // erase: find falha, rebind falha.
-        suite.check(map->erase(ObjectId{16}).has_value(), "a bound object is erased");
+        suite.check(map->erase(ObjectId{16}, 3).has_value(), "a bound object is erased");
         suite.check_error(map->find(ObjectId{16}), ErrorCode::record_not_found,
                           "an erased object is not found");
-        suite.check_error(map->rebind(ObjectId{16}, record), ErrorCode::record_not_found,
+        suite.check_error(map->rebind(ObjectId{16}, record, 4), ErrorCode::record_not_found,
                           "an erased object cannot be rebound");
 
         // Um id nunca reutilizado permanece com tombstone: novo bind do MESMO id
         // é rejeitado (o motor nunca reusa ids, mas a guarda precisa existir).
-        suite.check_error(map->bind(ObjectId{16}, record), ErrorCode::invalid_argument,
+        suite.check_error(map->bind(ObjectId{16}, record, 5), ErrorCode::invalid_argument,
                           "an erased id cannot be bound again");
 
         // Crescimento: muitos binds forçam várias páginas IDMP.
         bool all_found = true;
         for (std::uint64_t id = 100; id < 10100; ++id) {
-            if (!map->bind(ObjectId{id}, make_record(id))) {
+            if (!map->bind(ObjectId{id}, make_record(id), 1)) {
                 all_found = false;
                 break;
             }
@@ -119,12 +119,74 @@ int main() {
         // Um id muito alto força a criação de um segundo diretório IDMD
         // encadeado (o primeiro cobre ~130k entradas com página de 4 KiB).
         const std::uint64_t high_id = 2'000'000;
-        suite.check(map->bind(ObjectId{high_id}, make_record(high_id)).has_value(),
+        suite.check(map->bind(ObjectId{high_id}, make_record(high_id), 1).has_value(),
                     "a very high id binds, chaining a second directory");
         suite.check(map->find(ObjectId{high_id}) == Result<RecordId>{make_record(high_id)},
                     "the high id is found through the chained directory");
 
         suite.check(file.flush().has_value(), "map changes are flushed");
+    }
+
+    // --- Fase 6B: leitura versionada (current/previous por época) ---
+    {
+        TemporaryDatabase versioned_database{"versioned"};
+        auto versioned_file = PageFile::create(versioned_database.path());
+        suite.check(versioned_file.has_value(), "versioned fixture file is created");
+        if (!versioned_file) {
+            return suite.finish();
+        }
+        auto map = IdentityMap::create(*versioned_file);
+        suite.check(map.has_value(), "versioned identity map is created");
+        if (!map) {
+            return suite.finish();
+        }
+
+        const auto v1 = make_record(11);
+        const auto v2 = make_record(22);
+        suite.check(map->bind(ObjectId{16}, v1, 1).has_value(), "versioned object binds at epoch 1");
+        suite.check(map->current_epoch(ObjectId{16}) == Result<std::uint64_t>{1},
+                    "current_epoch reports the binding epoch");
+        suite.check(map->has_previous(ObjectId{16}) == Result<bool>{false},
+                    "a freshly bound object has no previous version");
+
+        // Antes do rebind: current e previous(inexistente) resolvem para v1
+        // em qualquer época >= 1.
+        suite.check(map->find_at(ObjectId{16}, 1) == Result<RecordId>{v1},
+                    "find_at at the binding epoch resolves to the first version");
+
+        suite.check(map->rebind(ObjectId{16}, v2, 5).has_value(),
+                    "versioned object rebinds at epoch 5");
+        suite.check(map->current_epoch(ObjectId{16}) == Result<std::uint64_t>{5},
+                    "current_epoch reflects the rebind");
+        suite.check(map->has_previous(ObjectId{16}) == Result<bool>{true},
+                    "rebind populates the previous version");
+        suite.check(map->find(ObjectId{16}) == Result<RecordId>{v2},
+                    "find (no snapshot) always resolves to current");
+        suite.check(map->find_at(ObjectId{16}, 5) == Result<RecordId>{v2},
+                    "find_at at or after the rebind epoch resolves to the new version");
+        suite.check(map->find_at(ObjectId{16}, 3) == Result<RecordId>{v1},
+                    "find_at between the two epochs falls back to previous");
+        suite.check_error(map->find_at(ObjectId{16}, 0), ErrorCode::record_not_found,
+                          "find_at before the object was even bound reports not found");
+
+        // Um id criado só a partir de certa época é invisível antes dela: uma
+        // época anterior ao bind não encontra nem current nem previous.
+        suite.check(map->bind(ObjectId{17}, make_record(33), 5).has_value(),
+                    "a second object binds at epoch 5");
+        suite.check_error(map->find_at(ObjectId{17}, 1), ErrorCode::record_not_found,
+                          "an object created later is invisible to an older epoch");
+
+        // erase versionado: current vira remoção, previous preserva a v2.
+        suite.check(map->erase(ObjectId{16}, 9).has_value(),
+                    "versioned object is removed at epoch 9");
+        suite.check_error(map->find(ObjectId{16}), ErrorCode::record_not_found,
+                          "find (no snapshot) does not see a removed object");
+        suite.check_error(map->find_at(ObjectId{16}, 9), ErrorCode::record_not_found,
+                          "find_at at or after the removal epoch does not see the object");
+        suite.check(map->find_at(ObjectId{16}, 5) == Result<RecordId>{v2},
+                    "find_at just before the removal still resolves via previous");
+        suite.check_error(map->rebind(ObjectId{16}, v1, 10), ErrorCode::record_not_found,
+                          "a removed object cannot be rebound, even under versioning");
     }
 
     // Reabertura: o mapa persiste entre execuções.

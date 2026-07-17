@@ -135,6 +135,7 @@ int command_tx_wal_info(const std::filesystem::path& path);
 int command_tx_get(const std::filesystem::path& path, std::uint64_t object_id);
 int command_mvcc_status(const std::filesystem::path& path, bool explicit_upgrade);
 int command_mvcc_tick(const std::filesystem::path& path);
+int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -182,7 +183,8 @@ void print_help() {
            "  graph    Demo an object graph: refs, embedded, cascade (ODB++ Fase 4).\n"
            "  coll     Demo persistent vector/set/map collections (ODB++ Fase 4).\n"
            "  tx       Exercise transactions, the WAL and recovery (ODB++ Fase 5).\n"
-           "  mvcc     Inspect, upgrade and advance the MVCC epoch (ODB++ Fase 6A).\n"
+           "  mvcc     Inspect/advance the MVCC epoch and demo snapshots (ODB++ Fase "
+           "6A/6B).\n"
            "\n"
            "Options:\n"
            "  -h, --help     Show this help.\n"
@@ -1612,10 +1614,17 @@ void print_mvcc_help() {
                  "  modb mvcc status <file>\n"
                  "  modb mvcc upgrade <file>\n"
                  "  modb mvcc tick <file>\n"
+                 "  modb mvcc snapshot-demo <file> [--force]\n"
                  "\n"
                  "Exercises Fase 6A: status opens and validates DBRT/IDMP v2; upgrade\n"
                  "opens legacy v1 files and persists their compatible upgrade; tick commits\n"
-                 "an epoch-only transaction through the WAL.\n";
+                 "an epoch-only transaction through the WAL.\n"
+                 "\n"
+                 "snapshot-demo exercises Fase 6B: it opens a Snapshot, commits an update\n"
+                 "behind its back, shows the snapshot still reading the old value while a\n"
+                 "plain read sees the new one, then shows a second concurrent update being\n"
+                 "rejected with snapshot_conflict while the snapshot is still open, and\n"
+                 "finally shows the same update succeeding once the snapshot is closed.\n";
 }
 
 // Command group: oo employee — bindings C++ compilados que exercitam a Fase 3.
@@ -3120,6 +3129,141 @@ int run_tx_command(int argc, char* argv[]) {
     return 2;
 }
 
+int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force) {
+    std::error_code filesystem_error;
+    auto wal_path = path;
+    wal_path += ".wal";
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            return print_error(
+                modb::Error{modb::ErrorCode::file_already_exists,
+                            "mvcc snapshot-demo file exists; use --force to replace it"});
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            return print_error(modb::Error{modb::ErrorCode::io_error,
+                                           "cannot replace mvcc snapshot-demo database"});
+        }
+        std::filesystem::remove(wal_path, filesystem_error);
+    }
+
+    auto session = DatabaseSession::create(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    auto& database = session->database();
+    if (auto bound = database.bind(tx_account_binding()); !bound) {
+        return print_error(bound.error());
+    }
+
+    // --- cria Ana e commita ---
+    modb::object::ObjectId ana_id{};
+    {
+        auto transaction = database.begin();
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        auto ana = database.create(*transaction, TxAccount{"Ana", 100});
+        if (!ana) {
+            return print_error(ana.error());
+        }
+        ana_id = ana->id();
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
+        }
+    }
+    std::cout << "created Account{id=" << ana_id.value << ", owner=Ana, balance=100}\n";
+
+    // --- abre um snapshot antes do próximo update: leitura estável ---
+    auto opened_snapshot = database.snapshot();
+    if (!opened_snapshot) {
+        return print_error(opened_snapshot.error());
+    }
+    std::optional<modb::object::Snapshot> snapshot{std::move(*opened_snapshot)};
+    std::cout << "snapshot opened at epoch " << snapshot->epoch() << '\n';
+
+    {
+        auto transaction = database.begin();
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        auto handle = database.get<TxAccount>(ana_id);
+        if (!handle) {
+            return print_error(handle.error());
+        }
+        if (auto set = handle->set<&TxAccount::balance>(*transaction, 200); !set) {
+            return print_error(set.error());
+        }
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
+        }
+    }
+    std::cout << "committed an update behind the snapshot's back: Ana's balance -> 200\n";
+
+    auto via_snapshot = database.get<TxAccount>(ana_id, *snapshot);
+    if (!via_snapshot) {
+        return print_error(via_snapshot.error());
+    }
+    auto via_current = database.get<TxAccount>(ana_id);
+    if (!via_current) {
+        return print_error(via_current.error());
+    }
+    auto current_value = database.materialize(*via_current);
+    if (!current_value) {
+        return print_error(current_value.error());
+    }
+    std::cout << "snapshot read: balance=" << via_snapshot->balance << " (expected 100)\n"
+              << "current read:  balance=" << current_value->balance << " (expected 200)\n";
+
+    // --- conflito: a previous já está ocupada; uma 2a alteração é recusada ---
+    {
+        auto transaction = database.begin();
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        auto handle = database.get<TxAccount>(ana_id);
+        if (!handle) {
+            return print_error(handle.error());
+        }
+        auto set = handle->set<&TxAccount::balance>(*transaction, 300);
+        if (set) {
+            static_cast<void>(transaction->commit());
+            return print_error(modb::Error{
+                modb::ErrorCode::corrupt_file,
+                "expected snapshot_conflict but the second update succeeded"});
+        }
+        std::cout << "second update while the snapshot is open -> "
+                  << (set.error().code == modb::ErrorCode::snapshot_conflict
+                          ? "rejected with snapshot_conflict (expected)"
+                          : "rejected with an unexpected error")
+                  << '\n';
+        static_cast<void>(transaction->rollback());
+    }
+
+    // --- fecha o snapshot: a mesma alteração agora é aceita ---
+    snapshot.reset();
+    std::cout << "snapshot closed\n";
+    {
+        auto transaction = database.begin();
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        auto handle = database.get<TxAccount>(ana_id);
+        if (!handle) {
+            return print_error(handle.error());
+        }
+        if (auto set = handle->set<&TxAccount::balance>(*transaction, 300); !set) {
+            return print_error(set.error());
+        }
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
+        }
+    }
+    std::cout << "same update now succeeds: Ana's balance -> 300\n";
+
+    std::cout << "\nFase 6B MVCC snapshot demo: OK\n";
+    return 0;
+}
+
 int run_mvcc_command(int argc, char* argv[]) {
     if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
         print_mvcc_help();
@@ -3137,6 +3281,12 @@ int run_mvcc_command(int argc, char* argv[]) {
             return print_usage_error("modb mvcc tick <file>");
         }
         return command_mvcc_tick(argv[3]);
+    }
+    if (subcommand == "snapshot-demo") {
+        if (argc != 4 && !(argc == 5 && std::string_view{argv[4]} == "--force")) {
+            return print_usage_error("modb mvcc snapshot-demo <file> [--force]");
+        }
+        return command_mvcc_snapshot_demo(argv[3], argc == 5);
     }
     std::cerr << "Unknown mvcc command: " << subcommand << '\n';
     return 2;

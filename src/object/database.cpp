@@ -289,6 +289,19 @@ Transaction::~Transaction() {
     }
 }
 
+Snapshot::~Snapshot() {
+    if (!registered_) {
+        return;
+    }
+    // Se o banco já não estiver no registro (processo encerrando, ou já
+    // desanexado), não há o que desregistrar — não é um erro, só não há mais
+    // ninguém para avisar.
+    auto database = DatabaseRegistry::instance().find(database_);
+    if (database) {
+        (*database)->unregister_snapshot_epoch(epoch_);
+    }
+}
+
 Result<void> Transaction::commit() { return commit(CommitPhase::full); }
 
 Result<void> Transaction::commit(CommitPhase phase) {
@@ -374,7 +387,7 @@ Result<void> Database::remove_cascade(ObjectId id, std::unordered_set<std::uint6
             }
         }
     }
-    return store_.remove(id);
+    return store_.remove(id, oldest_open_snapshot_epoch());
 }
 
 Result<void> Database::register_migration(std::string type_name, std::uint64_t from_type_id,

@@ -104,6 +104,10 @@ enum class ErrorCode {
     // O WAL presente não pode ser interpretado com segurança; ele é preservado
     // para diagnóstico e a abertura do banco é interrompida.
     wal_corrupt,
+    // Uma segunda alteração do mesmo objeto foi tentada enquanto a versão
+    // anterior ainda é visível a um snapshot aberto (Fase 6B: só há uma
+    // posição `previous` por objeto — limitação documentada no ADR-009).
+    snapshot_conflict,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

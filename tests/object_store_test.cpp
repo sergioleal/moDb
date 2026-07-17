@@ -111,7 +111,8 @@ int main() {
                     "get returns the exact stored object");
 
         // update preserva a identidade.
-        suite.check(store->update(*ana, type->get(), employee("Ana Maria", 16000.0)).has_value(),
+        suite.check(store->update(*ana, type->get(), employee("Ana Maria", 16000.0), std::nullopt)
+                        .has_value(),
                     "object updated");
         auto updated = store->get(*ana);
         suite.check(updated.has_value() && updated->id == *ana &&
@@ -119,7 +120,7 @@ int main() {
                     "update is visible and keeps the identity");
 
         // remove: get falha e o id não é reutilizado.
-        suite.check(store->remove(*bia).has_value(), "object removed");
+        suite.check(store->remove(*bia, std::nullopt).has_value(), "object removed");
         suite.check_error(store->get(*bia), ErrorCode::record_not_found,
                           "a removed object is not found");
         auto carol = store->create_object(type->get(), employee("Carol", 21000.0));

@@ -204,6 +204,9 @@ if(BUILD_TESTING)
     add_executable(modb_object_store_tests tests/object_store_test.cpp)
     target_link_libraries(modb_object_store_tests PRIVATE modb::modb)
 
+    add_executable(modb_snapshot_tests tests/snapshot_test.cpp)
+    target_link_libraries(modb_snapshot_tests PRIVATE modb::modb)
+
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
@@ -265,6 +268,7 @@ if(BUILD_TESTING)
         target_link_options(modb_collection_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_identity_map_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_object_store_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_snapshot_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -294,6 +298,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.collection COMMAND modb_collection_tests)
     add_test(NAME modb.identity_map COMMAND modb_identity_map_tests)
     add_test(NAME modb.object_store COMMAND modb_object_store_tests)
+    add_test(NAME modb.snapshot COMMAND modb_snapshot_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)
@@ -343,6 +348,9 @@ if(BUILD_TESTING)
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-coll.modb --force)
     add_test(NAME modb.cli.tx_help COMMAND modb_cli tx --help)
     add_test(NAME modb.cli.mvcc_help COMMAND modb_cli mvcc --help)
+    add_test(NAME modb.cli.mvcc_snapshot_demo
+        COMMAND modb_cli mvcc snapshot-demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase6b-snapshot-demo.modb --force)
     add_test(NAME modb.cli.tx_demo
         COMMAND modb_cli tx demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-tx-demo.modb --force)

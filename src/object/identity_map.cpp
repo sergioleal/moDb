@@ -376,7 +376,7 @@ Result<storage::PageId> IdentityMap::ensure_idmp(std::uint64_t entry_page) {
     return PageId{pointer};
 }
 
-Result<void> IdentityMap::bind(ObjectId id, storage::RecordId record) {
+Result<void> IdentityMap::bind(ObjectId id, storage::RecordId record, std::uint64_t epoch) {
     if (id == invalid_object_id) {
         return std::unexpected(
             Error{ErrorCode::invalid_object_id, "cannot bind the invalid ObjectId 0"});
@@ -400,8 +400,10 @@ Result<void> IdentityMap::bind(ObjectId id, storage::RecordId record) {
         return std::unexpected(Error{ErrorCode::invalid_argument,
                                      "ObjectId " + std::to_string(id.value) + " is already bound"});
     }
-    write_entry(*page, entry_index,
-                Entry{record.page.value, record.slot.value, record.generation, flag_allocated});
+    // Um objeto novo não tem versão anterior: previous fica zerado/ausente.
+    Entry entry{record.page.value, record.slot.value, record.generation, flag_allocated};
+    entry.current_epoch = epoch;
+    write_entry(*page, entry_index, entry);
     return file_->write(*idmp_id, *page);
 }
 
@@ -432,7 +434,104 @@ Result<storage::RecordId> IdentityMap::find(ObjectId id) const {
     return RecordId{PageId{entry.page}, storage::SlotId{entry.slot}, entry.generation};
 }
 
-Result<void> IdentityMap::rebind(ObjectId id, storage::RecordId record) {
+Result<storage::RecordId> IdentityMap::find_at(ObjectId id, std::uint64_t snapshot_epoch) const {
+    const auto entry_page = id.value / entries_per_idmp;
+    const auto entry_index = id.value % entries_per_idmp;
+
+    auto idmp_id = resolve_idmp(entry_page);
+    if (!idmp_id) {
+        return std::unexpected(idmp_id.error());
+    }
+    if (!*idmp_id) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    auto page = file_->read(**idmp_id);
+    if (!page) {
+        return std::unexpected(page.error());
+    }
+    if (auto valid = check_magic(*page, idmp_magic, idmp_version, "entries"); !valid) {
+        return std::unexpected(valid.error());
+    }
+    const auto entry = read_entry(*page, entry_index);
+    if (!entry.allocated()) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    // A regra do snapshot (doc §Fase 6B): current serve se já valia na época
+    // pedida; senão cai para previous, se este também já valia; senão ausente.
+    if (entry.current_epoch <= snapshot_epoch) {
+        if (entry.removed()) {
+            return std::unexpected(Error{
+                ErrorCode::record_not_found,
+                "object " + std::to_string(id.value) + " was already removed at this epoch"});
+        }
+        return RecordId{PageId{entry.page}, storage::SlotId{entry.slot}, entry.generation};
+    }
+    if ((entry.previous_flags & flag_allocated) != 0U && entry.previous_epoch <= snapshot_epoch) {
+        return RecordId{PageId{entry.previous_page}, storage::SlotId{entry.previous_slot},
+                        entry.previous_generation};
+    }
+    return std::unexpected(Error{
+        ErrorCode::record_not_found,
+        "object " + std::to_string(id.value) + " did not exist yet at this epoch"});
+}
+
+Result<std::uint64_t> IdentityMap::current_epoch(ObjectId id) const {
+    const auto entry_page = id.value / entries_per_idmp;
+    const auto entry_index = id.value % entries_per_idmp;
+
+    auto idmp_id = resolve_idmp(entry_page);
+    if (!idmp_id) {
+        return std::unexpected(idmp_id.error());
+    }
+    if (!*idmp_id) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    auto page = file_->read(**idmp_id);
+    if (!page) {
+        return std::unexpected(page.error());
+    }
+    if (auto valid = check_magic(*page, idmp_magic, idmp_version, "entries"); !valid) {
+        return std::unexpected(valid.error());
+    }
+    const auto entry = read_entry(*page, entry_index);
+    if (!entry.allocated() || entry.removed()) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    return entry.current_epoch;
+}
+
+Result<bool> IdentityMap::has_previous(ObjectId id) const {
+    const auto entry_page = id.value / entries_per_idmp;
+    const auto entry_index = id.value % entries_per_idmp;
+
+    auto idmp_id = resolve_idmp(entry_page);
+    if (!idmp_id) {
+        return std::unexpected(idmp_id.error());
+    }
+    if (!*idmp_id) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    auto page = file_->read(**idmp_id);
+    if (!page) {
+        return std::unexpected(page.error());
+    }
+    if (auto valid = check_magic(*page, idmp_magic, idmp_version, "entries"); !valid) {
+        return std::unexpected(valid.error());
+    }
+    const auto entry = read_entry(*page, entry_index);
+    if (!entry.allocated() || entry.removed()) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    return (entry.previous_flags & flag_allocated) != 0U;
+}
+
+Result<void> IdentityMap::rebind(ObjectId id, storage::RecordId record, std::uint64_t epoch) {
     const auto entry_page = id.value / entries_per_idmp;
     const auto entry_index = id.value % entries_per_idmp;
 
@@ -456,12 +555,24 @@ Result<void> IdentityMap::rebind(ObjectId id, storage::RecordId record) {
         return std::unexpected(
             Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
     }
-    write_entry(*page, entry_index,
-                Entry{record.page.value, record.slot.value, record.generation, flag_allocated});
+    // Move a versão current (mecânico: quem decidiu que isto é seguro é o
+    // chamador) para previous, e grava a nova localização como current.
+    Entry next;
+    next.page = record.page.value;
+    next.slot = record.slot.value;
+    next.generation = record.generation;
+    next.flags = flag_allocated;
+    next.current_epoch = epoch;
+    next.previous_page = entry.page;
+    next.previous_slot = entry.slot;
+    next.previous_generation = entry.generation;
+    next.previous_flags = flag_allocated;
+    next.previous_epoch = entry.current_epoch;
+    write_entry(*page, entry_index, next);
     return file_->write(**idmp_id, *page);
 }
 
-Result<void> IdentityMap::erase(ObjectId id) {
+Result<void> IdentityMap::erase(ObjectId id, std::uint64_t epoch) {
     const auto entry_page = id.value / entries_per_idmp;
     const auto entry_index = id.value % entries_per_idmp;
 
@@ -485,9 +596,21 @@ Result<void> IdentityMap::erase(ObjectId id) {
         return std::unexpected(
             Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
     }
-    // Preserva a última localização e apenas marca o tombstone.
-    entry.flags |= flag_removed;
-    write_entry(*page, entry_index, entry);
+    // Move current -> previous (o registro físico antigo continua alcançável
+    // por quem tiver um snapshot anterior a esta época) e marca current como
+    // removido, sem localização física própria.
+    Entry next;
+    next.page = 0;
+    next.slot = 0;
+    next.generation = 0;
+    next.flags = flag_allocated | flag_removed;
+    next.current_epoch = epoch;
+    next.previous_page = entry.page;
+    next.previous_slot = entry.slot;
+    next.previous_generation = entry.generation;
+    next.previous_flags = flag_allocated;
+    next.previous_epoch = entry.current_epoch;
+    write_entry(*page, entry_index, next);
     return file_->write(**idmp_id, *page);
 }
 

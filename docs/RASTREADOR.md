@@ -46,12 +46,12 @@
 | [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ✅ Concluída | 10/10 | Fase 2 |
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
-| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | 🔄 Em andamento | 2/9 | Fase 5 |
+| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | 🔄 Em andamento | 5/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ⬜ Não iniciada | 0/10 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **51/103 (~50%)** | |
+| **Total** | | | **54/103 (~52%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -324,8 +324,8 @@ Isso permitiu observar a garantia de atomicidade (`before-commit` → ausente;
 
 ## Fase 6 — Snapshots e MVCC
 
-Status: 🔄 Em andamento (2/9) — quatro entregas incrementais; 6A concluída,
-6B–6D não iniciadas. Definição completa:
+Status: 🔄 Em andamento (5/9) — quatro entregas incrementais; 6A e 6B
+concluídas, 6C–6D não iniciadas. Definição completa:
 [PLANO_ODB.md §Fase 6](PLANO_ODB.md#fase-6--snapshots-e-mvcc) ·
 [PROTOCOLO_FASES.md §Fase 6](PROTOCOLO_FASES.md#fase-6--snapshots-e-mvcc)
 
@@ -356,16 +356,35 @@ ver [RELATORIO_CHECK_RECOVERY_FASES_5_6.md](RELATORIO_CHECK_RECOVERY_FASES_5_6.m
 
 ### Fase 6B — Snapshot e leituras consistentes
 
-Status: ⬜ Não iniciada (0/2)
+Status: ✅ Concluída (3/3) — commit `PREENCHER`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 6B.1 | `Snapshot` RAII e registro de épocas ativas | ⬜ | |
-| 6B.2 | Visibilidade por época em `get` e `scan` | ⬜ | |
-| 6B.3 | `snapshot_conflict` para limite de uma versão anterior | ⬜ | |
+| 6B.1 | `Snapshot` RAII e registro de épocas ativas | ✅ | `Database::snapshot()`; `std::multiset<epoch>` em memória |
+| 6B.2 | Visibilidade por época em `get` e `scan` | ✅ | `find_at`; `get_at`/`scan_at` filtram físicos por identidade |
+| 6B.3 | `snapshot_conflict` para limite de uma versão anterior | ✅ | `check_snapshot_conflict`: só há uma posição `previous` |
 
-Critério de aceite 6B: ⬜ snapshot devolve o estado da época; leitura corrente
-devolve o último commit.
+Consequência física documentada (ver [ADR-009](decisions/ADR-009-epocas-e-idmp-v2.md)
+e [GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md)): para preservar a
+versão `previous`, `update` **sempre** insere um registro físico novo e `remove`
+**não** apaga fisicamente; a recuperação de espaço fica para a Fase 6C. Por isso
+`scan`/`scan_at` filtram cada registro físico contra a identidade resolvida,
+ignorando cópias antigas/órfãs.
+
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.snapshot` | leitura estável, remoção/criação invisível, scan consistente e `snapshot_conflict` | ✅ |
+| `modb.identity_map` | `find_at`/`current_epoch`/`has_previous` em bind→rebind→erase versionados | ✅ |
+| `modb.object_store` | `update`/`remove` com época e `scan` filtrando físicos preservados | ✅ |
+| `modb.cli.mvcc_snapshot_demo` | `modb mvcc snapshot-demo`: leitura estável + conflito + liberação | ✅ |
+
+Critério de aceite 6B: ✅ um snapshot devolve o estado lógico da época em que foi
+criado (imune a update/remove/criação posteriores) enquanto a leitura sem
+snapshot devolve o último commit — demonstrado por `modb.snapshot` e pela CLI
+(`modb mvcc snapshot-demo`). Suíte completa 62/62 em Debug, `-Werror` e
+sanitizers.
 
 ### Fase 6C — Retenção, GC e concorrência
 
@@ -392,7 +411,7 @@ Status: ⬜ Não iniciada (0/2)
 
 | Teste (CTest) | Arquivo | Status |
 |---|---|---|
-| `modb.snapshot` | `tests/snapshot_test.cpp` | ⬜ |
+| `modb.snapshot` | `tests/snapshot_test.cpp` | ✅ (Fase 6B) |
 
 Critério de aceite 6D: ⬜ matriz passa sem leitura mista, versão perdida,
 vazamento persistente ou corrupção após recovery.

@@ -61,12 +61,24 @@ public:
 
     // Cria um objeto do tipo dado, validando o payload, persistindo-o e
     // registrando sua identidade. Devolve o ObjectId atribuído.
-    // Recupera um objeto vivo pelo id.
+    // Recupera a versão "current" de um objeto vivo pelo id (sem snapshot).
     [[nodiscard]] Result<DecodedObject> get(ObjectId id);
+    // Recupera o objeto tal como era visível numa época de snapshot (Fase
+    // 6B): current se já valia nessa época, senão previous, senão ausente.
+    [[nodiscard]] Result<DecodedObject> get_at(ObjectId id, std::uint64_t snapshot_epoch);
     // Substitui o conteúdo de um objeto, preservando sua identidade.
     // Remove um objeto (o id nunca é reutilizado).
-    // Visita cada objeto de dados vivo, na ordem física.
+    // Visita cada objeto de dados vivo, na ordem física (versão "current").
     [[nodiscard]] Result<void> scan(
+        const std::function<Result<void>(const DecodedObject&)>& visitor);
+    // Visita exatamente os objetos visíveis numa época de snapshot. Como o
+    // heap físico pode conter, para um mesmo ObjectId, tanto a versão current
+    // quanto uma versão previous ainda preservada, cada registro físico é
+    // comparado com o que `find_at` resolveria para aquele id — só o que
+    // corresponde à localização física do registro é visitado (evita
+    // duplicar ou expor a versão errada).
+    [[nodiscard]] Result<void> scan_at(
+        std::uint64_t snapshot_epoch,
         const std::function<Result<void>(const DecodedObject&)>& visitor);
 
     // Baseline corrente (nullopt antes de qualquer tipo ser registrado).
@@ -96,9 +108,21 @@ private:
     friend class Database;
     [[nodiscard]] Result<TypeDefinitionId> register_type(TypeDefinition definition);
     [[nodiscard]] Result<ObjectId> create_object(const TypeDefinition& type, FieldValues fields);
-    [[nodiscard]] Result<void> update(ObjectId id, const TypeDefinition& type, FieldValues fields);
-    [[nodiscard]] Result<void> remove(ObjectId id);
+    // `oldest_open_snapshot_epoch` é a época do snapshot aberto mais antigo no
+    // momento da escrita (nullopt se nenhum estiver aberto) — decide se esta
+    // escrita conflita com uma versão `previous` ainda visível (Fase 6B).
+    [[nodiscard]] Result<void> update(ObjectId id, const TypeDefinition& type, FieldValues fields,
+                                      std::optional<std::uint64_t> oldest_open_snapshot_epoch);
+    [[nodiscard]] Result<void> remove(ObjectId id,
+                                      std::optional<std::uint64_t> oldest_open_snapshot_epoch);
     [[nodiscard]] Result<void> advance_epoch() { return root_.advance_epoch(); }
+    // Verifica se uma escrita em `id` conflitaria com um snapshot ainda aberto
+    // que dependa da versão `previous` (Fase 6B): só é possível quando já há
+    // uma `previous` ocupada E existe um snapshot mais antigo que a época
+    // `current` da entrada — nesse caso não sobra posição para a nova versão
+    // que este `previous` teria de virar.
+    [[nodiscard]] Result<void> check_snapshot_conflict(
+        ObjectId id, std::optional<std::uint64_t> oldest_open_snapshot_epoch) const;
     ObjectStore(storage::PageFile& file, DatabaseRoot root, IdentityMap identity,
                 storage::TableHeap data_heap, CatalogStore catalog, TypeRegistry registry,
                 std::vector<TypeDefinitionId> type_ids, std::vector<Baseline> baselines,

@@ -27,6 +27,10 @@
 #include <mutex>
 // Disponibiliza nomes de tipos nas migrações.
 #include <string>
+// Disponibiliza std::optional na época de snapshot mais antiga.
+#include <optional>
+// Disponibiliza o registro de épocas de snapshots abertos.
+#include <set>
 // Disponibiliza o mapa de bindings.
 #include <unordered_map>
 // Disponibiliza o conjunto de ids visitados na cascata de remoção.
@@ -79,6 +83,38 @@ private:
     bool active_{false};
     // Verdadeiro quando o commit foi sincronizado no WAL; não há rollback possível.
     bool committed_{false};
+};
+
+// Snapshot de leitura (Fase 6B): fixa a época em que os `get`/`scan`
+// versionados enxergam o banco, imune a commits posteriores. RAII — enquanto
+// existir, mantém no registro do `Database` a época que segura a versão
+// `previous` de qualquer objeto alterado nesse meio-tempo (ver
+// ADR-009/PROTOCOLO_FASES.md §Fase 6B). Como o `Handle`/`Transaction`, guarda
+// só o `DatabaseId` e resolve o `Database` pelo registro, então sobrevive a
+// movimentos do `Database`.
+class Snapshot {
+public:
+    Snapshot(const Snapshot&) = delete;
+    Snapshot& operator=(const Snapshot&) = delete;
+    Snapshot(Snapshot&& other) noexcept
+        : database_{other.database_}, epoch_{other.epoch_}, registered_{other.registered_} {
+        other.registered_ = false;
+    }
+    Snapshot& operator=(Snapshot&&) = delete;
+    ~Snapshot();
+
+    [[nodiscard]] DatabaseId database() const noexcept { return database_; }
+    // Época capturada: `get`/`scan` através deste snapshot enxergam o estado
+    // lógico exatamente como estava no último commit até esta época.
+    [[nodiscard]] std::uint64_t epoch() const noexcept { return epoch_; }
+
+private:
+    friend class Database;
+    Snapshot(DatabaseId database, std::uint64_t epoch) noexcept
+        : database_{database}, epoch_{epoch}, registered_{true} {}
+    DatabaseId database_;
+    std::uint64_t epoch_;
+    bool registered_{false};
 };
 
 // Registro de processo que mantém bancos vivos e permite que Handles resolvam
@@ -233,36 +269,72 @@ public:
         if (!object) {
             return std::unexpected(object.error());
         }
-        T result{};
-        const Migration* migration = migration_for(bound->binding.type_name(), object->type);
-        if (migration != nullptr) {
-            auto migrated = (*migration)(*object);
-            if (!migrated) {
-                return std::unexpected(migrated.error());
-            }
-            if (auto materialized = bound->binding.materialize(*migrated, &result);
-                !materialized) {
-                return std::unexpected(materialized.error());
-            }
-            return result;
+        return materialize_decoded<T>(*bound, *object);
+    }
+
+    // Recupera o objeto materializado tal como era visível na época do
+    // snapshot (Fase 6B): leitura estável, imune a commits feitos depois que
+    // o snapshot foi aberto. Ao contrário de `get`/`materialize`, devolve o
+    // valor diretamente — uma leitura por época é um instantâneo, não uma
+    // identidade reaproveitável como `Handle`.
+    template <typename T>
+    [[nodiscard]] Result<T> get(ObjectId id, const Snapshot& snapshot) {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
         }
-        auto plan = bound->plans.find(object->type.value);
-        if (plan == bound->plans.end()) {
-            auto stored_type = store_.find_type(object->type);
-            if (!stored_type) {
-                return std::unexpected(stored_type.error());
-            }
-            auto built = ProjectionPlan::build(stored_type->get(), bound->binding);
-            if (!built) {
-                return std::unexpected(built.error());
-            }
-            plan = bound->plans.emplace(object->type.value, std::move(*built)).first;
+        if (snapshot.database() != database_id_) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_argument, "snapshot belongs to a different database"});
         }
-        if (auto materialized = plan->second.materialize(*object, bound->binding, &result);
-            !materialized) {
-            return std::unexpected(materialized.error());
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
         }
-        return result;
+        auto object = store_.get_at(id, snapshot.epoch());
+        if (!object) {
+            return std::unexpected(object.error());
+        }
+        auto stored_type = store_.find_type(object->type);
+        if (!stored_type) {
+            return std::unexpected(stored_type.error());
+        }
+        if (stored_type->get().name() != bound->binding.type_name()) {
+            return std::unexpected(
+                Error{ErrorCode::type_mismatch, "object belongs to a different bound type"});
+        }
+        return materialize_decoded<T>(*bound, *object);
+    }
+
+    // Visita, na ordem física, cada objeto do tipo T visível na época do
+    // snapshot — a versão "leitura estável" de scan (Fase 6B). Objetos de
+    // outros tipos são ignorados; a materialização usa o mesmo ProjectionPlan
+    // cacheado de `get`/`materialize`.
+    template <typename T>
+    [[nodiscard]] Result<void> scan(const Snapshot& snapshot,
+                                    const std::function<Result<void>(const T&)>& visitor) {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        if (snapshot.database() != database_id_) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_argument, "snapshot belongs to a different database"});
+        }
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
+        }
+        return store_.scan_at(
+            snapshot.epoch(), [&](const DecodedObject& object) -> Result<void> {
+                auto stored_type = store_.find_type(object.type);
+                if (!stored_type || stored_type->get().name() != bound->binding.type_name()) {
+                    return {};
+                }
+                auto value = materialize_decoded<T>(*bound, object);
+                if (!value) {
+                    return std::unexpected(value.error());
+                }
+                return visitor(*value);
+            });
     }
 
     // Regrava um objeto usando a definição corrente (migração preguiçosa).
@@ -300,7 +372,8 @@ public:
         if (!fields) {
             return std::unexpected(fields.error());
         }
-        return store_.update(handle.id(), type->get(), std::move(*fields));
+        return store_.update(handle.id(), type->get(), std::move(*fields),
+                            oldest_open_snapshot_epoch());
     }
 
     Result<void> register_migration(std::string type_name, std::uint64_t from_type_id,
@@ -309,6 +382,22 @@ public:
     // Inicia uma transação de escrita. Falha se já houver uma em andamento
     // (single-writer) ou se o banco não estiver anexado ao registro.
     [[nodiscard]] Result<Transaction> begin();
+
+    // Abre um snapshot fixado na época corrente (Fase 6B): leituras via
+    // `get(id, snapshot)`/`scan(snapshot, ...)` continuam vendo exatamente
+    // este estado lógico mesmo que outras transações commitem depois.
+    [[nodiscard]] Result<Snapshot> snapshot() {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        if (database_id_.value == 0) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_argument, "database must be attached before use"});
+        }
+        const auto current_epoch = store_.epoch();
+        register_snapshot_epoch(current_epoch);
+        return Snapshot{database_id_, current_epoch};
+    }
 
     [[nodiscard]] Result<TypeDefinitionId> define_type(Transaction& tx,
                                                         TypeDefinition definition);
@@ -465,6 +554,61 @@ private:
     [[nodiscard]] const Migration* migration_for(std::string_view type_name,
                                                  TypeDefinitionId from_type_id) const;
 
+    // Materializa um DecodedObject já resolvido (current ou de um snapshot) em
+    // T, compartilhado por `materialize`, `get(id, Snapshot)` e
+    // `scan(Snapshot, ...)` — a única diferença entre essas três leituras é de
+    // onde o DecodedObject veio, nunca como ele vira T.
+    template <typename T>
+    [[nodiscard]] Result<T> materialize_decoded(const BoundType& bound,
+                                                const DecodedObject& object) {
+        T result{};
+        const Migration* migration = migration_for(bound.binding.type_name(), object.type);
+        if (migration != nullptr) {
+            auto migrated = (*migration)(object);
+            if (!migrated) {
+                return std::unexpected(migrated.error());
+            }
+            if (auto materialized = bound.binding.materialize(*migrated, &result);
+                !materialized) {
+                return std::unexpected(materialized.error());
+            }
+            return result;
+        }
+        auto plan = bound.plans.find(object.type.value);
+        if (plan == bound.plans.end()) {
+            auto stored_type = store_.find_type(object.type);
+            if (!stored_type) {
+                return std::unexpected(stored_type.error());
+            }
+            auto built = ProjectionPlan::build(stored_type->get(), bound.binding);
+            if (!built) {
+                return std::unexpected(built.error());
+            }
+            plan = bound.plans.emplace(object.type.value, std::move(*built)).first;
+        }
+        if (auto materialized = plan->second.materialize(object, bound.binding, &result);
+            !materialized) {
+            return std::unexpected(materialized.error());
+        }
+        return result;
+    }
+
+    // Época do snapshot aberto mais antigo (nullopt se nenhum estiver aberto).
+    // Consultada antes de toda escrita que possa conflitar com uma versão
+    // `previous` ainda visível (Fase 6B).
+    [[nodiscard]] std::optional<std::uint64_t> oldest_open_snapshot_epoch() const noexcept {
+        return open_snapshot_epochs_.empty() ? std::nullopt
+                                             : std::optional{*open_snapshot_epochs_.begin()};
+    }
+    friend class Snapshot;
+    void register_snapshot_epoch(std::uint64_t epoch) { open_snapshot_epochs_.insert(epoch); }
+    void unregister_snapshot_epoch(std::uint64_t epoch) {
+        const auto it = open_snapshot_epochs_.find(epoch);
+        if (it != open_snapshot_epochs_.end()) {
+            open_snapshot_epochs_.erase(it);
+        }
+    }
+
     friend class DatabaseRegistry;
     void set_database_id(DatabaseId id) noexcept { database_id_ = id; }
 
@@ -484,6 +628,10 @@ private:
     // pode apagar o log: qualquer falha posterior exige reabertura e redo.
     bool commit_durable_{false};
     bool recovery_required_{false};
+    // Épocas dos snapshots atualmente abertos (multiset: dois snapshots podem
+    // capturar a mesma época). O mínimo é a época mais antiga ainda visível,
+    // consultada por toda escrita para decidir conflito (Fase 6B).
+    std::multiset<std::uint64_t> open_snapshot_epochs_;
 };
 
 template <typename T>

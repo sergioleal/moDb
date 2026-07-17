@@ -694,3 +694,27 @@ modb mvcc status exemplo-6a.modb
 # 5. Em um banco criado por versão anterior, execute a atualização compatível.
 modb mvcc upgrade exemplo-6a.modb
 ```
+
+## MVCC — Fase 6B (snapshots e leituras consistentes)
+
+```text
+modb mvcc snapshot-demo <file> [--force]
+```
+
+`snapshot-demo` cria um arquivo autocontido e demonstra o snapshot ponta a ponta:
+
+1. cria uma conta e commita;
+2. abre um `Snapshot` na época corrente;
+3. commita um `update` "por trás" do snapshot (saldo 100 → 200);
+4. mostra a leitura pelo snapshot ainda devolvendo 100 enquanto a leitura
+   corrente devolve 200;
+5. tenta uma **segunda** alteração enquanto o snapshot antigo continua aberto e
+   mostra a recusa com `snapshot_conflict` (só há uma versão anterior);
+6. fecha o snapshot e mostra a mesma alteração passando a ser aceita.
+
+Roteiro passo a passo:
+
+```text
+# Executa a demonstração completa num arquivo novo (--force recria se existir).
+modb mvcc snapshot-demo exemplo-6b.modb --force
+```

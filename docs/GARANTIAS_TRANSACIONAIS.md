@@ -166,3 +166,41 @@ inválido mantém a semântica de fim lógico do formato.
 
 ✅ Matriz de failpoints 100% verde: nenhuma linha exibe transação parcial. Suíte
 completa (59 testes) verde em Debug, `-Werror` e `sanitizers`.
+
+## 8. Leituras versionadas (Fase 6B — snapshots)
+
+A Fase 6B acrescenta leituras consistentes sobre o mesmo motor single-writer.
+A fonte de verdade é `modb.snapshot` (mais `modb.identity_map`/`modb.object_store`
+para as camadas). Detalhes de formato/época no
+[ADR-009](decisions/ADR-009-epocas-e-idmp-v2.md).
+
+- **Snapshot fixa uma época.** `Database::snapshot()` devolve um `Snapshot` RAII
+  que captura a época corrente e a registra em memória
+  (`std::multiset<epoch>`); o destrutor a desregistra. `get`/`scan` recebendo um
+  `Snapshot` leem a versão **visível** naquela época: `current` se
+  `current_epoch ≤ snapshot.epoch`, senão `previous`, senão o objeto não existia
+  (criação/remoção/update posteriores são invisíveis ao snapshot). Leituras sem
+  snapshot continuam devolvendo o último commit.
+- **Uma única versão anterior por objeto.** O IdentityMap v2 guarda apenas
+  `current` + `previous`. Uma segunda alteração de um objeto **enquanto a
+  `previous` ainda é visível a um snapshot aberto mais antigo** falha com
+  `snapshot_conflict`, antes de qualquer escrita — não há sobrescrita parcial. Se
+  não houver snapshot aberto anterior à época corrente, a alteração reusa a
+  posição `previous` normalmente.
+- **`update` sempre insere; `remove` não apaga fisicamente.** Para que a versão
+  `previous` sobreviva, `ObjectStore::update()` grava **sempre** um registro
+  físico novo (nunca reusa o slot in-place) e `ObjectStore::remove()` apenas
+  marca o tombstone lógico na identidade — o registro físico antigo permanece.
+  Consequência: `scan`/`scan_at` passam a filtrar cada registro físico contra a
+  identidade resolvida (`find`/`find_at`), ignorando cópias antigas/órfãs, para
+  não enumerar duplicatas.
+- **Recuperação de espaço fica para a Fase 6C.** Como no MVP não há free list,
+  os registros físicos preservados por `update`/`remove` **não** são recuperados
+  na Fase 6B; a retenção por época e o GC das versões obsoletas são o escopo
+  explícito da [Fase 6C](PLANO_ODB.md#fase-6c--retenção-gc-e-concorrência). É um
+  desvio de espaço consciente, no mesmo espírito do "`allocate_page` é imediato"
+  da Fase 5.
+
+Critério 6B: ✅ suíte completa (62 testes) verde em Debug, `-Werror` e
+`sanitizers`; snapshot devolve o estado lógico da época mesmo com commits
+concorrentes intercalados (`modb.snapshot`, `modb mvcc snapshot-demo`).
