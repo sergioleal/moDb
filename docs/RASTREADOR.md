@@ -45,13 +45,13 @@
 | [2](#fase-2--codec-genérico-e-objectstore-persistente) | Codec genérico + ObjectStore | ✅ Concluída | 11/11 | — |
 | [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ✅ Concluída | 10/10 | Fase 2 |
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
-| [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ⬜ Não iniciada | 0/11 | Fase 2 |
-| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ⬜ Não iniciada | 0/6 | Fase 5 |
+| [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
+| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ⬜ Não iniciada | 0/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ⬜ Não iniciada | 0/10 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **38/103 (~37%)** | |
+| **Total** | | | **49/103 (~48%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -257,51 +257,122 @@ de ponta a ponta) e `modb coll demo` (vector/set/map). Cobertos por seis testes
 
 ## Fase 5 — Transações, WAL e recuperação
 
-Status: ⬜ Não iniciada (0/11) — Definição completa:
+Status: ✅ Concluída (11/11) — matriz de failpoints verde. Commit `bc51f6e`,
+2026-07-17. Definição completa:
 [PLANO_ODB.md §Fase 5](PLANO_ODB.md#fase-5--transações-wal-e-recuperação) ·
-[PROTOCOLO_FASES.md §Fase 5](PROTOCOLO_FASES.md#fase-5--transações-wal-e-recuperação)
+[PROTOCOLO_FASES.md §Fase 5](PROTOCOLO_FASES.md#fase-5--transações-wal-e-recuperação) ·
+Garantias: [GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 5.1 | Estados e API de `Transaction` | ⬜ | |
-| 5.2 | Exigir `Transaction&` em toda escrita pública | ⬜ | |
-| 5.3 | Formato do WAL | ⬜ | |
-| 5.4 | WAL sincronizado antes das páginas de dados | ⬜ | |
-| 5.5 | `PageCache` com páginas sujas (embrião do BufferPool) | ⬜ | |
-| 5.6 | Recuperação na abertura | ⬜ | |
-| 5.7 | Rollback | ⬜ | |
-| 5.8 | Estratégia de checkpoint | ⬜ | |
-| 5.9 | Contrato commit/rollback automático por exceção | ⬜ | |
-| 5.10 | Testes de falha simulada (failpoints) | ⬜ | |
-| 5.11 | Testes de atomicidade/durabilidade/idempotência | ⬜ | |
+| 5.1 | Estados e API de `Transaction` | ✅ | RAII move-only; begin/commit/rollback; destrutor reverte se não committada |
+| 5.2 | Exigir `Transaction&` em toda escrita pública | ✅ | create/update/remove + mutações de coleção validam tx ativa; `bind()` grava o catálogo em transação interna |
+| 5.3 | Formato do WAL | ✅ | `MOWL` + registros com CRC32; fim lógico por CRC/truncamento (`wal.hpp`) |
+| 5.4 | WAL sincronizado antes das páginas de dados | ✅ | imagens+commit sincronizados antes do apply (`commit_transaction`) |
+| 5.5 | `PageCache` com páginas sujas (embrião do BufferPool) | ✅ | buffer de páginas sujas dentro do `PageFile` (mesmo papel; ver relatório §6) |
+| 5.6 | Recuperação na abertura | ✅ | `tx::recover` reaplica tx commitadas, idempotente, remove o WAL |
+| 5.7 | Rollback | ✅ | explícito e por destrutor; commit que falha mantém a tx ativa p/ reverter |
+| 5.8 | Estratégia de checkpoint | ✅ | checkpoint = remoção do WAL após apply durável |
+| 5.9 | Contrato commit/rollback automático por exceção | ✅ | `Database::transact(fn)`: Ok→commit, erro/exceção→rollback |
+| 5.10 | Testes de falha simulada (failpoints) | ✅ | `FailpointWalSink` (I/O real) + apply-failpoint; sem página escrita à mão |
+| 5.11 | Testes de atomicidade/durabilidade/idempotência | ✅ | `modb.recovery` (redo/uncommitted/idempotente/rollback/transact) |
 
 ### Testes automatizados desta fase
 
 | Teste (CTest) | Arquivo | Status |
 |---|---|---|
-| `modb.wal` | `tests/wal_test.cpp` | ⬜ |
-| `modb.recovery` | `tests/recovery_test.cpp` | ⬜ |
-| `modb.failpoint` | `tests/failpoint_test.cpp` | ⬜ |
+| `modb.wal` | `tests/wal_test.cpp` | ✅ |
+| `modb.recovery` | `tests/recovery_test.cpp` | ✅ |
+| `modb.failpoint` | `tests/failpoint_test.cpp` | ✅ |
 
-Critério de aceite: ⬜ matriz de failpoints 100% verde — nenhuma transação
-aparece parcialmente aplicada.
+Critério de aceite: ✅ matriz de failpoints 100% verde — nenhuma transação
+aparece parcialmente aplicada. Suíte completa (59 testes) verde em Debug,
+`-Werror` e `sanitizers`. Garantias documentadas em
+[GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md).
+
+**Nota de ambiente:** a toolchain do CLion migrou para GCC 15.2, cujo
+`libwinpthread.a` estático quebra o link `-static`
+(`__intrinsic_setjmpex`/`__ms_vsnprintf` indefinidos). O link estático virou a
+opção `MODB_STATIC_MINGW_RUNTIME` (padrão OFF; link dinâmico resolve as DLLs
+pelo PATH). Isso afetava **todos** os alvos, não só os de tx.
+
+**Correção pós-fechamento (encontrada pela CLI, não pela suíte original):**
+`Database::rollback_transaction()` só descartava o buffer de páginas do
+`PageFile`; os contadores em memória de `TableHeap`/`IdentityMap` (avançados
+otimisticamente durante a transação) não eram revertidos, corrompendo a raiz do
+heap na próxima escrita real após um `rollback → create → commit → reopen`.
+Corrigido com `Database::resync_store_after_rollback()` (reconstrói `store_`
+via `ObjectStore::open`, puramente leitura) mais um watermark que impede o
+contador de `ObjectId` de retroceder através do resync (preservando "nunca
+reutilizado" do [ADR-001](decisions/ADR-001-identidade.md) mesmo após um
+rollback). Coberto por um novo caso em `modb.recovery`
+("rollback-then-write") e detalhado em
+[GARANTIAS_TRANSACIONAIS.md §6](GARANTIAS_TRANSACIONAIS.md#6-limitações-e-desvios-documentados-mvp).
+
+**Extra (fora da lista de tarefas):** a CLI ganhou o grupo `modb tx`
+(`demo`/`crash`/`wal-info`/`get`), no espírito de `modb oo`/`graph`/`coll`.
+`crash` é o mais incomum dos comandos desta sessão: ele chama `std::exit` logo
+após atingir a fase de commit pedida, pulando todos os destrutores locais — uma
+simulação de queda genuína através de um processo real, não um truque de teste.
+Isso permitiu observar a garantia de atomicidade (`before-commit` → ausente;
+`after-commit`/`mid-apply`/`before-cleanup` → presente após recuperação) via
+`modb tx wal-info`/`modb tx get` em invocações separadas. Nove testes
+`modb.cli.tx_*`; suíte total em 59/59. Ver
+[USO_DA_CLI.md](USO_DA_CLI.md#modb-tx--transações-wal-e-recuperação-odb-fase-5).
 
 ---
 
 ## Fase 6 — Snapshots e MVCC
 
-Status: ⬜ Não iniciada (0/6) — Definição completa:
+Status: ⬜ Não iniciada (0/9) — quatro entregas incrementais. Definição completa:
 [PLANO_ODB.md §Fase 6](PLANO_ODB.md#fase-6--snapshots-e-mvcc) ·
 [PROTOCOLO_FASES.md §Fase 6](PROTOCOLO_FASES.md#fase-6--snapshots-e-mvcc)
 
+### Fase 6A — Épocas e formato versionado
+
+Status: ⬜ Não iniciada (0/3)
+
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 6.1 | Modelo de versão por objeto (ADR-009: épocas single-writer) | ⬜ | |
-| 6.2 | `Snapshot` associado a transação/consulta | ⬜ | |
-| 6.3 | Isolamento: snapshot não vê escritas posteriores | ⬜ | |
-| 6.4 | Retenção e GC de versões antigas | ⬜ | |
-| 6.5 | Política de lock inicial para escritores | ⬜ | |
-| 6.6 | Testes de consulta longa com commits concorrentes | ⬜ | |
+| 6A.1 | ADR-009: épocas single-writer, limite de versões e reabertura | ⬜ | |
+| 6A.2 | Época no DBRT, IdentityMap v2 e migração v1→v2 | ⬜ | |
+
+Critério de aceite 6A: ⬜ bancos v1/v2 reabrem com os mesmos objetos e época
+monotônica.
+
+### Fase 6B — Snapshot e leituras consistentes
+
+Status: ⬜ Não iniciada (0/2)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 6B.1 | `Snapshot` RAII e registro de épocas ativas | ⬜ | |
+| 6B.2 | Visibilidade por época em `get` e `scan` | ⬜ | |
+| 6B.3 | `snapshot_conflict` para limite de uma versão anterior | ⬜ | |
+
+Critério de aceite 6B: ⬜ snapshot devolve o estado da época; leitura corrente
+devolve o último commit.
+
+### Fase 6C — Retenção, GC e concorrência
+
+Status: ⬜ Não iniciada (0/2)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 6C.1 | Retenção e GC de versões anteriores | ⬜ | |
+| 6C.2 | Lock single-writer e sincronização de snapshots/GC | ⬜ | |
+
+Critério de aceite 6C: ⬜ versões visíveis são preservadas, versões obsoletas
+são recuperadas e conflitos não produzem escrita parcial.
+
+### Fase 6D — Integração e recuperação
+
+Status: ⬜ Não iniciada (0/2)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 6D.1 | Consulta longa com criação/update/remove concorrentes | ⬜ | |
+| 6D.2 | Migração, reabertura, recovery e limpeza de versões órfãs | ⬜ | |
 
 ### Testes automatizados desta fase
 
@@ -309,8 +380,11 @@ Status: ⬜ Não iniciada (0/6) — Definição completa:
 |---|---|---|
 | `modb.snapshot` | `tests/snapshot_test.cpp` | ⬜ |
 
-Critério de aceite: ⬜ scan sob snapshot produz estado idêntico ao da época,
-com commits concorrentes intercalados.
+Critério de aceite 6D: ⬜ matriz passa sem leitura mista, versão perdida,
+vazamento persistente ou corrupção após recovery.
+
+Critério de aceite da Fase 6: ⬜ scan sob snapshot produz estado idêntico ao da
+época, com commits concorrentes intercalados.
 
 ---
 
@@ -355,11 +429,11 @@ Status: ⬜ Não iniciada (0/9) — Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8.1 | ADR de rede e modelo de concorrência do servidor | ⬜ | |
+| 8.1 | ADR de rede e modelo de concorrência do servidor | ⬜ | [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md): codec lógico compartilhado, localização física privada |
 | 8.2 | Processo servidor hospedando `DatabaseRegistry` | ⬜ | |
-| 8.3 | Protocolo binário (Begin/Object/End/Error) | ⬜ | |
-| 8.4 | Framing na camada de transporte | ⬜ | |
-| 8.5 | Serialização de objetos para a rede (reusa o codec) | ⬜ | |
+| 8.3 | Protocolo binário (Begin/ObjectFrame/End/Error) | ⬜ | |
+| 8.4 | Framing com diretório de slots e compressão opcional | ⬜ | Coalescência física sem espera; compressão negociada por frame; `none` obrigatório |
+| 8.5 | Serialização de objetos para a rede (reusa o codec) | ⬜ | `ObjectId` + `TypeDefinitionId` + payload; sem `PageId`/`SlotId`/`RecordId` |
 | 8.6 | Backpressure fim-a-fim | ⬜ | |
 | 8.7 | Cliente C++ assíncrono | ⬜ | |
 | 8.8 | Cancelamento e políticas de timeout | ⬜ | |
@@ -390,10 +464,10 @@ Status: ⬜ Não iniciada (0/10) — Definição completa:
 | 9.3 | `OperationRegistry` | ⬜ | |
 | 9.4 | Despacho pelo protocolo (OperationId + args) | ⬜ | |
 | 9.5 | Contrato transacional (commit/rollback automático) | ⬜ | |
-| 9.6 | `ModuleManifest` + validação de compatibilidade | ⬜ | |
+| 9.6 | `ModuleManifest` + `ModuleLoader` confiável no processo | ⬜ | [ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md): origem administrativa + hash; sem binário enviado pelo cliente |
 | 9.7 | `client.call<Op>(...)` | ⬜ | |
 | 9.8 | Migrações como Operations | ⬜ | |
-| 9.9 | Documentar modelo de falhas (crash/supervisor/WAL recovery) | ⬜ | |
+| 9.9 | Documentar modelo de falhas (crash/supervisor/WAL recovery) | ⬜ | [ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md): sem sandbox inicialmente; isolamento futuro preservado pelo contrato serializado |
 | 9.10 | Exemplo `TransferFunds` completo + teste de atomicidade | ⬜ | |
 
 ### Testes automatizados desta fase
@@ -416,7 +490,7 @@ Status: ⬜ Não iniciada (0/9) — Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 10.1 | Benchmarks reproduzíveis (TTFR, throughput, materialização) | ⬜ | |
+| 10.1 | Plano completo e runner de benchmarks reproduzíveis | ⬜ | [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md): todas as camadas; um JSONL timestampado e autocontido por campanha |
 | 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ⬜ | |
 | 10.3 | Profiling antes de cada otimização | ⬜ | |
 | 10.4 | Fuzzing dos decoders | ⬜ | |
@@ -470,7 +544,7 @@ aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
 | Item | Local | Status |
 |---|---|---|
 | `modb.buffer_pool` (teste) | `tests/buffer_pool_test.cpp` | ⬜ |
-| Benchmarks (alvo separado, fora do ctest) | `benchmarks/` | ⬜ |
+| Benchmarks (alvo separado, fora do ctest) | `benchmarks/` + [plano](PLANO_BENCHMARKS.md) | ⬜ |
 | Alvos de fuzzing (preset `fuzz`) | `tests/fuzz/` | ⬜ |
 
 Critério de aceite: ⬜ benchmarks reproduzíveis, regressões detectadas
@@ -487,3 +561,4 @@ automaticamente, interfaces públicas documentadas.
 | 2 | 2026-07-16 | `8d23923`…`cc6ee9b`…`85a5712` + remoção do Anel 1 |
 | 3 | 2026-07-17 | `264213f` |
 | 4 | 2026-07-17 | `f902a0b` |
+| 5 | 2026-07-17 | `bc51f6e` |

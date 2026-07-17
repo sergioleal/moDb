@@ -56,13 +56,16 @@ implementação). As fases e a numeração são as mesmas nos dois documentos.
 - **[USO_DA_CLI.md](USO_DA_CLI.md)** — referência de uso da CLI **atual**
   (`demo`, `oo`, `type`, `baseline`, `object` e ferramentas físicas). Inclui o
   cenário tipado completo da Fase 3 com evolução v1→v2.
+- **[PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md)** — especificação completa de
+  medição: todas as camadas e dimensões, metodologia, métricas, datasets,
+  regressões e o arquivo JSONL timestampado que registra cada campanha.
 
 ## 3. Decisões arquiteturais — `decisions/`
 
 Registram decisões pontuais e suas justificativas, no formato ADR (Contexto →
 Decisão → Consequências). Duas gerações:
 
-### ADRs vigentes (pivô OO, `ADR-001` a `ADR-007`)
+### ADRs vigentes (pivô OO)
 
 Detalham decisões que o `PROTOCOLO_FASES.md` pressupõe como já tomadas —
 principalmente as da **Fase 0**:
@@ -76,6 +79,12 @@ principalmente as da **Fase 0**:
 | [ADR-005](decisions/ADR-005-mapa-de-identidade.md) | Mapa de identidade (`IDMD`/`IDMP`) |
 | [ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md) | O que fazer com o código relacional existente |
 | [ADR-007](decisions/ADR-007-limites-mvp-oo.md) | Limites do MVP OO |
+| [ADR-008](decisions/ADR-008-integridade-de-referencias.md) | Integridade de referências e cascata de composição |
+| [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) | Protocolo binário próximo do armazenamento lógico, sem expor localização física |
+| [ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md) | Interface por métodos C++, consultas internas e módulos confiáveis no processo |
+
+Os números ADR-009 e ADR-011 estão reservados no protocolo para as decisões de
+MVCC (Fase 6) e concorrência do servidor (Fase 8), respectivamente.
 
 ### ADRs legadas (modelo relacional, `0001`/`0002`)
 

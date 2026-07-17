@@ -325,6 +325,17 @@ Embora não existam lotes lógicos
 
 o protocolo físico continua utilizando frames.
 
+Frames de objetos podem usar um diretório de slots e coalescer resultados que
+já estejam disponíveis. Isso não cria espera para formar lote: o primeiro
+resultado continua imediatamente elegível, e um frame com um único slot é
+válido. O layout é definido na
+[ADR-010](docs/decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md).
+
+Cada frame pode ser comprimido de forma independente quando o codec tiver sido
+negociado e houver redução material. Frames pequenos ou incompressíveis seguem
+sem compressão. Não há dicionário compartilhado entre frames inicialmente, e o
+servidor nunca atrasa o envio para acumular mais dados para compressão.
+
 Isso é responsabilidade da camada de transporte.
 
 Não do banco.

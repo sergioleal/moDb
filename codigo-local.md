@@ -2,7 +2,7 @@
 
 ## Arquitetura de Módulos C++ Executáveis
 
-Versão: 0.1
+Versão: 0.2
 
 ---
 
@@ -21,6 +21,10 @@ Esse modelo reduz latência, elimina múltiplas chamadas de rede e permite que o
 O banco não executa SQL.
 
 O banco executa **operações de domínio**.
+
+A aplicação não envia consultas SQL nem código executável ao servidor. Ela chama
+um método C++ registrado e recebe seu resultado tipado. A decisão completa está
+registrada na [ADR-012](docs/decisions/ADR-012-runtime-de-modulos-no-processo.md).
 
 Em vez de:
 
@@ -49,6 +53,24 @@ TransferFunds{
 ```
 
 Todo o restante é responsabilidade do banco.
+
+---
+
+# Consultas Internas
+
+O banco continua possuindo mecanismo interno de consulta, planejamento, índices
+e streaming. Operações de domínio usam essas capacidades por uma API C++ tipada
+exposta pelo `ExecutionContext`.
+
+```cpp
+ctx.objects()
+    .query<Invoice>()
+    .where(field<&Invoice::due_date>() < today)
+    .stream();
+```
+
+SQL não é a interface pública do produto. A ausência de SQL público não implica
+abrir mão de um motor de consultas eficiente.
 
 ---
 
@@ -474,6 +496,29 @@ Logo
 
 não existe sandbox.
 
+Isso não significa aceitar binários enviados pelo cliente. Módulos são carregados
+somente de uma origem confiável configurada pelo operador, fora do controle da
+aplicação remota.
+
+---
+
+# Origem Confiável e Carregamento
+
+O primeiro runtime carrega módulos nativos de uma localização administrativa
+configurada para a instância. Cada módulo possui manifesto e hash conhecido.
+
+Na carga, o servidor valida:
+
+* identificador e versão do módulo
+* versão da API do runtime
+* baseline compatível
+* métodos exportados e modo `read_only` ou `read_write`
+* hash presente no manifesto ou em allowlist administrativa
+
+Pela rede trafegam apenas `OperationId`, versão, argumentos e resultados
+serializados. O cliente nunca escolhe um caminho de arquivo nem envia um
+binário para execução.
+
 ---
 
 # O que isso significa
@@ -518,6 +563,10 @@ O objetivo é preservar os invariantes do banco.
 # Processo
 
 Os módulos executam dentro do mesmo processo da instância.
+
+Essa é uma decisão da primeira implementação. Workers isolados, sandbox e
+atualização a quente serão avaliados depois que o contrato de métodos estiver
+validado.
 
 ```text
 Database Process
@@ -603,11 +652,17 @@ Os módulos possuem manifesto.
 ```cpp
 struct ModuleManifest
 {
+    ModuleId id;
+
     Version version;
 
     BaselineId baseline;
 
     ApiVersion api;
+
+    BinaryHash hash;
+
+    std::vector<ExportedMethod> methods;
 };
 ```
 

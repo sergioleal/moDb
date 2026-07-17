@@ -266,23 +266,25 @@ escrita passa a exigir transação.
 
 Tarefas:
 
-- [ ] Definir estados e API de `Transaction` (begin/commit/rollback).
-- [ ] Exigir `Transaction&` em toda operação de escrita da API pública
-      (`tx.create<T>()`, `handle.set(tx, ...)`, `tx.remove(...)`).
-- [ ] Definir o formato do write-ahead log (WAL).
-- [ ] Garantir WAL sincronizado (via `NativeFile::sync`) antes das páginas de
+- [x] Definir estados e API de `Transaction` (begin/commit/rollback).
+- [x] Exigir `Transaction&` em toda operação de escrita da API pública
+      (`create(tx, ...)`, `handle.set(tx, ...)`, `remove(tx, ...)`, coleções);
+      `bind()` grava o catálogo sob transação interna.
+- [x] Definir o formato do write-ahead log (WAL).
+- [x] Garantir WAL sincronizado (via `NativeFile::sync`) antes das páginas de
       dados.
-- [ ] Implementar cache mínimo de páginas com rastreio de páginas sujas
-      (embrião do BufferPool; a versão completa fica na fase 10).
-- [ ] Implementar recuperação ao abrir o banco (redo/undo conforme o formato
-      escolhido).
-- [ ] Implementar rollback das operações suportadas.
-- [ ] Definir estratégia de checkpoint.
-- [ ] Exceção dentro de uma operação → rollback automático; término normal →
-      commit (contrato que a fase 9 reutiliza).
-- [ ] Testes de falha simulada em cada ponto crítico de escrita (kill entre
-      WAL e página, entre páginas, durante checkpoint).
-- [ ] Testar atomicidade, durabilidade e idempotência da recuperação.
+- [x] Implementar cache mínimo de páginas com rastreio de páginas sujas
+      (buffer de transação no `PageFile`; BufferPool completo fica na fase 10).
+- [x] Implementar recuperação ao abrir o banco (redo das transações commitadas,
+      idempotente).
+- [x] Implementar rollback das operações suportadas.
+- [x] Definir estratégia de checkpoint (remoção do WAL após apply durável).
+- [x] Exceção dentro de uma operação → rollback automático; término normal →
+      commit (`Database::transact`, contrato que a fase 9 reutiliza).
+- [x] Testes de falha simulada em cada ponto crítico de escrita (`FailpointFile`
+      com I/O real + apply-failpoint; matriz em `modb.failpoint`).
+- [x] Testar atomicidade, durabilidade e idempotência da recuperação
+      (`modb.recovery`, `modb.wal`).
 
 Entregáveis: gerenciador de transações; WAL, recuperação e checkpoints;
 relatório das garantias oferecidas.
@@ -294,20 +296,65 @@ ou ausente — nunca parcialmente aplicada.
 
 Objetivo: leituras consistentes durante escritas — pré-requisito do streaming.
 
-Tarefas:
+Para reduzir o risco de uma mudança simultânea no formato persistente, nas
+leituras e na concorrência, a fase é entregue em quatro incrementos completos:
 
-- [ ] Definir o modelo de versão por objeto (ADR: escopo inicial
-      single-writer / multi-reader com snapshots, antes de MVCC completo).
-- [ ] Implementar `Snapshot` associado a transação/consulta.
-- [ ] Leituras de um snapshot nunca enxergam escritas posteriores.
-- [ ] Implementar retenção e descarte (GC) de versões antigas.
-- [ ] Definir política de lock inicial para escritores.
-- [ ] Testes: consulta longa lendo o mesmo estado lógico enquanto objetos são
-      modificados e removidos em paralelo.
+#### Fase 6A — Épocas e formato versionado
+
+- [ ] Registrar o ADR-009: modelo single-writer / multi-reader por época,
+      limite inicial de uma versão anterior, conflitos e comportamento após
+      reabertura.
+- [ ] Persistir a época global no DBRT e implementar o IdentityMap v2 com
+      localizações `current`/`previous` e migração do formato v1.
+
+Entregável 6A: banco reabre e migra com segurança para o formato versionado,
+sem alterar a semântica pública corrente.
+
+Critério de aceite 6A: bancos v1 e v2 abrem com os mesmos objetos e a época
+permanece monotônica após commit e reabertura.
+
+#### Fase 6B — Snapshot e leituras consistentes
+
+- [ ] Implementar `Snapshot` RAII associado a transação/consulta e o registro
+      em memória das épocas ativas.
+- [ ] Fazer `get` e `scan` selecionarem a versão visível na época do snapshot,
+      cobrindo criação, atualização e remoção posteriores.
+- [ ] Implementar `snapshot_conflict` para impedir que uma segunda alteração
+      sobrescreva a única versão anterior ainda visível.
+
+Entregável 6B: API de snapshot com leituras pontuais e varreduras consistentes.
+
+Critério de aceite 6B: um snapshot sempre devolve o estado lógico da época em
+que foi criado, enquanto leituras sem snapshot devolvem o estado corrente.
+
+#### Fase 6C — Retenção, GC e concorrência
+
+- [ ] Reter versões necessárias aos snapshots ativos e descartá-las quando a
+      última época dependente for liberada.
+- [ ] Definir e implementar a política inicial de lock single-writer, incluindo
+      a sincronização entre commit, abertura/fechamento de snapshot e GC.
+
+Entregável 6C: ciclo de vida completo das versões, com uso de espaço limitado
+e comportamento concorrente determinístico.
+
+Critério de aceite 6C: nenhuma versão visível é descartada; versões obsoletas
+são recuperadas e alterações incompatíveis falham sem corromper o estado.
+
+#### Fase 6D — Integração e recuperação
+
+- [ ] Testar consulta longa lendo o mesmo estado lógico enquanto objetos são
+      criados, modificados e removidos em paralelo.
+- [ ] Testar migração, commit, reabertura, recovery e limpeza de versões órfãs
+      nos limites de falha relevantes.
+
+Entregável 6D: matriz automatizada de integração e recuperação da Fase 6.
+
+Critério de aceite 6D: a matriz passa sem leitura mista, versão perdida,
+vazamento persistente ou corrupção após reabertura.
 
 Entregáveis: snapshots consistentes; base para cursores de longa duração.
 
-Critério de aceite: uma varredura iniciada antes de uma escrita produz
+Critério de aceite da Fase 6: uma varredura iniciada antes de uma escrita produz
 exatamente os objetos do snapshot, mesmo com commits concorrentes.
 
 ### Fase 7 — Índices e consultas em streaming (embedded)
@@ -348,14 +395,18 @@ dedicado a uma única aplicação.
 
 Tarefas:
 
-- [ ] ADR: biblioteca/abordagem de rede (ex.: asio standalone) e modelo de
-      concorrência do servidor — o motor deixa de ser single-thread; revisar
-      as premissas de escopo afetadas.
+- [ ] ADR: abordagem de rede, protocolo próximo do armazenamento lógico
+      ([ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md))
+      e modelo de concorrência do servidor — o motor deixa de ser single-thread;
+      revisar as premissas de escopo afetadas.
 - [ ] Implementar o processo servidor hospedando `DatabaseRegistry`.
 - [ ] Definir o protocolo binário de mensagens independentes:
       `Stream Begin` / `Object` / `Stream End` / `Stream Error`.
-- [ ] Framing na camada de transporte (nunca lotes lógicos no banco).
-- [ ] Serialização de objetos para a rede reutilizando o codec genérico.
+- [ ] Framing na camada de transporte com `ObjectFrame` e diretório de slots;
+      coalescência física oportunista, nunca lote lógico nem espera para encher;
+      compressão opcional por frame, negociada e limitada contra expansão.
+- [ ] Serialização de objetos para a rede reutilizando o codec genérico e
+      `ObjectId`; nunca expor `PageId`, `SlotId` ou `RecordId`.
 - [ ] Backpressure fim-a-fim: socket lento suspende serializer → executor →
       storage (propagação natural via coroutines).
 - [ ] Cliente C++ assíncrono: `co_await stream.next()`.
@@ -387,18 +438,22 @@ Tarefas:
 - [ ] Contrato transacional: término normal → commit; exceção → rollback
       (reutiliza a fase 5).
 - [ ] Implementar `ModuleManifest` (version, baseline, api) e validação de
-      compatibilidade na carga do módulo.
+      compatibilidade na carga do módulo; incluir id, hash, métodos exportados
+      e modo `read_only`/`read_write`; implementar `ModuleLoader` dentro do
+      processo, restrito a uma origem confiável configurada pelo operador — o
+      cliente nunca envia binários nem escolhe caminhos de carga
+      ([ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md)).
 - [ ] Implementar `client.call<TransferFunds>(source, destination, amount)`.
 - [ ] Migrações como Operations, reutilizando a mesma infraestrutura
       (`MigrationOperation` → ExecutionContext → Transaction → Projection).
 - [ ] Documentar o modelo de falhas: crash do módulo encerra a instância;
       recuperação por supervisor externo (systemd/Kubernetes/Windows Service)
-      + WAL recovery. Sem sandbox, por decisão registrada.
+      + WAL recovery. Sem sandbox no primeiro runtime, por decisão registrada.
 - [ ] Exemplo completo `TransferFunds` de ponta a ponta com teste de
       atomicidade (saldo insuficiente → rollback).
 
-Entregáveis: runtime de operações; exemplo TransferFunds; guia de operação
-sob supervisor.
+Entregáveis: runtime de operações e carregamento confiável no processo; exemplo
+TransferFunds; guia de operação sob supervisor.
 
 Critério de aceite: `TransferFunds` executa atomicamente via
 `client.call<...>`; uma exceção no módulo reverte tudo; a instância derrubada
@@ -410,8 +465,9 @@ Objetivo: medir, otimizar e preparar interfaces estáveis.
 
 Tarefas:
 
-- [ ] Benchmarks reproduzíveis: TTFR, throughput de streaming, materialização
-      (Binding + ProjectionPlan cacheado), codec e inserção.
+- [ ] Implementar o [plano completo de benchmarks](PLANO_BENCHMARKS.md): runner,
+      datasets determinísticos, perfis, coleta uniforme de todas as camadas e um
+      arquivo JSONL autocontido por campanha, nomeado com data/hora UTC.
 - [ ] Completar o BufferPool (política de substituição, pin/unpin, métricas),
       evoluindo o cache mínimo da fase 5.
 - [ ] Profiling antes de cada otimização relevante; garantir que o caminho
@@ -424,14 +480,32 @@ Tarefas:
 - [ ] Reescrever `README.md` e documentação de formato para o modelo OO.
 - [ ] Guia de backup, restauração, diagnóstico e operação.
 
-Entregáveis: relatório de benchmarks; API e formato versionados; documentação
-completa para usuários e contribuidores.
+Entregáveis: runner e arquivos históricos de benchmark; API e formato
+versionados; documentação completa para usuários e contribuidores.
 
 Critério de aceite: resultados reproduzíveis, regressões detectadas
 automaticamente, interfaces públicas documentadas.
 
 ## 6. Itens deliberadamente fora deste plano
 
+- herança e polimorfismo persistentes (tipos-base, discriminadores, consultas
+  polimórficas, materialização dinâmica e `dynamic_cast`);
+- constraints declarativas no metamodelo;
+- persistência de ponteiros C++ crus ou smart pointers (`unique_ptr` e
+  `shared_ptr`); referências e composição usam `Ref<T>` e `OwnedRef<T>`, sem
+  posse compartilhada ou composição cíclica;
+- mapeamento automático de construções C++ não cobertas pelo conjunto de
+  atributos do codec, como `std::optional`, `std::variant`, enums,
+  `std::chrono`, tuples e arrays;
+- persistência direta de contêineres STL como membros; coleções persistentes
+  usam `PersistentVector`, `PersistentSet` e `PersistentMap`;
+- materialização por construtores ou fábricas para classes sem construtor
+  padrão, e binding por getters/setters ou membros privados;
+- persistência transparente, detecção automática de alterações e lazy loading
+  por proxies que se comportem como objetos ou ponteiros C++ comuns;
+- relacionamentos bidirecionais declarativos, sincronização automática dos
+  dois lados e cardinalidades inversas;
+- múltiplos bindings simultâneos para o mesmo tipo C++;
 - múltiplas aplicações/tenants por instância (a instância é dedicada — decisão
   de arquitetura, não pendência);
 - sandbox para código de domínio (o código C++ é confiável por decisão);
