@@ -356,7 +356,7 @@ ver [RELATORIO_CHECK_RECOVERY_FASES_5_6.md](RELATORIO_CHECK_RECOVERY_FASES_5_6.m
 
 ### Fase 6B — Snapshot e leituras consistentes
 
-Status: ✅ Concluída (3/3) — commit `PREENCHER`, 2026-07-17.
+Status: ✅ Concluída (3/3) — commit `ecc80e9`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
