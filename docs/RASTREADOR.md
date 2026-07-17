@@ -246,6 +246,13 @@ reabertura; remover `Employee` remove o owned em cascata e preserva os alvos de
 associação (`modb.collection`, caso "grafo do critério"). Validado em Debug,
 `-Werror` e `sanitizers`: 42/42.
 
+**Extra (fora da lista de tarefas):** a CLI ganhou três grupos para exercitar a
+Fase 4 (no espírito do `modb oo` da Fase 3) — `modb blob` (put/get/info sobre o
+BlobStore), `modb graph demo` (associação + embedded + cascata + vector-de-refs
+de ponta a ponta) e `modb coll demo` (vector/set/map). Cobertos por seis testes
+`modb.cli.*` (help + demos); suíte total em 48/48. Ver
+[USO_DA_CLI.md](USO_DA_CLI.md#modb-blob--binários-encadeados-odb-fase-4).
+
 ---
 
 ## Fase 5 — Transações, WAL e recuperação

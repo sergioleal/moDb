@@ -45,6 +45,9 @@ Commands:
   baseline Inspect immutable catalog baselines (ODB++).
   object   Create, read and remove persistent objects (ODB++).
   oo       Use compiled C++ bindings, handles and schema projection.
+  blob     Store and read chained BLBP blobs (ODB++ Fase 4).
+  graph    Demo an object graph: refs, embedded, cascade (ODB++ Fase 4).
+  coll     Demo persistent vector/set/map collections (ODB++ Fase 4).
 
 Options:
   -h, --help     Show this help.
@@ -503,6 +506,85 @@ Baseline 20 (1 types) [current]
 `get --schema 2` materializa objetos da versão 1 através do `ProjectionPlan`; o
 default de `country` é `"BR"`. `set-salary --schema 2` usa `Handle::set` e regrava o
 objeto antigo com a definição corrente, demonstrando a migração preguiçosa.
+
+## `modb blob` — binários encadeados (ODB++ Fase 4)
+
+Exercita o `BlobStore` diretamente: grava um texto numa cadeia de páginas `BLBP`
+e o lê de volta. `put` cria o arquivo se ele não existir e imprime o `BlobId` da
+primeira página; `info` percorre a cadeia sem materializar tudo.
+
+```text
+modb blob put <file> <text>
+modb blob get <file> <blob-id>
+modb blob info <file> <blob-id>
+```
+
+```text
+$ modb blob put dados.modb "hello phase 4 blob"
+BlobId 1
+$ modb blob get dados.modb 1
+hello phase 4 blob
+$ modb blob info dados.modb 1
+Blob 1: pages=1 bytes=18
+```
+
+## `modb graph demo` — grafo de objetos (ODB++ Fase 4)
+
+Mostra os quatro tipos de relacionamento numa passada de ponta a ponta:
+associação (`Ref`), valor embutido (`Embedded`), composição (`OwnedRef`) e uma
+`PersistentVector<Ref<Project>>`. Grava o grafo, reabre o arquivo, resolve cada
+aresta e então remove o pai para evidenciar a cascata (o filho `owned` some; os
+objetos de associação sobrevivem).
+
+```text
+modb graph demo <file> [--force]
+```
+
+```text
+$ modb graph demo grafo.modb --force
+wrote Staff{id=28, name=Ana}
+  dept -> Department{id=24} (association)
+  home -> Address{street=Rua das Flores} (embedded)
+  badge -> Badge{id=27, code=7} (owned)
+  projects -> PersistentVector<Ref<Project>> with 2 refs (blob 8)
+
+reopened and resolved Staff 28:
+  name=Ana
+  home.street=Rua das Flores (embedded, no id)
+  dept -> Engenharia
+  projects -> Apollo Gemini
+  badge -> code 7 (owned)
+
+removed Staff 28:
+  owned Badge cascaded away: yes
+  associated Department survived: yes
+  referenced Projects survived: yes
+
+Phase 4 graph demo: OK
+```
+
+## `modb coll demo` — coleções persistentes (ODB++ Fase 4)
+
+Exercita `PersistentVector`, `PersistentSet` (deduplicação e ordem) e
+`PersistentMap` (`put`/`get`/`remove`), tudo sobrevivendo a uma reabertura.
+
+```text
+modb coll demo <file> [--force]
+```
+
+```text
+$ modb coll demo colecoes.modb --force
+wrote PersistentVector<int64> with 5 elements
+wrote PersistentSet<int64> from 7 inserts -> 4 unique elements
+wrote PersistentMap<string,int64>: put ana/bia, replaced ana, removed bia -> 1 entry
+
+reopened collections:
+  vector sum = 150 (expected 150)
+  map[ana] = 15 (expected 15)
+  map[bia] = absent (expected absent)
+
+Phase 4 collection demo: OK
+```
 
 ## Roteiro completo (equivalente a `modb demo run`)
 

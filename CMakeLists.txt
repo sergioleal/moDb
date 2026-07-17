@@ -299,4 +299,15 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.oo_demo
         COMMAND modb_cli oo employee demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --force)
+    add_test(NAME modb.cli.blob_help COMMAND modb_cli blob --help)
+    add_test(NAME modb.cli.graph_help COMMAND modb_cli graph --help)
+    add_test(NAME modb.cli.coll_help COMMAND modb_cli coll --help)
+    add_test(NAME modb.cli.blob_put
+        COMMAND modb_cli blob put ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-blob.modb hello)
+    add_test(NAME modb.cli.graph_demo
+        COMMAND modb_cli graph demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-graph.modb --force)
+    add_test(NAME modb.cli.coll_demo
+        COMMAND modb_cli coll demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-coll.modb --force)
 endif()
