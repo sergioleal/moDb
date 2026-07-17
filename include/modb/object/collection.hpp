@@ -6,6 +6,9 @@
 #include "modb/object/binding.hpp"
 // Importa Result e os códigos de erro.
 #include "modb/error.hpp"
+// Importa Transaction (validação das escritas) — Database não inclui coleções,
+// então não há ciclo.
+#include "modb/object/database.hpp"
 // Importa o codec de valor único (encoding canônico dos elementos).
 #include "modb/object/object_codec.hpp"
 // Importa BinaryWriter/BinaryReader do formato do blob.
@@ -30,14 +33,28 @@
 
 namespace modb::object {
 
-// Placeholder da Fase 5: as coleções aceitam uma Transaction em toda escrita.
-class Transaction;
-
 // Cabeçalho comum das coleções: as primeiras 4 bytes do blob guardam a
 // contagem de elementos. Helpers não-template ficam em collection.cpp.
 [[nodiscard]] Result<std::uint32_t> collection_count(std::span<const std::byte> raw);
 // Compara dois elementos já codificados, lexicograficamente por byte sem sinal.
 [[nodiscard]] bool encoded_less(std::span<const std::byte> a, std::span<const std::byte> b);
+
+// Exige uma transação válida antes de qualquer escrita de coleção (Fase 5): o
+// token precisa pertencer a um banco (id != 0) e precisa haver uma transação
+// ativa no arquivo de respaldo. Sob single-writer, a transação ativa neste
+// arquivo é necessariamente a do banco que criou a coleção.
+[[nodiscard]] inline Result<void> require_collection_transaction(const BlobStore& blobs,
+                                                                 const Transaction& tx) {
+    if (tx.database().value == 0) {
+        return std::unexpected(
+            Error{ErrorCode::invalid_argument, "transaction is not attached to a database"});
+    }
+    if (!blobs.in_transaction()) {
+        return std::unexpected(Error{ErrorCode::transaction_required,
+                                     "collection writes require an active transaction"});
+    }
+    return {};
+}
 
 // Codifica um único elemento no encoding canônico (tag + valor, ADR-003).
 template <typename T>
@@ -118,7 +135,10 @@ public:
         return decode_element<T>(reader);
     }
 
-    [[nodiscard]] Result<void> push_back(Transaction& /*tx*/, const T& value) {
+    [[nodiscard]] Result<void> push_back(Transaction& tx, const T& value) {
+        if (auto ready = require_collection_transaction(*blobs_, tx); !ready) {
+            return std::unexpected(ready.error());
+        }
         auto raw = blobs_->read(id_);
         if (!raw) {
             return std::unexpected(raw.error());
@@ -205,7 +225,10 @@ public:
     }
 
     // Insere mantendo a ordem; duplicatas (mesma codificação) são ignoradas.
-    [[nodiscard]] Result<void> insert(Transaction& /*tx*/, const T& value) {
+    [[nodiscard]] Result<void> insert(Transaction& tx, const T& value) {
+        if (auto ready = require_collection_transaction(*blobs_, tx); !ready) {
+            return std::unexpected(ready.error());
+        }
         auto raw = blobs_->read(id_);
         if (!raw) {
             return std::unexpected(raw.error());
@@ -376,7 +399,10 @@ public:
     }
 
     // Insere ou substitui o valor associado à chave.
-    [[nodiscard]] Result<void> put(Transaction& /*tx*/, const K& key, const V& value) {
+    [[nodiscard]] Result<void> put(Transaction& tx, const K& key, const V& value) {
+        if (auto ready = require_collection_transaction(*blobs_, tx); !ready) {
+            return std::unexpected(ready.error());
+        }
         auto raw = blobs_->read(id_);
         if (!raw) {
             return std::unexpected(raw.error());
@@ -442,7 +468,10 @@ public:
         return std::optional<V>{};
     }
 
-    [[nodiscard]] Result<bool> remove(Transaction& /*tx*/, const K& key) {
+    [[nodiscard]] Result<bool> remove(Transaction& tx, const K& key) {
+        if (auto ready = require_collection_transaction(*blobs_, tx); !ready) {
+            return std::unexpected(std::move(ready).error());
+        }
         auto raw = blobs_->read(id_);
         if (!raw) {
             return std::unexpected(raw.error());

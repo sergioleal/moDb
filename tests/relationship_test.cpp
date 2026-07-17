@@ -117,8 +117,13 @@ int main() {
         suite.check(database->bind(node_builder()).has_value(), "Node is bound");
         suite.check(database->bind(employee_builder()).has_value(), "Employee is bound");
 
-        auto dep = database->create(Department{"Engenharia"});
-        auto badge = database->create(Node{42, OwnedRef<Node>{}});
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "graph transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
+        auto dep = database->create(*transaction, Department{"Engenharia"});
+        auto badge = database->create(*transaction, Node{42, OwnedRef<Node>{}});
         suite.check(dep.has_value() && badge.has_value(), "Department and badge are stored");
         if (!dep || !badge) {
             return suite.finish();
@@ -131,14 +136,14 @@ int main() {
         ana.department = Ref<Department>{dep_id};
         ana.address = Embedded<Address>{Address{"Rua das Flores", 100}};
         ana.badge = OwnedRef<Node>{badge_id};
-        auto emp = database->create(ana);
+        auto emp = database->create(*transaction, ana);
         suite.check(emp.has_value(), "Employee with relationships is stored");
         if (!emp) {
             return suite.finish();
         }
         emp_id = emp->id();
 
-        suite.check(database->flush().has_value(), "graph is flushed");
+        suite.check(transaction->commit().has_value(), "graph transaction committed");
         registry.detach(*database_id);
     }
 
@@ -198,18 +203,23 @@ int main() {
                         database->bind(employee_builder()).has_value(),
                     "all types rebound for composition");
 
-        suite.check(database->remove(emp_id).has_value(), "Employee is removed");
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "composition transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
+        suite.check(database->remove(*transaction, emp_id).has_value(), "Employee is removed");
         suite.check_error(database->get<Node>(badge_id), ErrorCode::record_not_found,
                           "owned badge is removed in cascade");
         auto dep_handle = database->get<Department>(dep_id);
         suite.check(dep_handle.has_value(), "associated Department survives the parent removal");
 
         // Referência pendente detectável: remover o Department e resolver falha.
-        suite.check(database->remove(dep_id).has_value(), "Department is removed");
+        suite.check(database->remove(*transaction, dep_id).has_value(), "Department is removed");
         suite.check_error(database->get<Department>(dep_id), ErrorCode::record_not_found,
                           "a dangling Ref target resolves to record_not_found");
 
-        suite.check(database->flush().has_value(), "composition changes flushed");
+        suite.check(transaction->commit().has_value(), "composition transaction committed");
         registry.detach(*database_id);
     }
 
@@ -225,15 +235,21 @@ int main() {
         suite.check(database_id.has_value() && database->bind(node_builder()).has_value(),
                     "chain database ready");
 
-        auto c = database->create(Node{3, OwnedRef<Node>{}});
-        auto b = c ? database->create(Node{2, OwnedRef<Node>{c->id()}}) : c;
-        auto a = b ? database->create(Node{1, OwnedRef<Node>{b->id()}}) : b;
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "chain transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
+        auto c = database->create(*transaction, Node{3, OwnedRef<Node>{}});
+        auto b = c ? database->create(*transaction, Node{2, OwnedRef<Node>{c->id()}}) : c;
+        auto a = b ? database->create(*transaction, Node{1, OwnedRef<Node>{b->id()}}) : b;
         suite.check(a.has_value() && b.has_value() && c.has_value(), "A owns B owns C");
         if (a && b && c) {
             const auto a_id = a->id();
             const auto b_id = b->id();
             const auto c_id = c->id();
-            suite.check(database->remove(a_id).has_value(), "removing A cascades");
+            suite.check(database->remove(*transaction, a_id).has_value(), "removing A cascades");
+            suite.check(transaction->commit().has_value(), "chain transaction committed");
             suite.check_error(database->get<Node>(a_id), ErrorCode::record_not_found, "A gone");
             suite.check_error(database->get<Node>(b_id), ErrorCode::record_not_found, "B gone");
             suite.check_error(database->get<Node>(c_id), ErrorCode::record_not_found, "C gone");
@@ -255,14 +271,19 @@ int main() {
         suite.check(database_id.has_value() && database->bind(node_builder()).has_value(),
                     "cyclic database ready");
 
-        auto a = database->create(Node{1, OwnedRef<Node>{}});
-        auto b = a ? database->create(Node{2, OwnedRef<Node>{a->id()}}) : a;
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "cycle transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
+        auto a = database->create(*transaction, Node{1, OwnedRef<Node>{}});
+        auto b = a ? database->create(*transaction, Node{2, OwnedRef<Node>{a->id()}}) : a;
         suite.check(a.has_value() && b.has_value(), "A and B created");
         if (a && b) {
             // Fecha o ciclo: A passa a possuir B (e B já possui A).
-            auto close = database->update(*a, Node{1, OwnedRef<Node>{b->id()}});
+            auto close = database->update(*transaction, *a, Node{1, OwnedRef<Node>{b->id()}});
             suite.check(close.has_value(), "ownership cycle is closed");
-            suite.check_error(database->remove(a->id()), ErrorCode::invalid_argument,
+            suite.check_error(database->remove(*transaction, a->id()), ErrorCode::invalid_argument,
                               "a cyclic owned cascade fails explicitly");
             // Nada foi removido: A e B continuam legíveis.
             suite.check(database->get<Node>(a->id()).has_value() &&

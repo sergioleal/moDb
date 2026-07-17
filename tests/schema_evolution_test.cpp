@@ -90,8 +90,13 @@ int main() {
         suite.check(database_id.has_value(), "v1 database is attached");
         suite.check(database->bind(employee_v1()).has_value(), "v1 binding is registered");
 
-        auto ana = database->create(EmployeeV1{"Ana", 15000.0});
-        auto bia = database->create(EmployeeV1{"Bia", 12000.0});
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "v1 transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
+        auto ana = database->create(*transaction, EmployeeV1{"Ana", 15000.0});
+        auto bia = database->create(*transaction, EmployeeV1{"Bia", 12000.0});
         suite.check(ana.has_value() && bia.has_value(), "v1 objects are stored");
         if (!ana || !bia) {
             return suite.finish();
@@ -107,7 +112,7 @@ int main() {
         if (database->current_baseline()) {
             v1_baseline = database->current_baseline()->id();
         }
-        suite.check(database->flush().has_value(), "v1 database is flushed");
+        suite.check(transaction->commit().has_value(), "v1 transaction committed");
         registry.detach(*database_id);
     }
 
@@ -144,7 +149,12 @@ int main() {
         suite.check(second.has_value() && ProjectionPlan::build_count() == 1,
                     "the projection plan is cached by stored TypeDefinitionId");
 
-        auto current = database->create(EmployeeV2{"Carla", 18000.0, "PT"});
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "v2 transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
+        auto current = database->create(*transaction, EmployeeV2{"Carla", 18000.0, "PT"});
         suite.check(current.has_value(), "v2 object is stored");
         auto current_value = current ? database->materialize(*current) : first;
         auto old_value = database->get<EmployeeV2>(bia_id);
@@ -161,8 +171,7 @@ int main() {
             auto salary = ana->get<&EmployeeV2::salary>();
             suite.check(salary.has_value() && *salary == 15000.0,
                         "Handle::get reads a typed member");
-            auto transaction = database->begin();
-            suite.check(ana->set<&EmployeeV2::salary>(transaction, 16000.0).has_value(),
+            suite.check(ana->set<&EmployeeV2::salary>(*transaction, 16000.0).has_value(),
                         "Handle::set rewrites through the current binding");
             auto rewritten_type = database->object_type(ana_id);
             suite.check(rewritten_type.has_value() && *rewritten_type != v1_type,
@@ -171,7 +180,7 @@ int main() {
                 v2_type = *rewritten_type;
             }
         }
-        suite.check(database->flush().has_value(), "v2 database is flushed");
+        suite.check(transaction->commit().has_value(), "v2 transaction committed");
         registry.detach(*database_id);
     }
 
@@ -219,7 +228,12 @@ int main() {
         if (!database) {
             return suite.finish();
         }
-        auto object = database->create(EmployeeV1{"Dora", 12.34});
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "semantic v1 transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
+        auto object = database->create(*transaction, EmployeeV1{"Dora", 12.34});
         if (object) {
             salary_id = object->id();
             auto type = database->object_type(salary_id);
@@ -227,7 +241,7 @@ int main() {
                 salary_v1_type = *type;
             }
         }
-        suite.check(object.has_value() && database->flush().has_value(),
+        suite.check(object.has_value() && transaction->commit().has_value(),
                     "semantic v1 object is stored");
         if (database_id) {
             registry.detach(*database_id);

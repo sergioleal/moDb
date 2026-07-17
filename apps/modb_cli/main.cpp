@@ -1699,13 +1699,17 @@ int command_employee_create_v1(const std::filesystem::path& path, std::string na
     if (auto bound = session->database().bind(employee_v1_binding()); !bound) {
         return print_error(bound.error());
     }
+    auto transaction = session->database().begin();
+    if (!transaction) {
+        return print_error(transaction.error());
+    }
     const EmployeeV1 employee{std::move(name), salary};
-    auto handle = session->database().create(employee);
+    auto handle = session->database().create(*transaction, employee);
     if (!handle) {
         return print_error(handle.error());
     }
-    if (auto flushed = session->database().flush(); !flushed) {
-        return print_error(flushed.error());
+    if (auto committed = transaction->commit(); !committed) {
+        return print_error(committed.error());
     }
     std::cout << "Employee created with schema 1: id " << handle->id().value << '\n';
     return 0;
@@ -1745,13 +1749,17 @@ int command_employee_create_v2(const std::filesystem::path& path, std::string na
     if (auto bound = session->database().bind(employee_v2_binding()); !bound) {
         return print_error(bound.error());
     }
+    auto transaction = session->database().begin();
+    if (!transaction) {
+        return print_error(transaction.error());
+    }
     const EmployeeV2 employee{std::move(name), salary, std::move(country)};
-    auto handle = session->database().create(employee);
+    auto handle = session->database().create(*transaction, employee);
     if (!handle) {
         return print_error(handle.error());
     }
-    if (auto flushed = session->database().flush(); !flushed) {
-        return print_error(flushed.error());
+    if (auto committed = transaction->commit(); !committed) {
+        return print_error(committed.error());
     }
     std::cout << "Employee created with schema 2: id " << handle->id().value << '\n';
     return 0;
@@ -1813,8 +1821,14 @@ int command_employee_set_salary(const std::filesystem::path& path, std::uint64_t
             return print_error(handle.error());
         }
         auto transaction = session->database().begin();
-        if (auto updated = handle->set<&EmployeeV1::salary>(transaction, salary); !updated) {
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        if (auto updated = handle->set<&EmployeeV1::salary>(*transaction, salary); !updated) {
             return print_error(updated.error());
+        }
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
         }
     } else {
         if (auto bound = session->database().bind(employee_v2_binding()); !bound) {
@@ -1825,12 +1839,15 @@ int command_employee_set_salary(const std::filesystem::path& path, std::uint64_t
             return print_error(handle.error());
         }
         auto transaction = session->database().begin();
-        if (auto updated = handle->set<&EmployeeV2::salary>(transaction, salary); !updated) {
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        if (auto updated = handle->set<&EmployeeV2::salary>(*transaction, salary); !updated) {
             return print_error(updated.error());
         }
-    }
-    if (auto flushed = session->database().flush(); !flushed) {
-        return print_error(flushed.error());
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
+        }
     }
     std::cout << "Employee " << object_id << " salary updated to " << salary
               << " using schema " << schema << '\n';
@@ -1860,14 +1877,18 @@ int command_employee_demo(const std::filesystem::path& path, bool force) {
         if (auto bound = session->database().bind(employee_v1_binding()); !bound) {
             return print_error(bound.error());
         }
+        auto transaction = session->database().begin();
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
         const EmployeeV1 employee{"Ana", 15000.0};
-        auto old = session->database().create(employee);
+        auto old = session->database().create(*transaction, employee);
         if (!old) {
             return print_error(old.error());
         }
         old_id = old->id();
-        if (auto flushed = session->database().flush(); !flushed) {
-            return print_error(flushed.error());
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
         }
         std::cout << "v1 wrote Employee{id=" << old_id.value
                   << ", name=Ana, salary=15000}\n";
@@ -1891,16 +1912,19 @@ int command_employee_demo(const std::filesystem::path& path, bool force) {
         std::cout << "v2 projected old object: country=" << projected->country
                   << " annual_salary=" << projected->annual_salary() << '\n';
         auto transaction = session->database().begin();
-        if (auto updated = old->set<&EmployeeV2::salary>(transaction, 16000.0); !updated) {
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        if (auto updated = old->set<&EmployeeV2::salary>(*transaction, 16000.0); !updated) {
             return print_error(updated.error());
         }
         const EmployeeV2 employee{"Bia", 18000.0, "PT"};
-        auto current = session->database().create(employee);
+        auto current = session->database().create(*transaction, employee);
         if (!current) {
             return print_error(current.error());
         }
-        if (auto flushed = session->database().flush(); !flushed) {
-            return print_error(flushed.error());
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
         }
         std::cout << "lazy migration rewrote Employee " << old_id.value << " as v2\n"
                   << "v2 wrote Employee{id=" << current->id().value << ", country=PT}\n";
@@ -2094,10 +2118,14 @@ int command_graph_demo(const std::filesystem::path& path, bool force) {
             return print_error(bound.error());
         }
 
-        auto dept = database.create(GraphDept{"Engenharia"});
-        auto apollo = database.create(GraphProject{"Apollo"});
-        auto gemini = database.create(GraphProject{"Gemini"});
-        auto badge = database.create(GraphBadge{7});
+        auto transaction = database.begin();
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        auto dept = database.create(*transaction, GraphDept{"Engenharia"});
+        auto apollo = database.create(*transaction, GraphProject{"Apollo"});
+        auto gemini = database.create(*transaction, GraphProject{"Gemini"});
+        auto badge = database.create(*transaction, GraphBadge{7});
         if (!dept || !apollo || !gemini || !badge) {
             return print_error(modb::Error{modb::ErrorCode::io_error,
                                            "failed to create graph nodes"});
@@ -2112,10 +2140,9 @@ int command_graph_demo(const std::filesystem::path& path, bool force) {
         if (!projects) {
             return print_error(projects.error());
         }
-        auto transaction = database.begin();
         for (const auto id : project_ids) {
             if (auto pushed =
-                    projects->push_back(transaction, modb::object::Ref<GraphProject>{id});
+                    projects->push_back(*transaction, modb::object::Ref<GraphProject>{id});
                 !pushed) {
                 return print_error(pushed.error());
             }
@@ -2127,13 +2154,13 @@ int command_graph_demo(const std::filesystem::path& path, bool force) {
         ana.home = modb::object::Embedded<GraphAddress>{GraphAddress{"Rua das Flores"}};
         ana.badge = modb::object::OwnedRef<GraphBadge>{badge_id};
         ana.projects = projects->id();
-        auto staff = database.create(ana);
+        auto staff = database.create(*transaction, ana);
         if (!staff) {
             return print_error(staff.error());
         }
         staff_id = staff->id();
-        if (auto flushed = database.flush(); !flushed) {
-            return print_error(flushed.error());
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
         }
         std::cout << "wrote Staff{id=" << staff_id.value << ", name=Ana}\n"
                   << "  dept -> Department{id=" << dept_id.value << "} (association)\n"
@@ -2207,8 +2234,15 @@ int command_graph_demo(const std::filesystem::path& path, bool force) {
 
         // Remove o pai: o badge (owned) some em cascata; dept e projects
         // (associação) permanecem.
-        if (auto removed = database.remove(staff_id); !removed) {
+        auto transaction = database.begin();
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
+        if (auto removed = database.remove(*transaction, staff_id); !removed) {
             return print_error(removed.error());
+        }
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
         }
         const bool badge_gone =
             !database.get<GraphBadge>(badge_id).has_value();
@@ -2216,9 +2250,6 @@ int command_graph_demo(const std::filesystem::path& path, bool force) {
         bool projects_alive = true;
         for (const auto id : project_ids) {
             projects_alive = projects_alive && database.get<GraphProject>(id).has_value();
-        }
-        if (auto flushed = database.flush(); !flushed) {
-            return print_error(flushed.error());
         }
         std::cout << "\nremoved Staff " << staff_id.value << ":\n"
                   << "  owned Badge cascaded away: " << (badge_gone ? "yes" : "no") << '\n'
@@ -2258,6 +2289,9 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
         }
         auto& database = session->database();
         auto transaction = database.begin();
+        if (!transaction) {
+            return print_error(transaction.error());
+        }
         auto blobs = database.blobs();
 
         auto vector = modb::object::PersistentVector<std::int64_t>::create(blobs);
@@ -2265,7 +2299,7 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
             return print_error(vector.error());
         }
         for (std::int64_t value = 1; value <= 5; ++value) {
-            if (auto pushed = vector->push_back(transaction, value * 10); !pushed) {
+            if (auto pushed = vector->push_back(*transaction, value * 10); !pushed) {
                 return print_error(pushed.error());
             }
         }
@@ -2276,7 +2310,7 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
             return print_error(set.error());
         }
         for (const std::int64_t value : {5, 3, 5, 1, 3, 9, 1}) {
-            if (auto inserted = set->insert(transaction, value); !inserted) {
+            if (auto inserted = set->insert(*transaction, value); !inserted) {
                 return print_error(inserted.error());
             }
         }
@@ -2285,16 +2319,16 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
         if (!map) {
             return print_error(map.error());
         }
-        if (auto put = map->put(transaction, "ana", 10); !put) {
+        if (auto put = map->put(*transaction, "ana", 10); !put) {
             return print_error(put.error());
         }
-        if (auto put = map->put(transaction, "bia", 20); !put) {
+        if (auto put = map->put(*transaction, "bia", 20); !put) {
             return print_error(put.error());
         }
-        if (auto put = map->put(transaction, "ana", 15); !put) {
+        if (auto put = map->put(*transaction, "ana", 15); !put) {
             return print_error(put.error());
         }
-        if (auto removed = map->remove(transaction, "bia"); !removed) {
+        if (auto removed = map->remove(*transaction, "bia"); !removed) {
             return print_error(removed.error());
         }
         map_blob = map->id();
@@ -2304,8 +2338,8 @@ int command_coll_demo(const std::filesystem::path& path, bool force) {
         if (!set_size || !map_size) {
             return print_error(modb::Error{modb::ErrorCode::corrupt_file, "collection size failed"});
         }
-        if (auto flushed = database.flush(); !flushed) {
-            return print_error(flushed.error());
+        if (auto committed = transaction->commit(); !committed) {
+            return print_error(committed.error());
         }
         std::cout << "wrote PersistentVector<int64> with 5 elements\n"
                   << "wrote PersistentSet<int64> from 7 inserts -> " << *set_size

@@ -12,8 +12,22 @@ include(CTest)
 option(MODB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(MODB_ENABLE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
 option(MODB_ALLOW_CXX23_FALLBACK "Allow a local C++23 build when C++26 is unavailable" ON)
+# Link estático do runtime MinGW gera binários portáteis (sem DLLs), mas a
+# toolchain do CLion migrou de GCC 13 para GCC 15.2, cujo libwinpthread.a
+# estático deixa `__intrinsic_setjmpex`/`__ms_vsnprintf` sem definição no
+# link `-static`. Por isso o padrão é OFF (link dinâmico, que resolve as DLLs
+# pelo PATH). Reative com -DMODB_STATIC_MINGW_RUNTIME=ON numa toolchain onde o
+# link totalmente estático funcione (ex.: GCC 13).
+option(MODB_STATIC_MINGW_RUNTIME "Link the MinGW runtime statically into executables" OFF)
 set(MODB_PAGE_SIZE 4096 CACHE STRING "Database page size in bytes")
 set(MODB_CHURN_RECORD_TOTAL 10000 CACHE STRING "Record count used by churn tests")
+
+# Opções de link do runtime MinGW, vazias quando o link estático está desligado.
+if(MINGW AND MODB_STATIC_MINGW_RUNTIME)
+    set(MODB_MINGW_LINK_OPTS ${MODB_MINGW_LINK_OPTS})
+else()
+    set(MODB_MINGW_LINK_OPTS)
+endif()
 
 add_library(modb
     src/model/data_type.cpp
@@ -43,6 +57,8 @@ add_library(modb
     src/storage/slotted_page.cpp
     src/storage/table_heap.cpp
     src/text_escape.cpp
+    src/tx/recovery.cpp
+    src/tx/wal.cpp
     src/version.cpp
 )
 add_library(modb::modb ALIAS modb)
@@ -138,8 +154,8 @@ if(MINGW)
     # consumidores de std::function quanto em libstdc++. O motor não depende
     # de RTTI; desativá-lo evita a definição duplicada e mantém a ABI coerente.
     target_compile_options(modb PUBLIC -fno-rtti)
-    target_link_options(modb_cli PRIVATE -static -static-libgcc -static-libstdc++)
-    target_link_options(modb_object_bench PRIVATE -static -static-libgcc -static-libstdc++)
+    target_link_options(modb_cli PRIVATE ${MODB_MINGW_LINK_OPTS})
+    target_link_options(modb_object_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
 endif()
 
 if(BUILD_TESTING)
@@ -163,6 +179,15 @@ if(BUILD_TESTING)
 
     add_executable(modb_schema_evolution_tests tests/schema_evolution_test.cpp)
     target_link_libraries(modb_schema_evolution_tests PRIVATE modb::modb)
+
+    add_executable(modb_wal_tests tests/wal_test.cpp)
+    target_link_libraries(modb_wal_tests PRIVATE modb::modb)
+
+    add_executable(modb_recovery_tests tests/recovery_test.cpp)
+    target_link_libraries(modb_recovery_tests PRIVATE modb::modb)
+
+    add_executable(modb_failpoint_tests tests/failpoint_test.cpp)
+    target_link_libraries(modb_failpoint_tests PRIVATE modb::modb)
 
     add_executable(modb_blob_store_tests tests/blob_store_test.cpp)
     target_link_libraries(modb_blob_store_tests PRIVATE modb::modb)
@@ -224,31 +249,34 @@ if(BUILD_TESTING)
     target_link_libraries(modb_table_heap_space_reuse_65_tests PRIVATE modb::modb)
 
     if(MINGW)
-        target_link_options(modb_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_model_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_object_model_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_object_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_binding_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_projection_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(modb_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_model_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_object_model_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_object_codec_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_binding_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_projection_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_schema_evolution_tests
-            PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_blob_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_relationship_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_collection_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_identity_map_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_object_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_catalog_persistence_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_storage_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_page_cache_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_codec_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_text_escape_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_slotted_page_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_table_heap_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_database_check_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_table_heap_churn_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_table_heap_reverse_churn_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_table_heap_space_reuse_tests PRIVATE -static -static-libgcc -static-libstdc++)
-        target_link_options(modb_table_heap_space_reuse_65_tests PRIVATE -static -static-libgcc -static-libstdc++)
+            PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_wal_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_recovery_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_failpoint_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_blob_store_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_relationship_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_collection_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_identity_map_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_object_store_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_codec_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_text_escape_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_slotted_page_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_table_heap_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_database_check_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_table_heap_churn_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_table_heap_reverse_churn_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_table_heap_space_reuse_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_table_heap_space_reuse_65_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
     endif()
 
     add_test(NAME modb.unit COMMAND modb_tests)
@@ -258,6 +286,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.binding COMMAND modb_binding_tests)
     add_test(NAME modb.projection COMMAND modb_projection_tests)
     add_test(NAME modb.schema_evolution COMMAND modb_schema_evolution_tests)
+    add_test(NAME modb.wal COMMAND modb_wal_tests)
+    add_test(NAME modb.recovery COMMAND modb_recovery_tests)
+    add_test(NAME modb.failpoint COMMAND modb_failpoint_tests)
     add_test(NAME modb.blob_store COMMAND modb_blob_store_tests)
     add_test(NAME modb.relationship COMMAND modb_relationship_tests)
     add_test(NAME modb.collection COMMAND modb_collection_tests)

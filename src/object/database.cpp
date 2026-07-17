@@ -1,6 +1,13 @@
 // Importa a interface de Database.
 #include "modb/object/database.hpp"
 
+// Importa a recuperação executada na abertura.
+#include "modb/tx/recovery.hpp"
+// Importa o WAL usado no commit.
+#include "modb/tx/wal.hpp"
+
+// Disponibiliza std::error_code na remoção do WAL.
+#include <system_error>
 // Disponibiliza o conjunto de ids visitados na cascata.
 #include <unordered_set>
 // Disponibiliza std::move.
@@ -8,6 +15,13 @@
 
 namespace modb::object {
 namespace {
+
+// Deriva o caminho do WAL a partir do caminho do banco (`<db>.wal`).
+std::filesystem::path wal_path_for(const std::filesystem::path& path) {
+    std::filesystem::path wal = path;
+    wal += ".wal";
+    return wal;
+}
 
 // Compara duas TypeDefinitions ignorando o id (que difere entre a canônica do
 // binding, ainda sem id, e a persistida). Confere nome e atributos.
@@ -40,7 +54,11 @@ Result<Database> Database::create(const std::filesystem::path& path) {
     if (!store) {
         return std::unexpected(store.error());
     }
-    return Database{std::move(file), std::move(*store)};
+    // Um banco novo não deve herdar um WAL residual de um banco homônimo antigo.
+    auto wal_path = wal_path_for(path);
+    std::error_code remove_error;
+    std::filesystem::remove(wal_path, remove_error);
+    return Database{std::move(file), std::move(*store), std::move(wal_path)};
 }
 
 Result<Database> Database::open(const std::filesystem::path& path) {
@@ -49,11 +67,17 @@ Result<Database> Database::open(const std::filesystem::path& path) {
         return std::unexpected(page_file.error());
     }
     auto file = std::make_unique<storage::PageFile>(std::move(*page_file));
+    // Recuperação antes de reconstruir o catálogo: reaplica transações
+    // commitadas do WAL para que o ObjectStore leia o estado consolidado.
+    auto wal_path = wal_path_for(path);
+    if (auto recovered = tx::recover(*file, wal_path); !recovered) {
+        return std::unexpected(recovered.error());
+    }
     auto store = ObjectStore::open(*file);
     if (!store) {
         return std::unexpected(store.error());
     }
-    return Database{std::move(file), std::move(*store)};
+    return Database{std::move(file), std::move(*store), std::move(wal_path)};
 }
 
 Result<TypeDefinitionId> Database::register_or_adopt(const Binding& binding) {
@@ -73,14 +97,158 @@ Result<TypeDefinitionId> Database::register_or_adopt(const Binding& binding) {
     return store_.register_type(std::move(*canonical));
 }
 
+Result<TypeDefinitionId> Database::persist_binding(const Binding& binding) {
+    // Se o chamador já abriu uma transação, participa dela (sem commit próprio).
+    if (file_->in_transaction()) {
+        return register_or_adopt(binding);
+    }
+    // Caso contrário, envolve as escritas de catálogo numa transação interna,
+    // para que registrar/evoluir um tipo seja atômico e passe pelo WAL.
+    current_tx_id_ = next_tx_id_++;
+    file_->begin_transaction();
+    auto type_id = register_or_adopt(binding);
+    if (!type_id) {
+        (void)rollback_transaction();
+        return std::unexpected(type_id.error());
+    }
+    if (auto committed = commit_transaction(CommitPhase::full); !committed) {
+        (void)rollback_transaction();
+        return std::unexpected(committed.error());
+    }
+    return type_id;
+}
+
 const Database::BoundType* Database::bound_for(const void* type) const {
     const auto it = bound_.find(type);
     return it == bound_.end() ? nullptr : &it->second;
 }
 
-Result<void> Database::remove(ObjectId id) {
+Result<void> Database::remove(Transaction& tx, ObjectId id) {
+    if (auto writable = check_writable(tx); !writable) {
+        return std::unexpected(writable.error());
+    }
     std::unordered_set<std::uint64_t> visited;
     return remove_cascade(id, visited);
+}
+
+Result<Transaction> Database::begin() {
+    if (database_id_.value == 0) {
+        return std::unexpected(
+            Error{ErrorCode::invalid_argument, "database must be attached before begin"});
+    }
+    if (file_->in_transaction()) {
+        return std::unexpected(
+            Error{ErrorCode::transaction_active, "a transaction is already in progress"});
+    }
+    current_tx_id_ = next_tx_id_++;
+    file_->begin_transaction();
+    return Transaction{database_id_};
+}
+
+Result<void> Database::commit_transaction(CommitPhase phase) {
+    if (!file_->in_transaction()) {
+        return std::unexpected(
+            Error{ErrorCode::transaction_required, "no active transaction to commit"});
+    }
+    {
+        // Mantém o descritor do WAL em um escopo próprio. Ele precisa estar
+        // fechado antes do checkpoint removê-lo, especialmente no Windows.
+        // 1. Escreve begin + imagens de página no WAL e o torna durável. A
+        // fábrica do arquivo é injetável: produção abre um NativeFile; testes
+        // injetam um FailpointFile que falha após N escritas (failpoints).
+        auto wal = tx::Wal::create(wal_path_, wal_factory_);
+        if (!wal) {
+            return std::unexpected(wal.error());
+        }
+        if (auto appended = wal->append_begin(current_tx_id_); !appended) {
+            return std::unexpected(appended.error());
+        }
+        for (const auto& [page_id, page] : file_->transaction_pages()) {
+            if (auto appended =
+                    wal->append_page_image(current_tx_id_, storage::PageId{page_id}, page.bytes());
+                !appended) {
+                return std::unexpected(appended.error());
+            }
+        }
+        if (auto synced = wal->sync(); !synced) {
+            return std::unexpected(synced.error());
+        }
+        // Costura de failpoint: parar aqui deixa o WAL sem registro de commit; a
+        // recuperação descarta a transação (tudo-ou-nada → nada).
+        if (phase == CommitPhase::stop_after_images) {
+            return {};
+        }
+        // 2. Registro de commit + sync: a partir daqui a transação é durável.
+        if (auto appended = wal->append_commit(current_tx_id_); !appended) {
+            return std::unexpected(appended.error());
+        }
+        if (auto synced = wal->sync(); !synced) {
+            return std::unexpected(synced.error());
+        }
+        // Costura: parar aqui simula queda após o commit durável, antes de aplicar;
+        // a recuperação reaplica (tudo-ou-nada → tudo).
+        if (phase == CommitPhase::stop_after_commit_record) {
+            return {};
+        }
+        // 3. Aplica as páginas ao arquivo de dados e as torna duráveis.
+        if (auto applied = file_->apply_transaction(); !applied) {
+            return std::unexpected(applied.error());
+        }
+        if (auto flushed = file_->flush(); !flushed) {
+            return std::unexpected(flushed.error());
+        }
+        // Costura: parar aqui mantém o WAL; a recuperação reaplica de forma
+        // idempotente e então o remove.
+        if (phase == CommitPhase::stop_before_wal_cleanup) {
+            return {};
+        }
+    }
+    // 4. Checkpoint: as páginas já estão duráveis, o WAL pode ser removido.
+    std::error_code remove_error;
+    std::filesystem::remove(wal_path_, remove_error);
+    return {};
+}
+
+Result<void> Database::rollback_transaction() {
+    file_->discard_transaction();
+    std::error_code remove_error;
+    std::filesystem::remove(wal_path_, remove_error);
+    return {};
+}
+
+Transaction::~Transaction() {
+    if (active_) {
+        (void)rollback();
+    }
+}
+
+Result<void> Transaction::commit() { return commit(CommitPhase::full); }
+
+Result<void> Transaction::commit(CommitPhase phase) {
+    auto database = DatabaseRegistry::instance().find(database_);
+    if (!database) {
+        // Sem banco não há como reverter nem aplicar; consome a transação.
+        active_ = false;
+        return std::unexpected(database.error());
+    }
+    auto committed = (*database)->commit_transaction(phase);
+    // Só consome a transação quando o commit conclui (ou para num failpoint
+    // intencional, que também retorna Ok). Se o commit falhar de verdade,
+    // `active_` permanece e o destrutor executa o rollback — nunca deixando o
+    // PageFile preso numa transação nem o buffer aplicado pela metade.
+    if (committed) {
+        active_ = false;
+    }
+    return committed;
+}
+
+Result<void> Transaction::rollback() {
+    active_ = false;
+    auto database = DatabaseRegistry::instance().find(database_);
+    if (!database) {
+        return {};
+    }
+    return (*database)->rollback_transaction();
 }
 
 Result<void> Database::remove_cascade(ObjectId id, std::unordered_set<std::uint64_t>& visited) {

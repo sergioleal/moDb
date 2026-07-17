@@ -89,6 +89,10 @@ enum class ErrorCode {
     // Uma projeção não pôde reconciliar o tipo persistido com o binding atual
     // (conversão de tipo não permitida sem migração registrada).
     incompatible_projection,
+    // Uma escrita foi tentada sem uma transação ativa (Fase 5).
+    transaction_required,
+    // Uma segunda transação foi iniciada com uma já em andamento (single-writer).
+    transaction_active,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

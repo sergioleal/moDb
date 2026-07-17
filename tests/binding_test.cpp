@@ -111,15 +111,27 @@ int main() {
         if (!database_id) {
             return suite.finish();
         }
-        // Criar sem bind é rejeitado.
-        suite.check_error(db->create(ana), ErrorCode::type_not_found,
-                          "creating an unbound type is rejected");
+        // Criar sem bind é rejeitado (dentro de uma transação, que é exigida).
+        {
+            auto unbound_tx = db->begin();
+            suite.check(unbound_tx.has_value(), "a transaction begins");
+            if (unbound_tx) {
+                suite.check_error(db->create(*unbound_tx, ana), ErrorCode::type_not_found,
+                                  "creating an unbound type is rejected");
+                (void)unbound_tx->rollback();
+            }
+        }
 
         suite.check(db->bind(employee_builder()).has_value(), "the Employee type is bound");
         if (db->current_baseline()) {
             original_baseline = db->current_baseline()->id();
         }
-        auto handle = db->create(ana);
+        auto transaction = db->begin();
+        suite.check(transaction.has_value(), "the write transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
+        auto handle = db->create(*transaction, ana);
         suite.check(handle.has_value(), "a real Employee object is persisted");
         if (!handle) {
             return suite.finish();
@@ -130,7 +142,11 @@ int main() {
         suite.check(materialized.has_value() && *materialized == ana,
                     "the materialized object equals the original C++ object");
 
-        suite.check(db->flush().has_value(), "changes are flushed");
+        suite.check(transaction->commit().has_value(), "changes are committed");
+        auto wal_path = database.path();
+        wal_path += ".wal";
+        suite.check(!std::filesystem::exists(wal_path),
+                    "a full commit removes the closed WAL on Windows");
         DatabaseRegistry::instance().detach(*database_id);
     }
 

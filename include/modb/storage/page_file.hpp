@@ -18,6 +18,8 @@
 #include <memory>
 // Disponibiliza a raiz de catálogo, que pode ainda não existir.
 #include <optional>
+// Disponibiliza o buffer de páginas sujas da transação.
+#include <unordered_map>
 
 namespace modb::storage {
 
@@ -63,6 +65,36 @@ public:
     // Depois de um flush bem-sucedido, os dados sobrevivem a uma queda de energia.
     [[nodiscard]] Result<void> flush();
 
+    // --- Transações (Fase 5): WAL redo-only com after-images de página ---
+    // Durante uma transação, write() bufferiza a página modificada em vez de
+    // tocar o disco; read() enxerga o buffer (read-your-writes). No commit as
+    // páginas são aplicadas de uma vez. allocate_page continua imediato (páginas
+    // não referenciadas de uma transação abortada ficam órfãs — limitação de MVP).
+    void begin_transaction();
+    // Descarta as páginas pendentes (rollback): nada foi aplicado ao disco.
+    void discard_transaction() noexcept;
+    [[nodiscard]] bool in_transaction() const noexcept { return in_transaction_; }
+    // Páginas sujas acumuladas na transação corrente (lidas pelo WAL no commit).
+    [[nodiscard]] const std::unordered_map<std::uint64_t, Page>& transaction_pages()
+        const noexcept {
+        return tx_pages_;
+    }
+    // Aplica as páginas sujas ao disco (após o WAL estar durável) e encerra a
+    // transação. O flush é responsabilidade do chamador (após aplicar).
+    [[nodiscard]] Result<void> apply_transaction();
+
+    // Test-only (Fase 5, failpoints): faz apply_transaction falhar após aplicar
+    // exatamente `pages_before_failure` páginas, simulando uma queda no meio da
+    // aplicação — as primeiras ficam no disco, o resto e o WAL ficam para a
+    // recuperação. O padrão (~0) aplica todas as páginas normalmente.
+    void set_apply_failpoint(std::size_t pages_before_failure) noexcept {
+        apply_failpoint_ = pages_before_failure;
+    }
+
+    // Recuperação: grava uma página reaplicada do WAL, estendendo o arquivo e a
+    // contagem de páginas se necessário. Ignora o buffer de transação.
+    [[nodiscard]] Result<void> write_recovered_page(PageId id, const Page& page);
+
     // Retorna a página raiz do catálogo ou vazio quando ainda não existe.
     [[nodiscard]] std::optional<PageId> catalog_root() const noexcept { return catalog_root_; }
     // Persiste a raiz do catálogo no superbloco, preservando os demais campos.
@@ -101,6 +133,12 @@ private:
     std::uint64_t page_count_{};
     // Espelha a raiz do catálogo persistida no superbloco.
     std::optional<PageId> catalog_root_;
+    // Indica se há uma transação em andamento bufferizando escritas.
+    bool in_transaction_{false};
+    // Páginas sujas da transação corrente (PageId → conteúdo), aplicadas no commit.
+    std::unordered_map<std::uint64_t, Page> tx_pages_;
+    // Test-only: teto de páginas aplicadas antes de simular queda (~0 = todas).
+    std::size_t apply_failpoint_{~std::size_t{0}};
 };
 
 } // namespace modb::storage

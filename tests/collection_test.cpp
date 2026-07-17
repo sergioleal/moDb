@@ -99,6 +99,10 @@ int main() {
             }
             auto database_id = registry.attach(database);
             auto transaction = database->begin();
+            suite.check(transaction.has_value(), "vector transaction begins");
+            if (!transaction) {
+                return suite.finish();
+            }
             auto blobs = database->blobs();
             auto vector = PersistentVector<std::int64_t>::create(blobs);
             suite.check(vector.has_value(), "vector is created");
@@ -106,7 +110,8 @@ int main() {
                 return suite.finish();
             }
             for (int i = 0; i < total; ++i) {
-                if (auto pushed = vector->push_back(transaction, static_cast<std::int64_t>(i * 2));
+                if (auto pushed =
+                        vector->push_back(*transaction, static_cast<std::int64_t>(i * 2));
                     !pushed) {
                     suite.check(false, "push_back failed");
                     break;
@@ -118,7 +123,7 @@ int main() {
             auto middle = vector->at(5000);
             suite.check(middle.has_value() && *middle == 10000, "at() reads the right element");
             vector_id = vector->id();
-            suite.check(database->flush().has_value(), "vector flushed");
+            suite.check(transaction->commit().has_value(), "vector transaction committed");
             if (database_id) {
                 registry.detach(*database_id);
             }
@@ -155,12 +160,16 @@ int main() {
         }
         auto database_id = registry.attach(database);
         auto transaction = database->begin();
+        suite.check(transaction.has_value(), "set transaction begins");
+        if (!transaction) {
+            return suite.finish();
+        }
         auto blobs = database->blobs();
         auto set = PersistentSet<std::int64_t>::create(blobs);
         suite.check(set.has_value(), "set is created");
         if (set) {
             for (std::int64_t value : {5, 3, 5, 1, 3, 9, 1}) {
-                suite.check(set->insert(transaction, value).has_value(), "set insert succeeds");
+                suite.check(set->insert(*transaction, value).has_value(), "set insert succeeds");
             }
             auto size = set->size();
             suite.check(size.has_value() && *size == 4, "set deduplicates to 4 unique elements");
@@ -169,6 +178,7 @@ int main() {
             suite.check(has3.has_value() && *has3, "set contains an inserted element");
             suite.check(has7.has_value() && !*has7, "set rejects an absent element");
         }
+        suite.check(transaction->commit().has_value(), "set transaction committed");
         if (database_id) {
             registry.detach(*database_id);
         }
@@ -186,23 +196,27 @@ int main() {
             }
             auto database_id = registry.attach(database);
             auto transaction = database->begin();
+            suite.check(transaction.has_value(), "map transaction begins");
+            if (!transaction) {
+                return suite.finish();
+            }
             auto blobs = database->blobs();
             auto map = PersistentMap<std::string, std::int64_t>::create(blobs);
             suite.check(map.has_value(), "map is created");
             if (!map) {
                 return suite.finish();
             }
-            suite.check(map->put(transaction, "ana", 10).has_value(), "map put ana");
-            suite.check(map->put(transaction, "bia", 20).has_value(), "map put bia");
-            suite.check(map->put(transaction, "ana", 15).has_value(), "map replace ana");
+            suite.check(map->put(*transaction, "ana", 10).has_value(), "map put ana");
+            suite.check(map->put(*transaction, "bia", 20).has_value(), "map put bia");
+            suite.check(map->put(*transaction, "ana", 15).has_value(), "map replace ana");
             auto ana = map->get("ana");
             suite.check(ana.has_value() && ana->has_value() && **ana == 15, "map get replaced value");
-            auto removed = map->remove(transaction, "bia");
+            auto removed = map->remove(*transaction, "bia");
             suite.check(removed.has_value() && *removed, "map remove existing key");
             auto missing = map->get("bia");
             suite.check(missing.has_value() && !missing->has_value(), "removed key is absent");
             map_id = map->id();
-            suite.check(database->flush().has_value(), "map flushed");
+            suite.check(transaction->commit().has_value(), "map transaction committed");
             if (database_id) {
                 registry.detach(*database_id);
             }
@@ -244,9 +258,14 @@ int main() {
                             database->bind(employee_builder()).has_value(),
                         "graph types bound");
 
-            auto lead = database->create(Project{"Apollo"});
-            auto p2 = database->create(Project{"Gemini"});
-            auto office = database->create(Address{"Rua A"});
+            auto transaction = database->begin();
+            suite.check(transaction.has_value(), "graph transaction begins");
+            if (!transaction) {
+                return suite.finish();
+            }
+            auto lead = database->create(*transaction, Project{"Apollo"});
+            auto p2 = database->create(*transaction, Project{"Gemini"});
+            auto office = database->create(*transaction, Address{"Rua A"});
             suite.check(lead && p2 && office, "projects and office created");
             if (!lead || !p2 || !office) {
                 return suite.finish();
@@ -256,7 +275,6 @@ int main() {
             project_ids = {lead_id, p2->id()};
 
             // Monta a coleção de refs de projetos e guarda o BlobId no Employee.
-            auto transaction = database->begin();
             auto blobs = database->blobs();
             auto projects = PersistentVector<Ref<Project>>::create(blobs);
             suite.check(projects.has_value(), "projects vector created");
@@ -264,7 +282,7 @@ int main() {
                 return suite.finish();
             }
             for (auto id : project_ids) {
-                suite.check(projects->push_back(transaction, Ref<Project>{id}).has_value(),
+                suite.check(projects->push_back(*transaction, Ref<Project>{id}).has_value(),
                             "project ref appended");
             }
             projects_blob = projects->id();
@@ -274,13 +292,13 @@ int main() {
             ana.lead = Ref<Project>{lead_id};
             ana.office = OwnedRef<Address>{office_id};
             ana.projects = projects_blob;
-            auto emp = database->create(ana);
+            auto emp = database->create(*transaction, ana);
             suite.check(emp.has_value(), "employee with graph created");
             if (!emp) {
                 return suite.finish();
             }
             emp_id = emp->id();
-            suite.check(database->flush().has_value(), "graph flushed");
+            suite.check(transaction->commit().has_value(), "graph transaction committed");
             registry.detach(*database_id);
         }
 
@@ -326,7 +344,13 @@ int main() {
 
             // Remove Employee: o office (owned) some em cascata; os Projects
             // (associação/coleção) permanecem intactos.
-            suite.check(database->remove(emp_id).has_value(), "employee removed");
+            auto transaction = database->begin();
+            suite.check(transaction.has_value(), "remove transaction begins");
+            if (!transaction) {
+                return suite.finish();
+            }
+            suite.check(database->remove(*transaction, emp_id).has_value(), "employee removed");
+            suite.check(transaction->commit().has_value(), "remove transaction committed");
             suite.check_error(database->get<Address>(office_id), ErrorCode::record_not_found,
                               "owned office removed in cascade");
             for (auto id : project_ids) {

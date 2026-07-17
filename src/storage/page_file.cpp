@@ -302,6 +302,16 @@ Result<void> PageFile::read(PageId id, Page& destination) {
             Error{ErrorCode::page_not_found, "page does not exist: " + std::to_string(id.value)});
     }
 
+    // Read-your-writes: durante uma transação, uma página já modificada é
+    // servida do buffer, não do disco (que ainda tem a versão anterior).
+    if (in_transaction_) {
+        if (const auto found = tx_pages_.find(id.value); found != tx_pages_.end()) {
+            std::copy(found->second.bytes().begin(), found->second.bytes().end(),
+                      destination.bytes().begin());
+            return {};
+        }
+    }
+
     // Acerto de cache: copia a página já residente e evita a syscall.
     if (const Page* cached = cache_->get(id.value)) {
         std::copy(cached->bytes().begin(), cached->bytes().end(), destination.bytes().begin());
@@ -346,7 +356,61 @@ Result<void> PageFile::write(PageId id, const Page& page) {
         return std::unexpected(
             Error{ErrorCode::page_not_found, "page does not exist: " + std::to_string(id.value)});
     }
+    // Durante uma transação, a escrita é bufferizada (redo-only): o disco só é
+    // tocado no commit, depois que o WAL estiver durável.
+    if (in_transaction_) {
+        tx_pages_.insert_or_assign(id.value, page);
+        return {};
+    }
     // Usa a rotina interna depois de concluir todas as validações públicas.
+    return write_at(id, page);
+}
+
+void PageFile::begin_transaction() {
+    in_transaction_ = true;
+    tx_pages_.clear();
+}
+
+void PageFile::discard_transaction() noexcept {
+    in_transaction_ = false;
+    tx_pages_.clear();
+}
+
+Result<void> PageFile::apply_transaction() {
+    // Aplica cada página suja ao disco (write-through também atualiza o cache).
+    std::size_t applied = 0;
+    for (const auto& [id, page] : tx_pages_) {
+        if (applied >= apply_failpoint_) {
+            // Failpoint de teste: simula uma queda no meio da aplicação. As
+            // páginas já escritas permanecem; o buffer e o WAL ficam intactos
+            // para a recuperação reaplicar tudo. Não encerra a transação.
+            return std::unexpected(
+                Error{ErrorCode::io_error, "apply failpoint reached (simulated crash)"});
+        }
+        if (auto written = write_at(PageId{id}, page); !written) {
+            return std::unexpected(written.error());
+        }
+        ++applied;
+    }
+    tx_pages_.clear();
+    in_transaction_ = false;
+    return {};
+}
+
+Result<void> PageFile::write_recovered_page(PageId id, const Page& page) {
+    // O superbloco nunca aparece como imagem de página no WAL.
+    if (id == superblock_page_id) {
+        return std::unexpected(
+            Error{ErrorCode::reserved_page, "recovery cannot overwrite the superblock"});
+    }
+    // Estende a contagem lógica se a página estiver além do fim atual (a
+    // durabilidade da alocação pré-commit não é garantida; o WAL é a verdade).
+    if (id.value >= page_count_) {
+        if (auto grown = write_page_count(id.value + 1); !grown) {
+            return std::unexpected(grown.error());
+        }
+        page_count_ = id.value + 1;
+    }
     return write_at(id, page);
 }
 

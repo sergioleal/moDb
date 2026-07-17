@@ -37,6 +37,10 @@ public:
     // Liga a store ao arquivo; não aloca nada até a primeira gravação.
     explicit BlobStore(storage::PageFile& file) noexcept : file_{&file} {}
 
+    // Informa se há uma transação ativa no arquivo de respaldo. As coleções
+    // usam isto para exigir uma transação antes de qualquer escrita (Fase 5).
+    [[nodiscard]] bool in_transaction() const noexcept { return file_->in_transaction(); }
+
     // Grava os bytes fatiados em páginas encadeadas e devolve o BlobId (a
     // primeira página). Um blob vazio ainda ocupa uma página com length 0.
     [[nodiscard]] Result<BlobId> create(std::span<const std::byte> data);
