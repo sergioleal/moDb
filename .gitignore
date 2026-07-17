@@ -16,6 +16,7 @@ Testing/
 # Runtime database files
 *.modb
 *.modb-wal
+*.modb.wal
 *.db
 *.db-wal
 
