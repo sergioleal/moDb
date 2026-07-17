@@ -157,7 +157,7 @@ destruir instância, reabrir arquivo, recuperar exatamente os mesmos dados
 
 ## Fase 3 — Binding, Handle e ProjectionPlan
 
-Status: ✅ Concluída (10/10) — Definição completa:
+Status: ✅ Concluída (10/10) — commit `264213f`, 2026-07-17. Definição completa:
 [PLANO_ODB.md §Fase 3](PLANO_ODB.md#fase-3--binding-handle-e-projectionplan) ·
 [PROTOCOLO_FASES.md §Fase 3](PROTOCOLO_FASES.md#fase-3--binding-handle-e-projectionplan)
 
@@ -195,8 +195,7 @@ Debug com warnings como erros e `sanitizers`/hardening do MinGW.
 ## Fase 4 — Relacionamentos, coleções e BlobStore
 
 Status: ✅ Concluída (9/9) — critério de aceite verde (grafo do critério em
-`modb.collection`). Pendente de commit (mesma situação da Fase 3). Definição
-completa:
+`modb.collection`). Commit `f902a0b`, 2026-07-17. Definição completa:
 [PLANO_ODB.md §Fase 4](PLANO_ODB.md#fase-4--relacionamentos-coleções-e-blobstore) ·
 [PROTOCOLO_FASES.md §Fase 4](PROTOCOLO_FASES.md#fase-4--relacionamentos-coleções-e-blobstore)
 
@@ -479,5 +478,5 @@ automaticamente, interfaces públicas documentadas.
 | 0 | 2026-07-16 | `4928468` |
 | 1 | 2026-07-16 | `bfcc5ef` |
 | 2 | 2026-07-16 | `8d23923`…`cc6ee9b`…`85a5712` + remoção do Anel 1 |
-| 3 | 2026-07-17 | pendente de commit (critério de aceite verde) |
-| 4 | 2026-07-17 | pendente de commit (critério de aceite verde) |
+| 3 | 2026-07-17 | `264213f` |
+| 4 | 2026-07-17 | `f902a0b` |
