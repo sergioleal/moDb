@@ -17,7 +17,7 @@ Visão (3 MDs na raiz) → Plano OO → Protocolo por fase → ADRs da Fase 0
 ## Quer saber só "onde estamos agora"?
 
 **[RASTREADOR.md](RASTREADOR.md)** — o rastreador de andamento. Lista as
-~103 tarefas das 11 fases com status (`⬜`/`🔄`/`✅`/`🚫`), o teste automatizado
+~123 tarefas das 12 fases com status (`⬜`/`🔄`/`✅`/`🚫`), o teste automatizado
 de cada fase e o painel geral de progresso. É o único documento desta pasta
 que reflete estado vivo; os demais (Plano, Protocolo, ADRs) definem escopo e
 não mudam a cada tarefa concluída.
@@ -40,7 +40,7 @@ descreve *como* chegar lá.
 ## 2. Plano e protocolo (vigentes) — comece por aqui
 
 - **[PLANO_ODB.md](PLANO_ODB.md)** — o plano de desenvolvimento vigente.
-  Traduz os três documentos de visão em **11 fases verticais** (0 a 10), cada
+  Traduz os três documentos de visão em **12 fases verticais** (0 a 11), cada
   uma com objetivo, tarefas, entregáveis e critério de aceite. Define o MVP OO
   (fases 0–3) e a ordem recomendada de execução.
 - **[PROTOCOLO_FASES.md](PROTOCOLO_FASES.md)** — o mesmo plano, mas no nível de
@@ -82,9 +82,12 @@ principalmente as da **Fase 0**:
 | [ADR-008](decisions/ADR-008-integridade-de-referencias.md) | Integridade de referências e cascata de composição |
 | [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) | Protocolo binário próximo do armazenamento lógico, sem expor localização física |
 | [ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md) | Interface por métodos C++, consultas internas e módulos confiáveis no processo |
+| [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) | Container serverless stateful: volume persistente, writer único, escala a zero |
 
-Os números ADR-009 e ADR-011 estão reservados no protocolo para as decisões de
-MVCC (Fase 6) e concorrência do servidor (Fase 8), respectivamente.
+O número ADR-011 está reservado no protocolo para a concorrência do servidor
+(Fase 8A: leitor por conexão, workers, escritor dedicado e fila limitada) e
+ainda não existe no repositório. A ADR-009 (épocas / IDMP v2) já foi entregue
+com a Fase 6.
 
 ### ADRs legadas (modelo relacional, `0001`/`0002`)
 

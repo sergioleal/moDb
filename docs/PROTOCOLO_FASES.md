@@ -1273,43 +1273,144 @@ buscas por chave comprovadamente via índice.
 
 # Fase 8 — Servidor, protocolo binário e backpressure
 
+## Sequência de entregas verticais
+
+A Fase 8 não usa componentes internos como critério de entrega. Um socket
+isolado ou um codec sem servidor ainda não resolvem o caso de uso. Cada
+subfase abaixo termina com uma capacidade consumível e uma prova
+automatizada. A Fase 8A só pode ser encerrada depois da Fase 7, porque o
+streaming remoto reutiliza o pipeline preguiçoso e os snapshots.
+
+### Fase 8A — Contratos e codec do protocolo
+
+Escopo:
+
+- ADR-011: modelo de concorrência (leitor por conexão, workers de consulta,
+  escritor dedicado; fila de saída limitada); revisão das premissas
+  single-thread (`ScratchPagePool`, locks do `DatabaseRegistry`, etc.);
+- `QueryDescription` serializável;
+- codec das mensagens versionadas e `ObjectEnvelope` lógico;
+- framing com diretório de slots; `compression=none` obrigatório.
+
+Valor entregue: contrato binário estável e testável sem rede.
+
+Critério de conclusão 8A: round-trip encode→decode; frames hostis
+(truncados, length mentiroso, >16 MiB, diretório inválido, lixo) →
+`protocol_error` sem alocação gigante. Tag: `0.0.8a`.
+
+### Fase 8B — Transporte e processo servidor
+
+Escopo:
+
+- `NativeSocket` Win32/POSIX (mesmo padrão do `NativeFile`);
+- processo servidor hospedando `DatabaseRegistry`;
+- bind/accept em porta efêmera; negociação `Hello`/`HelloOk`.
+
+Valor entregue: servidor dedicado que aceita conexão e completa o
+handshake.
+
+Critério de conclusão 8B: loopback conecta, negocia e encerra; CLI
+demonstra `modb serve` (ou equivalente) e ping/info remoto. Tag: `0.0.8b`.
+
+### Fase 8C — Primeiro streaming remoto
+
+Escopo:
+
+- execução de `QueryDescription` declarativa restrita;
+- sequência `StreamBegin` → `ObjectFrame`(s) → `StreamEnd` / `StreamError`;
+- cliente C++ e `ObjectStream` incremental;
+- serialização reutilizando o codec genérico (sem localização física).
+
+Valor entregue: consulta remota em streaming ponta a ponta.
+
+Critério de conclusão 8C: 10 mil objetos íntegros e ordenados;
+independência física comprovada; falha após N → N objetos +
+`StreamError`. Tag: `0.0.8c`.
+
+### Fase 8D — Backpressure e ciclo de recursos
+
+Escopo:
+
+- limite de frame e fila de saída (no máximo um frame / constante pequena);
+- bloqueio do writer suspende o generator e o scan;
+- liberação de cursor/snapshot em desconexão;
+- instrumentação produzidos − enviados.
+
+Valor entregue: backpressure fim-a-fim sem acumular memória.
+
+Critério de conclusão 8D: cliente lento (1 obj/50 ms, janela TCP pequena)
+mantém produzidos − enviados ≤ constante pequena; desconexão não vaza
+recursos. Tag: `0.0.8d`.
+
+### Fase 8E — Cancelamento, multiplexação e API assíncrona
+
+Escopo:
+
+- `Cancel` recebido enquanto o escritor envia;
+- conexão reutilizável após cancelamento;
+- múltiplos `query_id` com escrita serializada;
+- API `co_await stream.next()` com semântica e executor na ADR-011.
+
+Valor entregue: cliente assíncrono com cancelamento e multiplexação.
+
+Critério de conclusão 8E: cancelamento interrompe produção e permite nova
+consulta; duas consultas concorrentes intercalam `query_id`s íntegros.
+Tag: `0.0.8e`.
+
+### Fase 8F — Limites, timeout, compressão e fechamento
+
+Escopo:
+
+- timeout, limite de streams, frame máximo e razão de expansão;
+- negociação de compressão (codec escolhido por benchmark; `none`
+  obrigatório e fallback);
+- suíte integrada e demonstração CLI entre processos.
+
+Valor entregue: políticas de recurso ativas e critério final da fase.
+
+Critério de conclusão 8F / da Fase 8: cliente em outro processo com
+backpressure comprovado e `StreamError` correto; compressão inválida ou
+não negociada rejeitada sem alocação excessiva. Tag: `0.0.8f`.
+
 ## Artefatos novos
 
 ```text
-include/modb/net/native_socket.hpp     src/net/native_socket.cpp   (espelha NativeFile: Win32/POSIX isolados)
-include/modb/net/protocol.hpp          src/net/protocol.cpp
-include/modb/net/server.hpp            src/net/server.cpp
-include/modb/net/client.hpp            src/net/client.cpp
-tests/protocol_test.cpp
-tests/server_streaming_test.cpp
+include/modb/net/native_socket.hpp     src/net/native_socket.cpp   (8B; espelha NativeFile: Win32/POSIX)
+include/modb/net/protocol.hpp          src/net/protocol.cpp        (8A)
+include/modb/net/query_description.hpp                             (8A)
+include/modb/net/server.hpp            src/net/server.cpp          (8B–8F)
+include/modb/net/client.hpp            src/net/client.cpp          (8C–8E)
+tests/protocol_test.cpp                                            (8A; estendido em 8F)
+tests/server_streaming_test.cpp                                    (8B–8F, casos progressivos)
+docs/decisions/ADR-011-*.md                                        (8A)
 ```
 
 [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md):
 rede via sockets nativos próprios (`NativeSocket`, mesmo padrão do
 `NativeFile`) e protocolo próximo do armazenamento lógico — sem dependência
-externa no MVP; asio reavaliado se a complexidade crescer. ADR-011: modelo de concorrência — 1 thread de aceitação
-+ 1 thread por conexão no MVP (instância dedicada a uma aplicação; poucas
-conexões); o motor continua com um escritor; o `DatabaseRegistry` ganha o lock
-que o escopo single-thread dispensava (revisar `ScratchPagePool` etc. sob a
-nova premissa — os pontos exatos ficam listados na ADR).
+externa no MVP; asio reavaliado se a complexidade crescer. ADR-011 (Fase 8A):
+modelo de concorrência — leitor por conexão + workers de consulta + escritor
+dedicado; fila de saída limitada a um frame (preserva backpressure); o motor
+continua com um escritor; o `DatabaseRegistry` já possui mutex e a ADR lista
+os pontos ainda single-thread (`ScratchPagePool`, etc.) a revisar.
 
 ## Protocolo (frames sobre TCP)
 
 Frame físico: `| length u32 | type u8 | payload |` (length cobre type+payload;
 máx 16 MiB — frame maior → erro de protocolo). Mensagens:
 
-| Tipo | Nome | Payload |
-|---|---|---|
-| 1 | `Hello` | versão do protocolo u16; nome do banco (string); codecs de compressão aceitos |
-| 2 | `HelloOk` | versão u16; BaselineId u64; codecs e limites selecionados |
-| 3 | `Query` | query_id u32 + descrição serializada da consulta |
-| 4 | `StreamBegin` | query_id u32 |
-| 5 | `ObjectFrame` | query_id u32 + diretório de slots + `ObjectEnvelope`s |
-| 6 | `StreamEnd` | query_id u32 + total u64 |
-| 7 | `StreamError` | query_id u32 + ErrorCode u16 + mensagem (string) |
-| 8 | `Cancel` | query_id u32 |
-| 9 | `OpCall` | op_id (string) + argumentos serializados (Fase 9) |
-| 10 | `OpResult` | sucesso u8 + payload ou erro |
+| Tipo | Nome | Payload | Entrega |
+|---|---|---|---|
+| 1 | `Hello` | versão do protocolo u16; nome do banco (string); codecs de compressão aceitos | 8A/8B |
+| 2 | `HelloOk` | versão u16; BaselineId u64; codecs e limites selecionados | 8A/8B |
+| 3 | `Query` | query_id u32 + descrição serializada da consulta | 8A/8C |
+| 4 | `StreamBegin` | query_id u32 | 8A/8C |
+| 5 | `ObjectFrame` | query_id u32 + diretório de slots + `ObjectEnvelope`s | 8A/8C |
+| 6 | `StreamEnd` | query_id u32 + total u64 | 8A/8C |
+| 7 | `StreamError` | query_id u32 + ErrorCode u16 + mensagem (string) | 8A/8C |
+| 8 | `Cancel` | query_id u32 | 8A/8E |
+| 9 | `OpCall` | op_id (string) + argumentos serializados (Fase 9) | reserva |
+| 10 | `OpResult` | sucesso u8 + payload ou erro | reserva |
 
 `ObjectEnvelope`, independente de página física:
 
@@ -1337,20 +1438,23 @@ elegível para envio assim que produzido; o serializer pode apenas coalescer
 objetos já disponíveis, sem aguardar quantidade ou tamanho mínimo
 (doc streaming §Framing e ADR-010).
 
-`compression=none` é obrigatório e implica
+`compression=none` é obrigatório desde a Fase 8A e implica
 `encoded_size == uncompressed_size`. Outros codecs são anunciados pelo cliente
-no `Hello` e selecionados no `HelloOk`. A primeira implementação não mantém
-estado nem dicionário entre frames. O servidor só tenta comprimir acima de um
-limiar configurável e volta a `none` se não houver redução material. O receptor
-valida tamanhos, razão máxima de expansão e codec negociado antes de alocar ou
-descomprimir.
+no `Hello` e selecionados no `HelloOk`. A escolha do codec comprimido (LZ4,
+Zstd ou outro) depende de benchmark e fecha na Fase 8F; até lá, a negociação
+pode anunciar apenas `none`. A primeira implementação não mantém estado nem
+dicionário entre frames. O servidor só tenta comprimir acima de um limiar
+configurável e volta a `none` se não houver redução material. O receptor
+valida tamanhos, razão máxima de expansão e codec negociado antes de alocar
+ou descomprimir.
 
 ### Backpressure
 
-O laço de envio escreve um `ObjectFrame` limitado no socket **bloqueante**;
-quando o cliente não consome, `send` bloqueia → o generator não avança → scan suspenso.
-A propagação é natural porque o pipeline é preguiçoso (Fase 7) — não há fila
-intermediária além de 1 objeto em trânsito. Teste comprova.
+O laço de envio escreve um `ObjectFrame` limitado no socket; quando o cliente
+não consome, o writer bloqueia ou a fila de um frame enche → o generator não
+avança → scan suspenso. A propagação é natural porque o pipeline é preguiçoso
+(Fase 7) — não há fila intermediária além de 1 frame / constante pequena de
+objetos em trânsito. Comprovado na Fase 8D.
 
 ### Cliente
 
@@ -1360,6 +1464,7 @@ public:
     static Result<Client> connect(std::string_view host, std::uint16_t port);
     Result<ObjectStream> query(QueryDescription);
     // ObjectStream::next() -> Result<std::optional<DecodedObject>>; nullopt = StreamEnd.
+    // Fase 8E: co_await stream.next() com executor definido na ADR-011.
     Result<void> cancel(QueryId);
 };
 ```
@@ -1367,38 +1472,40 @@ public:
 ## Testes automatizados
 
 **`tests/protocol_test.cpp`** (`modb.protocol`) — sem rede: codificação de
-frames em buffers
+frames em buffers (núcleo na 8A; compressão negociada fecha na 8F)
 
-| Caso | Verificação |
-|---|---|
-| round-trip de cada mensagem | encode→decode idêntico |
-| frame truncado / length mentiroso / >16 MiB | erros específicos, sem alocação gigante |
-| compressão negociada | frame compressível → round-trip; mesmo conteúdo lógico que `none` |
-| frame pequeno/incompressível | enviado como `none`, sem expansão inútil |
-| compressão inválida | codec não negociado, stream truncado, tamanho ou razão de expansão inválidos → `protocol_error` sem alocação excessiva |
-| lixo | bytes aleatórios → erro de protocolo, nunca crash (base p/ fuzzing F10) |
+| Caso | Verificação | Entrega |
+|---|---|---|
+| round-trip de cada mensagem | encode→decode idêntico | 8A |
+| frame truncado / length mentiroso / >16 MiB | erros específicos, sem alocação gigante | 8A |
+| diretório inválido | offset fora, sobreposição ou envelope truncado → `protocol_error` | 8A |
+| lixo | bytes aleatórios → erro de protocolo, nunca crash (base p/ fuzzing F10) | 8A |
+| compressão negociada | frame compressível → round-trip; mesmo conteúdo lógico que `none` | 8F |
+| frame pequeno/incompressível | enviado como `none`, sem expansão inútil | 8F |
+| compressão inválida | codec não negociado, stream truncado, tamanho ou razão de expansão inválidos → `protocol_error` sem alocação excessiva | 8F |
 
 **`tests/server_streaming_test.cpp`** (`modb.server_streaming`) — servidor em
 thread + cliente no mesmo processo de teste, porta efêmera de loopback
 
-| Caso | Verificação |
-|---|---|
-| fluxo completo | 10 000 objetos: Begin → `ObjectFrame`(s) → End; conteúdo íntegro e ordem preservada |
-| diretório inválido | offset fora da área de dados, sobreposição ou envelope truncado → `protocol_error` |
-| independência física | nenhum frame contém `PageId`/`SlotId`/`RecordId`; realocação física não altera bytes lógicos do objeto |
-| **backpressure (critério)** | cliente consome 1 obj/50 ms com janela TCP pequena: instrumentar o servidor com contador de objetos produzidos − enviados ≤ pequena constante (produção acompanha consumo; sem acúmulo) |
-| cancelamento | Cancel no meio → produção para (contador), conexão utilizável para nova consulta |
-| desconexão abrupta | fechar socket no meio do fluxo → servidor libera cursor/snapshot sem vazar (contadores de recursos) |
-| erro no meio do fluxo | falha injetada após N objetos → cliente recebe exatamente N objetos + `StreamError` |
-| duas consultas concorrentes | interleaving de dois query_ids na mesma conexão, ambos íntegros |
+| Caso | Verificação | Entrega |
+|---|---|---|
+| handshake | `Hello`/`HelloOk`, encerramento limpo | 8B |
+| fluxo completo | 10 000 objetos: Begin → `ObjectFrame`(s) → End; conteúdo íntegro e ordem preservada | 8C |
+| independência física | nenhum frame contém `PageId`/`SlotId`/`RecordId`; realocação física não altera bytes lógicos do objeto | 8C |
+| erro no meio do fluxo | falha injetada após N objetos → cliente recebe exatamente N objetos + `StreamError` | 8C |
+| **backpressure (critério)** | cliente consome 1 obj/50 ms com janela TCP pequena: produzidos − enviados ≤ pequena constante | 8D |
+| desconexão abrupta | fechar socket no meio do fluxo → servidor libera cursor/snapshot sem vazar | 8D |
+| cancelamento | Cancel no meio → produção para (contador), conexão utilizável para nova consulta | 8E |
+| duas consultas concorrentes | interleaving de dois query_ids na mesma conexão, ambos íntegros | 8E |
+| limites / timeout / compressão | políticas ativas; fallback para `none`; rejeição segura | 8F |
 
 ## Critério de conclusão
 
-Teste de backpressure verde: com cliente lento, o servidor comprova produção
-casada ao consumo, sem crescimento de memória.
+Teste de backpressure verde (8D) e suíte completa da fase (8F): com cliente
+lento, o servidor comprova produção casada ao consumo, sem crescimento de
+memória; falha parcial e políticas de recurso cobertas.
 
 ---
-
 # Fase 9 — Runtime de módulos de domínio
 
 ## Artefatos novos
@@ -1539,6 +1646,79 @@ recuperação pós-crash.
 Benchmarks reproduzíveis comparáveis entre execuções; fuzzing limpo; banco
 maior que o cache correto; documentação completa; suíte inteira verde nos
 três presets.
+
+---
+
+# Fase 11 — Container serverless
+
+## Objetivo
+
+Empacotar o servidor moDb (Fases 8–9) como imagem OCI reproduzível, adequada
+a plataformas de containers com escala a zero, inicialização sob demanda e
+persistência externa do arquivo do banco e do WAL. Esta fase começa somente
+depois das Fases 8, 9 e 10: rede, runtime de domínio e estabilização precisam
+existir antes da superfície operacional.
+
+## Decisões fixadas (conteúdo da ADR-013)
+
+1. **Stateful com volume persistente.** Disco efêmero do container não é
+   fonte de verdade. Banco e WAL vivem em volume compatível com escrita
+   posicional e `fsync`/`FlushFileBuffers`.
+2. **Uma instância ativa por banco.** Sem escala horizontal de escrita, sem
+   várias réplicas writers e sem HA distribuída nesta fase.
+3. **Escala a zero permitida.** Cold start executa abertura + WAL recovery
+   antes de aceitar tráfego (startup/readiness).
+4. **Configuração por ambiente.** Caminhos, porta, limites e secrets vêm de
+   variáveis/secrets; a imagem não contém dados nem credenciais.
+5. **Processo não privilegiado**, filesystem raiz somente leitura, volume
+   montado com permissão de escrita só no diretório de dados.
+
+## Artefatos novos
+
+```text
+deploy/Dockerfile
+deploy/.dockerignore
+deploy/compose.yaml                    (execução local de referência)
+deploy/k8s/                           (ou manifesto da plataforma escolhida)
+docs/decisions/ADR-013-execucao-serverless-em-container.md
+docs/OPERACAO_SERVERLESS.md
+tests/container_smoke_test.*          (ou script CI que sobe a imagem)
+```
+
+## Passo a passo
+
+1. Escrever a [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md)
+   com o modelo acima e a plataforma de referência (ex.: Kubernetes + scale
+   to zero, Cloud Run, ou equivalente com volume persistente).
+2. `Dockerfile` multi-stage: build com o toolchain do projeto; runtime mínimo
+   (distroless/alpine) contendo só o binário do servidor e dependências
+   dinâmicas inevitáveis; `USER` não-root; `ENTRYPOINT` do servidor.
+3. Expor apenas a porta do protocolo da Fase 8. Health: endpoint ou comando
+   de readiness que só fica verde após `Database` aberto e recovery concluído;
+   liveness separado do readiness.
+4. Tratar `SIGTERM`/`SIGINT`: parar de aceitar conexões, drenar streams
+   ativos dentro do grace period da plataforma, commit/rollback de
+   transações em voo, `sync` e saída limpa.
+5. Prova automatizada:
+   - build da imagem;
+   - sobe com volume vazio → cria banco → escreve objeto/operação → derruba
+     container com `kill -9` → sobe de novo no mesmo volume → estado
+     commitado presente, incompleto ausente;
+   - cold start a partir de escala zero atende um cliente da Fase 8/9;
+   - segunda réplica writer tentando o mesmo volume é rejeitada (lock) ou
+     documentada como configuração proibida na plataforma.
+6. Pipeline: build → SBOM → scan → publish com tag igual ao versionamento
+   do repositório (`0.0.#`).
+7. Documentar em `OPERACAO_SERVERLESS.md`: variáveis, volume, limites de
+   memória/CPU, backup (cópia quiescente de `<db>` + `<db>.wal`), restore e
+   restrições (sem multi-writer).
+
+## Critério de conclusão
+
+Imagem inicia sem estado local prévio, monta volume durável, recupera WAL
+quando necessário, atende cliente remoto, sobrevive a término forçado sem
+corrupção e encerra graciosamente sob sinal de parada. Uma única instância
+ativa, sem privilégios, com memória limitada e backpressure preservado.
 
 ---
 
