@@ -117,7 +117,7 @@ int command_heap_delete(const std::filesystem::path& path,
                         modb::storage::RecordId record_id);
 int command_heap_repair(const std::filesystem::path& path, modb::storage::PageId root_page);
 int command_codec_run();
-int command_protocol_run();
+int command_protocol_demo();
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
 int run_baseline_command(int argc, char* argv[]);
@@ -273,10 +273,11 @@ void print_codec_help() {
 
 void print_protocol_help() {
     std::cout << "Usage:\n"
-                 "  modb protocol\n"
+                 "  modb protocol demo\n"
                  "\n"
-                 "Encode and decode Hello, Query and ObjectFrame messages in memory\n"
-                 "(no network). Demonstrates the ODB++ Fase 8A binary protocol.\n";
+                 "Commands:\n"
+                 "  demo  Show, step by step, how Hello, Query and ObjectFrame are\n"
+                 "        encoded and decoded in memory (no network).\n";
 }
 
 void print_types_help() {
@@ -1243,7 +1244,7 @@ int command_codec_run() {
 }
 
 // Demonstra o codec do protocolo binário (Fase 8A) sem rede.
-int command_protocol_run() {
+int command_protocol_demo() {
     using modb::net::Compression;
     using modb::net::Hello;
     using modb::net::Message;
@@ -1256,6 +1257,9 @@ int command_protocol_run() {
     using modb::object::ObjectId;
     using modb::object::TypeDefinitionId;
 
+    std::cout << "ODB++ protocol demo (Fase 8A, in-memory, no network)\n"
+                 "\n"
+                 "[1/3] Hello: negotiate protocol version, database and compression\n";
     const Hello hello{.version = modb::net::protocol_version,
                       .database_name = "demo",
                       .accepted_codecs = {Compression::none}};
@@ -1267,9 +1271,13 @@ int command_protocol_run() {
     if (!hello_back) {
         return print_error(hello_back.error());
     }
-    std::cout << "Hello: database='" << hello.database_name << "' bytes=" << hello_bytes->size()
-              << " round-trip=" << (*hello_back == Message{hello} ? "OK" : "FAILED") << '\n';
+    std::cout << "  input: version=" << hello.version << " database='" << hello.database_name
+              << "' codecs=[none]\n"
+              << "  encoded frame: " << hello_bytes->size() << " bytes\n"
+              << "  decoded equals input: "
+              << (*hello_back == Message{hello} ? "OK" : "FAILED") << "\n\n";
 
+    std::cout << "[2/3] Query: describe the remote query without C++ callbacks\n";
     QueryDescription description{
         .type = TypeDefinitionId{16},
         .limit = 3,
@@ -1286,9 +1294,13 @@ int command_protocol_run() {
     if (!query_back) {
         return print_error(query_back.error());
     }
-    std::cout << "Query: id=" << query.query_id << " bytes=" << query_bytes->size()
-              << " round-trip=" << (*query_back == Message{query} ? "OK" : "FAILED") << '\n';
+    std::cout << "  input: query_id=" << query.query_id << " type=16 equals(field=2,value=42)"
+                 " limit=3 project=[1,2]\n"
+              << "  encoded frame: " << query_bytes->size() << " bytes\n"
+              << "  decoded equals input: "
+              << (*query_back == Message{query} ? "OK" : "FAILED") << "\n\n";
 
+    std::cout << "[3/3] ObjectFrame: carry logical object identity and payload\n";
     ObjectEnvelope envelope{.object_id = ObjectId{100},
                            .type_definition_id = TypeDefinitionId{16},
                            .payload = {std::byte{0x01}, std::byte{0x02}}};
@@ -1303,12 +1315,17 @@ int command_protocol_run() {
     if (!frame_back) {
         return print_error(frame_back.error());
     }
-    std::cout << "ObjectFrame: records=1 bytes=" << frame_bytes->size()
-              << " round-trip=" << (*frame_back == Message{frame} ? "OK" : "FAILED") << '\n';
+    std::cout << "  input: query_id=1 object_id=100 type=16 payload=2 bytes"
+                 " compression=none\n"
+              << "  encoded frame: " << frame_bytes->size() << " bytes\n"
+              << "  decoded equals input: "
+              << (*frame_back == Message{frame} ? "OK" : "FAILED") << "\n\n";
 
     const bool ok = *hello_back == Message{hello} && *query_back == Message{query} &&
                     *frame_back == Message{frame};
-    std::cout << "Protocol demo: " << (ok ? "OK" : "FAILED") << '\n';
+    std::cout << "Result: " << (ok ? "all protocol round-trips passed"
+                                  : "a protocol round-trip failed")
+              << '\n';
     return ok ? 0 : 1;
 }
 
@@ -4355,14 +4372,14 @@ int run(int argc, char* argv[]) {
         return command_codec_run();
     }
     if (command == "protocol") {
-        if (argc == 3 && is_help_argument(argv[2])) {
+        if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
             print_protocol_help();
             return 0;
         }
-        if (argc != 2) {
-            return print_usage_error("modb protocol");
+        if (argc == 3 && std::string_view{argv[2]} == "demo") {
+            return command_protocol_demo();
         }
-        return command_protocol_run();
+        return print_usage_error("modb protocol demo");
     }
     if (command == "types") {
         if (argc == 3 && is_help_argument(argv[2])) {
