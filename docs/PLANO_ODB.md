@@ -518,9 +518,9 @@ cursor/snapshot.
 
 #### Fase 8E — Cancelamento, multiplexação e API assíncrona
 
-- [ ] Receber `Cancel` enquanto o escritor envia; manter a conexão
+- [x] Receber `Cancel` enquanto o escritor envia; manter a conexão
       utilizável após o cancelamento.
-- [ ] Suportar múltiplos `query_id` na mesma conexão com escrita
+- [x] Suportar múltiplos `query_id` na mesma conexão com escrita
       serializada e entregar `co_await stream.next()` com semântica e
       executor definidos na ADR-011.
 

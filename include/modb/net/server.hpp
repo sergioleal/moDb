@@ -1,12 +1,13 @@
 #pragma once
 
-// Servidor TCP das Fases 8B–8D: Hello/HelloOk, streaming de Query e
-// backpressure com fila de no máximo um frame / constante pequena.
+// Servidor TCP das Fases 8B–8E: sessão com leitor ativo, Cancel, multiplexação
+// de query_id (escrita serializada) e backpressure (fila ≤ max_in_flight).
 
 #include "modb/error.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/protocol.hpp"
 #include "modb/object/database.hpp"
+#include "modb/query/operators.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -39,7 +40,6 @@ public:
     Server& operator=(Server&&) = delete;
     ~Server();
 
-    // Abre o banco, anexa ao registry e faz bind em host:port (0 = efêmera).
     [[nodiscard]] static Result<Server> listen(const std::filesystem::path& path,
                                                std::string_view host = "127.0.0.1",
                                                std::uint16_t port = 0);
@@ -52,13 +52,10 @@ public:
         return database_ ? database_->open_snapshot_count() : 0;
     }
 
-    // Uso em testes (8C): após emitir N objetos, envia StreamError.
     void fail_stream_after(std::size_t objects) noexcept { fail_after_ = objects; }
-
-    // Uso em testes (8D): SO_SNDBUF pequeno no peer aceito.
     void use_small_socket_buffers(bool enabled) noexcept { small_buffers_ = enabled; }
 
-    // Aceita uma conexão: Hello/HelloOk, opcionalmente uma Query, e encerra.
+    // Aceita uma conexão e mantém a sessão até o peer fechar (Hello + Queries).
     [[nodiscard]] Result<void> serve_one();
 
 private:
@@ -67,7 +64,6 @@ private:
            object::BaselineId baseline);
 
     [[nodiscard]] Result<void> handle_connection(NativeSocket peer);
-    [[nodiscard]] Result<void> handle_query(NativeSocket& peer, const Query& query);
 
     std::shared_ptr<object::Database> database_;
     object::DatabaseId database_id_{};

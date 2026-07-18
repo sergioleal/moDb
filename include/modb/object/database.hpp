@@ -633,6 +633,9 @@ public:
         std::optional<std::pair<FieldId, AttributeValue>> equals{};
         // Vazio = todos os campos. FieldId{0} (ObjectId) é ignorado no payload.
         std::vector<FieldId> project{};
+        // Cancelamento cooperativo (Fase 8E); default = sem token.
+        query::CancellationToken cancel{};
+        bool has_cancel{false};
     };
 
     [[nodiscard]] query::Generator<Result<DecodedObject>> query_objects(ObjectQuerySpec query);

@@ -530,6 +530,9 @@ query::Generator<Result<DecodedObject>> Database::query_objects(ObjectQuerySpec 
 
     std::uint64_t emitted = 0;
     for (auto& item : store_.scan_stream(snapshot.epoch(), query.type)) {
+        if (query.has_cancel && query.cancel.cancelled()) {
+            co_return;
+        }
         if (!item) {
             co_yield Result<DecodedObject>{std::unexpected(item.error())};
             co_return;

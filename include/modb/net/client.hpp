@@ -1,20 +1,66 @@
 #pragma once
 
-// Cliente TCP da Fase 8C: mantém a conexão após Hello/HelloOk e consome
-// ObjectStream incremental (Query → Begin → Frame(s) → End/Error).
+// Cliente TCP das Fases 8C–8E: demux por query_id, Cancel, multiplexação e
+// co_await await_next() (executor = thread do chamador, ADR-011).
 
 #include "modb/error.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/protocol.hpp"
 #include "modb/object/object_codec.hpp"
 
+#include <atomic>
+#include <condition_variable>
+#include <coroutine>
 #include <cstdint>
+#include <deque>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace modb::net {
+
+class Client;
+
+// Estado compartilhado da conexão: leitor em background demultiplexa frames.
+struct ClientConn {
+    NativeSocket socket;
+    std::mutex mu;
+    std::condition_variable cv;
+    std::unordered_map<std::uint32_t, std::deque<Message>> mailboxes;
+    std::atomic<bool> stop{false};
+    std::atomic<bool> failed{false};
+    Error failure{ErrorCode::connection_closed, "connection closed"};
+    std::thread reader;
+    std::mutex send_mu;
+
+    explicit ClientConn(NativeSocket sock);
+    ~ClientConn();
+
+    ClientConn(const ClientConn&) = delete;
+    ClientConn& operator=(const ClientConn&) = delete;
+
+    void reader_loop();
+    [[nodiscard]] Result<Message> recv_for(std::uint32_t query_id);
+    [[nodiscard]] Result<void> send(const Message& message);
+};
+
+// Awaitable de next() — executor = thread do chamador (espera bloqueante no
+// socket/mailbox). Uso: `auto item = co_await stream.await_next();`
+struct NextAwaitable {
+    class ObjectStream* stream{nullptr};
+    Result<std::optional<object::DecodedObject>> result_{
+        std::unexpected(Error{ErrorCode::invalid_argument, "awaitable not started"})};
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle);
+    Result<std::optional<object::DecodedObject>> await_resume() { return std::move(result_); }
+};
 
 class ObjectStream {
 public:
@@ -27,17 +73,21 @@ public:
     // Próximo objeto lógico; nullopt = StreamEnd. StreamError → unexpected.
     [[nodiscard]] Result<std::optional<object::DecodedObject>> next();
 
+    // Fase 8E: mesma semântica de next(), usável com co_await.
+    [[nodiscard]] NextAwaitable await_next() { return NextAwaitable{this}; }
+
     [[nodiscard]] std::uint32_t query_id() const noexcept { return query_id_; }
     [[nodiscard]] bool finished() const noexcept { return finished_; }
     [[nodiscard]] std::uint64_t received() const noexcept { return received_; }
 
 private:
     friend class Client;
-    ObjectStream(NativeSocket* socket, std::uint32_t query_id);
+    friend struct NextAwaitable;
+    ObjectStream(std::shared_ptr<ClientConn> conn, std::uint32_t query_id);
 
     [[nodiscard]] Result<void> refill();
 
-    NativeSocket* socket_{nullptr};
+    std::shared_ptr<ClientConn> conn_;
     std::uint32_t query_id_{0};
     std::vector<object::DecodedObject> pending_{};
     std::size_t pending_index_{0};
@@ -54,31 +104,28 @@ public:
     Client& operator=(Client&&) = delete;
     ~Client();
 
-    // Conecta, completa Hello/HelloOk e mantém o socket aberto.
     [[nodiscard]] static Result<Client> connect(std::string_view host, std::uint16_t port,
                                                 std::string_view database_name);
 
     [[nodiscard]] const HelloOk& hello_ok() const noexcept { return hello_ok_; }
 
-    // Ajusta SO_RCVBUF do socket (Fase 8D: janela TCP pequena nos testes).
-    [[nodiscard]] Result<void> set_recv_buffer_bytes(std::size_t bytes) {
-        return socket_.set_recv_buffer_bytes(bytes);
-    }
+    [[nodiscard]] Result<void> set_recv_buffer_bytes(std::size_t bytes);
 
-    // Envia Query e devolve um stream sobre a mesma conexão.
+    // Envia Query; várias streams podem coexistir (demux por query_id).
     [[nodiscard]] Result<ObjectStream> query(QueryDescription description);
 
-    // Conveniência 8B: handshake e fecha (sem streaming).
+    // Envia Cancel para interromper a produção no servidor (Fase 8E).
+    [[nodiscard]] Result<void> cancel(std::uint32_t query_id);
+
     [[nodiscard]] static Result<HelloOk> handshake(std::string_view host, std::uint16_t port,
                                                    std::string_view database_name);
 
 private:
-    Client(NativeSocket socket, HelloOk hello_ok);
+    Client(std::shared_ptr<ClientConn> conn, HelloOk hello_ok);
 
-    NativeSocket socket_;
+    std::shared_ptr<ClientConn> conn_;
     HelloOk hello_ok_{};
     std::uint32_t next_query_id_{1};
-    bool stream_active_{false};
 };
 
 } // namespace modb::net
