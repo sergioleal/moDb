@@ -612,7 +612,7 @@ Critério de aceite 8A: ✅ encode→decode idêntico; entradas hostis →
 
 ### Fase 8B — Transporte e processo servidor
 
-Status: ✅ Concluída (2/2) — tag prevista `0.0.8b`.
+Status: ✅ Concluída (2/2) — commit `6be4673`, tag `0.0.8b`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
