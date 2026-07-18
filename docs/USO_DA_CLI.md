@@ -528,7 +528,8 @@ Employee: name=Bia salary=18000 country=PT
 
 `--project` e `--compute` (Fase 7C) emitem uma linha projetada só com os campos
 pedidos e/ou valores computados registrados (`annual_salary = salary * 12`).
-`id` é o `ObjectId` (metadado de identidade, não atributo do schema):
+`id` expõe o `ObjectId` como um `ProjectedField`, com o mesmo acesso e iteração
+dos atributos do schema e dos valores computados:
 
 ```text
 $ modb query phase3.modb --schema 2 --project id,name,salary --compute annual_salary

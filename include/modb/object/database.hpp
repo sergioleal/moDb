@@ -1017,19 +1017,23 @@ private:
         co_yield Result<T>{std::unexpected(std::move(error))};
     }
 
-    // Monta uma ProjectedRow a partir de um objeto T (campos + computados).
-    // `object_id` é metadado de identidade (sempre preenchido).
+    // Monta uma ProjectedRow a partir de um objeto T (identidade, campos e
+    // computados). FieldId 0 seleciona o ObjectId como o campo sintético `id`.
     template <typename T>
     Result<query::ProjectedRow> project_object(const T& value, ObjectId object_id,
                                                const std::vector<FieldId>& selected,
                                                const std::vector<std::string>& computed) const {
         query::ProjectedRow row;
-        row.object_id = object_id;
         const BoundType* bound = bound_for(type_key<T>());
         if (bound == nullptr) {
             return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
         }
         for (const FieldId field : selected) {
+            if (field.value == 0) {
+                row.fields.push_back(
+                    query::ProjectedField{field, "id", AttributeValue{object_id}});
+                continue;
+            }
             const FieldBinder* binder = nullptr;
             for (const auto& candidate : bound->binding.fields()) {
                 if (candidate.id.value == field.value) {
@@ -1072,7 +1076,7 @@ private:
     }
 
     // Scan/Index Scan + Projection/Compute (Fase 7C). Preserva o ObjectId do
-    // DecodedObject (o stream tipado de T sozinho o descarta).
+    // DecodedObject quando o campo sintético `id` é selecionado.
     template <typename T>
     query::Generator<Result<query::ProjectedRow>> run_projected_stream(
         Snapshot snapshot, std::function<bool(const T&)> predicate, std::size_t limit_count,

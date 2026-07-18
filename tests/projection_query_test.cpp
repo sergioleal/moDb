@@ -138,6 +138,24 @@ int main() {
         suite.check(rows == 3 && only_selected, "select yields only requested fields");
     }
 
+    // --- id: mesma representação dos demais campos projetados ---
+    {
+        auto first = database->query<Item>().select({FieldId{0}, FieldId{1}}).limit(1).stream();
+        bool uniform = false;
+        for (auto& result : first) {
+            if (!result) {
+                break;
+            }
+            const auto id = result->get("id");
+            uniform = result->fields.size() == 2 && result->fields[0].name == "id" &&
+                      result->fields[0].id == FieldId{0} && id.has_value() &&
+                      id->as_ref().has_value() &&
+                      id->as_ref()->value >= first_user_object_id &&
+                      result->get("name").has_value();
+        }
+        suite.check(uniform, "object id is a regular projected field");
+    }
+
     // --- compute registrado ---
     {
         auto first = database->query<Item>().where([](const Item& item) { return item.value == 7; })
