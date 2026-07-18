@@ -2004,72 +2004,31 @@ std::vector<std::string> split_csv(std::string_view text) {
     return parts;
 }
 
-struct ProjectFieldSpec {
+modb::Result<std::vector<modb::object::FieldId>> resolve_project_fields(
+    const std::vector<std::string>& names, int schema) {
     std::vector<modb::object::FieldId> fields;
-    std::vector<std::string> display_order;  // inclui "id" (metadado) na ordem pedida
-};
-
-modb::Result<ProjectFieldSpec> resolve_project_fields(const std::vector<std::string>& names,
-                                                      int schema) {
-    ProjectFieldSpec spec;
     for (const auto& name : names) {
-        spec.display_order.push_back(name);
         if (name == "id") {
-            continue;  // ObjectId é metadado da ProjectedRow, não FieldId do schema
-        }
-        if (name == "name") {
-            spec.fields.push_back(modb::object::FieldId{1});
+            fields.push_back(modb::object::FieldId{0});
+        } else if (name == "name") {
+            fields.push_back(modb::object::FieldId{1});
         } else if (name == "salary") {
-            spec.fields.push_back(modb::object::FieldId{2});
+            fields.push_back(modb::object::FieldId{2});
         } else if (name == "country" && schema == 2) {
-            spec.fields.push_back(modb::object::FieldId{3});
+            fields.push_back(modb::object::FieldId{3});
         } else {
             return std::unexpected(
                 modb::Error{modb::ErrorCode::invalid_argument, "unknown --project field: " + name});
         }
     }
-    return spec;
+    return fields;
 }
 
-void print_projected_row(const modb::query::ProjectedRow& row,
-                         const std::vector<std::string>& display_order) {
+void print_projected_row(const modb::query::ProjectedRow& row) {
     std::cout << "Employee:";
-    if (display_order.empty()) {
-        for (const auto& field : row.fields) {
-            std::cout << ' ' << field.name << '='
-                      << modb::escape_for_terminal(format_attribute(field.value));
-        }
-    } else {
-        for (const auto& name : display_order) {
-            if (name == "id") {
-                std::cout << " id=" << row.object_id.value;
-                continue;
-            }
-            const auto value = row.get(name);
-            if (!value) {
-                continue;
-            }
-            std::cout << ' ' << name << '='
-                      << modb::escape_for_terminal(format_attribute(*value));
-        }
-        // Computed functions pedidas via --compute (não entram em display_order).
-        for (const auto& field : row.fields) {
-            if (field.id.value != 0) {
-                continue;
-            }
-            bool already = false;
-            for (const auto& name : display_order) {
-                if (name == field.name) {
-                    already = true;
-                    break;
-                }
-            }
-            if (already) {
-                continue;
-            }
-            std::cout << ' ' << field.name << '='
-                      << modb::escape_for_terminal(format_attribute(field.value));
-        }
+    for (const auto& field : row.fields) {
+        std::cout << ' ' << field.name << '='
+                  << modb::escape_for_terminal(format_attribute(field.value));
     }
     std::cout << '\n';
 }
@@ -2171,7 +2130,7 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
             if (!fields) {
                 return print_error(fields.error());
             }
-            auto projected_query = std::move(query).select(std::move(fields->fields));
+            auto projected_query = std::move(query).select(std::move(*fields));
             for (const auto& name : compute_names) {
                 std::move(projected_query).compute(name);
             }
@@ -2179,7 +2138,7 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
                 if (!result) {
                     return print_error(result.error());
                 }
-                print_projected_row(*result, fields->display_order);
+                print_projected_row(*result);
                 ++shown;
             }
         } else {
@@ -2235,7 +2194,7 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
             if (!fields) {
                 return print_error(fields.error());
             }
-            auto projected_query = std::move(query).select(std::move(fields->fields));
+            auto projected_query = std::move(query).select(std::move(*fields));
             for (const auto& name : compute_names) {
                 std::move(projected_query).compute(name);
             }
@@ -2243,7 +2202,7 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
                 if (!result) {
                     return print_error(result.error());
                 }
-                print_projected_row(*result, fields->display_order);
+                print_projected_row(*result);
                 ++shown;
             }
         } else {

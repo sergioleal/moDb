@@ -388,7 +388,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.query_project
         COMMAND modb_cli query
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2
-                --project name,salary --compute annual_salary --limit 2)
+                --project id,name,salary --compute annual_salary --limit 2)
     set_tests_properties(modb.cli.query_project PROPERTIES DEPENDS modb.cli.query)
     add_test(NAME modb.cli.query_topk
         COMMAND modb_cli query

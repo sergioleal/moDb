@@ -2,8 +2,8 @@
 
 // Linha projetada da Fase 7C: só os campos pedidos (e/ou valores computados),
 // sem materializar o objeto C++ completo no consumidor. Streaming — uma linha
-// por vez. O ObjectId é metadado de identidade (não é atributo do schema) e
-// sempre acompanha a linha, para o consumidor poder correlacionar/atualizar.
+// por vez. Identidade, atributos e valores computados têm a mesma representação
+// uniforme em `fields`; campos sintéticos usam FieldId 0.
 
 #include "modb/object/attribute_value.hpp"
 #include "modb/object/ids.hpp"
@@ -22,7 +22,6 @@ struct ProjectedField {
 };
 
 struct ProjectedRow {
-    object::ObjectId object_id{};
     std::vector<ProjectedField> fields;
 
     [[nodiscard]] std::optional<object::AttributeValue> get(object::FieldId id) const {
