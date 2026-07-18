@@ -689,7 +689,7 @@ sanitizers.
 
 ### Fase 8F — Limites, timeout, compressão e fechamento
 
-Status: ✅ Concluída (2/2) — tag prevista `0.0.8f`.
+Status: ✅ Concluída (2/2) — commit `18f85d3`, tag prevista `0.0.8f`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
