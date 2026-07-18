@@ -283,6 +283,53 @@ Result<void> Database::resync_store_after_rollback() {
     return {};
 }
 
+Result<std::size_t> Database::collect_garbage() {
+    if (auto usable = check_usable(); !usable) {
+        return std::unexpected(usable.error());
+    }
+    if (database_id_.value == 0) {
+        return std::unexpected(
+            Error{ErrorCode::invalid_argument, "database must be attached before use"});
+    }
+    // Single-writer: o GC escreve (libera páginas), então não pode correr junto
+    // de outra transação — a mesma guarda de begin().
+    if (file_->in_transaction()) {
+        return std::unexpected(Error{ErrorCode::transaction_active,
+                                     "cannot collect garbage while a transaction is in progress"});
+    }
+    // Lê a época do snapshot mais antigo antes de abrir a transação: nenhuma
+    // versão visível a ele será reciclada.
+    const auto oldest = oldest_open_snapshot_epoch();
+
+    current_tx_id_ = next_tx_id_++;
+    commit_durable_ = false;
+    file_->begin_transaction();
+    auto collected = store_.collect_garbage(oldest);
+    if (!collected) {
+        (void)rollback_transaction();
+        return std::unexpected(collected.error());
+    }
+    // Nada a coletar: desfaz a transação vazia sem gastar um commit (nem uma
+    // época) à toa.
+    if (*collected == 0) {
+        if (auto rolled = rollback_transaction(); !rolled) {
+            return std::unexpected(rolled.error());
+        }
+        return std::size_t{0};
+    }
+    if (auto committed = commit_transaction(CommitPhase::full); !committed) {
+        if (commit_is_durable()) {
+            require_recovery();
+            return std::unexpected(Error{ErrorCode::commit_recovery_required,
+                                         "gc commit is durable in WAL but requires recovery: " +
+                                             committed.error().message});
+        }
+        (void)rollback_transaction();
+        return std::unexpected(committed.error());
+    }
+    return *collected;
+}
+
 Transaction::~Transaction() {
     if (active_) {
         (void)rollback();

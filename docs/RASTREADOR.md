@@ -46,12 +46,12 @@
 | [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ✅ Concluída | 10/10 | Fase 2 |
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
-| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | 🔄 Em andamento | 5/9 | Fase 5 |
+| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | 🔄 Em andamento | 7/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ⬜ Não iniciada | 0/10 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **54/103 (~52%)** | |
+| **Total** | | | **56/103 (~54%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -324,8 +324,8 @@ Isso permitiu observar a garantia de atomicidade (`before-commit` → ausente;
 
 ## Fase 6 — Snapshots e MVCC
 
-Status: 🔄 Em andamento (5/9) — quatro entregas incrementais; 6A e 6B
-concluídas, 6C–6D não iniciadas. Definição completa:
+Status: 🔄 Em andamento (7/9) — quatro entregas incrementais; 6A, 6B e 6C
+concluídas, 6D não iniciada. Definição completa:
 [PLANO_ODB.md §Fase 6](PLANO_ODB.md#fase-6--snapshots-e-mvcc) ·
 [PROTOCOLO_FASES.md §Fase 6](PROTOCOLO_FASES.md#fase-6--snapshots-e-mvcc)
 
@@ -388,15 +388,34 @@ sanitizers.
 
 ### Fase 6C — Retenção, GC e concorrência
 
-Status: ⬜ Não iniciada (0/2)
+Status: ✅ Concluída (2/2) — commit `PREENCHER`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 6C.1 | Retenção e GC de versões anteriores | ⬜ | |
-| 6C.2 | Lock single-writer e sincronização de snapshots/GC | ⬜ | |
+| 6C.1 | Retenção e GC de versões anteriores | ✅ | `Database::collect_garbage()`; reconcilia heap×identidade, respeita snapshot mais antigo |
+| 6C.2 | Lock single-writer e sincronização de snapshots/GC | ✅ | `snapshot_registry_mutex_`; commits serializados pela guarda de `begin()` |
 
-Critério de aceite 6C: ⬜ versões visíveis são preservadas, versões obsoletas
-são recuperadas e conflitos não produzem escrita parcial.
+O GC roda numa transação própria (liberações passam pelo WAL). Reconcilia cada
+registro físico com a identidade: a versão `current` viva nunca é tocada; uma
+`previous` é liberada (e a entrada compactada por `clear_previous`) quando a
+época do snapshot aberto mais antigo já é `>=` à época `current` da entrada;
+cópias que não são nem `current` nem a `previous` referenciada (ex.: um
+`previous` sobrescrito por uma segunda alteração) são órfãs e sempre
+recuperadas. `data_record_count()` expõe o total físico para observar o efeito.
+
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.snapshot` | retenção (GC=0 com snapshot aberto), reciclagem (GC após fechar) e coleta de órfão (dois updates sem snapshot) | ✅ |
+| `modb.cli.mvcc_gc` | `modb mvcc gc`: coleta idempotente sobre arquivo já compactado | ✅ |
+| `modb.cli.mvcc_snapshot_demo` | demo estendida com retenção + reciclagem do GC | ✅ |
+
+Critério de aceite 6C: ✅ nenhuma versão ainda visível é descartada (GC com
+snapshot aberto coleta 0); ao fechar o último snapshot dependente as versões
+obsoletas são recuperadas; uma segunda alteração incompatível continua
+retornando `snapshot_conflict` sem escrita parcial (6B). Suíte completa 63/63 em
+Debug, `-Werror` e sanitizers.
 
 ### Fase 6D — Integração e recuperação
 

@@ -136,6 +136,7 @@ int command_tx_get(const std::filesystem::path& path, std::uint64_t object_id);
 int command_mvcc_status(const std::filesystem::path& path, bool explicit_upgrade);
 int command_mvcc_tick(const std::filesystem::path& path);
 int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force);
+int command_mvcc_gc(const std::filesystem::path& path);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -1615,16 +1616,22 @@ void print_mvcc_help() {
                  "  modb mvcc upgrade <file>\n"
                  "  modb mvcc tick <file>\n"
                  "  modb mvcc snapshot-demo <file> [--force]\n"
+                 "  modb mvcc gc <file>\n"
                  "\n"
                  "Exercises Fase 6A: status opens and validates DBRT/IDMP v2; upgrade\n"
                  "opens legacy v1 files and persists their compatible upgrade; tick commits\n"
                  "an epoch-only transaction through the WAL.\n"
                  "\n"
-                 "snapshot-demo exercises Fase 6B: it opens a Snapshot, commits an update\n"
+                 "snapshot-demo exercises Fase 6B/6C: it opens a Snapshot, commits an update\n"
                  "behind its back, shows the snapshot still reading the old value while a\n"
-                 "plain read sees the new one, then shows a second concurrent update being\n"
-                 "rejected with snapshot_conflict while the snapshot is still open, and\n"
-                 "finally shows the same update succeeding once the snapshot is closed.\n";
+                 "plain read sees the new one, shows a second concurrent update being\n"
+                 "rejected with snapshot_conflict while the snapshot is still open, shows\n"
+                 "gc retaining the previous version while the snapshot is open, and finally\n"
+                 "— once the snapshot is closed — the update succeeding and gc reclaiming\n"
+                 "the obsolete version.\n"
+                 "\n"
+                 "gc exercises Fase 6C: reclaims the physical space of previous versions no\n"
+                 "open snapshot can still see, and reports how many records were recovered.\n";
 }
 
 // Command group: oo employee — bindings C++ compilados que exercitam a Fase 3.
@@ -3239,6 +3246,15 @@ int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force) {
         static_cast<void>(transaction->rollback());
     }
 
+    // --- gc com o snapshot aberto: a versão previous é retida (Fase 6C) ---
+    const auto records_with_snapshot = database.data_record_count();
+    auto retained = database.collect_garbage();
+    if (!retained) {
+        return print_error(retained.error());
+    }
+    std::cout << "gc while the snapshot is open reclaimed " << *retained
+              << " record(s) (expected 0); physical records=" << records_with_snapshot << '\n';
+
     // --- fecha o snapshot: a mesma alteração agora é aceita ---
     snapshot.reset();
     std::cout << "snapshot closed\n";
@@ -3260,7 +3276,35 @@ int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force) {
     }
     std::cout << "same update now succeeds: Ana's balance -> 300\n";
 
-    std::cout << "\nFase 6B MVCC snapshot demo: OK\n";
+    // --- gc após fechar o snapshot: as versões obsoletas são recuperadas ---
+    const auto before_gc = database.data_record_count();
+    auto reclaimed = database.collect_garbage();
+    if (!reclaimed) {
+        return print_error(reclaimed.error());
+    }
+    std::cout << "gc after closing the snapshot reclaimed " << *reclaimed
+              << " obsolete record(s); physical records " << before_gc << " -> "
+              << database.data_record_count() << '\n';
+
+    std::cout << "\nFase 6B/6C MVCC snapshot demo: OK\n";
+    return 0;
+}
+
+// modb mvcc gc <file>
+int command_mvcc_gc(const std::filesystem::path& path) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    auto& database = session->database();
+    const auto before = database.data_record_count();
+    auto collected = database.collect_garbage();
+    if (!collected) {
+        return print_error(collected.error());
+    }
+    std::cout << "garbage collected: " << *collected << " obsolete record(s)\n"
+              << "physical data records: " << before << " -> " << database.data_record_count()
+              << '\n';
     return 0;
 }
 
@@ -3287,6 +3331,12 @@ int run_mvcc_command(int argc, char* argv[]) {
             return print_usage_error("modb mvcc snapshot-demo <file> [--force]");
         }
         return command_mvcc_snapshot_demo(argv[3], argc == 5);
+    }
+    if (subcommand == "gc") {
+        if (argc != 4) {
+            return print_usage_error("modb mvcc gc <file>");
+        }
+        return command_mvcc_gc(argv[3]);
     }
     std::cerr << "Unknown mvcc command: " << subcommand << '\n';
     return 2;

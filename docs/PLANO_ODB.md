@@ -329,9 +329,9 @@ que foi criado, enquanto leituras sem snapshot devolvem o estado corrente.
 
 #### Fase 6C — Retenção, GC e concorrência
 
-- [ ] Reter versões necessárias aos snapshots ativos e descartá-las quando a
+- [x] Reter versões necessárias aos snapshots ativos e descartá-las quando a
       última época dependente for liberada.
-- [ ] Definir e implementar a política inicial de lock single-writer, incluindo
+- [x] Definir e implementar a política inicial de lock single-writer, incluindo
       a sincronização entre commit, abertura/fechamento de snapshot e GC.
 
 Entregável 6C: ciclo de vida completo das versões, com uso de espaço limitado

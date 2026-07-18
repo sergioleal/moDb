@@ -718,3 +718,26 @@ Roteiro passo a passo:
 # Executa a demonstração completa num arquivo novo (--force recria se existir).
 modb mvcc snapshot-demo exemplo-6b.modb --force
 ```
+
+A demonstração também exercita o GC da Fase 6C: com o snapshot aberto, o GC
+recupera 0 registros (retenção); depois de fechar o snapshot, recupera as
+versões obsoletas.
+
+## MVCC — Fase 6C (retenção e coleta de lixo)
+
+```text
+modb mvcc gc <file>
+```
+
+`gc` recicla o espaço físico das versões `previous` que nenhum snapshot aberto
+ainda pode enxergar e informa quantos registros foram recuperados, além da
+contagem física de registros de dados antes e depois. É idempotente: rodar de
+novo sobre um arquivo já compactado recupera 0.
+
+Roteiro passo a passo:
+
+```text
+# Depois de atualizações/remoções (que preservam a versão anterior), recupere
+# o espaço das versões que já não são visíveis a nenhum snapshot.
+modb mvcc gc exemplo-6b.modb
+```

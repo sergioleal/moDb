@@ -351,6 +351,13 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.mvcc_snapshot_demo
         COMMAND modb_cli mvcc snapshot-demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase6b-snapshot-demo.modb --force)
+    # gc roda sobre o arquivo que a demo deixou (já compactado): coleta 0 e sai
+    # 0. Ordem fixada via DEPENDS para o arquivo existir e ser determinístico.
+    add_test(NAME modb.cli.mvcc_gc
+        COMMAND modb_cli mvcc gc
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase6b-snapshot-demo.modb)
+    set_tests_properties(modb.cli.mvcc_gc PROPERTIES
+        DEPENDS modb.cli.mvcc_snapshot_demo)
     add_test(NAME modb.cli.tx_demo
         COMMAND modb_cli tx demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-tx-demo.modb --force)

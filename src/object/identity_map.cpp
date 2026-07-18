@@ -614,4 +614,78 @@ Result<void> IdentityMap::erase(ObjectId id, std::uint64_t epoch) {
     return file_->write(**idmp_id, *page);
 }
 
+Result<IdentityMap::VersionInfo> IdentityMap::inspect(ObjectId id) const {
+    const auto entry_page = id.value / entries_per_idmp;
+    const auto entry_index = id.value % entries_per_idmp;
+
+    auto idmp_id = resolve_idmp(entry_page);
+    if (!idmp_id) {
+        return std::unexpected(idmp_id.error());
+    }
+    if (!*idmp_id) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    auto page = file_->read(**idmp_id);
+    if (!page) {
+        return std::unexpected(page.error());
+    }
+    if (auto valid = check_magic(*page, idmp_magic, idmp_version, "entries"); !valid) {
+        return std::unexpected(valid.error());
+    }
+    const auto entry = read_entry(*page, entry_index);
+    if (!entry.allocated()) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    VersionInfo info;
+    info.removed = entry.removed();
+    info.current_epoch = entry.current_epoch;
+    if (!entry.removed()) {
+        info.current = RecordId{PageId{entry.page}, storage::SlotId{entry.slot}, entry.generation};
+    }
+    if ((entry.previous_flags & flag_allocated) != 0U) {
+        info.previous = RecordId{PageId{entry.previous_page}, storage::SlotId{entry.previous_slot},
+                                 entry.previous_generation};
+        info.previous_epoch = entry.previous_epoch;
+    }
+    return info;
+}
+
+Result<void> IdentityMap::clear_previous(ObjectId id) {
+    const auto entry_page = id.value / entries_per_idmp;
+    const auto entry_index = id.value % entries_per_idmp;
+
+    auto idmp_id = resolve_idmp(entry_page);
+    if (!idmp_id) {
+        return std::unexpected(idmp_id.error());
+    }
+    if (!*idmp_id) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    auto page = file_->read(**idmp_id);
+    if (!page) {
+        return std::unexpected(page.error());
+    }
+    if (auto valid = check_magic(*page, idmp_magic, idmp_version, "entries"); !valid) {
+        return std::unexpected(valid.error());
+    }
+    auto entry = read_entry(*page, entry_index);
+    if (!entry.allocated()) {
+        return std::unexpected(
+            Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
+    }
+    // Zera só os campos da versão anterior; `current` (vivo ou tombstone) fica
+    // exatamente como estava. Um tombstone sem previous é uma entrada "vazia"
+    // mas ainda alocada — o ObjectId nunca é reutilizado (ADR-001).
+    entry.previous_page = 0;
+    entry.previous_slot = 0;
+    entry.previous_generation = 0;
+    entry.previous_flags = 0;
+    entry.previous_epoch = 0;
+    write_entry(*page, entry_index, entry);
+    return file_->write(**idmp_id, *page);
+}
+
 } // namespace modb::object

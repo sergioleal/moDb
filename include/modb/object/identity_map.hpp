@@ -24,6 +24,19 @@ namespace modb::object {
 // flags (alocada, removida). Um find custa no máximo duas leituras de página.
 class IdentityMap {
 public:
+    // Estado completo de versionamento de uma entrada (Fase 6C): usado pela
+    // coleta de lixo para reconciliar cada registro físico com a identidade
+    // sem sofrer as recusas de `find`/`current_epoch` quando o objeto está
+    // removido — o GC precisa enxergar a versão `previous` de um tombstone
+    // para decidir se pode reciclá-la.
+    struct VersionInfo {
+        bool removed{};                             // `current` é um tombstone
+        std::uint64_t current_epoch{};              // época da versão `current`
+        std::optional<storage::RecordId> current;   // nullopt se removido
+        std::optional<storage::RecordId> previous;  // nullopt se não há previous
+        std::uint64_t previous_epoch{};             // época da versão `previous`
+    };
+
     // Aloca e inicializa a página raiz do diretório (IDMD).
     [[nodiscard]] static Result<IdentityMap> create(storage::PageFile& file);
     // Reabre um mapa existente a partir da raiz do diretório.
@@ -65,6 +78,14 @@ public:
     // antigo não é tocado aqui — permanece acessível via `previous` até a
     // Fase 6C decidir que pode ser reciclado.
     [[nodiscard]] Result<void> erase(ObjectId id, std::uint64_t epoch);
+    // Devolve o estado completo de versionamento da entrada (Fase 6C).
+    // Diferente de `find`/`current_epoch`/`has_previous`, funciona mesmo com o
+    // objeto removido: o GC precisa inspecionar a `previous` de um tombstone.
+    [[nodiscard]] Result<VersionInfo> inspect(ObjectId id) const;
+    // Descarta a versão `previous` da entrada (Fase 6C), mantendo `current`
+    // intacto. Chamado pelo GC depois de reciclar fisicamente o registro
+    // anterior, quando nenhum snapshot aberto ainda pode enxergá-lo.
+    [[nodiscard]] Result<void> clear_previous(ObjectId id);
 
 private:
     IdentityMap(storage::PageFile& file, storage::PageId directory_root) noexcept

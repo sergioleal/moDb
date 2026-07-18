@@ -14,6 +14,8 @@
 #include "modb/storage/page_file.hpp"
 #include "modb/storage/table_heap.hpp"
 
+// Disponibiliza std::size_t no resultado do GC.
+#include <cstddef>
 // Disponibiliza std::function para o callback de scan.
 #include <functional>
 // Disponibiliza std::reference_wrapper nas buscas de tipo.
@@ -86,6 +88,13 @@ public:
         return current_baseline_;
     }
     [[nodiscard]] std::uint64_t epoch() const noexcept { return root_.epoch(); }
+    // Total de registros físicos vivos no heap de dados (Fase 6C): inclui as
+    // versões `previous` ainda preservadas e cópias órfãs ainda não coletadas.
+    // Diagnóstico read-only, usado por testes e pela CLI para observar o efeito
+    // do GC.
+    [[nodiscard]] std::uint64_t data_record_count() const noexcept {
+        return data_heap_.record_count();
+    }
 
     // Próximo ObjectId a ser alocado (contador persistido). Exposto para o
     // rollback de transação (Fase 5) preservar a garantia de não-reuso mesmo
@@ -115,6 +124,17 @@ private:
                                       std::optional<std::uint64_t> oldest_open_snapshot_epoch);
     [[nodiscard]] Result<void> remove(ObjectId id,
                                       std::optional<std::uint64_t> oldest_open_snapshot_epoch);
+    // Recicla o espaço físico das versões antigas que nenhum snapshot aberto
+    // ainda pode enxergar (Fase 6C). Reconcilia cada registro do heap com a
+    // identidade: a versão `current` viva nunca é tocada; uma versão `previous`
+    // é liberada (e a entrada compactada com `clear_previous`) quando
+    // `oldest_open_snapshot_epoch` é nulo ou >= à época `current` da entrada;
+    // qualquer registro que não seja nem `current` nem a `previous` referenciada
+    // é uma cópia órfã (ex.: previous sobrescrito por uma segunda alteração) e
+    // é sempre liberado. Exige uma transação ativa (as liberações passam pelo
+    // WAL). Devolve quantos registros físicos foram recuperados.
+    [[nodiscard]] Result<std::size_t> collect_garbage(
+        std::optional<std::uint64_t> oldest_open_snapshot_epoch);
     [[nodiscard]] Result<void> advance_epoch() { return root_.advance_epoch(); }
     // Verifica se uma escrita em `id` conflitaria com um snapshot ainda aberto
     // que dependa da versão `previous` (Fase 6B): só é possível quando já há

@@ -194,13 +194,53 @@ para as camadas). Detalhes de formato/época no
   Consequência: `scan`/`scan_at` passam a filtrar cada registro físico contra a
   identidade resolvida (`find`/`find_at`), ignorando cópias antigas/órfãs, para
   não enumerar duplicatas.
-- **Recuperação de espaço fica para a Fase 6C.** Como no MVP não há free list,
-  os registros físicos preservados por `update`/`remove` **não** são recuperados
-  na Fase 6B; a retenção por época e o GC das versões obsoletas são o escopo
-  explícito da [Fase 6C](PLANO_ODB.md#fase-6c--retenção-gc-e-concorrência). É um
-  desvio de espaço consciente, no mesmo espírito do "`allocate_page` é imediato"
-  da Fase 5.
+- **Recuperação de espaço (Fase 6C).** Na 6B os registros físicos preservados
+  por `update`/`remove` não eram recuperados; a 6C fecha isso (ver §9). Continua
+  não havendo free list de propósito geral — o GC recicla via `TableHeap::erase`,
+  que compacta a página e retira páginas vazias.
 
 Critério 6B: ✅ suíte completa (62 testes) verde em Debug, `-Werror` e
 `sanitizers`; snapshot devolve o estado lógico da época mesmo com commits
 concorrentes intercalados (`modb.snapshot`, `modb mvcc snapshot-demo`).
+
+## 9. Retenção, coleta de lixo e concorrência (Fase 6C)
+
+A fonte de verdade é `modb.snapshot` (casos de GC) e `modb.cli.mvcc_gc`.
+
+- **Coleta de lixo transacional.** `Database::collect_garbage()` roda numa
+  transação própria — as liberações de página passam pelo WAL como qualquer
+  escrita, então uma queda no meio do GC é atômica (tudo-ou-nada) e idempotente
+  na reabertura. Devolve quantos registros físicos foram recuperados. Falha com
+  `transaction_active` se houver uma transação em andamento (single-writer).
+- **Retenção por época.** O GC reconcilia cada registro físico do heap de dados
+  com a identidade: a versão `current` viva nunca é tocada; uma versão
+  `previous` só é liberada quando a época do snapshot aberto mais antigo já é
+  `>=` à época `current` da entrada — ou seja, quando **nenhum** snapshot aberto
+  ainda pode enxergá-la. Enquanto um snapshot que a vê estiver aberto, a versão
+  é preservada (o GC retorna 0 para ela).
+- **Coleta de órfãos.** Um registro que não é nem a `current` nem a `previous`
+  referenciada (ex.: um `previous` sobrescrito por uma segunda alteração, ou
+  qualquer cópia deixada por uma sessão anterior) é órfão e é sempre recuperado.
+  Isso também limpa `previous` órfãos remanescentes de execuções anteriores na
+  próxima coleta (snapshots não sobrevivem ao processo).
+- **Compactação da entrada.** Ao liberar a `previous` referenciada, o GC chama
+  `IdentityMap::clear_previous`, zerando o slot anterior e mantendo o `current`
+  intacto. Um tombstone cujo `previous` foi coletado vira uma entrada vazia mas
+  ainda alocada — o `ObjectId` nunca é reutilizado (ADR-001).
+- **Sincronização single-writer.** Commits são serializados pela guarda de
+  `begin()` (uma segunda transação falha com `transaction_active`, Fase 5). O
+  registro em memória das épocas de snapshots abertos é protegido por um mutex
+  curto (`snapshot_registry_mutex_`): abertura/fechamento de snapshot (leitor) e
+  escrita/commit/GC (escritor) sincronizam só nesse ponto, sem prender a duração
+  das leituras.
+
+Limitação mantida (ADR-009): **uma** versão anterior por objeto — uma segunda
+alteração enquanto a `previous` ainda é visível retorna `snapshot_conflict`. O
+GC não roda automaticamente em toda transação nem no fechamento de snapshot: ele
+é explícito (`Database::collect_garbage()` / `modb mvcc gc`), o que mantém o
+commit barato; o custo de uma coleta é `O(registros do heap)` — reconciliação
+completa, candidata a otimização com um índice de reclamação na Fase 10.
+
+Critério 6C: ✅ nenhuma versão ainda visível é descartada; ao fechar o último
+snapshot dependente as versões obsoletas são recuperadas; suíte completa (63
+testes) verde em Debug, `-Werror` e `sanitizers`.

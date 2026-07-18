@@ -66,6 +66,22 @@ void detach(const Result<DatabaseId>& id) {
     }
 }
 
+// Altera o saldo de um Account numa transação própria e commita.
+Result<void> set_balance(Database& database, ObjectId id, std::int64_t balance) {
+    auto tx = database.begin();
+    if (!tx) {
+        return std::unexpected(tx.error());
+    }
+    auto handle = database.get<Account>(id);
+    if (!handle) {
+        return std::unexpected(handle.error());
+    }
+    if (auto set = handle->set<&Account::balance>(*tx, balance); !set) {
+        return std::unexpected(set.error());
+    }
+    return tx->commit();
+}
+
 // Cria um Account numa transação própria e commita; devolve o id.
 Result<ObjectId> create_committed(Database& database, Account value) {
     auto tx = database.begin();
@@ -268,6 +284,96 @@ int main() {
                             handle->set<&Account::balance>(*tx, 3).has_value(),
                         "the same change succeeds once the old snapshot is closed");
             suite.check(tx->commit().has_value(), "the now-unblocked update commits");
+        }
+    }
+
+    // --- Fase 6C: retenção e coleta de lixo das versões previous ---
+    // Banco próprio, para as contagens físicas serem determinísticas e não
+    // dependerem do que as seções anteriores deixaram.
+    {
+        TemporaryDatabase gc_temp{"gc"};
+        auto gc_created = Database::create(gc_temp.path());
+        auto gc_db = share(gc_created);
+        suite.check(gc_db != nullptr, "gc database is created");
+        if (gc_db) {
+            auto gc_id = attach(gc_db);
+            suite.check(gc_id.has_value(), "gc database is attached");
+            suite.check(gc_db->bind(account_builder()).has_value(),
+                        "Account is bound in the gc database");
+
+            auto fabio = create_committed(*gc_db, Account{"Fabio", 10});
+            suite.check(fabio.has_value(), "Fabio is created and committed");
+            if (fabio) {
+                // Só o registro corrente de Fabio existe fisicamente.
+                const auto baseline = gc_db->data_record_count();
+                suite.check(baseline == 1, "one physical record after creation");
+
+                {
+                    // Snapshot aberto ANTES do update: a versão previous que ele
+                    // criar precisa sobreviver enquanto este snapshot viver.
+                    auto opened = gc_db->snapshot();
+                    suite.check(opened.has_value(), "a snapshot opens before Fabio's update");
+                    if (!opened) {
+                        detach(gc_id);
+                        detach(database_id);
+                        return suite.finish();
+                    }
+                    Snapshot keep = std::move(*opened);
+
+                    suite.check(set_balance(*gc_db, *fabio, 20).has_value(),
+                                "Fabio's balance is updated to 20");
+                    suite.check(gc_db->data_record_count() == baseline + 1,
+                                "the update leaves the previous version physically present");
+
+                    // GC com o snapshot aberto: a versão previous ainda é
+                    // visível a ele, então nada é recuperado (retenção).
+                    auto retained = gc_db->collect_garbage();
+                    suite.check(retained.has_value() && *retained == 0,
+                                "gc reclaims nothing while a snapshot can still see the previous");
+                    suite.check(gc_db->data_record_count() == baseline + 1,
+                                "the previous version survives gc while the snapshot is open");
+                    auto via_snapshot = gc_db->get<Account>(*fabio, keep);
+                    suite.check(via_snapshot.has_value() && via_snapshot->balance == 10,
+                                "the snapshot still reads Fabio's original balance");
+                }
+
+                // Snapshot fechado: a versão previous passa a ser coletável.
+                auto collected = gc_db->collect_garbage();
+                suite.check(collected.has_value() && *collected == 1,
+                            "gc reclaims the previous version once the snapshot is closed");
+                suite.check(gc_db->data_record_count() == baseline,
+                            "only Fabio's current version remains physically");
+                auto current = gc_db->get<Account>(*fabio);
+                Result<Account> current_value{
+                    std::unexpected(Error{ErrorCode::record_not_found, "x"})};
+                if (current) {
+                    current_value = gc_db->materialize(*current);
+                }
+                suite.check(current_value.has_value() && current_value->balance == 20,
+                            "gc does not disturb the current version");
+
+                // Duas alterações SEM snapshot: a segunda sobrescreve a posição
+                // previous, deixando a versão intermediária órfã no heap. O GC
+                // recupera tanto a previous referenciada quanto a órfã.
+                suite.check(set_balance(*gc_db, *fabio, 30).has_value(), "Fabio updated to 30");
+                suite.check(set_balance(*gc_db, *fabio, 40).has_value(), "Fabio updated to 40");
+                suite.check(gc_db->data_record_count() == baseline + 2,
+                            "two snapshotless updates leave a previous and an orphan copy");
+                auto swept = gc_db->collect_garbage();
+                suite.check(swept.has_value() && *swept == 2,
+                            "gc reclaims both the previous and the orphaned intermediate copy");
+                suite.check(gc_db->data_record_count() == baseline,
+                            "only the latest version remains after the sweep");
+                auto latest = gc_db->get<Account>(*fabio);
+                Result<Account> latest_value{
+                    std::unexpected(Error{ErrorCode::record_not_found, "x"})};
+                if (latest) {
+                    latest_value = gc_db->materialize(*latest);
+                }
+                suite.check(latest_value.has_value() && latest_value->balance == 40,
+                            "the current version is the latest committed value after gc");
+            }
+            detach(gc_id);
         }
     }
 

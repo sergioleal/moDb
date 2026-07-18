@@ -57,3 +57,34 @@ A 6B consome o formato preparado pela 6A. Decisões concretizadas:
 - **Escopo adiado.** A recuperação do espaço ocupado pelos registros físicos
   preservados (retenção por época + GC) é explicitamente da 6C. A 6B aceita o
   crescimento de espaço como desvio consciente do MVP.
+
+## Adendo (Fase 6C) — retenção, coleta de lixo e concorrência
+
+A 6C recicla o espaço que a 6B preservava, mantendo a retenção correta:
+
+- **GC por reconciliação.** `Database::collect_garbage()` (transação própria,
+  via WAL) varre o heap de dados e, para cada registro, consulta
+  `IdentityMap::inspect(id)` — que devolve `current`/`previous` e suas épocas
+  mesmo para um tombstone. A `current` viva nunca é tocada; a `previous`
+  referenciada é liberada quando `oldest_open_snapshot_epoch >= current_epoch`
+  (nenhum snapshot aberto ainda a vê); qualquer registro que não seja `current`
+  nem a `previous` referenciada é órfão e é sempre liberado.
+- **Compactação da entrada.** Liberar a `previous` referenciada chama
+  `IdentityMap::clear_previous(id)`, que zera só o slot anterior. Como o
+  `ObjectId` nunca é reusado (ADR-001), um tombstone sem `previous` permanece
+  alocado, apenas sem versões físicas.
+- **Regra de coletabilidade = espelho do conflito.** A condição de reciclagem
+  (`OOSE >= current_epoch`) é a mesma, invertida, da recusa de `snapshot_conflict`
+  da 6B: enquanto um snapshot mais antigo que a época `current` estiver aberto, a
+  `previous` é retida e uma segunda alteração conflita; quando esse snapshot
+  fecha, a `previous` é reciclável e uma nova alteração volta a caber.
+- **Sem free list geral; sem GC automático.** A reciclagem reusa
+  `TableHeap::erase` (compacta a página, retira páginas vazias). O GC é
+  explícito (não roda em todo commit nem no destrutor do `Snapshot`, que
+  permanece livre de I/O), o que mantém o commit barato; o custo por coleta é
+  `O(registros do heap)`. Otimizar com um índice de reclamação por época fica
+  para a Fase 10.
+- **Concorrência.** Commits seguem serializados pela guarda single-writer de
+  `begin()`. O registro de épocas de snapshots abertos é protegido por um mutex
+  curto, sincronizando leitor (abre/fecha snapshot) e escritor (escrita/GC) sem
+  bloquear a duração das leituras.

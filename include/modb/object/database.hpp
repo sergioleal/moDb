@@ -17,6 +17,8 @@
 // Importa a fábrica do WAL (injeção de failpoint) usada no commit.
 #include "modb/tx/wal.hpp"
 
+// Disponibiliza std::size_t no resultado do GC.
+#include <cstddef>
 // Disponibiliza caminhos.
 #include <filesystem>
 // Disponibiliza callbacks de migração.
@@ -455,6 +457,19 @@ public:
         BaselineId id) const {
         return store_.find_baseline(id);
     }
+    // Total de registros físicos vivos no heap de dados (Fase 6C): current +
+    // versões `previous` preservadas + órfãos ainda não coletados. Diagnóstico
+    // para observar o efeito do GC.
+    [[nodiscard]] std::uint64_t data_record_count() const noexcept {
+        return store_.data_record_count();
+    }
+
+    // Recicla o espaço das versões antigas que nenhum snapshot aberto ainda
+    // pode enxergar (Fase 6C). Roda numa transação própria (as liberações
+    // passam pelo WAL); respeita o snapshot aberto mais antigo, então versões
+    // ainda visíveis são preservadas. Falha se houver transação ativa
+    // (single-writer). Devolve quantos registros físicos foram recuperados.
+    [[nodiscard]] Result<std::size_t> collect_garbage();
 
     // Remove um objeto pelo id (o id nunca é reutilizado). Exige uma transação
     // ativa. Referências de composição (OwnedRef) são removidas em cascata, em
@@ -595,14 +610,22 @@ private:
 
     // Época do snapshot aberto mais antigo (nullopt se nenhum estiver aberto).
     // Consultada antes de toda escrita que possa conflitar com uma versão
-    // `previous` ainda visível (Fase 6B).
-    [[nodiscard]] std::optional<std::uint64_t> oldest_open_snapshot_epoch() const noexcept {
+    // `previous` ainda visível (Fase 6B) e pelo GC (Fase 6C). O acesso ao
+    // registro é serializado pelo `snapshot_registry_mutex_`: abertura/fecho de
+    // snapshot (lado leitor) e escrita/GC (lado escritor) sincronizam só neste
+    // ponto curto, sem prender a duração das leituras (Fase 6C).
+    [[nodiscard]] std::optional<std::uint64_t> oldest_open_snapshot_epoch() const {
+        const std::scoped_lock lock{*snapshot_registry_mutex_};
         return open_snapshot_epochs_.empty() ? std::nullopt
                                              : std::optional{*open_snapshot_epochs_.begin()};
     }
     friend class Snapshot;
-    void register_snapshot_epoch(std::uint64_t epoch) { open_snapshot_epochs_.insert(epoch); }
+    void register_snapshot_epoch(std::uint64_t epoch) {
+        const std::scoped_lock lock{*snapshot_registry_mutex_};
+        open_snapshot_epochs_.insert(epoch);
+    }
     void unregister_snapshot_epoch(std::uint64_t epoch) {
+        const std::scoped_lock lock{*snapshot_registry_mutex_};
         const auto it = open_snapshot_epochs_.find(epoch);
         if (it != open_snapshot_epochs_.end()) {
             open_snapshot_epochs_.erase(it);
@@ -630,8 +653,16 @@ private:
     bool recovery_required_{false};
     // Épocas dos snapshots atualmente abertos (multiset: dois snapshots podem
     // capturar a mesma época). O mínimo é a época mais antiga ainda visível,
-    // consultada por toda escrita para decidir conflito (Fase 6B).
+    // consultada por toda escrita para decidir conflito (Fase 6B) e pelo GC
+    // (Fase 6C). Protegido por `snapshot_registry_mutex_`.
     std::multiset<std::uint64_t> open_snapshot_epochs_;
+    // Serializa o acesso ao registro de épocas entre o lado leitor (Snapshot
+    // RAII) e o lado escritor (escrita/commit/GC). Mantido por unique_ptr para
+    // o `Database` continuar movível (std::mutex não é movível) — a fábrica
+    // move o `Database` para dentro de um shared_ptr. A serialização de commits
+    // em si é dada pela guarda single-writer de `begin()` (Fase 5): uma segunda
+    // transação falha com `transaction_active`.
+    std::unique_ptr<std::mutex> snapshot_registry_mutex_{std::make_unique<std::mutex>()};
 };
 
 template <typename T>

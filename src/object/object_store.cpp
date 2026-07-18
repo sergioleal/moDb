@@ -380,6 +380,80 @@ Result<void> ObjectStore::remove(ObjectId id,
     return identity_.erase(id, root_.epoch() + 1);
 }
 
+Result<std::size_t> ObjectStore::collect_garbage(
+    std::optional<std::uint64_t> oldest_open_snapshot_epoch) {
+    if (!file_->in_transaction()) {
+        return std::unexpected(Error{ErrorCode::transaction_required,
+                                     "garbage collection requires an active transaction"});
+    }
+    auto records = data_heap_.scan_records();
+    if (!records) {
+        return std::unexpected(records.error());
+    }
+
+    // Um alvo a reciclar: o registro físico e se ele é a `previous` referenciada
+    // (que também precisa ter o slot compactado) ou uma cópia órfã (só liberar).
+    struct Victim {
+        storage::RecordId record;
+        ObjectId id;
+        bool is_referenced_previous;
+    };
+    std::vector<Victim> victims;
+    // Classifica lendo a identidade ANTES de qualquer mutação, para a decisão
+    // de cada registro refletir o estado consistente do início do GC.
+    for (const auto& record : *records) {
+        auto object = decode_object(record.bytes);
+        if (!object) {
+            return std::unexpected(object.error());
+        }
+        auto info = identity_.inspect(object->id);
+        if (!info) {
+            // Sem entrada de identidade: nenhum id vivo reivindica este registro.
+            if (info.error().code == ErrorCode::record_not_found) {
+                victims.push_back({record.id, object->id, false});
+                continue;
+            }
+            return std::unexpected(info.error());
+        }
+        // A versão current viva nunca é reciclada.
+        if (info->current && *info->current == record.id) {
+            continue;
+        }
+        // A versão previous referenciada: reciclável só quando nenhum snapshot
+        // aberto ainda pode enxergá-la (mesma regra segura do conflito da 6B:
+        // basta o snapshot mais antigo já ser >= à época current da entrada).
+        if (info->previous && *info->previous == record.id) {
+            const bool collectible =
+                !oldest_open_snapshot_epoch || *oldest_open_snapshot_epoch >= info->current_epoch;
+            if (collectible) {
+                victims.push_back({record.id, object->id, true});
+            }
+            continue;
+        }
+        // Nem current nem a previous referenciada: cópia antiga órfã (ex.: um
+        // previous sobrescrito por uma segunda alteração). Sempre reciclável.
+        victims.push_back({record.id, object->id, false});
+    }
+
+    std::size_t collected = 0;
+    for (const auto& victim : victims) {
+        if (victim.is_referenced_previous) {
+            if (auto cleared = identity_.clear_previous(victim.id); !cleared) {
+                return std::unexpected(cleared.error());
+            }
+        }
+        if (auto erased = data_heap_.erase(victim.record); !erased) {
+            // Um registro já ausente não é um erro para o GC; qualquer outra
+            // falha (ex.: página corrompida) aborta a coleta.
+            if (erased.error().code != ErrorCode::record_not_found) {
+                return std::unexpected(erased.error());
+            }
+        }
+        ++collected;
+    }
+    return collected;
+}
+
 Result<void> ObjectStore::scan(
     const std::function<Result<void>(const DecodedObject&)>& visitor) {
     auto records = data_heap_.scan_records();
