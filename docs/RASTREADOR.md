@@ -48,10 +48,11 @@
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
-| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
+| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **82/110 (~75%)** | |
+| [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/10 | Fases 8, 9, 10 |
+| **Total** | | | **82/123 (~67%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -584,31 +585,120 @@ objetos (TTFR); buscas por chave via índice.
 
 ## Fase 8 — Servidor, protocolo binário e backpressure
 
-Status: ⬜ Não iniciada (0/9) — Definição completa:
+Status: ⬜ Não iniciada (0/12) — seis entregas verticais 8A–8F.
+Definição completa:
 [PLANO_ODB.md §Fase 8](PLANO_ODB.md#fase-8--servidor-protocolo-binário-e-backpressure) ·
 [PROTOCOLO_FASES.md §Fase 8](PROTOCOLO_FASES.md#fase-8--servidor-protocolo-binário-e-backpressure)
 
+### Fase 8A — Contratos e codec do protocolo
+
+Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8a`.
+
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8.1 | ADR de rede e modelo de concorrência do servidor | ⬜ | [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md): codec lógico compartilhado, localização física privada |
-| 8.2 | Processo servidor hospedando `DatabaseRegistry` | ⬜ | |
-| 8.3 | Protocolo binário (Begin/ObjectFrame/End/Error) | ⬜ | |
-| 8.4 | Framing com diretório de slots e compressão opcional | ⬜ | Coalescência física sem espera; compressão negociada por frame; `none` obrigatório |
-| 8.5 | Serialização de objetos para a rede (reusa o codec) | ⬜ | `ObjectId` + `TypeDefinitionId` + payload; sem `PageId`/`SlotId`/`RecordId` |
-| 8.6 | Backpressure fim-a-fim | ⬜ | |
-| 8.7 | Cliente C++ assíncrono | ⬜ | |
-| 8.8 | Cancelamento e políticas de timeout | ⬜ | |
-| 8.9 | Testes de cliente lento/desconexão/erro no meio do fluxo | ⬜ | |
+| 8A.1 | ADR-011: concorrência do servidor + revisão single-thread | ⬜ | [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) já fixa o codec lógico; ADR-011 lista leitor/workers/escritor e `ScratchPagePool` |
+| 8A.2 | `QueryDescription` + codec de mensagens/`ObjectEnvelope`/`ObjectFrame` (`none`) | ⬜ | Framing com diretório de slots; sem localização física |
 
-### Testes automatizados desta fase
+### Testes automatizados desta subfase
 
-| Teste (CTest) | Arquivo | Status |
+| Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.protocol` | `tests/protocol_test.cpp` | ⬜ |
-| `modb.server_streaming` | `tests/server_streaming_test.cpp` | ⬜ |
+| `modb.protocol` | round-trip; frames hostis (truncado, length, >16 MiB, diretório inválido, lixo) | ⬜ |
 
-Critério de aceite: ⬜ backpressure comprovado (produção casada ao consumo,
-sem crescer memória) com cliente lento.
+Critério de aceite 8A: ⬜ encode→decode idêntico; entradas hostis →
+`protocol_error` sem alocação gigante.
+
+### Fase 8B — Transporte e processo servidor
+
+Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8b`. Depende de 8A.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 8B.1 | `NativeSocket` Win32/POSIX | ⬜ | Mesmo padrão do `NativeFile` |
+| 8B.2 | Processo servidor + `Hello`/`HelloOk` em porta efêmera | ⬜ | Hospeda `DatabaseRegistry`; CLI `modb serve` / ping |
+
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.server_streaming` (handshake) | loopback: conexão, negociação, encerramento limpo | ⬜ |
+
+Critério de aceite 8B: ⬜ handshake e encerramento limpos; CLI demonstra
+servidor e ping/info remoto.
+
+### Fase 8C — Primeiro streaming remoto
+
+Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8c`. Depende de 8B.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 8C.1 | Execução remota Begin → ObjectFrame(s) → End/Error | ⬜ | `QueryDescription` declarativa restrita |
+| 8C.2 | Cliente C++ + `ObjectStream` incremental | ⬜ | Codec genérico; sem `PageId`/`SlotId`/`RecordId` |
+
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.server_streaming` (fluxo) | 10 mil objetos; ordem; independência física; erro após N | ⬜ |
+
+Critério de aceite 8C: ⬜ fluxo íntegro de 10 mil objetos; falha parcial
+entrega N + `StreamError`.
+
+### Fase 8D — Backpressure e ciclo de recursos
+
+Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8d`. Depende de 8C.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 8D.1 | Fila/frame limitados; socket lento suspende o generator | ⬜ | ≤ 1 frame / constante pequena em trânsito |
+| 8D.2 | Instrumentação e liberação em desconexão | ⬜ | produzidos − enviados; cursor/snapshot |
+
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.server_streaming` (backpressure) | cliente lento 1 obj/50 ms; desconexão sem vazamento | ⬜ |
+
+Critério de aceite 8D: ⬜ produzidos − enviados ≤ constante; memória não
+cresce com o tamanho do fluxo.
+
+### Fase 8E — Cancelamento, multiplexação e API assíncrona
+
+Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8e`. Depende de 8D.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 8E.1 | `Cancel` durante envio; conexão reutilizável | ⬜ | Leitor desacoplado do escritor |
+| 8E.2 | Multiplexação de `query_id` + `co_await stream.next()` | ⬜ | Semântica/executor na ADR-011 |
+
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.server_streaming` (concorrência) | cancelamento; duas consultas na mesma conexão | ⬜ |
+
+Critério de aceite 8E: ⬜ cancelamento interrompe produção e permite nova
+consulta; dois `query_id`s íntegros.
+
+### Fase 8F — Limites, timeout, compressão e fechamento
+
+Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8f`. Depende de 8E.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 8F.1 | Timeout, limites de stream/frame/expansão; compressão negociada | ⬜ | Codec por benchmark; `none` obrigatório e fallback |
+| 8F.2 | Suíte completa + demo CLI entre processos | ⬜ | Fecha critério da Fase 8 |
+
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.protocol` (compressão) | negociada; incompressível → `none`; inválida rejeitada | ⬜ |
+| `modb.server_streaming` (fechamento) | limites/timeout; demo entre processos | ⬜ |
+
+Critério de aceite 8F / da Fase 8: ⬜ cliente em outro processo com
+backpressure comprovado e `StreamError` correto; compressão inválida
+rejeitada sem alocação excessiva.
 
 ---
 
@@ -710,6 +800,40 @@ aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
 
 Critério de aceite: ⬜ benchmarks reproduzíveis, regressões detectadas
 automaticamente, interfaces públicas documentadas.
+
+---
+
+## Fase 11 — Container serverless
+
+Status: ⬜ Não iniciada (0/10) — Definição completa:
+[PLANO_ODB.md §Fase 11](PLANO_ODB.md#fase-11--container-serverless) ·
+[PROTOCOLO_FASES.md §Fase 11](PROTOCOLO_FASES.md#fase-11--container-serverless)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 11.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ⬜ | [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
+| 11.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ⬜ | `deploy/Dockerfile` |
+| 11.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | Sem expor formato físico; backpressure preservado |
+| 11.4 | Configuração só por env/secrets | ⬜ | Sem dados nem credenciais na imagem |
+| 11.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | Disco efêmero proibido como fonte de verdade |
+| 11.6 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | `SIGTERM` drena e sincroniza antes do prazo |
+| 11.7 | Recovery em cold start e após término forçado | ⬜ | Inclui WAL pendente |
+| 11.8 | Logs estruturados e métricas operacionais | ⬜ | Cold start, recovery, conexões, I/O, latência |
+| 11.9 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | |
+| 11.10 | Guia de operação local e implantação de referência | ⬜ | `docs/OPERACAO_SERVERLESS.md` |
+
+### Testes/artefatos desta fase
+
+| Item | Local | Status |
+|---|---|---|
+| Build da imagem OCI | `deploy/Dockerfile` | ⬜ |
+| Smoke container + volume | `tests/container_smoke_test` ou script CI | ⬜ |
+| Kill -9 + reabertura no mesmo volume | prova de recovery | ⬜ |
+| Manifesto de referência | `deploy/` | ⬜ |
+
+Critério de aceite: ⬜ imagem sobe do zero com volume durável, recupera WAL,
+atende cliente 8/9, preserva commits após término forçado, uma instância
+ativa, sem privilégios, com backpressure.
 
 ---
 

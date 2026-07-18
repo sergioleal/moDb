@@ -68,6 +68,7 @@ Mantida do plano anterior. Uma tarefa só está concluída quando:
 | 8 | Servidor, protocolo binário e backpressure | streaming pela rede | 7 |
 | 9 | Runtime de módulos de domínio | `client.call<TransferFunds>(...)` | 5, 8 |
 | 10 | Desempenho e estabilização | benchmarks, buffer pool, fuzzing | todas |
+| 11 | Container serverless | imagem OCI com escala a zero e dados duráveis | 8, 9, 10 |
 
 O **MVP OO** compreende as fases 0 a 3. Critério, análogo ao MVP relacional:
 criar um tipo `Employee`, persistir um objeto, fechar completamente a
@@ -447,32 +448,104 @@ e buscas por chave usam o índice.
 Objetivo: levar o fluxo de objetos à rede, com o servidor como processo
 dedicado a uma única aplicação.
 
-Tarefas:
+Para que cada incremento seja utilizável e demonstrável, a fase é dividida
+em seis entregas verticais. Sockets, codecs e filas são infraestrutura
+interna das entregas, não marcos isolados. A fase depende da conclusão da
+Fase 7.
 
-- [ ] ADR: abordagem de rede, protocolo próximo do armazenamento lógico
-      ([ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md))
-      e modelo de concorrência do servidor — o motor deixa de ser single-thread;
-      revisar as premissas de escopo afetadas.
-- [ ] Implementar o processo servidor hospedando `DatabaseRegistry`.
-- [ ] Definir o protocolo binário de mensagens independentes:
-      `Stream Begin` / `Object` / `Stream End` / `Stream Error`.
-- [ ] Framing na camada de transporte com `ObjectFrame` e diretório de slots;
-      coalescência física oportunista, nunca lote lógico nem espera para encher;
-      compressão opcional por frame, negociada e limitada contra expansão.
-- [ ] Serialização de objetos para a rede reutilizando o codec genérico e
-      `ObjectId`; nunca expor `PageId`, `SlotId` ou `RecordId`.
-- [ ] Backpressure fim-a-fim: socket lento suspende serializer → executor →
-      storage (propagação natural via coroutines).
-- [ ] Cliente C++ assíncrono: `co_await stream.next()`.
-- [ ] Cancelamento pelo cliente e políticas de timeout/limite de recursos.
-- [ ] Testes com cliente lento (backpressure), desconexão no meio do fluxo e
-      erro após N objetos enviados (`Stream Error`).
+#### Fase 8A — Contratos e codec do protocolo
 
-Entregáveis: servidor + cliente streaming; protocolo documentado.
+- [ ] Registrar a ADR-011 com o modelo de concorrência do servidor
+      (leitor por conexão, workers de consulta, escritor dedicado) e
+      revisar as premissas single-thread afetadas (`ScratchPagePool`,
+      `DatabaseRegistry`, etc.).
+- [ ] Definir `QueryDescription` serializável e o codec das mensagens
+      versionadas (`Hello`, `Query`, `StreamBegin`, `ObjectFrame`,
+      `StreamEnd`, `StreamError`, `Cancel`), com `ObjectEnvelope` lógico
+      (`ObjectId` + `TypeDefinitionId` + payload) e framing com diretório
+      de slots; `compression=none` obrigatório nesta entrega.
 
-Critério de aceite: um cliente em outro processo consome um fluxo grande com
-backpressure comprovado (servidor desacelera sem acumular memória) e recebe
-`Stream Error` correto em falha no meio do fluxo.
+Entregável 8A: protocolo binário documentado e testável sem rede.
+
+Critério de aceite 8A: round-trip encode→decode de cada mensagem;
+frames truncados, length mentiroso, >16 MiB, diretório inválido e lixo
+são rejeitados com erro de protocolo, sem alocação gigante.
+
+#### Fase 8B — Transporte e processo servidor
+
+- [ ] Implementar `NativeSocket` (Win32/POSIX, mesmo padrão do
+      `NativeFile`) e o processo servidor hospedando `DatabaseRegistry`.
+- [ ] Abrir/registrar o banco, fazer bind em porta efêmera e negociar
+      `Hello`/`HelloOk` (versão, baseline, codecs e limites).
+
+Entregável 8B: servidor dedicado que aceita conexão e completa o
+handshake.
+
+Critério de aceite 8B: teste em loopback conecta, negocia e encerra
+limpa; a CLI demonstra `modb serve` (ou equivalente) e um ping/info
+remoto.
+
+#### Fase 8C — Primeiro streaming remoto
+
+- [ ] Executar uma `QueryDescription` declarativa restrita no servidor e
+      enviar `StreamBegin` → `ObjectFrame`(s) → `StreamEnd` (ou
+      `StreamError` em falha do generator).
+- [ ] Implementar o cliente C++ e `ObjectStream` para consumo incremental
+      do fluxo remoto, reutilizando o codec genérico; nunca expor
+      `PageId`, `SlotId` ou `RecordId`.
+
+Entregável 8C: consulta remota em streaming ponta a ponta.
+
+Critério de aceite 8C: fluxo de 10 mil objetos com conteúdo íntegro e
+ordem preservada; realocação física não altera os bytes lógicos do
+objeto; falha injetada após N objetos entrega exatamente N +
+`StreamError`.
+
+#### Fase 8D — Backpressure e ciclo de recursos
+
+- [ ] Limitar frame, fila de saída (no máximo um frame / constante
+      pequena de objetos em trânsito) e propagar bloqueio do socket até
+      o generator e o storage.
+- [ ] Instrumentar produzidos − enviados, snapshots e cursores vivos;
+      liberar recursos em desconexão abrupta.
+
+Entregável 8D: backpressure fim-a-fim comprovado.
+
+Critério de aceite 8D: com cliente lento (ex.: 1 obj/50 ms e janela TCP
+pequena), produzidos − enviados permanece ≤ constante pequena e a
+memória não cresce com o tamanho do fluxo; desconexão libera
+cursor/snapshot.
+
+#### Fase 8E — Cancelamento, multiplexação e API assíncrona
+
+- [ ] Receber `Cancel` enquanto o escritor envia; manter a conexão
+      utilizável após o cancelamento.
+- [ ] Suportar múltiplos `query_id` na mesma conexão com escrita
+      serializada e entregar `co_await stream.next()` com semântica e
+      executor definidos na ADR-011.
+
+Entregável 8E: cliente assíncrono com cancelamento e multiplexação.
+
+Critério de aceite 8E: cancelamento interrompe a produção e permite nova
+consulta na mesma conexão; duas consultas concorrentes intercalam
+`query_id`s com ambos os fluxos íntegros.
+
+#### Fase 8F — Limites, timeout, compressão e fechamento
+
+- [ ] Aplicar timeout, limite de streams concorrentes, frame máximo e
+      razão de expansão; negociar compressão (codec escolhido por
+      benchmark; `none` permanece obrigatório e fallback).
+- [ ] Fechar a suíte `modb.protocol` + `modb.server_streaming` e
+      demonstrar consumo entre processos com a CLI.
+
+Entregáveis: servidor + cliente streaming; protocolo documentado;
+políticas de recurso ativas.
+
+Critério de aceite 8F / da Fase 8: um cliente em outro processo consome
+um fluxo grande com backpressure comprovado (servidor desacelera sem
+acumular memória) e recebe `Stream Error` correto em falha no meio do
+fluxo; compressão inválida ou não negociada é rejeitada sem alocação
+excessiva.
 
 ### Fase 9 — Runtime de módulos de domínio
 
@@ -540,6 +613,51 @@ versionados; documentação completa para usuários e contribuidores.
 Critério de aceite: resultados reproduzíveis, regressões detectadas
 automaticamente, interfaces públicas documentadas.
 
+### Fase 11 — Container serverless
+
+Objetivo: empacotar e operar o servidor moDb em uma plataforma de containers
+serverless, preservando as garantias de durabilidade e recuperação do banco.
+
+O moDb continua stateful: o disco efêmero do container não é fonte de verdade
+e a fase não introduz escala horizontal de escrita. A implantação inicial usa
+um volume persistente compatível com escrita posicional e `fsync`, uma única
+instância ativa por banco e escala a zero quando o serviço está ocioso.
+
+Tarefas:
+
+- [ ] Registrar em ADR o modelo de implantação, incluindo volume persistente,
+      instância escritora única, cold start, escala a zero e plataformas
+      serverless suportadas.
+- [ ] Criar imagem OCI reproduzível em build multi-stage, mínima, executada por
+      usuário não privilegiado e com filesystem raiz somente leitura.
+- [ ] Adaptar o protocolo da fase 8 ao ingresso suportado pela plataforma
+      escolhida, sem expor o formato físico nem enfraquecer backpressure,
+      cancelamento ou limites de recursos.
+- [ ] Configurar banco, porta, credenciais e limites somente por variáveis de
+      ambiente e secrets; nunca incluir segredos ou dados na imagem.
+- [ ] Montar os arquivos do banco e WAL em armazenamento persistente com as
+      garantias de locking, flush e atomicidade exigidas pelo motor.
+- [ ] Implementar readiness, liveness, startup probe e desligamento gracioso,
+      bloqueando novas operações e concluindo ou revertendo transações antes do
+      prazo de término da plataforma.
+- [ ] Comprovar recovery no cold start e após término forçado do container,
+      incluindo banco com WAL pendente.
+- [ ] Adicionar logs estruturados e métricas de cold start, recovery, conexões,
+      transações, memória, I/O e duração das requisições.
+- [ ] Automatizar build, SBOM, scan de vulnerabilidades e publicação versionada
+      da imagem OCI.
+- [ ] Documentar execução local e implantação de referência, incluindo
+      restrições de plataforma, backup, restauração e custo operacional.
+
+Entregáveis: imagem OCI publicada; manifesto de implantação serverless de
+referência; guia operacional; testes de container, cold start e recovery.
+
+Critério de aceite: a imagem sobe a partir de zero, monta armazenamento
+durável, recupera o banco quando necessário e atende um cliente da fase 8/9;
+após término completo e nova inicialização, os objetos commitados permanecem e
+transações incompletas não aparecem. A validação deve comprovar uso de uma única
+instância ativa, memória limitada, backpressure e execução sem privilégios.
+
 ## 6. Itens deliberadamente fora deste plano
 
 - herança e polimorfismo persistentes (tipos-base, discriminadores, consultas
@@ -579,6 +697,8 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
 - evolução de schema: matriz de casos v1→v2 (add/remove/convert/migração);
 - falha simulada para WAL, commit, recovery e crash de módulo;
 - streaming: TTFR, memória O(1), backpressure, cancelamento, Stream Error;
+- container serverless: build da imagem, cold start, término gracioso,
+  persistência em volume e recovery após término forçado;
 - sanitizers nos toolchains que os suportam (preset já configurado);
 - benchmarks separados dos testes funcionais.
 
@@ -606,8 +726,10 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
    coleções e cascatas.
 3. Fases 5–6 antes do streaming, porque snapshot consistente é pré-requisito
    de cursor de longa duração.
-4. Fases 8–9 por último: rede, concorrência e módulos multiplicam a
-   complexidade; só entram sobre um núcleo com garantias comprovadas.
+4. Fases 8–9 introduzem rede, concorrência e módulos somente sobre um núcleo
+   com garantias comprovadas.
+5. A Fase 10 estabiliza o produto antes da Fase 11, que adiciona os riscos
+   operacionais de container, cold start e armazenamento remoto persistente.
 
 Não iniciar índices, streaming ou servidor antes de existir um teste confiável
 de persistência, reabertura e recuperação. Cada fase preserva os testes e
