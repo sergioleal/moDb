@@ -538,6 +538,24 @@ Employee: id=21 name=Bia salary=18000.000000 annual_salary=216000.000000
 2 employee(s) streamed (projected) (nature=streaming); data pages read: 1
 ```
 
+Na API C++, `ProjectedQuery::map<Out>` (opcional) instancia uma classe tipada a
+partir de cada `ProjectedRow` e cede o resultado no mesmo stream — sem buffer
+intermediário. O mapper é explícito (sem reflexão):
+
+```cpp
+struct EmployeeSummary { ObjectId id; std::string name; double annual_salary; };
+
+for (auto& row : database.query<EmployeeV2>()
+                     .select({FieldId{0}, FieldId{1}})
+                     .compute("annual_salary")
+                     .map<EmployeeSummary>([](const ProjectedRow& p) -> Result<EmployeeSummary> {
+                         // extrai campos e instancia EmployeeSummary
+                     })
+                     .stream()) {
+    // processa *row
+}
+```
+
 `--order-by`, `--top`, `--distinct` e `--count` (Fase 7D) aplicam operadores
 classificados explicitamente: sort/distinct/aggregate são **bloqueantes**;
 `--top K` é **parcialmente bloqueante** (heap ≤ K). Com esses operadores,

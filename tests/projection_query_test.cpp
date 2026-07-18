@@ -46,6 +46,32 @@ struct Item {
     friend bool operator==(const Item&, const Item&) = default;
 };
 
+// Classe tipada materializada a partir de uma ProjectedRow (API opcional).
+struct ItemSummary {
+    ObjectId id{};
+    std::string name;
+    std::int64_t double_value{};
+    friend bool operator==(const ItemSummary&, const ItemSummary&) = default;
+};
+
+Result<ItemSummary> to_summary(const ProjectedRow& row) {
+    const auto id = row.get("id");
+    const auto name = row.get("name");
+    const auto doubled = row.get("double_value");
+    if (!id || !name || !doubled) {
+        return std::unexpected(
+            Error{ErrorCode::invalid_argument, "projected row is missing required fields"});
+    }
+    auto object_id = id->as_ref();
+    auto text = name->as_string();
+    auto value = doubled->as_int64();
+    if (!object_id || !text || !value) {
+        return std::unexpected(
+            Error{ErrorCode::invalid_argument, "projected field has unexpected type"});
+    }
+    return ItemSummary{*object_id, std::string{*text}, *value};
+}
+
 BindingBuilder<Item> item_builder() {
     BindingBuilder<Item> builder{"Item"};
     builder.field<1>("name", &Item::name).field<2>("value", &Item::value);
@@ -210,6 +236,50 @@ int main() {
         }
         suite.check(labels == std::vector<std::string>{"item-0=0", "item-1=1"},
                     "map transforms each element lazily");
+    }
+
+    // --- ProjectedRow → classe tipada (streaming, com limit) ---
+    {
+        std::vector<ItemSummary> summaries;
+        for (auto& result : database->query<Item>()
+                                .where([](const Item& item) { return item.value % 2 == 0; })
+                                .select({FieldId{0}, FieldId{1}})
+                                .compute("double_value")
+                                .limit(3)
+                                .map<ItemSummary>(to_summary)
+                                .stream()) {
+            if (!result) {
+                summaries.clear();
+                break;
+            }
+            summaries.push_back(std::move(*result));
+        }
+        suite.check(summaries.size() == 3 && summaries[0].name == "item-0" &&
+                        summaries[0].double_value == 0 && summaries[1].name == "item-2" &&
+                        summaries[1].double_value == 4 && summaries[2].name == "item-4" &&
+                        summaries[2].double_value == 8 &&
+                        summaries[0].id.value >= first_user_object_id,
+                    "ProjectedQuery::map materializes classes lazily");
+    }
+
+    // --- mapper falível propaga erro e encerra o stream ---
+    {
+        std::size_t seen = 0;
+        bool saw_error = false;
+        for (auto& result : database->query<Item>()
+                                .select({FieldId{1}})
+                                .limit(5)
+                                .map<ItemSummary>([](const ProjectedRow& row) -> Result<ItemSummary> {
+                                    (void)row;
+                                    return std::unexpected(Error{ErrorCode::invalid_argument,
+                                                                 "mapper refused the row"});
+                                })
+                                .stream()) {
+            ++seen;
+            saw_error = !result && result.error().code == ErrorCode::invalid_argument;
+            break;
+        }
+        suite.check(seen == 1 && saw_error, "ProjectedQuery::map propagates mapper errors");
     }
 
     // --- compute ausente falha limpo ---
