@@ -275,6 +275,13 @@ public:
         limit_ = count;
         return std::move(*this);
     }
+    // Materializa cada ProjectedRow numa classe tipada (Fase 7C), elemento a
+    // elemento — opcional, streaming, sem buffer intermediário.
+    template <typename Out>
+    [[nodiscard]] MappedQuery<Out> map(std::function<Out(const query::ProjectedRow&)> fn) &&;
+    template <typename Out>
+    [[nodiscard]] MappedQuery<Out> map(
+        std::function<Result<Out>(const query::ProjectedRow&)> fn) &&;
 
     [[nodiscard]] query::Generator<Result<query::ProjectedRow>> stream() &&;
 
@@ -1314,6 +1321,27 @@ query::Generator<Result<query::ProjectedRow>> ProjectedQuery<T>::stream() && {
         std::move(*snapshot_), std::move(predicate_), limit_, std::move(token_), has_token_,
         index_field_, std::move(index_lo_), std::move(index_hi_), std::move(selected_),
         std::move(computed_));
+}
+
+template <typename T>
+template <typename Out>
+MappedQuery<Out> ProjectedQuery<T>::map(
+    std::function<Out(const query::ProjectedRow&)> fn) && {
+    auto source = std::move(*this).stream();
+    return MappedQuery<Out>{query::project<query::ProjectedRow, Out>(
+        std::move(source),
+        [fn = std::move(fn)](const query::ProjectedRow& row) -> Result<Out> { return fn(row); })};
+}
+
+template <typename T>
+template <typename Out>
+MappedQuery<Out> ProjectedQuery<T>::map(
+    std::function<Result<Out>(const query::ProjectedRow&)> fn) && {
+    auto source = std::move(*this).stream();
+    return MappedQuery<Out>{query::compute<query::ProjectedRow, Out>(
+        std::move(source), [fn = std::move(fn)](const query::ProjectedRow& row) {
+            return fn(row);
+        })};
 }
 
 template <typename T>
