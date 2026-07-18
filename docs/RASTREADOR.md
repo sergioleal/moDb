@@ -604,7 +604,7 @@ Status: ✅ Concluída (2/2) — commit `9f65f81`, tag `0.0.8a`.
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
 | `modb.protocol` | round-trip; frames hostis (truncado, length, >16 MiB, diretório inválido, lixo) | ✅ |
-| `modb.cli.protocol` | demo `modb protocol` em memória | ✅ |
+| `modb.cli.protocol_demo` | demo explicativa `modb protocol demo` em memória | ✅ |
 
 Critério de aceite 8A: ✅ encode→decode idêntico; entradas hostis →
 `protocol_error`/`frame_too_large` sem alocação gigante. Suíte completa

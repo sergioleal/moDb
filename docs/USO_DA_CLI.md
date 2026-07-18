@@ -369,23 +369,34 @@ Decoded row: 1 | Ana
 Round-trip: OK
 ```
 
-## `modb protocol` — frames do protocolo binário em memória (Fase 8A)
+## `modb protocol demo` — frames do protocolo binário em memória (Fase 8A)
 
 ```text
-modb protocol
+modb protocol demo
 ```
 
-Sem argumentos e sem rede: codifica e decodifica `Hello`, `Query` e
-`ObjectFrame` (compressão `none`), demonstrando o codec da
+O subcomando `demo`, sem rede, explica e executa passo a passo a codificação e
+decodificação de `Hello`, `Query` e `ObjectFrame` (compressão `none`),
+demonstrando o codec da
 [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) /
 [ADR-011](decisions/ADR-011-concorrencia-do-servidor.md).
 
 ```text
-$ modb protocol
-Hello: database='demo' bytes=… round-trip=OK
-Query: id=1 bytes=… round-trip=OK
-ObjectFrame: records=1 bytes=… round-trip=OK
-Protocol demo: OK
+$ modb protocol demo
+ODB++ protocol demo (Fase 8A, in-memory, no network)
+
+[1/3] Hello: negotiate protocol version, database and compression
+  input: version=1 database='demo' codecs=[none]
+  encoded frame: 17 bytes
+  decoded equals input: OK
+
+[2/3] Query: describe the remote query without C++ callbacks
+  ...
+
+[3/3] ObjectFrame: carry logical object identity and payload
+  ...
+
+Result: all protocol round-trips passed
 ```
 
 ## `modb types` — modelo de objetos em memória (ODB++)
