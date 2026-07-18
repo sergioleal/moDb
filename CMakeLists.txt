@@ -230,6 +230,9 @@ if(BUILD_TESTING)
     add_executable(modb_projection_query_tests tests/projection_query_test.cpp)
     target_link_libraries(modb_projection_query_tests PRIVATE modb::modb)
 
+    add_executable(modb_aggregation_query_tests tests/aggregation_query_test.cpp)
+    target_link_libraries(modb_aggregation_query_tests PRIVATE modb::modb)
+
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
@@ -299,6 +302,7 @@ if(BUILD_TESTING)
         target_link_options(modb_indexed_query_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_index_catalog_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_projection_query_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_aggregation_query_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -336,6 +340,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.indexed_query COMMAND modb_indexed_query_tests)
     add_test(NAME modb.index_catalog COMMAND modb_index_catalog_tests)
     add_test(NAME modb.projection_query COMMAND modb_projection_query_tests)
+    add_test(NAME modb.aggregation_query COMMAND modb_aggregation_query_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)
@@ -385,6 +390,11 @@ if(BUILD_TESTING)
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2
                 --project name,salary --compute annual_salary --limit 2)
     set_tests_properties(modb.cli.query_project PROPERTIES DEPENDS modb.cli.query)
+    add_test(NAME modb.cli.query_topk
+        COMMAND modb_cli query
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2
+                --order-by salary --top 1)
+    set_tests_properties(modb.cli.query_topk PROPERTIES DEPENDS modb.cli.query_project)
     # Índice (Fase 7B): cria sobre a demo (ainda em `oo employee index`), depois
     # consulta por igualdade de salário via Index Scan no comando `query`.
     add_test(NAME modb.cli.oo_index
@@ -393,7 +403,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.query_indexed
         COMMAND modb_cli query
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2 --salary 18000)
-    set_tests_properties(modb.cli.oo_index PROPERTIES DEPENDS modb.cli.query_project)
+    set_tests_properties(modb.cli.oo_index PROPERTIES DEPENDS modb.cli.query_topk)
     set_tests_properties(modb.cli.query_indexed PROPERTIES DEPENDS modb.cli.oo_index)
     add_test(NAME modb.cli.blob_help COMMAND modb_cli blob --help)
     add_test(NAME modb.cli.graph_help COMMAND modb_cli graph --help)

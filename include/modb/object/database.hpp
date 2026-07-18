@@ -130,15 +130,13 @@ private:
     bool registered_{false};
 };
 
-// Consulta em streaming (Fase 7A/7B/7C): construtor fluente que descreve um
+// Consulta em streaming (Fases 7A–7D): construtor fluente que descreve um
 // scan preguiçoso sobre o tipo T — filtrável (`where`), limitável (`limit`),
-// cancelável (`cancel_on`), indexável (`equals`/`between`) e projetável
-// (`select`/`compute`/`map`) — e o materializa em `stream()`. O `Snapshot` é
-// aberto na construção e MOVIDO para dentro do Generator em `stream()`: a
-// leitura vê um estado lógico estável por toda a sua vida, mesmo que a Query
-// temporária morra antes do consumo (padrão `for (auto& r : db.query<T>()...
-// .stream())`). Move-only; os métodos fluentes são `&&`-qualificados para
-// encadear sobre a temporária.
+// cancelável (`cancel_on`), indexável (`equals`/`between`), projetável
+// (`select`/`compute`/`map`) e ordenável/agregável (`order_by`/`top_k`/
+// `distinct_by`) — e o materializa em `stream()`. O `Snapshot` é aberto na
+// construção e MOVIDO para dentro do Generator em `stream()`. Move-only; os
+// métodos fluentes são `&&`-qualificados para encadear sobre a temporária.
 template <typename T>
 class Query {
 public:
@@ -153,6 +151,8 @@ public:
         return std::move(*this);
     }
     // Operador Limit: encerra o upstream ao atingir a contagem. 0 = sem limite.
+    // Com order_by/top_k/distinct, o limite aplica-se DEPOIS do operador
+    // bloqueante (não há pushdown para o scan).
     Query&& limit(std::size_t count) && {
         limit_ = count;
         return std::move(*this);
@@ -177,20 +177,55 @@ public:
         index_hi_ = std::move(hi);
         return std::move(*this);
     }
+    // Sort global (Fase 7D, bloqueante). `less(a,b)` define ordem crescente.
+    Query&& order_by(std::function<bool(const T&, const T&)> less) && {
+        order_less_ = std::move(less);
+        return std::move(*this);
+    }
+    // Top-K (Fase 7D, parcialmente bloqueante): os k "maiores" segundo `less`.
+    Query&& top_k(std::size_t k, std::function<bool(const T&, const T&)> less) && {
+        top_k_ = k;
+        order_less_ = std::move(less);
+        return std::move(*this);
+    }
+    // Distinct por chave (Fase 7D, bloqueante): primeira ocorrência de cada chave.
+    Query&& distinct_by(std::function<std::string(const T&)> key) && {
+        distinct_key_ = std::move(key);
+        return std::move(*this);
+    }
+    // Instrumentação de pico de memória dos operadores bloqueantes/parcialmente
+    // bloqueantes (sort/top_k/distinct). Usado pelos testes de aceite 7D.
+    Query&& track_peak(std::size_t* peak) && {
+        peak_ = peak;
+        return std::move(*this);
+    }
     // Projection (Fase 7C): só os FieldIds pedidos, como ProjectedRow.
     [[nodiscard]] ProjectedQuery<T> select(std::vector<FieldId> fields) &&;
-    // Computed Function registrada (Fase 7C): acrescenta o valor nomeado à linha
-    // projetada (se ainda não houve select, a linha começa só com o computado).
+    // Computed Function registrada (Fase 7C).
     [[nodiscard]] ProjectedQuery<T> compute(std::string name) &&;
-    // Transformação tipada elemento a elemento (Fase 7C): cobre projeção/
-    // compute ad-hoc sem registro.
+    // Transformação tipada elemento a elemento (Fase 7C).
     template <typename Out>
     [[nodiscard]] MappedQuery<Out> map(std::function<Out(const T&)> fn) &&;
     template <typename Out>
     [[nodiscard]] MappedQuery<Out> map(std::function<Result<Out>(const T&)> fn) &&;
 
+    // Aggregate (Fase 7D, bloqueante): reduz o fluxo a um único Acc.
+    template <typename Acc, typename Fold>
+    [[nodiscard]] query::Generator<Result<Acc>> aggregate(Acc initial, Fold fold) &&;
+
     // Constrói o Generator preguiçoso; consome a Query (move o Snapshot).
     [[nodiscard]] query::Generator<Result<T>> stream() &&;
+
+    // Natureza do plano após os operadores enfileirados (Fase 7D).
+    [[nodiscard]] query::OperatorNature nature() const noexcept {
+        if (top_k_ > 0) {
+            return query::OperatorNature::partially_blocking;
+        }
+        if (order_less_ || distinct_key_) {
+            return query::OperatorNature::blocking;
+        }
+        return query::OperatorNature::streaming;
+    }
 
 private:
     friend class Database;
@@ -212,6 +247,10 @@ private:
     std::optional<std::uint16_t> index_field_;
     AttributeValue index_lo_;
     AttributeValue index_hi_;
+    std::function<bool(const T&, const T&)> order_less_;
+    std::size_t top_k_{0};
+    std::function<std::string(const T&)> distinct_key_;
+    std::size_t* peak_{nullptr};
 };
 
 // Consulta projetada (Fase 7C): produz ProjectedRow com campos selecionados e/ou
@@ -979,11 +1018,13 @@ private:
     }
 
     // Monta uma ProjectedRow a partir de um objeto T (campos + computados).
+    // `object_id` é metadado de identidade (sempre preenchido).
     template <typename T>
-    Result<query::ProjectedRow> project_object(const T& value,
+    Result<query::ProjectedRow> project_object(const T& value, ObjectId object_id,
                                                const std::vector<FieldId>& selected,
                                                const std::vector<std::string>& computed) const {
         query::ProjectedRow row;
+        row.object_id = object_id;
         const BoundType* bound = bound_for(type_key<T>());
         if (bound == nullptr) {
             return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
@@ -1030,30 +1071,96 @@ private:
         return row;
     }
 
-    // Scan/Index Scan + Projection/Compute (Fase 7C).
+    // Scan/Index Scan + Projection/Compute (Fase 7C). Preserva o ObjectId do
+    // DecodedObject (o stream tipado de T sozinho o descarta).
     template <typename T>
     query::Generator<Result<query::ProjectedRow>> run_projected_stream(
         Snapshot snapshot, std::function<bool(const T&)> predicate, std::size_t limit_count,
         query::CancellationToken token, bool has_token, std::optional<std::uint16_t> index_field,
         AttributeValue lo, AttributeValue hi, std::vector<FieldId> selected,
         std::vector<std::string> computed) {
-        auto objects = index_field
-                           ? run_index_stream<T>(std::move(snapshot), *index_field, std::move(lo),
-                                                 std::move(hi), std::move(predicate), limit_count,
-                                                 std::move(token), has_token)
-                           : run_stream<T>(std::move(snapshot), std::move(predicate), limit_count,
-                                           std::move(token), has_token);
-        for (auto& item : objects) {
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            co_yield Result<query::ProjectedRow>{
+                std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"})};
+            co_return;
+        }
+
+        auto emit = [&](const DecodedObject& decoded,
+                        const T& value) -> Result<query::ProjectedRow> {
+            return project_object<T>(value, decoded.id, selected, computed);
+        };
+
+        std::size_t emitted = 0;
+        if (index_field) {
+            auto ids = store_.index_range(bound->binding.type_name(), *index_field, lo, hi);
+            if (!ids) {
+                co_yield Result<query::ProjectedRow>{std::unexpected(ids.error())};
+                co_return;
+            }
+            for (const auto& id : *ids) {
+                if (has_token && token.cancelled()) {
+                    co_return;
+                }
+                auto candidate =
+                    store_.index_candidate_at(id, snapshot.epoch(), *index_field, lo, hi);
+                if (!candidate) {
+                    co_yield Result<query::ProjectedRow>{std::unexpected(candidate.error())};
+                    co_return;
+                }
+                if (!*candidate) {
+                    continue;
+                }
+                auto value = materialize_decoded<T>(*bound, **candidate);
+                if (!value) {
+                    co_yield Result<query::ProjectedRow>{std::unexpected(value.error())};
+                    co_return;
+                }
+                if (predicate && !predicate(*value)) {
+                    continue;
+                }
+                auto row = emit(**candidate, *value);
+                if (!row) {
+                    co_yield Result<query::ProjectedRow>{std::unexpected(row.error())};
+                    co_return;
+                }
+                co_yield Result<query::ProjectedRow>{std::move(*row)};
+                if (limit_count != 0 && ++emitted >= limit_count) {
+                    co_return;
+                }
+            }
+            co_return;
+        }
+
+        for (auto& item : store_.scan_stream(snapshot.epoch(), std::nullopt)) {
+            if (has_token && token.cancelled()) {
+                co_return;
+            }
             if (!item) {
                 co_yield Result<query::ProjectedRow>{std::unexpected(item.error())};
                 co_return;
             }
-            auto row = project_object<T>(*item, selected, computed);
+            auto stored_type = store_.find_type(item->type);
+            if (!stored_type || stored_type->get().name() != bound->binding.type_name()) {
+                continue;
+            }
+            auto value = materialize_decoded<T>(*bound, *item);
+            if (!value) {
+                co_yield Result<query::ProjectedRow>{std::unexpected(value.error())};
+                co_return;
+            }
+            if (predicate && !predicate(*value)) {
+                continue;
+            }
+            auto row = emit(*item, *value);
             if (!row) {
                 co_yield Result<query::ProjectedRow>{std::unexpected(row.error())};
                 co_return;
             }
             co_yield Result<query::ProjectedRow>{std::move(*row)};
+            if (limit_count != 0 && ++emitted >= limit_count) {
+                co_return;
+            }
         }
     }
 
@@ -1128,13 +1235,40 @@ query::Generator<Result<T>> Query<T>::stream() && {
     if (setup_error_) {
         return database_->template failed_stream<T>(std::move(*setup_error_));
     }
-    if (index_field_) {
-        return database_->template run_index_stream<T>(
-            std::move(*snapshot_), *index_field_, std::move(index_lo_), std::move(index_hi_),
-            std::move(predicate_), limit_, std::move(token_), has_token_);
+    const bool blocking_tail = top_k_ > 0 || static_cast<bool>(order_less_) ||
+                               static_cast<bool>(distinct_key_);
+    const std::size_t scan_limit = blocking_tail ? 0 : limit_;
+
+    query::Generator<Result<T>> gen = [&]() {
+        if (index_field_) {
+            return database_->template run_index_stream<T>(
+                std::move(*snapshot_), *index_field_, std::move(index_lo_), std::move(index_hi_),
+                std::move(predicate_), scan_limit, std::move(token_), has_token_);
+        }
+        return database_->template run_stream<T>(std::move(*snapshot_), std::move(predicate_),
+                                                 scan_limit, std::move(token_), has_token_);
+    }();
+
+    // top_k exige order_less_ (definido em Query::top_k). Sem comparador
+    // explícito não há fallback std::less<T>: T tipicamente não é ordenável.
+    if (top_k_ > 0 && order_less_) {
+        gen = query::top_k<T>(std::move(gen), top_k_, std::move(order_less_), peak_);
+    } else if (order_less_) {
+        gen = query::sort<T>(std::move(gen), std::move(order_less_), peak_);
     }
-    return database_->template run_stream<T>(std::move(*snapshot_), std::move(predicate_), limit_,
-                                             std::move(token_), has_token_);
+    if (distinct_key_) {
+        gen = query::distinct<T>(std::move(gen), std::move(distinct_key_), peak_);
+    }
+    if (blocking_tail && limit_ != 0) {
+        gen = query::limit<T>(std::move(gen), limit_);
+    }
+    return gen;
+}
+
+template <typename T>
+template <typename Acc, typename Fold>
+query::Generator<Result<Acc>> Query<T>::aggregate(Acc initial, Fold fold) && {
+    return query::aggregate<T, Acc>(std::move(*this).stream(), std::move(initial), std::move(fold));
 }
 
 template <typename T>

@@ -411,8 +411,8 @@ Scan/Index Scan, Predicate e Limit mantendo avaliação preguiçosa e memória O
 
 #### Fase 7D — Ordenação e agregação
 
-- [ ] Implementar Sort global e Top-K, limitando Top-K a memória O(k).
-- [ ] Implementar Aggregate, Distinct e Merge, classificando e documentando
+- [x] Implementar Sort global e Top-K, limitando Top-K a memória O(k).
+- [x] Implementar Aggregate, Distinct e Merge, classificando e documentando
       operadores bloqueantes e parcialmente bloqueantes.
 
 Entregável 7D: rankings, ordenação e consultas analíticas no pipeline embedded.

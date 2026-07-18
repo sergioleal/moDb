@@ -489,11 +489,13 @@ objeto antigo com a definição corrente, demonstrando a migração preguiçosa.
 `index` cria uma B+ tree sobre `Employee.salary` (Fase 7B); a consulta
 propriamente dita é um comando à parte, `modb query` (abaixo).
 
-## `modb query` — consulta em streaming (ODB++ Fase 7A/7B/7C)
+## `modb query` — consulta em streaming (ODB++ Fase 7A/7B/7C/7D)
 
 ```text
 modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
-           [--project name[,salary[,country]]] [--compute annual_salary]
+           [--project id[,name[,salary[,country]]]] [--compute annual_salary]
+           [--order-by salary|name|-salary|-name] [--top K]
+           [--distinct name] [--count]
 ```
 
 Percorre os Employees preguiçosamente (todas as versões de schema do tipo),
@@ -504,7 +506,7 @@ páginas de dados foram lidas — com `--limit`, poucas (o critério TTFR):
 ```text
 $ modb query phase3.modb --schema 2 --min-salary 17000
 Employee: name=Bia salary=18000 country=PT
-1 employee(s) streamed; data pages read: 1
+1 employee(s) streamed (nature=streaming); data pages read: 1
 ```
 
 `--salary S` faz um **Index Scan por igualdade** via a B+ tree criada por
@@ -521,17 +523,33 @@ Index created on Employee.salary (field 2)
 
 $ modb query phase3.modb --schema 2 --salary 18000
 Employee: name=Bia salary=18000 country=PT
-1 employee(s) streamed (via index); data pages read: 0
+1 employee(s) streamed (via index) (nature=streaming); data pages read: 0
 ```
 
 `--project` e `--compute` (Fase 7C) emitem uma linha projetada só com os campos
-pedidos e/ou valores computados registrados (`annual_salary = salary * 12`):
+pedidos e/ou valores computados registrados (`annual_salary = salary * 12`).
+`id` é o `ObjectId` (metadado de identidade, não atributo do schema):
 
 ```text
-$ modb query phase3.modb --schema 2 --project name,salary --compute annual_salary
-Employee: name=Ana salary=16000.000000 annual_salary=192000.000000
-Employee: name=Bia salary=18000.000000 annual_salary=216000.000000
-2 employee(s) streamed (projected); data pages read: 1
+$ modb query phase3.modb --schema 2 --project id,name,salary --compute annual_salary
+Employee: id=18 name=Ana salary=16000.000000 annual_salary=192000.000000
+Employee: id=21 name=Bia salary=18000.000000 annual_salary=216000.000000
+2 employee(s) streamed (projected) (nature=streaming); data pages read: 1
+```
+
+`--order-by`, `--top`, `--distinct` e `--count` (Fase 7D) aplicam operadores
+classificados explicitamente: sort/distinct/aggregate são **bloqueantes**;
+`--top K` é **parcialmente bloqueante** (heap ≤ K). Com esses operadores,
+`--limit` aplica-se *depois* deles (sem pushdown no scan):
+
+```text
+$ modb query phase3.modb --schema 2 --order-by salary --top 1
+Employee: name=Bia salary=18000 country=PT
+1 employee(s) streamed (nature=partially_blocking); data pages read: 1
+
+$ modb query phase3.modb --schema 2 --count
+count=2
+aggregate count done (nature=blocking); data pages read: 1
 ```
 
 ## `modb blob` — binários encadeados (ODB++ Fase 4)
