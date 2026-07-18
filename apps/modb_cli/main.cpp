@@ -11,6 +11,7 @@
 #include "modb/text_escape.hpp"
 #include "modb/value.hpp"
 #include "modb/storage/codec.hpp"
+#include "modb/net/protocol.hpp"
 #include "modb/storage/page.hpp"
 #include "modb/storage/page_file.hpp"
 #include "modb/storage/slotted_page.hpp"
@@ -67,6 +68,7 @@ void print_page_help();
 void print_record_help();
 void print_heap_help();
 void print_codec_help();
+void print_protocol_help();
 void print_types_help();
 void print_type_help();
 void print_baseline_help();
@@ -115,6 +117,7 @@ int command_heap_delete(const std::filesystem::path& path,
                         modb::storage::RecordId record_id);
 int command_heap_repair(const std::filesystem::path& path, modb::storage::PageId root_page);
 int command_codec_run();
+int command_protocol_run();
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
 int run_baseline_command(int argc, char* argv[]);
@@ -195,6 +198,7 @@ void print_help() {
            "  record   Manage records stored in one page.\n"
            "  heap     Manage multi-page table heaps.\n"
            "  codec    Encode and decode a row in memory.\n"
+           "  protocol Encode/decode protocol frames in memory (ODB++ Fase 8A).\n"
            "  types    Exercise the in-memory object model (ODB++).\n"
            "  type     Define and list persistent object types (ODB++).\n"
            "  baseline Inspect immutable catalog baselines (ODB++).\n"
@@ -265,6 +269,14 @@ void print_heap_help() {
 void print_codec_help() {
     std::cout << "Usage:\n"
                  "  modb codec\n";
+}
+
+void print_protocol_help() {
+    std::cout << "Usage:\n"
+                 "  modb protocol\n"
+                 "\n"
+                 "Encode and decode Hello, Query and ObjectFrame messages in memory\n"
+                 "(no network). Demonstrates the ODB++ Fase 8A binary protocol.\n";
 }
 
 void print_types_help() {
@@ -1228,6 +1240,76 @@ int command_codec_run() {
     print_row(*decoded);
     std::cout << "Round-trip: " << (*decoded == original ? "OK" : "FAILED") << '\n';
     return *decoded == original ? 0 : 1;
+}
+
+// Demonstra o codec do protocolo binário (Fase 8A) sem rede.
+int command_protocol_run() {
+    using modb::net::Compression;
+    using modb::net::Hello;
+    using modb::net::Message;
+    using modb::net::ObjectEnvelope;
+    using modb::net::ObjectFrame;
+    using modb::net::Query;
+    using modb::net::QueryDescription;
+    using modb::object::AttributeValue;
+    using modb::object::FieldId;
+    using modb::object::ObjectId;
+    using modb::object::TypeDefinitionId;
+
+    const Hello hello{.version = modb::net::protocol_version,
+                      .database_name = "demo",
+                      .accepted_codecs = {Compression::none}};
+    auto hello_bytes = modb::net::encode_message(hello);
+    if (!hello_bytes) {
+        return print_error(hello_bytes.error());
+    }
+    auto hello_back = modb::net::decode_message(*hello_bytes);
+    if (!hello_back) {
+        return print_error(hello_back.error());
+    }
+    std::cout << "Hello: database='" << hello.database_name << "' bytes=" << hello_bytes->size()
+              << " round-trip=" << (*hello_back == Message{hello} ? "OK" : "FAILED") << '\n';
+
+    QueryDescription description{
+        .type = TypeDefinitionId{16},
+        .limit = 3,
+        .equals = modb::net::EqualityFilter{.field = FieldId{2},
+                                            .value = AttributeValue{std::int64_t{42}}},
+        .project = {FieldId{1}, FieldId{2}},
+    };
+    const Query query{.query_id = 1, .description = description};
+    auto query_bytes = modb::net::encode_message(query);
+    if (!query_bytes) {
+        return print_error(query_bytes.error());
+    }
+    auto query_back = modb::net::decode_message(*query_bytes);
+    if (!query_back) {
+        return print_error(query_back.error());
+    }
+    std::cout << "Query: id=" << query.query_id << " bytes=" << query_bytes->size()
+              << " round-trip=" << (*query_back == Message{query} ? "OK" : "FAILED") << '\n';
+
+    ObjectEnvelope envelope{.object_id = ObjectId{100},
+                           .type_definition_id = TypeDefinitionId{16},
+                           .payload = {std::byte{0x01}, std::byte{0x02}}};
+    const ObjectFrame frame{.query_id = 1,
+                            .compression = Compression::none,
+                            .records = {envelope}};
+    auto frame_bytes = modb::net::encode_message(frame);
+    if (!frame_bytes) {
+        return print_error(frame_bytes.error());
+    }
+    auto frame_back = modb::net::decode_message(*frame_bytes);
+    if (!frame_back) {
+        return print_error(frame_back.error());
+    }
+    std::cout << "ObjectFrame: records=1 bytes=" << frame_bytes->size()
+              << " round-trip=" << (*frame_back == Message{frame} ? "OK" : "FAILED") << '\n';
+
+    const bool ok = *hello_back == Message{hello} && *query_back == Message{query} &&
+                    *frame_back == Message{frame};
+    std::cout << "Protocol demo: " << (ok ? "OK" : "FAILED") << '\n';
+    return ok ? 0 : 1;
 }
 
 // Command group: types.
@@ -4271,6 +4353,16 @@ int run(int argc, char* argv[]) {
             return print_usage_error("modb codec");
         }
         return command_codec_run();
+    }
+    if (command == "protocol") {
+        if (argc == 3 && is_help_argument(argv[2])) {
+            print_protocol_help();
+            return 0;
+        }
+        if (argc != 2) {
+            return print_usage_error("modb protocol");
+        }
+        return command_protocol_run();
     }
     if (command == "types") {
         if (argc == 3 && is_help_argument(argv[2])) {

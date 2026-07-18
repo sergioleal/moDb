@@ -48,11 +48,11 @@
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
-| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/12 | Fase 7 |
+| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 2/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
 | [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/10 | Fases 8, 9, 10 |
-| **Total** | | | **82/123 (~67%)** | |
+| **Total** | | | **84/123 (~68%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -585,28 +585,30 @@ objetos (TTFR); buscas por chave via índice.
 
 ## Fase 8 — Servidor, protocolo binário e backpressure
 
-Status: ⬜ Não iniciada (0/12) — seis entregas verticais 8A–8F.
+Status: 🔄 Em andamento (2/12) — seis entregas verticais 8A–8F.
 Definição completa:
 [PLANO_ODB.md §Fase 8](PLANO_ODB.md#fase-8--servidor-protocolo-binário-e-backpressure) ·
 [PROTOCOLO_FASES.md §Fase 8](PROTOCOLO_FASES.md#fase-8--servidor-protocolo-binário-e-backpressure)
 
 ### Fase 8A — Contratos e codec do protocolo
 
-Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8a`.
+Status: ✅ Concluída (2/2) — tag prevista `0.0.8a`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8A.1 | ADR-011: concorrência do servidor + revisão single-thread | ⬜ | [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) já fixa o codec lógico; ADR-011 lista leitor/workers/escritor e `ScratchPagePool` |
-| 8A.2 | `QueryDescription` + codec de mensagens/`ObjectEnvelope`/`ObjectFrame` (`none`) | ⬜ | Framing com diretório de slots; sem localização física |
+| 8A.1 | ADR-011: concorrência do servidor + revisão single-thread | ✅ | [ADR-011](decisions/ADR-011-concorrencia-do-servidor.md): leitor/workers/escritor; fila de 1 frame; `ScratchPagePool` isolado |
+| 8A.2 | `QueryDescription` + codec de mensagens/`ObjectEnvelope`/`ObjectFrame` (`none`) | ✅ | `modb/net/protocol.hpp`; ErrorCode `protocol_error`/`frame_too_large`/`connection_closed` |
 
 ### Testes automatizados desta subfase
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.protocol` | round-trip; frames hostis (truncado, length, >16 MiB, diretório inválido, lixo) | ⬜ |
+| `modb.protocol` | round-trip; frames hostis (truncado, length, >16 MiB, diretório inválido, lixo) | ✅ |
+| `modb.cli.protocol` | demo `modb protocol` em memória | ✅ |
 
-Critério de aceite 8A: ⬜ encode→decode idêntico; entradas hostis →
-`protocol_error` sem alocação gigante.
+Critério de aceite 8A: ✅ encode→decode idêntico; entradas hostis →
+`protocol_error`/`frame_too_large` sem alocação gigante. Suíte completa
+85/85 em Debug e sanitizers (MinGW: `_GLIBCXX_ASSERTIONS` + stack protector).
 
 ### Fase 8B — Transporte e processo servidor
 

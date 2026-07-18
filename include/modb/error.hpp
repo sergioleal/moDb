@@ -108,6 +108,12 @@ enum class ErrorCode {
     // anterior ainda é visível a um snapshot aberto (Fase 6B: só há uma
     // posição `previous` por objeto — limitação documentada no ADR-009).
     snapshot_conflict,
+    // Frame de protocolo inválido, inconsistente ou hostil (Fase 8).
+    protocol_error,
+    // length do frame excede o máximo negociado / 16 MiB (Fase 8).
+    frame_too_large,
+    // A conexão de rede foi fechada pelo peer ou pelo transporte (Fase 8).
+    connection_closed,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

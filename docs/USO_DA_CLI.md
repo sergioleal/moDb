@@ -369,6 +369,25 @@ Decoded row: 1 | Ana
 Round-trip: OK
 ```
 
+## `modb protocol` — frames do protocolo binário em memória (Fase 8A)
+
+```text
+modb protocol
+```
+
+Sem argumentos e sem rede: codifica e decodifica `Hello`, `Query` e
+`ObjectFrame` (compressão `none`), demonstrando o codec da
+[ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) /
+[ADR-011](decisions/ADR-011-concorrencia-do-servidor.md).
+
+```text
+$ modb protocol
+Hello: database='demo' bytes=… round-trip=OK
+Query: id=1 bytes=… round-trip=OK
+ObjectFrame: records=1 bytes=… round-trip=OK
+Protocol demo: OK
+```
+
 ## `modb types` — modelo de objetos em memória (ODB++)
 
 ```text

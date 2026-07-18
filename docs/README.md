@@ -81,13 +81,12 @@ principalmente as da **Fase 0**:
 | [ADR-007](decisions/ADR-007-limites-mvp-oo.md) | Limites do MVP OO |
 | [ADR-008](decisions/ADR-008-integridade-de-referencias.md) | Integridade de referências e cascata de composição |
 | [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) | Protocolo binário próximo do armazenamento lógico, sem expor localização física |
+| [ADR-011](decisions/ADR-011-concorrencia-do-servidor.md) | Modelo de concorrência do servidor (leitor, workers, escritor, fila limitada) |
 | [ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md) | Interface por métodos C++, consultas internas e módulos confiáveis no processo |
 | [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) | Container serverless stateful: volume persistente, writer único, escala a zero |
 
-O número ADR-011 está reservado no protocolo para a concorrência do servidor
-(Fase 8A: leitor por conexão, workers, escritor dedicado e fila limitada) e
-ainda não existe no repositório. A ADR-009 (épocas / IDMP v2) já foi entregue
-com a Fase 6.
+A ADR-011 foi entregue na subfase 8A. A ADR-009 (épocas / IDMP v2) já foi
+entregue com a Fase 6.
 
 ### ADRs legadas (modelo relacional, `0001`/`0002`)
 
