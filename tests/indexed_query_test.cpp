@@ -16,6 +16,7 @@
 
 using namespace modb;
 using namespace modb::object;
+using namespace modb::query;
 
 namespace {
 
@@ -129,16 +130,17 @@ int main() {
             }
         }
 
-        // Antes do índice: equals falha (não há índice sobre o campo) — o erro
-        // chega como o primeiro item do stream.
+        // Antes do índice: equals faz fallback Scan+Predicate (Fase 7E) e ainda
+        // devolve os matches — o plano reporta table_scan.
         {
-            bool saw_expected = false;
-            for (auto& result :
-                 database->query<Person>().equals(FieldId{2}, std::int64_t{50}).stream()) {
-                saw_expected = !result && result.error().code == ErrorCode::type_not_found;
-                break;
-            }
-            suite.check(saw_expected, "querying an unindexed field yields type_not_found");
+            auto q = database->query<Person>().equals(FieldId{2}, std::int64_t{50});
+            const auto planned = q.plan();
+            suite.check(planned.access == query::AccessMethod::table_scan &&
+                            planned.index_requested && !planned.index_available,
+                        "unindexed equality plans a table_scan fallback");
+            auto matches = ages_of(std::move(q).stream());
+            suite.check(matches.size() == 4,
+                        "unindexed equality still returns matches via Scan+Predicate");
         }
 
         // Cria o índice sobre `age` (backfill dos 400).

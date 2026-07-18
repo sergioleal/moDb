@@ -47,11 +47,11 @@
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
-| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 11/14 | Fases 4, 6 |
+| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **79/110 (~72%)** | |
+| **Total** | | | **82/110 (~75%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -449,8 +449,8 @@ processo (`modb.snapshot`, `modb.mvcc_recovery`). Suíte completa 64/64 em Debug
 
 ## Fase 7 — Índices e consultas em streaming (embedded)
 
-Status: 🔄 Em andamento (11/14) — cinco entregas verticais; 7A–7D
-concluídas, 7E não iniciada. Definição completa:
+Status: ✅ **Concluída** (14/14) — cinco entregas verticais 7A–7E.
+Definição completa:
 [PLANO_ODB.md §Fase 7](PLANO_ODB.md#fase-7--índices-e-consultas-em-streaming-embedded) ·
 [PROTOCOLO_FASES.md §Fase 7](PROTOCOLO_FASES.md#fase-7--índices-e-consultas-em-streaming-embedded)
 
@@ -557,27 +557,26 @@ Suíte completa 79/79 em Debug, `-Werror` e sanitizers.
 
 ### Fase 7E — Planejamento automático e comprovação
 
-Status: ⬜ Não iniciada (0/3) — bloqueada pela Fase 7D.
+Status: ✅ Concluída (3/3) — commit `TBD`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 7E.1 | Planner determinístico (Index Scan ou Scan + Predicate) | ⬜ | |
-| 7E.2 | Pushdown de Limit, Top-K, `nature()` e `first_result_cost()` | ⬜ | |
-| 7E.3 | Benchmarks de TTFR, memória e ganho de índice | ⬜ | Reproduzíveis |
+| 7E.1 | Planner determinístico (Index Scan ou Scan + Predicate) | ✅ | `query::plan_query` + `Query::plan()`; fallback Scan+Predicate |
+| 7E.2 | Pushdown de Limit, Top-K, `nature()` e `first_result_cost()` | ✅ | `order_by`+`limit` → Top-K; `Query::first_result_cost()` |
+| 7E.3 | Benchmarks de TTFR, memória e ganho de índice | ✅ | em `modb.planner` (TTFR ≤2 págs, pico O(k), index < scan) |
 
-### Testes automatizados desta fase
+### Testes automatizados desta subfase
 
-| Teste (CTest) | Arquivo | Status |
+| Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.btree` | `tests/btree_test.cpp` | ⬜ |
-| `modb.generator` | `tests/generator_test.cpp` | ⬜ |
-| `modb.streaming_query` | `tests/streaming_query_test.cpp` | ⬜ |
-| `modb.planner` | `tests/planner_test.cpp` | ⬜ |
+| `modb.planner` | regras do planner; index vs scan; pushdown; Top-K automático; TTFR; ganho de índice; pico O(k) | ✅ |
+| `modb.cli.query_explain` | `modb query --salary … --explain` | ✅ |
 
-Critério de aceite 7E: ⬜ planner escolhe índice e aplica pushdown seguro; os
-benchmarks confirmam TTFR e limites de memória.
+Critério de aceite 7E: ✅ planner escolhe índice e aplica pushdown seguro; os
+benchmarks confirmam TTFR e limites de memória. Suíte completa 81/81 em Debug,
+`-Werror` e sanitizers.
 
-Critério de aceite da Fase 7: ⬜ 1º resultado em ≤ 2 páginas lidas sobre 100k
+Critério de aceite da Fase 7: ✅ 1º resultado em ≤ 2 páginas lidas sobre 100k
 objetos (TTFR); buscas por chave via índice.
 
 ---

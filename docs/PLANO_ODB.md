@@ -422,11 +422,11 @@ operador que materializa entrada é identificado como bloqueante.
 
 #### Fase 7E — Planejamento automático e comprovação
 
-- [ ] Implementar Planner determinístico que escolha índice ou varredura e
+- [x] Implementar Planner determinístico que escolha índice ou varredura e
       classifique a natureza do plano.
-- [ ] Implementar pushdown de Limit, seleção de Top-K e estimativas de TTFR e
+- [x] Implementar pushdown de Limit, seleção de Top-K e estimativas de TTFR e
       memória (`first_result_cost`).
-- [ ] Executar benchmarks reproduzíveis de TTFR, memória constante e ganho de
+- [x] Executar benchmarks reproduzíveis de TTFR, memória constante e ganho de
       índice em coleções grandes.
 
 Entregável 7E: API de consulta que monta automaticamente o pipeline adequado,

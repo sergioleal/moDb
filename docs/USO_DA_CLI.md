@@ -489,13 +489,13 @@ objeto antigo com a definição corrente, demonstrando a migração preguiçosa.
 `index` cria uma B+ tree sobre `Employee.salary` (Fase 7B); a consulta
 propriamente dita é um comando à parte, `modb query` (abaixo).
 
-## `modb query` — consulta em streaming (ODB++ Fase 7A/7B/7C/7D)
+## `modb query` — consulta em streaming (ODB++ Fase 7A/7B/7C/7D/7E)
 
 ```text
 modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
            [--project id[,name[,salary[,country]]]] [--compute annual_salary]
            [--order-by salary|name|-salary|-name] [--top K]
-           [--distinct name] [--count]
+           [--distinct name] [--count] [--explain]
 ```
 
 Percorre os Employees preguiçosamente (todas as versões de schema do tipo),
@@ -569,6 +569,21 @@ Employee: name=Bia salary=18000 country=PT
 $ modb query phase3.modb --schema 2 --count
 count=2
 aggregate count done (nature=blocking); data pages read: 1
+```
+
+`--explain` (Fase 7E) imprime o plano determinístico antes dos resultados:
+método de acesso (`table_scan` | `index_scan`), natureza, `first_result_cost`
+e se o Limit foi empurrado até a fonte. Com `--salary` e índice criado, o plano
+usa `index_scan`:
+
+```text
+$ modb oo employee index phase3.modb --schema 2
+Index created on Employee.salary (field 2)
+
+$ modb query phase3.modb --schema 2 --salary 18000 --limit 1 --explain
+plan: access=index_scan nature=streaming first_result_cost=1 limit_pushed=true index_requested=true index_available=true
+Employee: name=Bia salary=18000 country=PT
+1 employee(s) streamed (via index) (nature=streaming); data pages read: 0
 ```
 
 ## `modb blob` — binários encadeados (ODB++ Fase 4)
