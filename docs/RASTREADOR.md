@@ -669,7 +669,7 @@ desconexão libera snapshot. Suíte completa 91/91 em Debug e sanitizers.
 
 ### Fase 8E — Cancelamento, multiplexação e API assíncrona
 
-Status: ✅ Concluída (2/2) — tag prevista `0.0.8e`.
+Status: ✅ Concluída (2/2) — commit `51e0026`, tag `0.0.8e`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
