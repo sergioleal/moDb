@@ -515,7 +515,7 @@ miss — cenário raro no single-writer).
 ### Fase 7C — Projeção e transformação
 
 Status: ✅ Concluída (4/4) — commit `b6284c4`; identidade uniforme `2f9adee`;
-`ProjectedQuery::map` tipado no commit desta entrega, 2026-07-18.
+`ProjectedQuery::map` tipado no commit `38e6f4c`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
