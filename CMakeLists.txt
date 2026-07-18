@@ -395,11 +395,17 @@ if(BUILD_TESTING)
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2
                 --project id,name,salary --compute annual_salary --limit 2)
     set_tests_properties(modb.cli.query_project PROPERTIES DEPENDS modb.cli.query)
+    add_test(NAME modb.cli.query_materialize
+        COMMAND modb_cli query
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2
+                --project id,name,salary --compute annual_salary
+                --materialize-summary --limit 2)
+    set_tests_properties(modb.cli.query_materialize PROPERTIES DEPENDS modb.cli.query_project)
     add_test(NAME modb.cli.query_topk
         COMMAND modb_cli query
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2
                 --order-by salary --top 1)
-    set_tests_properties(modb.cli.query_topk PROPERTIES DEPENDS modb.cli.query_project)
+    set_tests_properties(modb.cli.query_topk PROPERTIES DEPENDS modb.cli.query_materialize)
     # Índice (Fase 7B): cria sobre a demo (ainda em `oo employee index`), depois
     # consulta por igualdade de salário via Index Scan no comando `query`.
     add_test(NAME modb.cli.oo_index

@@ -148,6 +148,7 @@ struct Query7dOptions {
     bool distinct_name{false};
     bool count_only{false};
     bool explain{false};
+    bool materialize_summary{false};
 };
 
 int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
@@ -315,6 +316,7 @@ void print_query_help() {
                  "  modb query <file> --schema <1|2> [--limit N] [--min-salary S] "
                  "[--salary S]\n"
                  "             [--project id[,name[,salary[,country]]]] [--compute annual_salary]\n"
+                 "             [--materialize-summary]\n"
                  "             [--order-by salary|name|-salary|-name] [--top K]\n"
                  "             [--distinct name] [--count] [--explain]\n"
                  "\n"
@@ -327,6 +329,8 @@ void print_query_help() {
                  "\n"
                  "--project and --compute (ODB++ Fase 7C) emit a projected row with only\n"
                  "the requested fields and/or registered computed values (annual_salary).\n"
+                 "--materialize-summary passes each row through\n"
+                 "ProjectedQuery::map<EmployeeSummary> before streaming it.\n"
                  "\n"
                  "--order-by / --top / --distinct / --count (ODB++ Fase 7D): sort is\n"
                  "blocking; --top K keeps a heap of at most K rows (partially blocking);\n"
@@ -2037,6 +2041,43 @@ void print_projected_row(const modb::query::ProjectedRow& row) {
     std::cout << '\n';
 }
 
+struct EmployeeSummary {
+    modb::object::ObjectId id{};
+    std::string name;
+    double salary{};
+    double annual_salary{};
+};
+
+modb::Result<EmployeeSummary> materialize_employee_summary(
+    const modb::query::ProjectedRow& row) {
+    const auto id = row.get("id");
+    const auto name = row.get("name");
+    const auto salary = row.get("salary");
+    const auto annual_salary = row.get("annual_salary");
+    if (!id || !name || !salary || !annual_salary) {
+        return std::unexpected(modb::Error{
+            modb::ErrorCode::invalid_argument,
+            "--materialize-summary requires projected id,name,salary and annual_salary"});
+    }
+    const auto object_id = id->as_ref();
+    const auto text = name->as_string();
+    const auto salary_value = salary->as_float64();
+    const auto annual_value = annual_salary->as_float64();
+    if (!object_id || !text || !salary_value || !annual_value) {
+        return std::unexpected(
+            modb::Error{modb::ErrorCode::invalid_argument,
+                        "EmployeeSummary projection contains an unexpected field type"});
+    }
+    return EmployeeSummary{*object_id, std::string{*text}, *salary_value, *annual_value};
+}
+
+void print_employee_summary(const EmployeeSummary& summary) {
+    std::cout << "EmployeeSummary: id=" << summary.id.value
+              << " name=" << modb::escape_for_terminal(summary.name)
+              << " salary=" << summary.salary
+              << " annual_salary=" << summary.annual_salary << '\n';
+}
+
 } // namespace
 
 void print_query_plan(const modb::query::QueryPlan& plan) {
@@ -2167,12 +2208,25 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
             for (const auto& name : compute_names) {
                 std::move(projected_query).compute(name);
             }
-            for (auto& result : std::move(projected_query).stream()) {
-                if (!result) {
-                    return print_error(result.error());
+            if (agg.materialize_summary) {
+                for (auto& result :
+                     std::move(projected_query)
+                         .map<EmployeeSummary>(materialize_employee_summary)
+                         .stream()) {
+                    if (!result) {
+                        return print_error(result.error());
+                    }
+                    print_employee_summary(*result);
+                    ++shown;
                 }
-                print_projected_row(*result);
-                ++shown;
+            } else {
+                for (auto& result : std::move(projected_query).stream()) {
+                    if (!result) {
+                        return print_error(result.error());
+                    }
+                    print_projected_row(*result);
+                    ++shown;
+                }
             }
         } else {
             for (auto& result : std::move(query).stream()) {
@@ -2234,12 +2288,25 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
             for (const auto& name : compute_names) {
                 std::move(projected_query).compute(name);
             }
-            for (auto& result : std::move(projected_query).stream()) {
-                if (!result) {
-                    return print_error(result.error());
+            if (agg.materialize_summary) {
+                for (auto& result :
+                     std::move(projected_query)
+                         .map<EmployeeSummary>(materialize_employee_summary)
+                         .stream()) {
+                    if (!result) {
+                        return print_error(result.error());
+                    }
+                    print_employee_summary(*result);
+                    ++shown;
                 }
-                print_projected_row(*result);
-                ++shown;
+            } else {
+                for (auto& result : std::move(projected_query).stream()) {
+                    if (!result) {
+                        return print_error(result.error());
+                    }
+                    print_projected_row(*result);
+                    ++shown;
+                }
             }
         } else {
             for (auto& result : std::move(query).stream()) {
@@ -2261,6 +2328,7 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
     } else {
         std::cout << shown << " employee(s) streamed" << (eq_salary ? " (via index)" : "")
                   << (projected ? " (projected)" : "")
+                  << (agg.materialize_summary ? " (materialized EmployeeSummary)" : "")
                   << " (nature=" << modb::query::nature_name(nature) << ")"
                   << "; data pages read: " << database.data_pages_read() << '\n';
     }
@@ -3466,7 +3534,7 @@ int run_oo_command(int argc, char* argv[]) {
 
 // modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
 //             [--project ...] [--compute ...] [--order-by ...] [--top K]
-//             [--distinct name] [--count]
+//             [--distinct name] [--count] [--materialize-summary]
 int run_query_command(int argc, char* argv[]) {
     if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
         print_query_help();
@@ -3475,7 +3543,7 @@ int run_query_command(int argc, char* argv[]) {
     constexpr const char* usage =
         "modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S] "
         "[--project fields] [--compute name] [--order-by field] [--top K] "
-        "[--distinct name] [--count] [--explain]";
+        "[--distinct name] [--count] [--explain] [--materialize-summary]";
     std::optional<int> schema;
     std::size_t limit = 0;
     std::optional<double> min_salary;
@@ -3549,6 +3617,8 @@ int run_query_command(int argc, char* argv[]) {
             agg.count_only = true;
         } else if (flag == "--explain") {
             agg.explain = true;
+        } else if (flag == "--materialize-summary") {
+            agg.materialize_summary = true;
         } else {
             return print_usage_error(usage);
         }
@@ -3560,6 +3630,21 @@ int run_query_command(int argc, char* argv[]) {
         if (name != "annual_salary") {
             return print_usage_error("--compute currently supports only annual_salary");
         }
+    }
+    const auto contains = [](const std::vector<std::string>& values, std::string_view expected) {
+        for (const auto& value : values) {
+            if (value == expected) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (agg.materialize_summary &&
+        (!contains(project_fields, "id") || !contains(project_fields, "name") ||
+         !contains(project_fields, "salary") || !contains(compute_names, "annual_salary"))) {
+        return print_usage_error(
+            "--materialize-summary requires --project id,name,salary "
+            "--compute annual_salary");
     }
     return command_employee_query(argv[2], *schema, limit, min_salary, eq_salary, project_fields,
                                   compute_names, agg);
