@@ -47,11 +47,11 @@
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
-| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 7/14 | Fases 4, 6 |
+| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 9/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **75/110 (~68%)** | |
+| **Total** | | | **77/110 (~70%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -449,8 +449,8 @@ processo (`modb.snapshot`, `modb.mvcc_recovery`). Suíte completa 64/64 em Debug
 
 ## Fase 7 — Índices e consultas em streaming (embedded)
 
-Status: 🔄 Em andamento (7/14) — cinco entregas verticais; 7A e 7B
-concluídas, 7C–7E não iniciadas. Definição completa:
+Status: 🔄 Em andamento (9/14) — cinco entregas verticais; 7A–7C
+concluídas, 7D–7E não iniciadas. Definição completa:
 [PLANO_ODB.md §Fase 7](PLANO_ODB.md#fase-7--índices-e-consultas-em-streaming-embedded) ·
 [PROTOCOLO_FASES.md §Fase 7](PROTOCOLO_FASES.md#fase-7--índices-e-consultas-em-streaming-embedded)
 
@@ -514,15 +514,23 @@ miss — cenário raro no single-writer).
 
 ### Fase 7C — Projeção e transformação
 
-Status: ⬜ Não iniciada (0/2) — bloqueada pelas Fases 7A e 7B.
+Status: ✅ Concluída (2/2) — commit (esta entrega), 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 7C.1 | Projection com resultados tipados | ⬜ | Somente campos solicitados |
-| 7C.2 | Computed Functions registradas no fluxo | ⬜ | Avaliação elemento a elemento |
+| 7C.1 | Projection com resultados tipados | ✅ | `ProjectedRow` + `Query::select` / operadores `project` |
+| 7C.2 | Computed Functions registradas no fluxo | ✅ | `Database::register_computed` + `Query::compute` / `map` |
 
-Critério de aceite 7C: ⬜ projeções e funções computadas compõem com os
-operadores existentes mantendo preguiça e memória O(1).
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.projection_query` | project∘filter∘limit preguiçoso; select de campos; compute registrado; select+compute+where+limit; map tipado; compute ausente | ✅ |
+| `modb.cli.query_project` | `modb query --project name,salary --compute annual_salary` | ✅ |
+
+Critério de aceite 7C: ✅ projeções e funções computadas compõem com Scan/Index
+Scan, Predicate e Limit mantendo avaliação preguiçosa e memória O(1). Suíte
+completa 77/77 em Debug, `-Werror` e sanitizers.
 
 ### Fase 7D — Ordenação e agregação
 

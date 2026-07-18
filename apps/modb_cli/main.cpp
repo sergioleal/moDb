@@ -141,7 +141,9 @@ int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force);
 int command_mvcc_gc(const std::filesystem::path& path);
 int command_mvcc_versions(const std::filesystem::path& path, std::uint64_t object_id);
 int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
-                           std::optional<double> min_salary, std::optional<double> eq_salary);
+                           std::optional<double> min_salary, std::optional<double> eq_salary,
+                           const std::vector<std::string>& project_fields,
+                           const std::vector<std::string>& compute_names);
 int command_employee_index(const std::filesystem::path& path, int schema);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
@@ -301,13 +303,17 @@ void print_query_help() {
     std::cout << "Usage:\n"
                  "  modb query <file> --schema <1|2> [--limit N] [--min-salary S] "
                  "[--salary S]\n"
+                 "             [--project name[,salary[,country]]] [--compute annual_salary]\n"
                  "\n"
                  "Streams the Employees lazily (ODB++ Fase 7A) instead of materializing them\n"
                  "all: --min-salary filters (Predicate), --limit stops the scan early\n"
                  "(curto-circuito), and it reports how many data pages were read.\n"
                  "\n"
                  "--salary S does an equality Index Scan via the B+ tree built by\n"
-                 "'modb oo employee index' (ODB++ Fase 7B), instead of a full scan.\n";
+                 "'modb oo employee index' (ODB++ Fase 7B), instead of a full scan.\n"
+                 "\n"
+                 "--project and --compute (ODB++ Fase 7C) emit a projected row with only\n"
+                 "the requested fields and/or registered computed values (annual_salary).\n";
 }
 
 void print_blob_help() {
@@ -1934,13 +1940,83 @@ int command_employee_get(const std::filesystem::path& path, std::uint64_t object
 }
 
 // modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
-// Consulta em streaming (Fase 7A): percorre os Employees preguiçosamente,
-// opcionalmente filtrando por salário mínimo e limitando a N resultados, e
-// reporta quantas páginas de dados foram lidas — com `--limit`, poucas.
-// `--salary` faz um Index Scan por igualdade via a B+ tree (Fase 7B), quando
-// `modb oo employee index` já criou o índice sobre o campo.
+//                 [--project ...] [--compute ...]
+// Consulta em streaming (Fase 7A/7B/7C).
+namespace {
+
+std::string format_attribute(const modb::object::AttributeValue& value) {
+    if (auto text = value.as_string(); text) {
+        return std::string{*text};
+    }
+    if (auto number = value.as_int64(); number) {
+        return std::to_string(*number);
+    }
+    if (auto number = value.as_float64(); number) {
+        return std::to_string(*number);
+    }
+    if (auto flag = value.as_bool(); flag) {
+        return *flag ? "true" : "false";
+    }
+    return "<value>";
+}
+
+std::vector<std::string> split_csv(std::string_view text) {
+    std::vector<std::string> parts;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const auto comma = text.find(',', start);
+        const auto end = comma == std::string_view::npos ? text.size() : comma;
+        auto part = text.substr(start, end - start);
+        while (!part.empty() && (part.front() == ' ' || part.front() == '\t')) {
+            part.remove_prefix(1);
+        }
+        while (!part.empty() && (part.back() == ' ' || part.back() == '\t')) {
+            part.remove_suffix(1);
+        }
+        if (!part.empty()) {
+            parts.emplace_back(part);
+        }
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return parts;
+}
+
+modb::Result<std::vector<modb::object::FieldId>> resolve_project_fields(
+    const std::vector<std::string>& names, int schema) {
+    std::vector<modb::object::FieldId> fields;
+    for (const auto& name : names) {
+        if (name == "name") {
+            fields.push_back(modb::object::FieldId{1});
+        } else if (name == "salary") {
+            fields.push_back(modb::object::FieldId{2});
+        } else if (name == "country" && schema == 2) {
+            fields.push_back(modb::object::FieldId{3});
+        } else {
+            return std::unexpected(
+                modb::Error{modb::ErrorCode::invalid_argument, "unknown --project field: " + name});
+        }
+    }
+    return fields;
+}
+
+void print_projected_row(const modb::query::ProjectedRow& row) {
+    std::cout << "Employee:";
+    for (const auto& field : row.fields) {
+        std::cout << ' ' << field.name << '='
+                  << modb::escape_for_terminal(format_attribute(field.value));
+    }
+    std::cout << '\n';
+}
+
+} // namespace
+
 int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
-                           std::optional<double> min_salary, std::optional<double> eq_salary) {
+                           std::optional<double> min_salary, std::optional<double> eq_salary,
+                           const std::vector<std::string>& project_fields,
+                           const std::vector<std::string>& compute_names) {
     auto session = DatabaseSession::open(path);
     if (!session) {
         return print_error(session.error());
@@ -1948,13 +2024,25 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
     auto& database = session->database();
     database.reset_data_pages_read();
     std::size_t shown = 0;
+    const bool projected = !project_fields.empty() || !compute_names.empty();
 
     if (schema == 1) {
         if (auto bound = database.bind(employee_v1_binding()); !bound) {
             return print_error(bound.error());
         }
+        if (!compute_names.empty()) {
+            if (auto registered =
+                    database.register_computed<EmployeeV1>(
+                        "annual_salary",
+                        [](const EmployeeV1& employee) -> modb::Result<modb::object::AttributeValue> {
+                            return modb::object::AttributeValue{employee.annual_salary()};
+                        });
+                !registered) {
+                return print_error(registered.error());
+            }
+        }
         auto query = database.query<EmployeeV1>();
-        if (eq_salary) {  // Index Scan por igualdade de salário (Fase 7B).
+        if (eq_salary) {
             std::move(query).equals(modb::object::FieldId{2},
                                     modb::object::AttributeValue{*eq_salary});
         }
@@ -1965,17 +2053,46 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
         if (limit != 0) {
             std::move(query).limit(limit);
         }
-        for (auto& result : std::move(query).stream()) {
-            if (!result) {
-                return print_error(result.error());
+        if (projected) {
+            auto fields = resolve_project_fields(project_fields, schema);
+            if (!fields) {
+                return print_error(fields.error());
             }
-            std::cout << "Employee: name=" << modb::escape_for_terminal(result->name)
-                      << " salary=" << result->salary << '\n';
-            ++shown;
+            auto projected_query = std::move(query).select(std::move(*fields));
+            for (const auto& name : compute_names) {
+                std::move(projected_query).compute(name);
+            }
+            for (auto& result : std::move(projected_query).stream()) {
+                if (!result) {
+                    return print_error(result.error());
+                }
+                print_projected_row(*result);
+                ++shown;
+            }
+        } else {
+            for (auto& result : std::move(query).stream()) {
+                if (!result) {
+                    return print_error(result.error());
+                }
+                std::cout << "Employee: name=" << modb::escape_for_terminal(result->name)
+                          << " salary=" << result->salary << '\n';
+                ++shown;
+            }
         }
     } else {
         if (auto bound = database.bind(employee_v2_binding()); !bound) {
             return print_error(bound.error());
+        }
+        if (!compute_names.empty()) {
+            if (auto registered =
+                    database.register_computed<EmployeeV2>(
+                        "annual_salary",
+                        [](const EmployeeV2& employee) -> modb::Result<modb::object::AttributeValue> {
+                            return modb::object::AttributeValue{employee.annual_salary()};
+                        });
+                !registered) {
+                return print_error(registered.error());
+            }
         }
         auto query = database.query<EmployeeV2>();
         if (eq_salary) {
@@ -1989,18 +2106,37 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
         if (limit != 0) {
             std::move(query).limit(limit);
         }
-        for (auto& result : std::move(query).stream()) {
-            if (!result) {
-                return print_error(result.error());
+        if (projected) {
+            auto fields = resolve_project_fields(project_fields, schema);
+            if (!fields) {
+                return print_error(fields.error());
             }
-            std::cout << "Employee: name=" << modb::escape_for_terminal(result->name)
-                      << " salary=" << result->salary
-                      << " country=" << modb::escape_for_terminal(result->country) << '\n';
-            ++shown;
+            auto projected_query = std::move(query).select(std::move(*fields));
+            for (const auto& name : compute_names) {
+                std::move(projected_query).compute(name);
+            }
+            for (auto& result : std::move(projected_query).stream()) {
+                if (!result) {
+                    return print_error(result.error());
+                }
+                print_projected_row(*result);
+                ++shown;
+            }
+        } else {
+            for (auto& result : std::move(query).stream()) {
+                if (!result) {
+                    return print_error(result.error());
+                }
+                std::cout << "Employee: name=" << modb::escape_for_terminal(result->name)
+                          << " salary=" << result->salary
+                          << " country=" << modb::escape_for_terminal(result->country) << '\n';
+                ++shown;
+            }
         }
     }
 
     std::cout << shown << " employee(s) streamed" << (eq_salary ? " (via index)" : "")
+              << (projected ? " (projected)" : "")
               << "; data pages read: " << database.data_pages_read() << '\n';
     return 0;
 }
@@ -3203,17 +3339,21 @@ int run_oo_command(int argc, char* argv[]) {
 }
 
 // modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
+//             [--project ...] [--compute ...]
 int run_query_command(int argc, char* argv[]) {
     if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
         print_query_help();
         return 0;
     }
     constexpr const char* usage =
-        "modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]";
+        "modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S] "
+        "[--project fields] [--compute name]";
     std::optional<int> schema;
     std::size_t limit = 0;
     std::optional<double> min_salary;
     std::optional<double> eq_salary;
+    std::vector<std::string> project_fields;
+    std::vector<std::string> compute_names;
     for (int i = 3; i < argc; ++i) {
         const std::string_view flag{argv[i]};
         if (flag == "--schema" && i + 1 < argc) {
@@ -3240,6 +3380,13 @@ int run_query_command(int argc, char* argv[]) {
                 return print_error(parsed.error());
             }
             eq_salary = *parsed;
+        } else if (flag == "--project" && i + 1 < argc) {
+            project_fields = split_csv(argv[++i]);
+            if (project_fields.empty()) {
+                return print_usage_error("--project expects a comma-separated field list");
+            }
+        } else if (flag == "--compute" && i + 1 < argc) {
+            compute_names.push_back(argv[++i]);
         } else {
             return print_usage_error(usage);
         }
@@ -3247,7 +3394,13 @@ int run_query_command(int argc, char* argv[]) {
     if (!schema) {
         return print_usage_error(usage);
     }
-    return command_employee_query(argv[2], *schema, limit, min_salary, eq_salary);
+    for (const auto& name : compute_names) {
+        if (name != "annual_salary") {
+            return print_usage_error("--compute currently supports only annual_salary");
+        }
+    }
+    return command_employee_query(argv[2], *schema, limit, min_salary, eq_salary, project_fields,
+                                  compute_names);
 }
 
 int run_blob_command(int argc, char* argv[]) {

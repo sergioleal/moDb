@@ -399,9 +399,9 @@ preservam duplicatas e permanecem corretas após commit, recovery e reabertura.
 
 #### Fase 7C — Projeção e transformação
 
-- [ ] Implementar Projection com resultados tipados contendo somente os campos
+- [x] Implementar Projection com resultados tipados contendo somente os campos
       solicitados.
-- [ ] Implementar Computed Functions registradas e avaliadas durante o fluxo.
+- [x] Implementar Computed Functions registradas e avaliadas durante o fluxo.
 
 Entregável 7C: fluxo reduzido e transformado sem materializar objetos ou campos
 desnecessários.
