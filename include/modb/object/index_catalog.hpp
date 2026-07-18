@@ -1,10 +1,12 @@
 #pragma once
 
-// Diretório persistente de índices (Fase 7B): uma página `IXDR` que lista, para
-// cada índice, o tipo lógico e o campo indexados e a página raiz da B+ tree. A
-// raiz de um índice muda quando a árvore cresce em altura; por isso o catálogo
-// expõe `set_root`, chamado após cada manutenção que possa ter feito split de
-// raiz. O ponteiro para esta página vive no DBRT (`index_dir`).
+// Diretório persistente de índices (Fase 7B): cadeia de páginas `IXDR` que lista,
+// para cada índice, o tipo lógico e o campo indexados e a página raiz da B+ tree.
+// Quando os registros não cabem numa página, o header aponta para a próxima
+// (`next`); a primeira página da cadeia é a que o DBRT guarda em `index_dir`.
+// A raiz de um índice muda quando a árvore cresce ou encolhe; por isso o
+// catálogo expõe `set_root`, chamado após cada manutenção que possa ter alterado
+// a raiz.
 
 // Importa Result e códigos de erro.
 #include "modb/error.hpp"
@@ -50,14 +52,21 @@ public:
 
 private:
     IndexCatalog(storage::PageFile& file, storage::PageId directory,
-                 std::vector<IndexInfo> indexes) noexcept
-        : file_{&file}, directory_{directory}, indexes_{std::move(indexes)} {}
+                 std::vector<IndexInfo> indexes,
+                 std::vector<storage::PageId> overflow) noexcept
+        : file_{&file},
+          directory_{directory},
+          indexes_{std::move(indexes)},
+          overflow_{std::move(overflow)} {}
 
     [[nodiscard]] Result<void> persist();
 
     storage::PageFile* file_;
     storage::PageId directory_;
     std::vector<IndexInfo> indexes_;
+    // Páginas da cadeia além da primeira (`directory_`), reaproveitadas ou
+    // zeradas em `persist()`.
+    std::vector<storage::PageId> overflow_;
 };
 
 } // namespace modb::object

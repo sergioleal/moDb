@@ -1250,7 +1250,7 @@ em cadeia).
 | Caso | Verificação |
 |---|---|
 | **TTFR (critério)** | 100 000 objetos; consulta com `limit 1`; instrumentar o ObjectStore com contador de páginas lidas: deve ler ≤ 2 páginas de dados — prova que nada foi materializado |
-| memória O(1) | operador `filter+project` sobre 100 000 objetos: nenhum operador guarda mais que K elementos (contadores internos de pico expostos para teste) |
+| memória O(1) | `filter` sobre 100 000 payloads instrumentados: o pico de instâncias vivas permanece limitado por uma constante e zera ao concluir |
 | snapshot no fluxo | consulta longa + commits intercalados → resultados do snapshot |
 | cancelamento | cancelar após N resultados → upstream para (contador), sem vazamento |
 | operador bloqueante | `sort` global correto; `top_k` usa só k de memória (contador de pico) |

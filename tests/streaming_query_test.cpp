@@ -59,7 +59,7 @@ std::shared_ptr<Database> share(Result<Database>& result) {
 }
 
 // Insere `count` itens (value = 0..count-1) em lotes transacionais.
-Result<void> seed(Database& database, int count, int batch = 200) {
+Result<void> seed(Database& database, int count, int batch = 2'000) {
     for (int start = 0; start < count; start += batch) {
         auto tx = database.begin();
         if (!tx) {
@@ -94,9 +94,10 @@ int main() {
     suite.check(database_id.has_value(), "streaming database is attached");
     suite.check(database->bind(item_builder()).has_value(), "Item is bound");
 
-    // Volume que ocupa muitas páginas de dados, para que "≤ 2 páginas" seja uma
-    // afirmação forte (uma varredura ingênua leria dezenas).
-    constexpr int total = 3000;
+    // Volume literal do critério de aceite 7A. A consulta com limit(1) abaixo
+    // deve continuar lendo no máximo duas páginas, independentemente das
+    // milhares de páginas ocupadas pelo conjunto completo.
+    constexpr int total = 100'000;
     suite.check(seed(*database, total).has_value(), "the dataset is seeded");
 
     // --- varredura completa: enumera todos e prova que há muitas páginas ---

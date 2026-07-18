@@ -469,14 +469,14 @@ Status: ✅ Concluída (4/4) — commit `a585fab`, 2026-07-17.
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.generator` | preguiça (contador + limit), composição filter/limit, propagação de erro, cancelamento, destruição precoce | ✅ |
-| `modb.streaming_query` | **TTFR: `limit 1` lê ≤ 2 páginas**; varredura completa; filtro; filter+limit curto-circuita; cancelamento; estabilidade do snapshot | ✅ |
+| `modb.generator` | preguiça (contador + limit), composição filter/limit, propagação de erro, cancelamento, destruição precoce; **pico constante de payloads em 100 mil entradas** | ✅ |
+| `modb.streaming_query` | **TTFR: `limit 1` lê ≤ 2 páginas sobre 100 mil objetos**; varredura completa; filtro; filter+limit curto-circuita; cancelamento; estabilidade do snapshot | ✅ |
 | `modb.cli.query` | `modb query` (streaming, filtro, limite) sobre o tipo evoluído | ✅ |
 
-Critério de aceite 7A: ✅ `limit 1` lê ≤ 2 páginas de dados (num heap com muitas
-páginas), mantém memória O(1) (pipeline preguiçoso, nada materializado),
+Critério de aceite 7A: ✅ `limit 1` lê ≤ 2 páginas de dados sobre 100 mil
+objetos, mantém memória O(1) (pico instrumentado de payloads permanece constante),
 preserva o estado lógico do snapshot por toda a leitura e encerra o upstream ao
-atingir o limite ou ao cancelar. Suíte completa 69/69 em Debug, `-Werror` e
+atingir o limite ou ao cancelar. Suíte completa 75/75 em Debug, `-Werror` e
 sanitizers.
 
 ### Fase 7B — Consultas indexadas
@@ -493,21 +493,24 @@ Status: ✅ Concluída (3/3) — commit `e3d76a3`, 2026-07-18.
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.btree` | inserção ordenada/embaralhada (2–3 mil), invariantes (ordem, profundidade uniforme, split interno), duplicatas, faixa, remoção, reabertura, ordem por tipo (int com sinal, float, string) | ✅ |
+| `modb.btree` | inserção ordenada/embaralhada (2–3 mil), invariantes (ordem, profundidade uniforme, fill mínimo, split interno), duplicatas, faixa, remoção com borrow/merge e encolhimento de raiz, reabertura, ordem por tipo | ✅ |
 | `modb.indexed_query` | criação com backfill, igualdade/faixa em ordem, duplicatas, índice lê menos páginas que scan, manutenção em update/remove, reabertura e **recovery** de objeto + índice | ✅ |
+| `modb.index_catalog` | diretório IXDR multipágina (cadeia), `set_root`, reabertura completa | ✅ |
 | `modb.cli.oo_index` / `modb.cli.query_indexed` | `oo employee index` + `modb query --salary` (Index Scan por igualdade) | ✅ |
 
-Critério de aceite 7B: ✅ buscas por igualdade e faixa usam comprovadamente a B+
-tree (uma consulta seletiva lê menos páginas que o scan completo), preservam
-duplicatas (chave composta valor+ObjectId) e permanecem corretas após commit,
-recovery (objeto e índice refeitos juntos pelo WAL) e reabertura (raiz
-persistida no catálogo). Suíte completa 73/73 em Debug, `-Werror` e sanitizers.
+ Critério de aceite 7B: ✅ buscas por igualdade e faixa usam comprovadamente a B+
+ tree (uma consulta seletiva lê menos páginas que o scan completo), preservam
+ duplicatas (chave composta valor+ObjectId) e permanecem corretas após commit,
+ recovery (objeto e índice refeitos juntos pelo WAL) e reabertura (raiz
+ persistida no catálogo). Remoção rebalanceia por borrow/merge; o diretório de
+ índices cresce em cadeia IXDR. Suíte completa 75/75 em Debug, `-Werror` e
+ sanitizers.
 
-Limitação documentada (MVP): a remoção na B+ tree não faz merge/borrow (folha
-pode ficar abaixo do mínimo — `find`/`range` seguem corretos); o diretório de
-índices cabe em uma página; o Index Scan usa o índice corrente e revalida cada
-candidato contra a versão do snapshot (sem falso-positivo; um valor alterado
-depois de o snapshot abrir pode causar um miss — cenário raro no single-writer).
+Limitação documentada (MVP): páginas liberadas por merge da B+ tree ou por
+encolhimento da cadeia IXDR ficam órfãs (sem free list geral — Fase 10). O Index
+Scan usa o índice corrente e revalida cada candidato contra a versão do snapshot
+(sem falso-positivo; um valor alterado depois de o snapshot abrir pode causar um
+miss — cenário raro no single-writer).
 
 ### Fase 7C — Projeção e transformação
 
