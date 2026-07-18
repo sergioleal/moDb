@@ -88,3 +88,21 @@ A 6C recicla o espaço que a 6B preservava, mantendo a retenção correta:
   `begin()`. O registro de épocas de snapshots abertos é protegido por um mutex
   curto, sincronizando leitor (abre/fecha snapshot) e escritor (escrita/GC) sem
   bloquear a duração das leituras.
+
+## Adendo (Fase 6D) — validação de integração e recuperação
+
+A 6D não acrescenta design; valida o modelo completo numa matriz de ponta a
+ponta (`modb.mvcc_recovery`, ver
+[GARANTIAS_TRANSACIONAIS.md §10](../GARANTIAS_TRANSACIONAIS.md)):
+
+- Uma leitura longa (snapshot) atravessa `update`/`remove`/`create`
+  intercalados sem leitura mista.
+- `update`/`remove` versionados com commit durável, mas não aplicados, são
+  refeitos na reabertura pela mesma recuperação da Fase 5 — as imagens de página
+  incluem tanto o novo registro do heap quanto a página IDMP com o `current`
+  movido para `previous`, então o redo restaura a entrada versionada inteira.
+- Confirma-se a decisão da 6C de **não** limpar `previous` órfãos
+  automaticamente na abertura: eles sobrevivem à reabertura e são recuperados
+  pelo primeiro `collect_garbage()` (nenhum snapshot sobrevive ao processo, logo
+  todos são coletáveis) — sem vazamento persistente, ao custo de uma coleta
+  explícita, coerente com o GC explícito da 6C.

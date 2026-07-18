@@ -244,3 +244,27 @@ completa, candidata a otimização com um índice de reclamação na Fase 10.
 Critério 6C: ✅ nenhuma versão ainda visível é descartada; ao fechar o último
 snapshot dependente as versões obsoletas são recuperadas; suíte completa (63
 testes) verde em Debug, `-Werror` e `sanitizers`.
+
+## 10. Matriz de integração e recuperação (Fase 6D)
+
+Fecha a Fase 6 juntando snapshots (6B), GC (6C) e transações/WAL/recuperação (5)
+numa matriz de ponta a ponta (`modb.mvcc_recovery`), verificando os quatro modos
+de falha que o critério da fase exige ausentes:
+
+- **Sem leitura mista.** Uma consulta longa (snapshot) atravessa uma sequência
+  intercalada de `update`/`remove`/`create` commitados e, em cada passo, `get`
+  e `scan` continuam devolvendo exatamente o estado lógico da época capturada.
+- **Sem versão perdida.** Um `update` e um `remove` **versionados** com o
+  registro de commit durável no WAL, mas sem as páginas aplicadas (queda
+  simulada por `stop_after_commit_record`), são refeitos integralmente na
+  reabertura — a versão corrente resultante é a esperada.
+- **Sem vazamento persistente.** As versões `previous` retidas sobrevivem a uma
+  reabertura limpa (continuam no disco), e um `collect_garbage()` após reabrir —
+  quando nenhum snapshot sobrevive ao processo — recupera todas, voltando ao
+  tamanho físico mínimo.
+- **Sem corrupção após recovery.** `database_check` (estrutural, read-only)
+  reporta `ok` depois de cada recovery versionado.
+
+Critério da Fase 6: ✅ scan sob snapshot produz o estado idêntico ao da época com
+commits concorrentes intercalados no mesmo processo. Suíte completa (64 testes)
+verde em Debug, `-Werror` e `sanitizers`.

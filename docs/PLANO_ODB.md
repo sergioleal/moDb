@@ -342,9 +342,9 @@ são recuperadas e alterações incompatíveis falham sem corromper o estado.
 
 #### Fase 6D — Integração e recuperação
 
-- [ ] Testar consulta longa lendo o mesmo estado lógico enquanto objetos são
+- [x] Testar consulta longa lendo o mesmo estado lógico enquanto objetos são
       criados, modificados e removidos em paralelo.
-- [ ] Testar migração, commit, reabertura, recovery e limpeza de versões órfãs
+- [x] Testar migração, commit, reabertura, recovery e limpeza de versões órfãs
       nos limites de falha relevantes.
 
 Entregável 6D: matriz automatizada de integração e recuperação da Fase 6.
@@ -362,29 +362,83 @@ exatamente os objetos do snapshot, mesmo com commits concorrentes.
 Objetivo: consultas como fluxo de objetos, com memória O(1) e TTFR mínimo,
 ainda dentro do processo (sem rede).
 
-Tarefas:
+Para que cada incremento seja utilizável por quem consome a API, a fase é
+dividida em cinco entregas verticais. `Generator`, cursores e B+ tree são
+infraestrutura interna das entregas, não marcos isolados.
 
-- [ ] Implementar `IndexDefinition` no catálogo e índice B+ tree persistente
-      sobre atributos.
-- [ ] Implementar o cursor de varredura com estado mínimo (página atual, slot
-      atual, estado do plano) — nunca materializar todos os resultados.
-- [ ] Adotar C++20 coroutines (`Task<T>`/generator) como modelo de execução;
-      validar suporte nos toolchains (MinGW GCC, MSVC, Clang).
-- [ ] Implementar operadores naturalmente streaming: Scan, Index Scan,
-      Predicate, Projection, Computed Functions, Limit.
-- [ ] Implementar operadores bloqueantes: Sort sem índice, Aggregate global,
-      Distinct global; e parcialmente bloqueantes: Top-K, Merge.
-- [ ] Implementar o Planner ciente da natureza de cada operador (streaming /
-      parcialmente bloqueante / bloqueante) e capaz de estimar TTFR e memória.
-- [ ] Toda consulta abre um `Snapshot` (fase 6) e o mantém até o fim do fluxo.
-- [ ] Implementar cancelamento cooperativo do cursor.
-- [ ] API embedded: `query.stream()` consumível com `co_await stream.next()`.
-- [ ] Benchmarks de TTFR e memória constante em coleções grandes.
+#### Fase 7A — Consulta streaming básica
+
+- [ ] Implementar `Generator<Result<T>>` com coroutines C++20 e cursor de
+      varredura com estado mínimo; validar MinGW GCC, MSVC e Clang.
+- [ ] Implementar Scan, Predicate e Limit com avaliação preguiçosa e
+      curto-circuito do upstream.
+- [ ] Fazer toda consulta manter um `Snapshot` até o fim e implementar
+      cancelamento cooperativo.
+- [ ] Expor `query.stream()` para consumo incremental, sem materializar o
+      conjunto de resultados.
+
+Entregável 7A: consulta embedded por varredura, filtrável e cancelável.
+
+Critério de aceite 7A: consulta com `limit 1` sobre 100 mil objetos entrega o
+primeiro resultado lendo no máximo duas páginas de dados, mantém memória O(1)
+e conserva o estado lógico do snapshot. A entrega depende da conclusão da
+Fase 6D.
+
+#### Fase 7B — Consultas indexadas
+
+- [ ] Implementar `IndexDefinition` no catálogo e B+ tree persistente com
+      `insert`, `remove`, `find` e `range`.
+- [ ] Manter o índice atomicamente com as escritas de objetos e comprovar
+      recuperação e reabertura.
+- [ ] Integrar Index Scan e buscas por igualdade/faixa à API streaming.
+
+Entregável 7B: consultas por chave e intervalo sem varredura completa.
+
+Critério de aceite 7B: buscas por chave e faixa usam comprovadamente o índice,
+preservam duplicatas e permanecem corretas após commit, recovery e reabertura.
+
+#### Fase 7C — Projeção e transformação
+
+- [ ] Implementar Projection com resultados tipados contendo somente os campos
+      solicitados.
+- [ ] Implementar Computed Functions registradas e avaliadas durante o fluxo.
+
+Entregável 7C: fluxo reduzido e transformado sem materializar objetos ou campos
+desnecessários.
+
+Critério de aceite 7C: projeções e funções computadas compõem com
+Scan/Index Scan, Predicate e Limit mantendo avaliação preguiçosa e memória O(1).
+
+#### Fase 7D — Ordenação e agregação
+
+- [ ] Implementar Sort global e Top-K, limitando Top-K a memória O(k).
+- [ ] Implementar Aggregate, Distinct e Merge, classificando e documentando
+      operadores bloqueantes e parcialmente bloqueantes.
+
+Entregável 7D: rankings, ordenação e consultas analíticas no pipeline embedded.
+
+Critério de aceite 7D: resultados são corretos, Top-K comprova pico O(k) e todo
+operador que materializa entrada é identificado como bloqueante.
+
+#### Fase 7E — Planejamento automático e comprovação
+
+- [ ] Implementar Planner determinístico que escolha índice ou varredura e
+      classifique a natureza do plano.
+- [ ] Implementar pushdown de Limit, seleção de Top-K e estimativas de TTFR e
+      memória (`first_result_cost`).
+- [ ] Executar benchmarks reproduzíveis de TTFR, memória constante e ganho de
+      índice em coleções grandes.
+
+Entregável 7E: API de consulta que monta automaticamente o pipeline adequado,
+com comportamento e desempenho observáveis.
+
+Critério de aceite 7E: predicados elegíveis usam índice, Limit chega ao ponto
+mais profundo seguro e os benchmarks comprovam TTFR e limites de memória.
 
 Entregáveis: motor de consultas streaming embedded; índices persistentes;
 métrica de TTFR estabelecida.
 
-Critério de aceite: uma consulta sobre milhões de objetos entrega o primeiro
+Critério de aceite da Fase 7: uma consulta sobre milhões de objetos entrega o primeiro
 resultado sem materializar o conjunto, com memória O(1) comprovada por teste,
 e buscas por chave usam o índice.
 

@@ -46,12 +46,12 @@
 | [3](#fase-3--binding-handle-e-projectionplan) | Binding, Handle, ProjectionPlan | ✅ Concluída | 10/10 | Fase 2 |
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
-| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | 🔄 Em andamento | 7/9 | Fase 5 |
-| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ⬜ Não iniciada | 0/10 | Fases 4, 6 |
+| [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
+| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ⬜ Não iniciada | 0/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **56/103 (~54%)** | |
+| **Total** | | | **68/110 (~62%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -324,8 +324,8 @@ Isso permitiu observar a garantia de atomicidade (`before-commit` → ausente;
 
 ## Fase 6 — Snapshots e MVCC
 
-Status: 🔄 Em andamento (7/9) — quatro entregas incrementais; 6A, 6B e 6C
-concluídas, 6D não iniciada. Definição completa:
+Status: ✅ Concluída (9/9) — quatro entregas incrementais; 6A, 6B, 6C e 6D
+concluídas. Definição completa:
 [PLANO_ODB.md §Fase 6](PLANO_ODB.md#fase-6--snapshots-e-mvcc) ·
 [PROTOCOLO_FASES.md §Fase 6](PROTOCOLO_FASES.md#fase-6--snapshots-e-mvcc)
 
@@ -419,45 +419,100 @@ Debug, `-Werror` e sanitizers.
 
 ### Fase 6D — Integração e recuperação
 
-Status: ⬜ Não iniciada (0/2)
+Status: ✅ Concluída (2/2) — commit `PREENCHER`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 6D.1 | Consulta longa com criação/update/remove concorrentes | ⬜ | |
-| 6D.2 | Migração, reabertura, recovery e limpeza de versões órfãs | ⬜ | |
+| 6D.1 | Consulta longa com criação/update/remove intercalados | ✅ | snapshot atravessa 4 mutações; get/scan estáveis |
+| 6D.2 | Migração, reabertura, recovery e limpeza de versões órfãs | ✅ | update/remove versionados via WAL; sem vazamento após reabrir |
 
-### Testes automatizados desta fase
+### Testes automatizados desta subfase
 
-| Teste (CTest) | Arquivo | Status |
+| Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.snapshot` | `tests/snapshot_test.cpp` | ✅ (Fase 6B) |
+| `modb.mvcc_recovery` | leitura longa estável; durabilidade versionada + GC sem vazamento na reabertura; recovery de update/remove versionados; `database_check` após recovery | ✅ |
+| `modb.snapshot` | matriz de snapshot/GC da 6B/6C | ✅ |
+| `modb.identity_map` | migração IDMP v1→v2 (limite de formato da 6D) | ✅ |
+| `modb.binding` | época monotônica após reabertura | ✅ |
 
-Critério de aceite 6D: ⬜ matriz passa sem leitura mista, versão perdida,
-vazamento persistente ou corrupção após recovery.
+Critério de aceite 6D: ✅ a matriz passa sem leitura mista (a consulta longa
+enxerga sempre o estado da época), sem versão perdida (update/remove
+versionados sobrevivem a recovery), sem vazamento persistente (o GC recupera as
+versões órfãs após reabrir) e sem corrupção após recovery (`database_check` ok).
 
-Critério de aceite da Fase 6: ⬜ scan sob snapshot produz estado idêntico ao da
-época, com commits concorrentes intercalados.
+Critério de aceite da Fase 6: ✅ scan sob snapshot produz o estado idêntico ao da
+época, mesmo com create/update/remove commitados e intercalados no mesmo
+processo (`modb.snapshot`, `modb.mvcc_recovery`). Suíte completa 64/64 em Debug,
+`-Werror` e sanitizers.
 
 ---
 
 ## Fase 7 — Índices e consultas em streaming (embedded)
 
-Status: ⬜ Não iniciada (0/10) — Definição completa:
+Status: ⬜ Não iniciada (0/14) — cinco entregas verticais. Definição completa:
 [PLANO_ODB.md §Fase 7](PLANO_ODB.md#fase-7--índices-e-consultas-em-streaming-embedded) ·
 [PROTOCOLO_FASES.md §Fase 7](PROTOCOLO_FASES.md#fase-7--índices-e-consultas-em-streaming-embedded)
 
+### Fase 7A — Consulta streaming básica
+
+Status: ⬜ Não iniciada (0/4) — bloqueada pela Fase 6D.
+
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 7.1 | `IndexDefinition` + B+ tree persistente | ⬜ | |
-| 7.2 | Cursor de varredura com estado mínimo | ⬜ | |
-| 7.3 | Coroutines C++20 (`Generator<T>`) | ⬜ | |
-| 7.4 | Operadores streaming (Scan/Index Scan/Predicate/Projection/Limit) | ⬜ | |
-| 7.5 | Operadores bloqueantes/parciais (Sort/Aggregate/Distinct/Top-K/Merge) | ⬜ | |
-| 7.6 | Planner (natureza do operador, estimativa de TTFR) | ⬜ | |
-| 7.7 | Consulta abre e mantém `Snapshot` até o fim do fluxo | ⬜ | |
-| 7.8 | Cancelamento cooperativo do cursor | ⬜ | |
-| 7.9 | API embedded (`query.stream()`) | ⬜ | |
-| 7.10 | Benchmarks de TTFR e memória constante | ⬜ | |
+| 7A.1 | `Generator<Result<T>>` + cursor de scan com estado mínimo | ⬜ | Validar MinGW GCC, MSVC e Clang |
+| 7A.2 | Operadores preguiçosos Scan, Predicate e Limit | ⬜ | Limit encerra o upstream |
+| 7A.3 | Snapshot durante todo o fluxo + cancelamento cooperativo | ⬜ | Depende da Fase 6D |
+| 7A.4 | API embedded `query.stream()` | ⬜ | Consumo incremental |
+
+Critério de aceite 7A: ⬜ `limit 1` sobre 100 mil objetos lê no máximo duas
+páginas, usa memória O(1), preserva o snapshot e encerra o upstream.
+
+### Fase 7B — Consultas indexadas
+
+Status: ⬜ Não iniciada (0/3) — bloqueada pela Fase 7A.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 7B.1 | `IndexDefinition` + B+ tree persistente (`find`/`range`) | ⬜ | |
+| 7B.2 | Manutenção transacional e recovery do índice | ⬜ | Create/update/remove atômicos com índice |
+| 7B.3 | Index Scan integrado à API streaming | ⬜ | Igualdade e faixa |
+
+Critério de aceite 7B: ⬜ buscas por chave/faixa usam a B+ tree, preservam
+duplicatas e permanecem corretas após commit, recovery e reabertura.
+
+### Fase 7C — Projeção e transformação
+
+Status: ⬜ Não iniciada (0/2) — bloqueada pelas Fases 7A e 7B.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 7C.1 | Projection com resultados tipados | ⬜ | Somente campos solicitados |
+| 7C.2 | Computed Functions registradas no fluxo | ⬜ | Avaliação elemento a elemento |
+
+Critério de aceite 7C: ⬜ projeções e funções computadas compõem com os
+operadores existentes mantendo preguiça e memória O(1).
+
+### Fase 7D — Ordenação e agregação
+
+Status: ⬜ Não iniciada (0/2) — bloqueada pela Fase 7A.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 7D.1 | Sort global e Top-K | ⬜ | Top-K com memória O(k) |
+| 7D.2 | Aggregate, Distinct e Merge | ⬜ | Natureza bloqueante documentada |
+
+Critério de aceite 7D: ⬜ resultados corretos, Top-K com pico O(k) e operadores
+que materializam entrada classificados como bloqueantes.
+
+### Fase 7E — Planejamento automático e comprovação
+
+Status: ⬜ Não iniciada (0/3) — bloqueada pelas Fases 7B, 7C e 7D.
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 7E.1 | Planner determinístico (Index Scan ou Scan + Predicate) | ⬜ | |
+| 7E.2 | Pushdown de Limit, Top-K, `nature()` e `first_result_cost()` | ⬜ | |
+| 7E.3 | Benchmarks de TTFR, memória e ganho de índice | ⬜ | Reproduzíveis |
 
 ### Testes automatizados desta fase
 
@@ -468,8 +523,11 @@ Status: ⬜ Não iniciada (0/10) — Definição completa:
 | `modb.streaming_query` | `tests/streaming_query_test.cpp` | ⬜ |
 | `modb.planner` | `tests/planner_test.cpp` | ⬜ |
 
-Critério de aceite: ⬜ 1º resultado em ≤ 2 páginas lidas sobre 100k objetos
-(TTFR); buscas por chave via índice.
+Critério de aceite 7E: ⬜ planner escolhe índice e aplica pushdown seguro; os
+benchmarks confirmam TTFR e limites de memória.
+
+Critério de aceite da Fase 7: ⬜ 1º resultado em ≤ 2 páginas lidas sobre 100k
+objetos (TTFR); buscas por chave via índice.
 
 ---
 
