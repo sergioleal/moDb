@@ -481,7 +481,7 @@ sanitizers.
 
 ### Fase 7B — Consultas indexadas
 
-Status: ✅ Concluída (3/3) — commit `PREENCHER`, 2026-07-18.
+Status: ✅ Concluída (3/3) — commit `e3d76a3`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
