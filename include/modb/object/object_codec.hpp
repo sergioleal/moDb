@@ -51,6 +51,12 @@ struct DecodedObject {
 // viram erro, nunca acesso fora de faixa nem alocação gigante.
 [[nodiscard]] Result<DecodedObject> decode_object(std::span<const std::byte> record);
 
+// Payload lógico sem identidade (Fase 8C / ObjectEnvelope):
+//   | versão u8 | field_count u16 | (field_id u16, tag u8, valor)* |
+// A identidade viaja no envelope da rede; o registro do heap usa encode_object.
+[[nodiscard]] Result<std::vector<std::byte>> encode_object_payload(const FieldValues& fields);
+[[nodiscard]] Result<FieldValues> decode_object_payload(std::span<const std::byte> payload);
+
 // Escreve um único valor (tag u8 + conteúdo no encoding do ADR-003). Exposto
 // porque o catálogo (CatalogStore) reaproveita o mesmo encoding ao serializar
 // defaults de atributo dentro do seu sub-formato.

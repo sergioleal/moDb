@@ -52,6 +52,7 @@ add_library(modb
     src/net/protocol.cpp
     src/net/native_socket.cpp
     src/net/server.cpp
+    src/net/client.cpp
     src/storage/binary.cpp
     src/storage/codec.cpp
     src/storage/page_file.cpp
@@ -395,6 +396,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.serve_demo
         COMMAND modb_cli serve demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-demo.modb --force)
+    add_test(NAME modb.cli.serve_query_demo
+        COMMAND modb_cli serve query-demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-query-demo.modb --force)
     add_test(NAME modb.cli.ping_help COMMAND modb_cli ping --help)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
     add_test(NAME modb.cli.types_help COMMAND modb_cli types --help)

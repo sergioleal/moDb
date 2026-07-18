@@ -614,6 +614,29 @@ public:
         return Query<T>{this, std::move(*opened), std::nullopt};
     }
 
+    // Id persistido do tipo T após bind() (útil para QueryDescription remota).
+    template <typename T>
+    [[nodiscard]] Result<TypeDefinitionId> type_id_of() const {
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
+        }
+        return bound->type_id;
+    }
+
+    // Consulta genérica (Fase 8C): DecodedObject sem binding C++. Abre snapshot,
+    // varre o tipo, aplica igualdade/projeção/limite e cede objetos sob demanda.
+    struct ObjectQuerySpec {
+        TypeDefinitionId type{};
+        // 0 = sem limite.
+        std::uint64_t limit{0};
+        std::optional<std::pair<FieldId, AttributeValue>> equals{};
+        // Vazio = todos os campos. FieldId{0} (ObjectId) é ignorado no payload.
+        std::vector<FieldId> project{};
+    };
+
+    [[nodiscard]] query::Generator<Result<DecodedObject>> query_objects(ObjectQuerySpec query);
+
     // Indica se há índice B+ tree no campo do tipo T (Fase 7E — planner).
     template <typename T>
     [[nodiscard]] bool has_index_for(FieldId field) const noexcept {

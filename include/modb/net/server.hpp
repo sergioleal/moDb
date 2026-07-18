@@ -1,16 +1,18 @@
 #pragma once
 
-// Servidor TCP da Fase 8B: abre o banco, registra no DatabaseRegistry, escuta
-// e completa Hello/HelloOk. Streaming de consultas fica para 8C.
+// Servidor TCP das Fases 8B–8C: Hello/HelloOk e execução de QueryDescription
+// em streaming (Begin → ObjectFrame(s) → End/Error).
 
 #include "modb/error.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/protocol.hpp"
 #include "modb/object/database.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -36,7 +38,10 @@ public:
     [[nodiscard]] std::string_view database_name() const noexcept { return database_name_; }
     [[nodiscard]] object::BaselineId baseline() const noexcept { return baseline_; }
 
-    // Aceita uma conexão, negocia Hello/HelloOk e encerra o peer.
+    // Uso em testes (8C): após emitir N objetos, envia StreamError.
+    void fail_stream_after(std::size_t objects) noexcept { fail_after_ = objects; }
+
+    // Aceita uma conexão: Hello/HelloOk, opcionalmente uma Query, e encerra.
     [[nodiscard]] Result<void> serve_one();
 
 private:
@@ -45,6 +50,7 @@ private:
            object::BaselineId baseline);
 
     [[nodiscard]] Result<void> handle_connection(NativeSocket peer);
+    [[nodiscard]] Result<void> handle_query(NativeSocket& peer, const Query& query);
 
     std::shared_ptr<object::Database> database_;
     object::DatabaseId database_id_{};
@@ -52,13 +58,7 @@ private:
     std::uint16_t port_{0};
     std::string database_name_;
     object::BaselineId baseline_{};
-};
-
-class Client {
-public:
-    // Conecta, envia Hello e devolve HelloOk negociado.
-    [[nodiscard]] static Result<HelloOk> handshake(std::string_view host, std::uint16_t port,
-                                                   std::string_view database_name);
+    std::optional<std::size_t> fail_after_{};
 };
 
 } // namespace modb::net

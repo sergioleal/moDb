@@ -487,10 +487,10 @@ remoto.
 
 #### Fase 8C — Primeiro streaming remoto
 
-- [ ] Executar uma `QueryDescription` declarativa restrita no servidor e
+- [x] Executar uma `QueryDescription` declarativa restrita no servidor e
       enviar `StreamBegin` → `ObjectFrame`(s) → `StreamEnd` (ou
       `StreamError` em falha do generator).
-- [ ] Implementar o cliente C++ e `ObjectStream` para consumo incremental
+- [x] Implementar o cliente C++ e `ObjectStream` para consumo incremental
       do fluxo remoto, reutilizando o codec genérico; nunca expor
       `PageId`, `SlotId` ou `RecordId`.
 

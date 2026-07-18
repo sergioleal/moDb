@@ -497,6 +497,82 @@ Result<DatabaseId> DatabaseRegistry::attach(std::shared_ptr<Database> database) 
     return id;
 }
 
+query::Generator<Result<DecodedObject>> Database::query_objects(ObjectQuerySpec query) {
+    auto opened = snapshot();
+    if (!opened) {
+        co_yield Result<DecodedObject>{std::unexpected(opened.error())};
+        co_return;
+    }
+    Snapshot snapshot = std::move(*opened);
+
+    auto type = store_.find_type(query.type);
+    if (!type) {
+        co_yield Result<DecodedObject>{std::unexpected(type.error())};
+        co_return;
+    }
+    if (query.equals) {
+        if (type->get().find(query.equals->first) == nullptr) {
+            co_yield Result<DecodedObject>{std::unexpected(
+                Error{ErrorCode::invalid_argument, "equals field is not part of the type"})};
+            co_return;
+        }
+    }
+    for (const FieldId field : query.project) {
+        if (field.value == 0) {
+            continue; // ObjectId viaja no envelope, não no payload.
+        }
+        if (type->get().find(field) == nullptr) {
+            co_yield Result<DecodedObject>{std::unexpected(
+                Error{ErrorCode::invalid_argument, "projected field is not part of the type"})};
+            co_return;
+        }
+    }
+
+    std::uint64_t emitted = 0;
+    for (auto& item : store_.scan_stream(snapshot.epoch(), query.type)) {
+        if (!item) {
+            co_yield Result<DecodedObject>{std::unexpected(item.error())};
+            co_return;
+        }
+        if (query.equals) {
+            const AttributeValue* found = nullptr;
+            for (const auto& [field_id, value] : item->fields) {
+                if (field_id == query.equals->first) {
+                    found = &value;
+                    break;
+                }
+            }
+            if (found == nullptr || *found != query.equals->second) {
+                continue;
+            }
+        }
+
+        DecodedObject object = std::move(*item);
+        if (!query.project.empty()) {
+            FieldValues projected;
+            projected.reserve(query.project.size());
+            for (const FieldId field : query.project) {
+                if (field.value == 0) {
+                    continue;
+                }
+                for (const auto& [field_id, value] : object.fields) {
+                    if (field_id == field) {
+                        projected.emplace_back(field_id, value);
+                        break;
+                    }
+                }
+            }
+            object.fields = std::move(projected);
+        }
+
+        co_yield Result<DecodedObject>{std::move(object)};
+        ++emitted;
+        if (query.limit != 0 && emitted >= query.limit) {
+            co_return;
+        }
+    }
+}
+
 Result<std::shared_ptr<Database>> DatabaseRegistry::find(DatabaseId id) const {
     if (id.value == 0) {
         return std::unexpected(

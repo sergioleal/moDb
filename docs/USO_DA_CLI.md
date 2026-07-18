@@ -388,17 +388,20 @@ ODB++ protocol demo (Fase 8A, in-memory, no network)
 Result: all protocol round-trips passed
 ```
 
-## `modb serve` / `modb ping` — handshake de rede (Fase 8B)
+## `modb serve` / `modb ping` — rede (Fases 8B–8C)
 
 ```text
 modb serve demo <file> [--force]
+modb serve query-demo <file> [--force]
 modb serve <file> [--port N] --once
 modb ping <host> <port> <database-name>
 ```
 
 `serve demo` sobe um listener em porta efêmera no loopback, completa
-`Hello`/`HelloOk` com um cliente local e encerra. `serve … --once` fica
-escutando até um único handshake (útil com `ping` em outro processo).
+`Hello`/`HelloOk` com um cliente local e encerra. `serve query-demo`
+semeia objetos, executa uma `Query` remota via `ObjectStream` e imprime
+os primeiros resultados. `serve … --once` fica escutando até uma
+conexão (handshake + Query opcional).
 
 ```text
 $ modb serve demo serve.modb --force
@@ -407,6 +410,15 @@ ODB++ serve demo (Fase 8B)
   listening: 127.0.0.1:54321
   HelloOk: version=1 baseline=… codec=none max_frame=16777216
 Result: handshake OK
+
+$ modb serve query-demo stream.modb --force
+ODB++ serve query-demo (Fase 8C)
+  database: stream.modb
+  listening: 127.0.0.1:54321
+  object id=… value=0
+  object id=… value=1
+  object id=… value=2
+Result: received 3 objects via remote ObjectStream
 ```
 
 ## `modb types` — modelo de objetos em memória (ODB++)

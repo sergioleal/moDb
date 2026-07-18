@@ -59,6 +59,10 @@ public:
 
     // Informa quantos bytes ainda não foram consumidos.
     [[nodiscard]] std::size_t remaining() const noexcept { return bytes_.size() - position_; }
+    // Visão dos bytes ainda não lidos (Fase 8C: decode_object → payload).
+    [[nodiscard]] std::span<const std::byte> remaining_bytes() const noexcept {
+        return bytes_.subspan(position_);
+    }
     // Informa se todos os bytes já foram consumidos.
     [[nodiscard]] bool at_end() const noexcept { return position_ == bytes_.size(); }
 

@@ -1,6 +1,6 @@
 #include "modb/net/server.hpp"
 
-#include "modb/storage/binary.hpp"
+#include "modb/object/object_codec.hpp"
 #include "modb/storage/endian.hpp"
 
 #include <algorithm>
@@ -14,6 +14,8 @@ namespace {
 Error make_protocol(std::string message) {
     return Error{ErrorCode::protocol_error, std::move(message)};
 }
+
+constexpr std::size_t k_max_records_per_frame = 32;
 
 } // namespace
 
@@ -57,8 +59,10 @@ Server::Server(std::shared_ptr<object::Database> database, object::DatabaseId da
 Server::Server(Server&& other) noexcept
     : database_{std::move(other.database_)}, database_id_{other.database_id_},
       listener_{std::move(other.listener_)}, port_{other.port_},
-      database_name_{std::move(other.database_name_)}, baseline_{other.baseline_} {
+      database_name_{std::move(other.database_name_)}, baseline_{other.baseline_},
+      fail_after_{other.fail_after_} {
     other.database_id_ = object::DatabaseId{};
+    other.fail_after_.reset();
 }
 
 Server::~Server() {
@@ -72,7 +76,6 @@ Result<Server> Server::listen(const std::filesystem::path& path, std::string_vie
                               std::uint16_t port) {
     Result<object::Database> opened = object::Database::open(path);
     if (!opened) {
-        // Banco novo: cria se não existir.
         if (opened.error().code == ErrorCode::file_not_found) {
             auto created = object::Database::create(path);
             if (!created) {
@@ -110,6 +113,78 @@ Result<Server> Server::listen(const std::filesystem::path& path, std::string_vie
                   path.filename().string(), baseline};
 }
 
+Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
+    if (auto status = send_message(peer, StreamBegin{.query_id = query.query_id}); !status) {
+        return status;
+    }
+
+    object::Database::ObjectQuerySpec spec{
+        .type = query.description.type,
+        .limit = query.description.limit,
+        .project = query.description.project,
+    };
+    if (query.description.equals) {
+        spec.equals = std::pair{query.description.equals->field, query.description.equals->value};
+    }
+
+    ObjectFrame batch{.query_id = query.query_id, .compression = Compression::none};
+    std::uint64_t total = 0;
+
+    auto flush_batch = [&]() -> Result<void> {
+        if (batch.records.empty()) {
+            return {};
+        }
+        if (auto status = send_message(peer, batch); !status) {
+            return status;
+        }
+        batch.records.clear();
+        return {};
+    };
+
+    for (auto& item : database_->query_objects(std::move(spec))) {
+        if (!item) {
+            (void)flush_batch();
+            return send_message(peer, StreamError{.query_id = query.query_id,
+                                                  .code = item.error().code,
+                                                  .message = item.error().message});
+        }
+
+        if (fail_after_ && total >= *fail_after_) {
+            (void)flush_batch();
+            return send_message(peer,
+                                StreamError{.query_id = query.query_id,
+                                            .code = ErrorCode::io_error,
+                                            .message = "injected stream failure"});
+        }
+
+        auto payload = object::encode_object_payload(item->fields);
+        if (!payload) {
+            (void)flush_batch();
+            return send_message(peer, StreamError{.query_id = query.query_id,
+                                                  .code = payload.error().code,
+                                                  .message = payload.error().message});
+        }
+
+        batch.records.push_back(ObjectEnvelope{
+            .object_id = item->id,
+            .type_definition_id = item->type,
+            .payload = std::move(*payload),
+        });
+        ++total;
+
+        if (batch.records.size() >= k_max_records_per_frame) {
+            if (auto status = flush_batch(); !status) {
+                return status;
+            }
+        }
+    }
+
+    if (auto status = flush_batch(); !status) {
+        return status;
+    }
+    return send_message(peer, StreamEnd{.query_id = query.query_id, .total = total});
+}
+
 Result<void> Server::handle_connection(NativeSocket peer) {
     auto message = recv_message(peer);
     if (!message) {
@@ -128,9 +203,6 @@ Result<void> Server::handle_connection(NativeSocket peer) {
     if (!accepts_none) {
         return std::unexpected(make_protocol("client must accept compression=none"));
     }
-
-    // O nome no Hello identifica o banco lógico; aceitamos o stem do arquivo ou
-    // o nome pedido (CLI ping usa o stem).
     (void)database_name_;
 
     HelloOk ok{.version = protocol_version,
@@ -138,6 +210,23 @@ Result<void> Server::handle_connection(NativeSocket peer) {
                .selected_codec = Compression::none,
                .max_frame_bytes = max_frame_bytes};
     if (auto status = send_message(peer, ok); !status) {
+        return status;
+    }
+
+    // Após o handshake, uma Query opcional (8C). Desconexão limpa sem Query
+    // também é válida (comportamento 8B / ping).
+    auto next = recv_message(peer);
+    if (!next) {
+        if (next.error().code == ErrorCode::connection_closed) {
+            return peer.close();
+        }
+        return std::unexpected(next.error());
+    }
+    const auto* query = std::get_if<Query>(&*next);
+    if (query == nullptr) {
+        return std::unexpected(make_protocol("expected Query after HelloOk"));
+    }
+    if (auto status = handle_query(peer, *query); !status) {
         return status;
     }
     return peer.close();
@@ -149,38 +238,6 @@ Result<void> Server::serve_one() {
         return std::unexpected(peer.error());
     }
     return handle_connection(std::move(*peer));
-}
-
-Result<HelloOk> Client::handshake(std::string_view host, std::uint16_t port,
-                                  std::string_view database_name) {
-    auto socket = NativeSocket::connect(host, port);
-    if (!socket) {
-        return std::unexpected(socket.error());
-    }
-
-    Hello hello{.version = protocol_version,
-                .database_name = std::string{database_name},
-                .accepted_codecs = {Compression::none}};
-    if (auto status = send_message(*socket, hello); !status) {
-        return std::unexpected(status.error());
-    }
-
-    auto reply = recv_message(*socket);
-    if (!reply) {
-        return std::unexpected(reply.error());
-    }
-    const auto* ok = std::get_if<HelloOk>(&*reply);
-    if (ok == nullptr) {
-        return std::unexpected(make_protocol("expected HelloOk from server"));
-    }
-    if (ok->version != protocol_version) {
-        return std::unexpected(make_protocol("server selected unsupported protocol version"));
-    }
-    if (ok->selected_codec != Compression::none) {
-        return std::unexpected(make_protocol("Fase 8B only accepts compression=none"));
-    }
-    (void)socket->close();
-    return *ok;
 }
 
 } // namespace modb::net
