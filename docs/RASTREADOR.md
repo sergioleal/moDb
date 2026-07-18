@@ -631,7 +631,7 @@ servidor e ping/info remoto. Suíte completa 89/89 em Debug e sanitizers.
 
 ### Fase 8C — Primeiro streaming remoto
 
-Status: ✅ Concluída (2/2) — tag prevista `0.0.8c`.
+Status: ✅ Concluída (2/2) — commit `e1a61d3`, tag `0.0.8c`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
