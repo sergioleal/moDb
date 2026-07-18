@@ -530,6 +530,7 @@ Status: ✅ Concluída (4/4) — commit `b6284c4`; identidade uniforme `2f9adee`
 |---|---|---|
 | `modb.projection_query` | project∘filter∘limit; select; compute; map tipado; ProjectedRow→classe; mapper falível; compute ausente | ✅ |
 | `modb.cli.query_project` | `modb query --project id,name,salary --compute annual_salary` | ✅ |
+| `modb.cli.query_materialize` | `ProjectedRow` → `map<EmployeeSummary>` → stream pela CLI | ✅ |
 
 Critério de aceite 7C: ✅ projeções e funções computadas compõem com Scan/Index
 Scan, Predicate e Limit mantendo avaliação preguiçosa e memória O(1). Suíte

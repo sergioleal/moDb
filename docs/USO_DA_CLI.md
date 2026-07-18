@@ -494,6 +494,7 @@ propriamente dita é um comando à parte, `modb query` (abaixo).
 ```text
 modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
            [--project id[,name[,salary[,country]]]] [--compute annual_salary]
+           [--materialize-summary]
            [--order-by salary|name|-salary|-name] [--top K]
            [--distinct name] [--count] [--explain]
 ```
@@ -554,6 +555,17 @@ for (auto& row : database.query<EmployeeV2>()
                      .stream()) {
     // processa *row
 }
+```
+
+Para exercer esse `map<Out>` pela CLI, acrescente `--materialize-summary`. Cada
+linha projetada é convertida em `EmployeeSummary` e emitida imediatamente:
+
+```text
+$ modb query phase3.modb --schema 2 --project id,name,salary \
+    --compute annual_salary --materialize-summary
+EmployeeSummary: id=18 name=Ana salary=16000 annual_salary=192000
+EmployeeSummary: id=21 name=Bia salary=18000 annual_salary=216000
+2 employee(s) streamed (projected) (materialized EmployeeSummary) (nature=streaming); data pages read: 1
 ```
 
 `--order-by`, `--top`, `--distinct` e `--count` (Fase 7D) aplicam operadores
