@@ -510,4 +510,39 @@ Result<void> ObjectStore::scan_at(
     return {};
 }
 
+query::Generator<Result<DecodedObject>> ObjectStore::scan_stream(
+    std::uint64_t snapshot_epoch, std::optional<TypeDefinitionId> type) {
+    // Percorre a cadeia de páginas de dados sob demanda: cada iteração do while
+    // lê exatamente UMA página (read_page_records) e cede seus objetos visíveis;
+    // a próxima página só é lida quando o consumidor esgota esta. Um `limit` a
+    // montante encerra o fluxo destruindo esta coroutine — nenhuma página além
+    // das necessárias é lida.
+    auto page = data_heap_.first_page();
+    while (page) {
+        auto slice = data_heap_.read_page_records(*page);
+        if (!slice) {
+            co_yield std::unexpected(slice.error());
+            co_return;
+        }
+        for (auto& record : slice->records) {
+            auto object = decode_object(record.bytes);
+            if (!object) {
+                co_yield std::unexpected(object.error());
+                co_return;
+            }
+            if (type && object->type != *type) {
+                continue;
+            }
+            // Só a versão que `find_at` resolve para esta época é visível: o
+            // resto do heap são versões previous preservadas ou órfãos.
+            auto resolved = identity_.find_at(object->id, snapshot_epoch);
+            if (!resolved || *resolved != record.id) {
+                continue;
+            }
+            co_yield Result<DecodedObject>{std::move(*object)};
+        }
+        page = slice->next;
+    }
+}
+
 } // namespace modb::object
