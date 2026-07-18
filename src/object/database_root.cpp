@@ -117,6 +117,11 @@ Result<DatabaseRoot> DatabaseRoot::open(storage::PageFile& file) {
                                          "database root page is truncated before epoch"});
         }
         root.epoch_ = *epoch;
+        // Campo de índice em espaço reservado v2: arquivos gravados antes da
+        // Fase 7B têm zeros aqui (página zerada), o que significa "sem índices".
+        if (auto index_dir = reader.read_u64(); index_dir) {
+            root.index_dir_ = *index_dir;
+        }
     } else if (auto upgraded = root.persist(); !upgraded) {
         return std::unexpected(upgraded.error());
     }
@@ -132,6 +137,9 @@ std::optional<PageId> DatabaseRoot::catalog_heap_root() const noexcept {
 std::optional<PageId> DatabaseRoot::data_heap_root() const noexcept {
     return optional_page(data_heap_root_);
 }
+std::optional<PageId> DatabaseRoot::index_dir() const noexcept {
+    return optional_page(index_dir_);
+}
 
 Result<void> DatabaseRoot::persist() {
     storage::BinaryWriter writer;
@@ -144,6 +152,7 @@ Result<void> DatabaseRoot::persist() {
     writer.write_u64(next_object_id_);
     writer.write_u64(current_baseline_);
     writer.write_u64(epoch_);
+    writer.write_u64(index_dir_);
 
     Page page;
     const auto bytes = writer.bytes();
@@ -196,6 +205,16 @@ Result<void> DatabaseRoot::set_current_baseline(BaselineId baseline) {
     current_baseline_ = baseline.value;
     if (auto persisted = persist(); !persisted) {
         current_baseline_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+Result<void> DatabaseRoot::set_index_dir(storage::PageId id) {
+    const auto previous = index_dir_;
+    index_dir_ = id.value;
+    if (auto persisted = persist(); !persisted) {
+        index_dir_ = previous;
         return std::unexpected(persisted.error());
     }
     return {};

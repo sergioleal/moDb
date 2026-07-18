@@ -459,7 +459,8 @@ modb oo employee create <file> <name> <salary> [country] --schema <1|2>
 modb oo employee evolve <file> --schema <1|2>
 modb oo employee get <file> <object-id> --schema <1|2>
 modb oo employee set-salary <file> <object-id> <salary> --schema <1|2>
-modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S]
+modb oo employee index <file> --schema <1|2>
+modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
 modb oo employee demo <file> [--force]
 ```
 
@@ -495,6 +496,23 @@ foram lidas — com `--limit`, poucas (o critério TTFR):
 $ modb oo employee query phase3.modb --schema 2 --min-salary 17000
 Employee: name=Bia salary=18000 country=PT
 1 employee(s) streamed; data pages read: 1
+```
+
+`index` cria uma B+ tree sobre `Employee.salary` (Fase 7B); depois
+`query --salary S` faz um **Index Scan por igualdade** em vez de varrer tudo,
+retornando todos os empregados com aquele salário (duplicatas incluídas) em
+ordem, sem passar pelo scan sequencial:
+
+```text
+$ modb oo employee query phase3.modb --schema 2 --salary 18000
+Error: no index on this field
+
+$ modb oo employee index phase3.modb --schema 2
+Index created on Employee.salary (field 2)
+
+$ modb oo employee query phase3.modb --schema 2 --salary 18000
+Employee: name=Bia salary=18000 country=PT
+1 employee(s) streamed (via index); data pages read: 0
 ```
 
 ## `modb blob` — binários encadeados (ODB++ Fase 4)

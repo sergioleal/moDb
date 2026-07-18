@@ -1,6 +1,12 @@
 // Importa a interface de ObjectStore.
 #include "modb/object/object_store.hpp"
 
+// Importa a B+ tree e o codec de chave ordenável (Fase 7B).
+#include "modb/index/btree.hpp"
+#include "modb/index/key_codec.hpp"
+
+// Disponibiliza std::min no comparador de bytes.
+#include <algorithm>
 // Disponibiliza o limite do espaço de ObjectIds.
 #include <limits>
 // Disponibiliza diagnósticos numéricos.
@@ -138,6 +144,16 @@ Result<ObjectStore> ObjectStore::open(storage::PageFile& file) {
         return std::unexpected(activated.error());
     }
 
+    // Diretório de índices (Fase 7B): carregado do DBRT se já existir.
+    std::optional<IndexCatalog> indexes;
+    if (auto dir = root->index_dir()) {
+        auto opened = IndexCatalog::open(file, *dir);
+        if (!opened) {
+            return std::unexpected(opened.error());
+        }
+        indexes = std::move(*opened);
+    }
+
     return ObjectStore{file,
                        std::move(*root),
                        std::move(*identity),
@@ -148,7 +164,8 @@ Result<ObjectStore> ObjectStore::open(storage::PageFile& file) {
                                                               current->types().end()}
                                : std::vector<TypeDefinitionId>{},
                        std::move(baselines),
-                       std::move(current)};
+                       std::move(current),
+                       std::move(indexes)};
 }
 
 Result<ObjectId> ObjectStore::allocate_object_id() {
@@ -284,6 +301,11 @@ Result<ObjectId> ObjectStore::create_object(const TypeDefinition& type, FieldVal
     if (auto bound = identity_.bind(*id, *location, root_.epoch() + 1); !bound) {
         return std::unexpected(bound.error());
     }
+    // Manutenção de índices (Fase 7B): a mesma transação cobre objeto e índices.
+    if (auto indexed = index_maintain(std::string{type.name()}, *id, fields, /*insert=*/true);
+        !indexed) {
+        return std::unexpected(indexed.error());
+    }
     return *id;
 }
 
@@ -350,6 +372,14 @@ Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldV
     if (auto conflict = check_snapshot_conflict(id, oldest_open_snapshot_epoch); !conflict) {
         return std::unexpected(conflict.error());
     }
+    // Captura os valores antigos ANTES de sobrescrever, para retirar as chaves
+    // antigas dos índices (Fase 7B). Só quando há índices.
+    std::optional<DecodedObject> previous;
+    if (indexes_) {
+        if (auto existing = get(id); existing) {
+            previous = std::move(*existing);
+        }
+    }
     auto record = encode_object(id, type.id(), fields);
     if (!record) {
         return std::unexpected(record.error());
@@ -362,7 +392,18 @@ Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldV
     if (!location) {
         return std::unexpected(location.error());
     }
-    return identity_.rebind(id, *location, root_.epoch() + 1);
+    if (auto rebound = identity_.rebind(id, *location, root_.epoch() + 1); !rebound) {
+        return std::unexpected(rebound.error());
+    }
+    // Atualiza os índices: retira as chaves antigas e insere as novas.
+    if (previous) {
+        if (auto r = index_maintain(std::string{type.name()}, id, previous->fields,
+                                    /*insert=*/false);
+            !r) {
+            return std::unexpected(r.error());
+        }
+    }
+    return index_maintain(std::string{type.name()}, id, fields, /*insert=*/true);
 }
 
 Result<void> ObjectStore::remove(ObjectId id,
@@ -374,10 +415,235 @@ Result<void> ObjectStore::remove(ObjectId id,
     if (auto conflict = check_snapshot_conflict(id, oldest_open_snapshot_epoch); !conflict) {
         return std::unexpected(conflict.error());
     }
+    // Captura o objeto antes de remover, para retirar suas chaves dos índices.
+    std::optional<DecodedObject> previous;
+    if (indexes_) {
+        if (auto existing = get(id); existing) {
+            previous = std::move(*existing);
+        }
+    }
     // O registro físico não é tocado: um snapshot mais antigo pode precisar
     // dele via `previous`. A reciclagem do espaço é responsabilidade da Fase
     // 6C (retenção e GC), não desta escrita.
-    return identity_.erase(id, root_.epoch() + 1);
+    if (auto erased = identity_.erase(id, root_.epoch() + 1); !erased) {
+        return std::unexpected(erased.error());
+    }
+    if (previous) {
+        auto type = find_type(previous->type);
+        if (type) {
+            if (auto r = index_maintain(std::string{type->get().name()}, id, previous->fields,
+                                        /*insert=*/false);
+                !r) {
+                return std::unexpected(r.error());
+            }
+        }
+    }
+    return {};
+}
+
+namespace {
+
+// Localiza o valor de um campo dentro dos valores de um objeto; nullptr se
+// ausente.
+const AttributeValue* field_value(const FieldValues& fields, std::uint16_t field_id) {
+    for (const auto& [id, value] : fields) {
+        if (id.value == field_id) {
+            return &value;
+        }
+    }
+    return nullptr;
+}
+
+// a < b lexicograficamente (bytes não sinalizados).
+bool bytes_less(std::span<const std::byte> a, std::span<const std::byte> b) {
+    const std::size_t n = std::min(a.size(), b.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto ai = std::to_integer<std::uint8_t>(a[i]);
+        const auto bi = std::to_integer<std::uint8_t>(b[i]);
+        if (ai != bi) {
+            return ai < bi;
+        }
+    }
+    return a.size() < b.size();
+}
+
+} // namespace
+
+Result<void> ObjectStore::index_maintain(const std::string& type_name, ObjectId id,
+                                         const FieldValues& fields, bool insert) {
+    if (!indexes_) {
+        return {};
+    }
+    for (std::size_t slot = 0; slot < indexes_->indexes().size(); ++slot) {
+        const auto& info = indexes_->indexes()[slot];
+        if (info.type_name != type_name) {
+            continue;
+        }
+        const AttributeValue* value = field_value(fields, info.field_id);
+        if (value == nullptr || value->is_null()) {
+            continue;  // nulos não entram no índice
+        }
+        auto key = index::encode_key(*value);
+        if (!key) {
+            return std::unexpected(key.error());
+        }
+        auto tree = index::BTree::open(*file_, info.root);
+        if (!tree) {
+            return std::unexpected(tree.error());
+        }
+        if (insert) {
+            if (auto r = tree->insert(*key, id.value); !r) {
+                return std::unexpected(r.error());
+            }
+        } else if (auto r = tree->remove(*key, id.value);
+                   !r && r.error().code != ErrorCode::record_not_found) {
+            return std::unexpected(r.error());
+        }
+        // A raiz muda quando a árvore cresce/encolhe: persiste a nova.
+        if (tree->root_page() != info.root) {
+            if (auto r = indexes_->set_root(slot, tree->root_page()); !r) {
+                return std::unexpected(r.error());
+            }
+        }
+    }
+    return {};
+}
+
+Result<void> ObjectStore::create_index(const TypeDefinition& type, FieldId field) {
+    if (!file_->in_transaction()) {
+        return std::unexpected(
+            Error{ErrorCode::transaction_required, "creating an index requires a transaction"});
+    }
+    if (type.find(field) == nullptr) {
+        return std::unexpected(
+            Error{ErrorCode::invalid_argument, "type has no such field to index"});
+    }
+    if (!indexes_) {
+        auto dir = IndexCatalog::create(*file_);
+        if (!dir) {
+            return std::unexpected(dir.error());
+        }
+        if (auto linked = root_.set_index_dir(dir->directory()); !linked) {
+            return std::unexpected(linked.error());
+        }
+        indexes_ = std::move(*dir);
+    }
+    if (indexes_->find(type.name(), field.value) >= 0) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "index already exists"});
+    }
+
+    auto tree = index::BTree::create(*file_);
+    if (!tree) {
+        return std::unexpected(tree.error());
+    }
+    // Backfill: indexa os objetos CURRENT do tipo (todas as versões de schema).
+    auto records = data_heap_.scan_records();
+    if (!records) {
+        return std::unexpected(records.error());
+    }
+    for (const auto& record : *records) {
+        auto object = decode_object(record.bytes);
+        if (!object) {
+            return std::unexpected(object.error());
+        }
+        auto current = identity_.find(object->id);
+        if (!current || *current != record.id) {
+            continue;  // versão previous ou órfã
+        }
+        auto object_type = find_type(object->type);
+        if (!object_type || object_type->get().name() != type.name()) {
+            continue;  // outro tipo lógico
+        }
+        const AttributeValue* value = field_value(object->fields, field.value);
+        if (value == nullptr || value->is_null()) {
+            continue;
+        }
+        auto key = index::encode_key(*value);
+        if (!key) {
+            return std::unexpected(key.error());
+        }
+        if (auto r = tree->insert(*key, object->id.value); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+    return indexes_->add(IndexInfo{std::string{type.name()}, field.value, tree->root_page()});
+}
+
+bool ObjectStore::has_index(std::string_view type_name, std::uint16_t field_id) const noexcept {
+    return indexes_.has_value() && indexes_->find(type_name, field_id) >= 0;
+}
+
+Result<std::vector<ObjectId>> ObjectStore::index_equal(std::string_view type_name,
+                                                       std::uint16_t field_id,
+                                                       const AttributeValue& key) const {
+    return index_range(type_name, field_id, key, key);
+}
+
+Result<std::vector<ObjectId>> ObjectStore::index_range(std::string_view type_name,
+                                                       std::uint16_t field_id,
+                                                       const AttributeValue& lo,
+                                                       const AttributeValue& hi) const {
+    if (!indexes_) {
+        return std::unexpected(Error{ErrorCode::type_not_found, "no index on this field"});
+    }
+    const int slot = indexes_->find(type_name, field_id);
+    if (slot < 0) {
+        return std::unexpected(Error{ErrorCode::type_not_found, "no index on this field"});
+    }
+    auto lo_key = index::encode_key(lo);
+    if (!lo_key) {
+        return std::unexpected(lo_key.error());
+    }
+    auto hi_key = index::encode_key(hi);
+    if (!hi_key) {
+        return std::unexpected(hi_key.error());
+    }
+    auto tree = index::BTree::open(*file_, indexes_->indexes()[static_cast<std::size_t>(slot)].root);
+    if (!tree) {
+        return std::unexpected(tree.error());
+    }
+    auto ids = tree->range(*lo_key, *hi_key);
+    if (!ids) {
+        return std::unexpected(ids.error());
+    }
+    std::vector<ObjectId> out;
+    out.reserve(ids->size());
+    for (auto value : *ids) {
+        out.push_back(ObjectId{value});
+    }
+    return out;
+}
+
+Result<std::optional<DecodedObject>> ObjectStore::index_candidate_at(
+    ObjectId id, std::uint64_t snapshot_epoch, std::uint16_t field_id, const AttributeValue& lo,
+    const AttributeValue& hi) {
+    auto object = get_at(id, snapshot_epoch);
+    if (!object) {
+        if (object.error().code == ErrorCode::record_not_found) {
+            return std::optional<DecodedObject>{};  // não visível nesta época
+        }
+        return std::unexpected(object.error());
+    }
+    const AttributeValue* value = field_value(object->fields, field_id);
+    if (value == nullptr || value->is_null()) {
+        return std::optional<DecodedObject>{};
+    }
+    auto enc = index::encode_key(*value);
+    if (!enc) {
+        return std::unexpected(enc.error());
+    }
+    auto lo_key = index::encode_key(lo);
+    if (!lo_key) {
+        return std::unexpected(lo_key.error());
+    }
+    auto hi_key = index::encode_key(hi);
+    if (!hi_key) {
+        return std::unexpected(hi_key.error());
+    }
+    if (bytes_less(*enc, *lo_key) || bytes_less(*hi_key, *enc)) {
+        return std::optional<DecodedObject>{};  // fora da faixa na versão do snapshot
+    }
+    return std::optional<DecodedObject>{std::move(*object)};
 }
 
 Result<std::size_t> ObjectStore::collect_garbage(

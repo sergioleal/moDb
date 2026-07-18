@@ -139,7 +139,8 @@ int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force);
 int command_mvcc_gc(const std::filesystem::path& path);
 int command_mvcc_versions(const std::filesystem::path& path, std::uint64_t object_id);
 int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
-                           std::optional<double> min_salary);
+                           std::optional<double> min_salary, std::optional<double> eq_salary);
+int command_employee_index(const std::filesystem::path& path, int schema);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -286,12 +287,15 @@ void print_oo_help() {
                  "  modb oo employee get <file> <object-id> --schema <1|2>\n"
                  "  modb oo employee set-salary <file> <object-id> <salary> "
                  "--schema <1|2>\n"
+                 "  modb oo employee index <file> --schema <1|2>\n"
                  "  modb oo employee query <file> --schema <1|2> [--limit N] "
-                 "[--min-salary S]\n"
+                 "[--min-salary S] [--salary S]\n"
                  "  modb oo employee demo <file> [--force]\n"
                  "\n"
                  "query streams the employees lazily (ODB++ Fase 7A): --min-salary filters,\n"
-                 "--limit stops the scan early, and it reports how many data pages were read.\n";
+                 "--limit stops the scan early, and it reports how many data pages were read.\n"
+                 "index builds a B+ tree on Employee.salary (ODB++ Fase 7B); then\n"
+                 "query --salary S does an equality Index Scan instead of a full scan.\n";
 }
 
 void print_blob_help() {
@@ -1922,7 +1926,7 @@ int command_employee_get(const std::filesystem::path& path, std::uint64_t object
 // opcionalmente filtrando por salário mínimo e limitando a N resultados, e
 // reporta quantas páginas de dados foram lidas — com `--limit`, poucas.
 int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
-                           std::optional<double> min_salary) {
+                           std::optional<double> min_salary, std::optional<double> eq_salary) {
     auto session = DatabaseSession::open(path);
     if (!session) {
         return print_error(session.error());
@@ -1936,6 +1940,10 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
             return print_error(bound.error());
         }
         auto query = database.query<EmployeeV1>();
+        if (eq_salary) {  // Index Scan por igualdade de salário (Fase 7B).
+            std::move(query).equals(modb::object::FieldId{2},
+                                    modb::object::AttributeValue{*eq_salary});
+        }
         if (min_salary) {
             std::move(query).where(
                 [threshold = *min_salary](const EmployeeV1& e) { return e.salary >= threshold; });
@@ -1956,6 +1964,10 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
             return print_error(bound.error());
         }
         auto query = database.query<EmployeeV2>();
+        if (eq_salary) {
+            std::move(query).equals(modb::object::FieldId{2},
+                                    modb::object::AttributeValue{*eq_salary});
+        }
         if (min_salary) {
             std::move(query).where(
                 [threshold = *min_salary](const EmployeeV2& e) { return e.salary >= threshold; });
@@ -1974,8 +1986,35 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
         }
     }
 
-    std::cout << shown << " employee(s) streamed; data pages read: " << database.data_pages_read()
-              << '\n';
+    std::cout << shown << " employee(s) streamed" << (eq_salary ? " (via index)" : "")
+              << "; data pages read: " << database.data_pages_read() << '\n';
+    return 0;
+}
+
+// modb oo employee index <file> --schema <1|2>
+// Cria um índice B+ tree sobre Employee.salary (Fase 7B).
+int command_employee_index(const std::filesystem::path& path, int schema) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    auto& database = session->database();
+    modb::Result<void> created;
+    if (schema == 1) {
+        if (auto bound = database.bind(employee_v1_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        created = database.create_index<EmployeeV1>(modb::object::FieldId{2});
+    } else {
+        if (auto bound = database.bind(employee_v2_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        created = database.create_index<EmployeeV2>(modb::object::FieldId{2});
+    }
+    if (!created) {
+        return print_error(created.error());
+    }
+    std::cout << "Index created on Employee.salary (field 2)\n";
     return 0;
 }
 
@@ -3137,13 +3176,15 @@ int run_oo_command(int argc, char* argv[]) {
     }
     if (subcommand == "query") {
         constexpr const char* usage =
-            "modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S]";
+            "modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S] "
+            "[--salary S]";
         if (argc < 5) {
             return print_usage_error(usage);
         }
         std::optional<int> schema;
         std::size_t limit = 0;
         std::optional<double> min_salary;
+        std::optional<double> eq_salary;
         for (int i = 5; i < argc; ++i) {
             const std::string_view flag{argv[i]};
             if (flag == "--schema" && i + 1 < argc) {
@@ -3164,6 +3205,12 @@ int run_oo_command(int argc, char* argv[]) {
                     return print_error(parsed.error());
                 }
                 min_salary = *parsed;
+            } else if (flag == "--salary" && i + 1 < argc) {
+                auto parsed = parse_real(argv[++i]);
+                if (!parsed) {
+                    return print_error(parsed.error());
+                }
+                eq_salary = *parsed;
             } else {
                 return print_usage_error(usage);
             }
@@ -3171,7 +3218,17 @@ int run_oo_command(int argc, char* argv[]) {
         if (!schema) {
             return print_usage_error(usage);
         }
-        return command_employee_query(argv[4], *schema, limit, min_salary);
+        return command_employee_query(argv[4], *schema, limit, min_salary, eq_salary);
+    }
+    if (subcommand == "index") {
+        if (argc != 7 || std::string_view{argv[5]} != "--schema") {
+            return print_usage_error("modb oo employee index <file> --schema <1|2>");
+        }
+        auto schema = parse_employee_schema(argv[6]);
+        if (!schema) {
+            return print_error(schema.error());
+        }
+        return command_employee_index(argv[4], *schema);
     }
     std::cerr << "Unknown oo employee command: " << subcommand << '\n';
     return 2;

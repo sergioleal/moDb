@@ -33,6 +33,10 @@ public:
     [[nodiscard]] std::optional<storage::PageId> identity_dir() const noexcept;
     [[nodiscard]] std::optional<storage::PageId> catalog_heap_root() const noexcept;
     [[nodiscard]] std::optional<storage::PageId> data_heap_root() const noexcept;
+    // Diretório de índices (Fase 7B); nullopt quando nenhum índice foi criado.
+    // Gravado em espaço reservado do DBRT v2 (arquivos antigos leem 0), então
+    // não muda a versão do formato.
+    [[nodiscard]] std::optional<storage::PageId> index_dir() const noexcept;
     // Próximo ObjectId a alocar; começa em first_user_object_id.
     [[nodiscard]] std::uint64_t next_object_id() const noexcept { return next_object_id_; }
     // Baseline corrente; invalid_object_id (0) quando ainda não há nenhuma.
@@ -50,6 +54,7 @@ public:
     [[nodiscard]] Result<void> set_next_object_id(std::uint64_t next);
     [[nodiscard]] Result<void> set_current_baseline(BaselineId baseline);
     [[nodiscard]] Result<void> advance_epoch();
+    [[nodiscard]] Result<void> set_index_dir(storage::PageId id);
 
 private:
     DatabaseRoot(storage::PageFile& file, storage::PageId page) noexcept
@@ -69,6 +74,7 @@ private:
     std::uint64_t next_object_id_{first_user_object_id};
     std::uint64_t current_baseline_{};
     std::uint64_t epoch_{};
+    std::uint64_t index_dir_{};
 };
 
 } // namespace modb::object

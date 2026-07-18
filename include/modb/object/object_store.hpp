@@ -7,6 +7,7 @@
 #include "modb/object/catalog_store.hpp"
 #include "modb/object/database_root.hpp"
 #include "modb/object/identity_map.hpp"
+#include "modb/object/index_catalog.hpp"
 #include "modb/object/object_codec.hpp"
 #include "modb/object/type_definition.hpp"
 #include "modb/object/type_registry.hpp"
@@ -166,10 +167,38 @@ private:
     // que este `previous` teria de virar.
     [[nodiscard]] Result<void> check_snapshot_conflict(
         ObjectId id, std::optional<std::uint64_t> oldest_open_snapshot_epoch) const;
+    // Cria um índice sobre (tipo, campo): monta a B+ tree, backfill dos objetos
+    // atuais e registra no catálogo. Exige transação (as escritas passam pelo
+    // WAL). Fase 7B.
+    [[nodiscard]] Result<void> create_index(const TypeDefinition& type, FieldId field);
+    // Há um índice sobre (tipo lógico, campo)?
+    [[nodiscard]] bool has_index(std::string_view type_name, std::uint16_t field_id) const noexcept;
+    // Igualdade/faixa via B+ tree: ObjectIds cujo valor de campo casa. Fase 7B.
+    [[nodiscard]] Result<std::vector<ObjectId>> index_equal(std::string_view type_name,
+                                                            std::uint16_t field_id,
+                                                            const AttributeValue& key) const;
+    [[nodiscard]] Result<std::vector<ObjectId>> index_range(std::string_view type_name,
+                                                            std::uint16_t field_id,
+                                                            const AttributeValue& lo,
+                                                            const AttributeValue& hi) const;
+    // Revalida um candidato do índice contra a versão visível no snapshot (Fase
+    // 7B): devolve o objeto na época `snapshot_epoch` só se o valor do campo
+    // `field_id` estiver em [lo, hi] nessa versão; nullopt se não visível
+    // (criado/removido depois) ou fora da faixa. O índice reflete o estado
+    // corrente, então esta checagem evita falso-positivo sob o snapshot.
+    [[nodiscard]] Result<std::optional<DecodedObject>> index_candidate_at(
+        ObjectId id, std::uint64_t snapshot_epoch, std::uint16_t field_id, const AttributeValue& lo,
+        const AttributeValue& hi);
+    // Mantém todos os índices do tipo após uma escrita: `insert=true` adiciona a
+    // entrada do objeto, `false` a remove. Nulos não são indexados.
+    [[nodiscard]] Result<void> index_maintain(const std::string& type_name, ObjectId id,
+                                              const FieldValues& fields, bool insert);
+
     ObjectStore(storage::PageFile& file, DatabaseRoot root, IdentityMap identity,
                 storage::TableHeap data_heap, CatalogStore catalog, TypeRegistry registry,
                 std::vector<TypeDefinitionId> type_ids, std::vector<Baseline> baselines,
-                std::optional<Baseline> baseline) noexcept
+                std::optional<Baseline> baseline,
+                std::optional<IndexCatalog> indexes = std::nullopt) noexcept
         : file_{&file},
           root_{std::move(root)},
           identity_{std::move(identity)},
@@ -178,7 +207,8 @@ private:
           registry_{std::move(registry)},
           type_ids_{std::move(type_ids)},
           baselines_{std::move(baselines)},
-          current_baseline_{std::move(baseline)} {}
+          current_baseline_{std::move(baseline)},
+          indexes_{std::move(indexes)} {}
 
     // Aloca o próximo ObjectId, persistindo o contador antes de devolvê-lo.
     [[nodiscard]] Result<ObjectId> allocate_object_id();
@@ -195,6 +225,8 @@ private:
     // Baselines históricas imutáveis, inclusive a corrente.
     std::vector<Baseline> baselines_;
     std::optional<Baseline> current_baseline_;
+    // Diretório de índices (Fase 7B); nullopt até o primeiro índice ser criado.
+    std::optional<IndexCatalog> indexes_;
 };
 
 } // namespace modb::object

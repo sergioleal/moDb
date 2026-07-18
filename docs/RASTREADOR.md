@@ -47,11 +47,11 @@
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
-| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 4/14 | Fases 4, 6 |
+| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 7/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **72/110 (~65%)** | |
+| **Total** | | | **75/110 (~68%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -449,8 +449,8 @@ processo (`modb.snapshot`, `modb.mvcc_recovery`). Suíte completa 64/64 em Debug
 
 ## Fase 7 — Índices e consultas em streaming (embedded)
 
-Status: 🔄 Em andamento (4/14) — cinco entregas verticais; 7A concluída,
-7B–7E não iniciadas. Definição completa:
+Status: 🔄 Em andamento (7/14) — cinco entregas verticais; 7A e 7B
+concluídas, 7C–7E não iniciadas. Definição completa:
 [PLANO_ODB.md §Fase 7](PLANO_ODB.md#fase-7--índices-e-consultas-em-streaming-embedded) ·
 [PROTOCOLO_FASES.md §Fase 7](PROTOCOLO_FASES.md#fase-7--índices-e-consultas-em-streaming-embedded)
 
@@ -481,16 +481,33 @@ sanitizers.
 
 ### Fase 7B — Consultas indexadas
 
-Status: ⬜ Não iniciada (0/3) — bloqueada pela Fase 7A.
+Status: ✅ Concluída (3/3) — commit `PREENCHER`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 7B.1 | `IndexDefinition` + B+ tree persistente (`find`/`range`) | ⬜ | |
-| 7B.2 | Manutenção transacional e recovery do índice | ⬜ | Create/update/remove atômicos com índice |
-| 7B.3 | Index Scan integrado à API streaming | ⬜ | Igualdade e faixa |
+| 7B.1 | `IndexDefinition` + B+ tree persistente (`find`/`range`) | ✅ | `index::BTree` (BTLF/BTIN, split até a raiz); `key_codec` ordenável; `IndexCatalog` no DBRT |
+| 7B.2 | Manutenção transacional e recovery do índice | ✅ | `index_maintain` em create/update/remove; raiz no catálogo; recovery via WAL |
+| 7B.3 | Index Scan integrado à API streaming | ✅ | `query<T>().equals/.between`; candidatos revalidados contra o snapshot |
 
-Critério de aceite 7B: ⬜ buscas por chave/faixa usam a B+ tree, preservam
-duplicatas e permanecem corretas após commit, recovery e reabertura.
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.btree` | inserção ordenada/embaralhada (2–3 mil), invariantes (ordem, profundidade uniforme, split interno), duplicatas, faixa, remoção, reabertura, ordem por tipo (int com sinal, float, string) | ✅ |
+| `modb.indexed_query` | criação com backfill, igualdade/faixa em ordem, duplicatas, índice lê menos páginas que scan, manutenção em update/remove, reabertura e **recovery** de objeto + índice | ✅ |
+| `modb.cli.oo_index` / `modb.cli.oo_query_indexed` | `oo employee index` + `query --salary` (Index Scan por igualdade) | ✅ |
+
+Critério de aceite 7B: ✅ buscas por igualdade e faixa usam comprovadamente a B+
+tree (uma consulta seletiva lê menos páginas que o scan completo), preservam
+duplicatas (chave composta valor+ObjectId) e permanecem corretas após commit,
+recovery (objeto e índice refeitos juntos pelo WAL) e reabertura (raiz
+persistida no catálogo). Suíte completa 73/73 em Debug, `-Werror` e sanitizers.
+
+Limitação documentada (MVP): a remoção na B+ tree não faz merge/borrow (folha
+pode ficar abaixo do mínimo — `find`/`range` seguem corretos); o diretório de
+índices cabe em uma página; o Index Scan usa o índice corrente e revalida cada
+candidato contra a versão do snapshot (sem falso-positivo; um valor alterado
+depois de o snapshot abrir pode causar um miss — cenário raro no single-writer).
 
 ### Fase 7C — Projeção e transformação
 

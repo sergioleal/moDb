@@ -386,11 +386,11 @@ Fase 6D.
 
 #### Fase 7B — Consultas indexadas
 
-- [ ] Implementar `IndexDefinition` no catálogo e B+ tree persistente com
+- [x] Implementar `IndexDefinition` no catálogo e B+ tree persistente com
       `insert`, `remove`, `find` e `range`.
-- [ ] Manter o índice atomicamente com as escritas de objetos e comprovar
+- [x] Manter o índice atomicamente com as escritas de objetos e comprovar
       recuperação e reabertura.
-- [ ] Integrar Index Scan e buscas por igualdade/faixa à API streaming.
+- [x] Integrar Index Scan e buscas por igualdade/faixa à API streaming.
 
 Entregável 7B: consultas por chave e intervalo sem varredura completa.
 

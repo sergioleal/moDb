@@ -158,6 +158,22 @@ public:
         has_token_ = true;
         return std::move(*this);
     }
+    // Index Scan por igualdade (Fase 7B): usa a B+ tree do campo para gerar só
+    // os candidatos, revalidados contra o snapshot. Exige um índice sobre o
+    // campo; senão `stream()` devolve `type_not_found`.
+    Query&& equals(FieldId field, AttributeValue value) && {
+        index_field_ = field.value;
+        index_lo_ = value;
+        index_hi_ = std::move(value);
+        return std::move(*this);
+    }
+    // Index Scan por faixa [lo, hi] inclusive (Fase 7B).
+    Query&& between(FieldId field, AttributeValue lo, AttributeValue hi) && {
+        index_field_ = field.value;
+        index_lo_ = std::move(lo);
+        index_hi_ = std::move(hi);
+        return std::move(*this);
+    }
     // Constrói o Generator preguiçoso; consome a Query (move o Snapshot).
     [[nodiscard]] query::Generator<Result<T>> stream() &&;
 
@@ -178,6 +194,10 @@ private:
     std::size_t limit_{0};
     query::CancellationToken token_;
     bool has_token_{false};
+    // Index Scan: quando presente, o campo e a faixa [lo, hi] da busca.
+    std::optional<std::uint16_t> index_field_;
+    AttributeValue index_lo_;
+    AttributeValue index_hi_;
 };
 
 // Registro de processo que mantém bancos vivos e permite que Handles resolvam
@@ -455,6 +475,51 @@ public:
             return Query<T>{this, std::nullopt, opened.error()};
         }
         return Query<T>{this, std::move(*opened), std::nullopt};
+    }
+
+    // Cria um índice B+ tree sobre o campo `field` do tipo T (Fase 7B): monta a
+    // árvore, indexa os objetos atuais (backfill) e registra no catálogo, tudo
+    // numa transação interna (WAL). Depois, `query<T>().equals/.between` usam a
+    // árvore. Falha se houver transação ativa ou se o tipo não estiver bound.
+    template <typename T>
+    [[nodiscard]] Result<void> create_index(FieldId field) {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        if (database_id_.value == 0) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_argument, "database must be attached before use"});
+        }
+        if (file_->in_transaction()) {
+            return std::unexpected(Error{ErrorCode::transaction_active,
+                                         "cannot create an index inside a transaction"});
+        }
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
+        }
+        auto type = store_.find_type(bound->type_id);
+        if (!type) {
+            return std::unexpected(type.error());
+        }
+        current_tx_id_ = next_tx_id_++;
+        commit_durable_ = false;
+        file_->begin_transaction();
+        if (auto created = store_.create_index(type->get(), field); !created) {
+            (void)rollback_transaction();
+            return std::unexpected(created.error());
+        }
+        if (auto committed = commit_transaction(CommitPhase::full); !committed) {
+            if (commit_is_durable()) {
+                require_recovery();
+                return std::unexpected(Error{ErrorCode::commit_recovery_required,
+                                             "index commit is durable but requires recovery: " +
+                                                 committed.error().message});
+            }
+            (void)rollback_transaction();
+            return std::unexpected(committed.error());
+        }
+        return {};
     }
 
     Result<void> register_migration(std::string type_name, std::uint64_t from_type_id,
@@ -751,6 +816,55 @@ private:
         }
     }
 
+    // Index Scan (Fase 7B): a B+ tree do campo gera os candidatos (em ordem de
+    // valor); cada um é revalidado contra a versão do snapshot antes de
+    // materializar, aplicar Predicate e Limit. O Snapshot vive na moldura da
+    // coroutine (leitura estável). Sem índice sobre o campo → erro.
+    template <typename T>
+    query::Generator<Result<T>> run_index_stream(Snapshot snapshot, std::uint16_t field,
+                                                 AttributeValue lo, AttributeValue hi,
+                                                 std::function<bool(const T&)> predicate,
+                                                 std::size_t limit_count,
+                                                 query::CancellationToken token, bool has_token) {
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            co_yield Result<T>{std::unexpected(Error{ErrorCode::type_not_found,
+                                                     "type is not bound"})};
+            co_return;
+        }
+        auto ids = store_.index_range(bound->binding.type_name(), field, lo, hi);
+        if (!ids) {
+            co_yield Result<T>{std::unexpected(ids.error())};
+            co_return;
+        }
+        std::size_t emitted = 0;
+        for (const auto& id : *ids) {
+            if (has_token && token.cancelled()) {
+                co_return;
+            }
+            auto candidate = store_.index_candidate_at(id, snapshot.epoch(), field, lo, hi);
+            if (!candidate) {
+                co_yield Result<T>{std::unexpected(candidate.error())};
+                co_return;
+            }
+            if (!*candidate) {
+                continue;  // não visível ou fora da faixa na versão do snapshot
+            }
+            auto value = materialize_decoded<T>(*bound, **candidate);
+            if (!value) {
+                co_yield Result<T>{std::unexpected(value.error())};
+                co_return;
+            }
+            if (predicate && !predicate(*value)) {
+                continue;
+            }
+            co_yield Result<T>{std::move(*value)};
+            if (limit_count != 0 && ++emitted >= limit_count) {
+                co_return;
+            }
+        }
+    }
+
     // Fluxo que cede um único erro — usado quando a configuração da Query falhou
     // (tipo não bound, snapshot não pôde abrir) antes de qualquer leitura.
     template <typename T>
@@ -821,6 +935,11 @@ template <typename T>
 query::Generator<Result<T>> Query<T>::stream() && {
     if (setup_error_) {
         return database_->template failed_stream<T>(std::move(*setup_error_));
+    }
+    if (index_field_) {
+        return database_->template run_index_stream<T>(
+            std::move(*snapshot_), *index_field_, std::move(index_lo_), std::move(index_hi_),
+            std::move(predicate_), limit_, std::move(token_), has_token_);
     }
     return database_->template run_stream<T>(std::move(*snapshot_), std::move(predicate_), limit_,
                                              std::move(token_), has_token_);
