@@ -455,11 +455,11 @@ Fase 7.
 
 #### Fase 8A — Contratos e codec do protocolo
 
-- [ ] Registrar a ADR-011 com o modelo de concorrência do servidor
+- [x] Registrar a ADR-011 com o modelo de concorrência do servidor
       (leitor por conexão, workers de consulta, escritor dedicado) e
       revisar as premissas single-thread afetadas (`ScratchPagePool`,
       `DatabaseRegistry`, etc.).
-- [ ] Definir `QueryDescription` serializável e o codec das mensagens
+- [x] Definir `QueryDescription` serializável e o codec das mensagens
       versionadas (`Hello`, `Query`, `StreamBegin`, `ObjectFrame`,
       `StreamEnd`, `StreamError`, `Cancel`), com `ObjectEnvelope` lógico
       (`ObjectId` + `TypeDefinitionId` + payload) e framing com diretório

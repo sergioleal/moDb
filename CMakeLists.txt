@@ -49,6 +49,7 @@ add_library(modb
     src/object/type_definition.cpp
     src/object/type_registry.cpp
     src/index/btree.cpp
+    src/net/protocol.cpp
     src/storage/binary.cpp
     src/storage/codec.cpp
     src/storage/page_file.cpp
@@ -236,6 +237,9 @@ if(BUILD_TESTING)
     add_executable(modb_planner_tests tests/planner_test.cpp)
     target_link_libraries(modb_planner_tests PRIVATE modb::modb)
 
+    add_executable(modb_protocol_tests tests/protocol_test.cpp)
+    target_link_libraries(modb_protocol_tests PRIVATE modb::modb)
+
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
@@ -307,6 +311,7 @@ if(BUILD_TESTING)
         target_link_options(modb_projection_query_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_aggregation_query_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_planner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_protocol_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -346,6 +351,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.projection_query COMMAND modb_projection_query_tests)
     add_test(NAME modb.aggregation_query COMMAND modb_aggregation_query_tests)
     add_test(NAME modb.planner COMMAND modb_planner_tests)
+    add_test(NAME modb.protocol COMMAND modb_protocol_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)
@@ -373,6 +379,8 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.heap_help COMMAND modb_cli heap --help)
     add_test(NAME modb.cli.codec COMMAND modb_cli codec)
     add_test(NAME modb.cli.codec_help COMMAND modb_cli codec --help)
+    add_test(NAME modb.cli.protocol COMMAND modb_cli protocol)
+    add_test(NAME modb.cli.protocol_help COMMAND modb_cli protocol --help)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
     add_test(NAME modb.cli.types_help COMMAND modb_cli types --help)
     add_test(NAME modb.cli.type_help COMMAND modb_cli type --help)
