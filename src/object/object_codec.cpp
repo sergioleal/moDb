@@ -178,8 +178,7 @@ Result<AttributeValue> decode_value(storage::BinaryReader& reader) {
     return std::unexpected(Error{ErrorCode::invalid_encoding, "unknown attribute tag"});
 }
 
-Result<std::vector<std::byte>> encode_object(ObjectId id, TypeDefinitionId type,
-                                             const FieldValues& fields) {
+Result<std::vector<std::byte>> encode_object_payload(const FieldValues& fields) {
     // O teto de campos por objeto é o mesmo de atributos por tipo (ADR-007).
     if (fields.size() > modb::max_columns_per_table) {
         return std::unexpected(
@@ -187,10 +186,6 @@ Result<std::vector<std::byte>> encode_object(ObjectId id, TypeDefinitionId type,
     }
 
     storage::BinaryWriter writer;
-    // Cabeçalho do registro.
-    writer.write_u64(id.value);
-    writer.write_u64(type.value);
-    // Cabeçalho do payload.
     writer.write_u8(object_payload_version);
     writer.write_u16(static_cast<std::uint16_t>(fields.size()));
     for (const auto& [field_id, value] : fields) {
@@ -202,17 +197,8 @@ Result<std::vector<std::byte>> encode_object(ObjectId id, TypeDefinitionId type,
     return std::move(writer).take();
 }
 
-Result<DecodedObject> decode_object(std::span<const std::byte> record) {
-    storage::BinaryReader reader{record};
-
-    auto id = reader.read_u64();
-    if (!id) {
-        return std::unexpected(id.error());
-    }
-    auto type = reader.read_u64();
-    if (!type) {
-        return std::unexpected(type.error());
-    }
+Result<FieldValues> decode_object_payload(std::span<const std::byte> payload) {
+    storage::BinaryReader reader{payload};
     auto version = reader.read_u8();
     if (!version) {
         return std::unexpected(version.error());
@@ -227,21 +213,14 @@ Result<DecodedObject> decode_object(std::span<const std::byte> record) {
         return std::unexpected(field_count.error());
     }
 
-    DecodedObject object{ObjectId{*id}, TypeDefinitionId{*type}, {}};
-    // Reserva limitada ao teto do produto: uma contagem mentirosa não provoca
-    // alocação gigante; a leitura simplesmente esgota os bytes campo a campo.
-    object.fields.reserve(
-        std::min<std::size_t>(*field_count, modb::max_columns_per_table));
-
+    FieldValues fields;
+    fields.reserve(std::min<std::size_t>(*field_count, modb::max_columns_per_table));
     for (std::uint16_t index = 0; index < *field_count; ++index) {
         auto field_id = reader.read_u16();
         if (!field_id) {
             return std::unexpected(field_id.error());
         }
-        // Campo duplicado é corrupção; varredura linear evita alocar um set e é
-        // barata porque o número de campos íntegros é pequeno (a contagem
-        // mentirosa esbarra antes no fim do buffer).
-        for (const auto& [seen_id, seen_value] : object.fields) {
+        for (const auto& [seen_id, seen_value] : fields) {
             if (seen_id.value == *field_id) {
                 return std::unexpected(Error{
                     ErrorCode::invalid_encoding,
@@ -252,15 +231,44 @@ Result<DecodedObject> decode_object(std::span<const std::byte> record) {
         if (!value) {
             return std::unexpected(value.error());
         }
-        object.fields.emplace_back(FieldId{*field_id}, std::move(*value));
+        fields.emplace_back(FieldId{*field_id}, std::move(*value));
     }
-
-    // Bytes sobrando depois do último campo indicam formato inconsistente.
     if (!reader.at_end()) {
         return std::unexpected(
-            Error{ErrorCode::trailing_data, "object record has trailing bytes"});
+            Error{ErrorCode::trailing_data, "object payload has trailing bytes"});
     }
-    return object;
+    return fields;
+}
+
+Result<std::vector<std::byte>> encode_object(ObjectId id, TypeDefinitionId type,
+                                             const FieldValues& fields) {
+    auto payload = encode_object_payload(fields);
+    if (!payload) {
+        return std::unexpected(payload.error());
+    }
+    storage::BinaryWriter writer;
+    writer.write_u64(id.value);
+    writer.write_u64(type.value);
+    writer.write_bytes(*payload);
+    return std::move(writer).take();
+}
+
+Result<DecodedObject> decode_object(std::span<const std::byte> record) {
+    storage::BinaryReader reader{record};
+
+    auto id = reader.read_u64();
+    if (!id) {
+        return std::unexpected(id.error());
+    }
+    auto type = reader.read_u64();
+    if (!type) {
+        return std::unexpected(type.error());
+    }
+    auto fields = decode_object_payload(reader.remaining_bytes());
+    if (!fields) {
+        return std::unexpected(fields.error());
+    }
+    return DecodedObject{ObjectId{*id}, TypeDefinitionId{*type}, std::move(*fields)};
 }
 
 } // namespace modb::object

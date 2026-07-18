@@ -48,11 +48,11 @@
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
-| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 4/12 | Fase 7 |
+| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 6/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
 | [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10 |
-| **Total** | | | **86/124 (~69%)** | |
+| **Total** | | | **88/124 (~71%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -585,7 +585,7 @@ objetos (TTFR); buscas por chave via índice.
 
 ## Fase 8 — Servidor, protocolo binário e backpressure
 
-Status: 🔄 Em andamento (4/12) — seis entregas verticais 8A–8F.
+Status: 🔄 Em andamento (6/12) — seis entregas verticais 8A–8F.
 Definição completa:
 [PLANO_ODB.md §Fase 8](PLANO_ODB.md#fase-8--servidor-protocolo-binário-e-backpressure) ·
 [PROTOCOLO_FASES.md §Fase 8](PROTOCOLO_FASES.md#fase-8--servidor-protocolo-binário-e-backpressure)
@@ -631,21 +631,22 @@ servidor e ping/info remoto. Suíte completa 89/89 em Debug e sanitizers.
 
 ### Fase 8C — Primeiro streaming remoto
 
-Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8c`. Depende de 8B.
+Status: ✅ Concluída (2/2) — commit `e1a61d3`, tag `0.0.8c`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8C.1 | Execução remota Begin → ObjectFrame(s) → End/Error | ⬜ | `QueryDescription` declarativa restrita |
-| 8C.2 | Cliente C++ + `ObjectStream` incremental | ⬜ | Codec genérico; sem `PageId`/`SlotId`/`RecordId` |
+| 8C.1 | Execução remota Begin → ObjectFrame(s) → End/Error | ✅ | `Database::query_objects` + `Server::handle_query`; failpoint `fail_stream_after` |
+| 8C.2 | Cliente C++ + `ObjectStream` incremental | ✅ | `modb/net/client.hpp`; payload via `encode_object_payload` |
 
 ### Testes automatizados desta subfase
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.server_streaming` (fluxo) | 10 mil objetos; ordem; independência física; erro após N | ⬜ |
+| `modb.server_streaming` | 10 mil objetos; ordem; independência física; erro após N; filtro/projeção | ✅ |
+| `modb.cli.serve_query_demo` | `modb serve query-demo` stream remoto in-process | ✅ |
 
-Critério de aceite 8C: ⬜ fluxo íntegro de 10 mil objetos; falha parcial
-entrega N + `StreamError`.
+Critério de aceite 8C: ✅ fluxo íntegro de 10 mil objetos; falha parcial
+entrega N + `StreamError`. Suíte completa 90/90 em Debug e sanitizers.
 
 ### Fase 8D — Backpressure e ciclo de recursos
 
