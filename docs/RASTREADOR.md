@@ -419,7 +419,7 @@ Debug, `-Werror` e sanitizers.
 
 ### Fase 6D — Integração e recuperação
 
-Status: ✅ Concluída (2/2) — commit `PREENCHER`, 2026-07-17.
+Status: ✅ Concluída (2/2) — commit `3f65e3f`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
