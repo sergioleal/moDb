@@ -534,7 +534,7 @@ completa 77/77 em Debug, `-Werror` e sanitizers.
 
 ### Fase 7D — Ordenação e agregação
 
-Status: ✅ Concluída (2/2) — commit `TBD`, 2026-07-18.
+Status: ✅ Concluída (2/2) — commit `172134d`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
