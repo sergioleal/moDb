@@ -637,6 +637,12 @@ Tarefas:
       ambiente e secrets; nunca incluir segredos ou dados na imagem.
 - [ ] Montar os arquivos do banco e WAL em armazenamento persistente com as
       garantias de locking, flush e atomicidade exigidas pelo motor.
+- [ ] Implementar I/O assíncrono real sob uma abstração única: `io_uring` no
+      Linux e IOCP no Windows, com leitura, escrita, flush, cancelamento,
+      limites de operações em voo e fallback síncrono detectado em runtime
+      para kernels ou volumes incompatíveis. A ordem WAL → flush → páginas
+      deve depender de completions/barreiras explícitas, nunca apenas da ordem
+      de submissão.
 - [ ] Implementar readiness, liveness, startup probe e desligamento gracioso,
       bloqueando novas operações e concluindo ou revertendo transações antes do
       prazo de término da plataforma.
@@ -650,13 +656,17 @@ Tarefas:
       restrições de plataforma, backup, restauração e custo operacional.
 
 Entregáveis: imagem OCI publicada; manifesto de implantação serverless de
-referência; guia operacional; testes de container, cold start e recovery.
+referência; camada de I/O assíncrono real; guia operacional; testes de
+container, cold start e recovery.
 
 Critério de aceite: a imagem sobe a partir de zero, monta armazenamento
 durável, recupera o banco quando necessário e atende um cliente da fase 8/9;
 após término completo e nova inicialização, os objetos commitados permanecem e
 transações incompletas não aparecem. A validação deve comprovar uso de uma única
 instância ativa, memória limitada, backpressure e execução sem privilégios.
+Nos ambientes compatíveis, métricas e testes devem comprovar uso efetivo de
+`io_uring`/IOCP sem bloquear o executor; o fallback deve ser explícito e
+preservar a mesma correção e durabilidade.
 
 ## 6. Itens deliberadamente fora deste plano
 

@@ -51,8 +51,8 @@
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 2/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/10 | Fases 8, 9, 10 |
-| **Total** | | | **84/123 (~68%)** | |
+| [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10 |
+| **Total** | | | **84/124 (~68%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -807,7 +807,7 @@ automaticamente, interfaces públicas documentadas.
 
 ## Fase 11 — Container serverless
 
-Status: ⬜ Não iniciada (0/10) — Definição completa:
+Status: ⬜ Não iniciada (0/11) — Definição completa:
 [PLANO_ODB.md §Fase 11](PLANO_ODB.md#fase-11--container-serverless) ·
 [PROTOCOLO_FASES.md §Fase 11](PROTOCOLO_FASES.md#fase-11--container-serverless)
 
@@ -818,11 +818,12 @@ Status: ⬜ Não iniciada (0/10) — Definição completa:
 | 11.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | Sem expor formato físico; backpressure preservado |
 | 11.4 | Configuração só por env/secrets | ⬜ | Sem dados nem credenciais na imagem |
 | 11.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | Disco efêmero proibido como fonte de verdade |
-| 11.6 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | `SIGTERM` drena e sincroniza antes do prazo |
-| 11.7 | Recovery em cold start e após término forçado | ⬜ | Inclui WAL pendente |
-| 11.8 | Logs estruturados e métricas operacionais | ⬜ | Cold start, recovery, conexões, I/O, latência |
-| 11.9 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | |
-| 11.10 | Guia de operação local e implantação de referência | ⬜ | `docs/OPERACAO_SERVERLESS.md` |
+| 11.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ⬜ | Completion/`co_await`, cancelamento, fila limitada, ordering WAL explícito |
+| 11.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
+| 11.8 | Recovery em cold start e após término forçado | ⬜ | Inclui WAL pendente |
+| 11.9 | Logs estruturados e métricas operacionais | ⬜ | Inclui backend de I/O, queue depth, completions e fallbacks |
+| 11.10 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | |
+| 11.11 | Guia de operação local e implantação de referência | ⬜ | `docs/OPERACAO_SERVERLESS.md` |
 
 ### Testes/artefatos desta fase
 
@@ -830,12 +831,15 @@ Status: ⬜ Não iniciada (0/10) — Definição completa:
 |---|---|---|
 | Build da imagem OCI | `deploy/Dockerfile` | ⬜ |
 | Smoke container + volume | `tests/container_smoke_test` ou script CI | ⬜ |
+| Contrato de I/O assíncrono real | `tests/async_file_test.cpp` em Linux/Windows | ⬜ |
 | Kill -9 + reabertura no mesmo volume | prova de recovery | ⬜ |
 | Manifesto de referência | `deploy/` | ⬜ |
 
 Critério de aceite: ⬜ imagem sobe do zero com volume durável, recupera WAL,
 atende cliente 8/9, preserva commits após término forçado, uma instância
-ativa, sem privilégios, com backpressure.
+ativa, sem privilégios, com backpressure. Em ambientes compatíveis, testes e
+métricas comprovam completions reais por `io_uring`/IOCP; fallback explícito
+mantém a mesma durabilidade.
 
 ---
 

@@ -1672,6 +1672,10 @@ existir antes da superfície operacional.
    variáveis/secrets; a imagem não contém dados nem credenciais.
 5. **Processo não privilegiado**, filesystem raiz somente leitura, volume
    montado com permissão de escrita só no diretório de dados.
+6. **I/O assíncrono real quando suportado.** Linux usa `io_uring`; Windows usa
+   IOCP com handles abertos por `FILE_FLAG_OVERLAPPED`. Um fallback síncrono
+   explícito preserva portabilidade para kernels, políticas seccomp e volumes
+   que não ofereçam as operações necessárias.
 
 ## Artefatos novos
 
@@ -1683,23 +1687,57 @@ deploy/k8s/                           (ou manifesto da plataforma escolhida)
 docs/decisions/ADR-013-execucao-serverless-em-container.md
 docs/OPERACAO_SERVERLESS.md
 tests/container_smoke_test.*          (ou script CI que sobe a imagem)
+include/modb/storage/async_file.hpp
+src/storage/async_file_linux.cpp       (`io_uring`)
+src/storage/async_file_windows.cpp     (IOCP)
+tests/async_file_test.cpp
 ```
+
+## Protocolo do I/O assíncrono
+
+- Expor uma API única baseada em completion/`co_await` para `read_at`,
+  `write_at`, `sync` e cancelamento. A coroutine só retoma após a conclusão
+  real do kernel; delegar `pread`/`pwrite` bloqueante a `std::async` não atende
+  este requisito.
+- Linux: detectar `io_uring` em runtime e usar operações de leitura, escrita e
+  `IORING_OP_FSYNC`; registrar a razão do fallback quando syscall, opcode,
+  política seccomp ou filesystem não forem compatíveis.
+- Windows: abrir o arquivo com `FILE_FLAG_OVERLAPPED`, associá-lo a uma
+  completion port e consumir completions via `GetQueuedCompletionStatus`;
+  usar `CancelIoEx` no cancelamento.
+- Manter buffers vivos e imóveis até a completion; validar alinhamento e
+  tamanho; tratar completions parciais, `EINTR`, cancelamento e fechamento com
+  operações ainda em voo.
+- Limitar a profundidade da fila e os bytes em voo. Saturação suspende o
+  produtor e propaga backpressure até consulta/rede, sem fila ilimitada.
+- Durabilidade não decorre da ordem de submissão. O commit espera
+  explicitamente a completion do WAL e de seu flush antes de liberar páginas
+  de dados; shutdown drena ou cancela e aguarda todas as completions.
+- Expor métricas `io_backend`, operações/bytes em voo, latência de submission e
+  completion, queue depth, cancelamentos e fallbacks.
+- Testar o backend real em Linux e Windows, o fallback forçado, saturação,
+  cancelamento, fechamento com I/O pendente, erro parcial, ordering do WAL e
+  volumes suportados pela plataforma serverless. Benchmarks comparam backend
+  assíncrono e síncrono sob a mesma carga.
 
 ## Passo a passo
 
 1. Escrever a [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md)
    com o modelo acima e a plataforma de referência (ex.: Kubernetes + scale
    to zero, Cloud Run, ou equivalente com volume persistente).
-2. `Dockerfile` multi-stage: build com o toolchain do projeto; runtime mínimo
+2. Implementar e validar a abstração de I/O assíncrono conforme o protocolo
+   acima, sem trocar o backend de produção até que testes de WAL/recovery
+   comprovem equivalência de durabilidade.
+3. `Dockerfile` multi-stage: build com o toolchain do projeto; runtime mínimo
    (distroless/alpine) contendo só o binário do servidor e dependências
    dinâmicas inevitáveis; `USER` não-root; `ENTRYPOINT` do servidor.
-3. Expor apenas a porta do protocolo da Fase 8. Health: endpoint ou comando
+4. Expor apenas a porta do protocolo da Fase 8. Health: endpoint ou comando
    de readiness que só fica verde após `Database` aberto e recovery concluído;
    liveness separado do readiness.
-4. Tratar `SIGTERM`/`SIGINT`: parar de aceitar conexões, drenar streams
+5. Tratar `SIGTERM`/`SIGINT`: parar de aceitar conexões, drenar streams
    ativos dentro do grace period da plataforma, commit/rollback de
    transações em voo, `sync` e saída limpa.
-5. Prova automatizada:
+6. Prova automatizada:
    - build da imagem;
    - sobe com volume vazio → cria banco → escreve objeto/operação → derruba
      container com `kill -9` → sobe de novo no mesmo volume → estado
@@ -1707,9 +1745,9 @@ tests/container_smoke_test.*          (ou script CI que sobe a imagem)
    - cold start a partir de escala zero atende um cliente da Fase 8/9;
    - segunda réplica writer tentando o mesmo volume é rejeitada (lock) ou
      documentada como configuração proibida na plataforma.
-6. Pipeline: build → SBOM → scan → publish com tag igual ao versionamento
+7. Pipeline: build → SBOM → scan → publish com tag igual ao versionamento
    do repositório (`0.0.#`).
-7. Documentar em `OPERACAO_SERVERLESS.md`: variáveis, volume, limites de
+8. Documentar em `OPERACAO_SERVERLESS.md`: variáveis, volume, limites de
    memória/CPU, backup (cópia quiescente de `<db>` + `<db>.wal`), restore e
    restrições (sem multi-writer).
 
@@ -1719,6 +1757,9 @@ Imagem inicia sem estado local prévio, monta volume durável, recupera WAL
 quando necessário, atende cliente remoto, sobrevive a término forçado sem
 corrupção e encerra graciosamente sob sinal de parada. Uma única instância
 ativa, sem privilégios, com memória limitada e backpressure preservado.
+Em Linux e Windows compatíveis, a suíte também comprova completions reais por
+`io_uring` e IOCP, respectivamente, sem bloquear o executor. O fallback é
+observável, testado e não altera ordering, atomicidade ou durabilidade.
 
 ---
 
