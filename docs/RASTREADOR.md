@@ -456,7 +456,7 @@ Status: 🔄 Em andamento (4/14) — cinco entregas verticais; 7A concluída,
 
 ### Fase 7A — Consulta streaming básica
 
-Status: ✅ Concluída (4/4) — commit `PREENCHER`, 2026-07-17.
+Status: ✅ Concluída (4/4) — commit `a585fab`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
