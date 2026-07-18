@@ -489,10 +489,11 @@ objeto antigo com a definição corrente, demonstrando a migração preguiçosa.
 `index` cria uma B+ tree sobre `Employee.salary` (Fase 7B); a consulta
 propriamente dita é um comando à parte, `modb query` (abaixo).
 
-## `modb query` — consulta em streaming (ODB++ Fase 7A/7B)
+## `modb query` — consulta em streaming (ODB++ Fase 7A/7B/7C)
 
 ```text
 modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
+           [--project name[,salary[,country]]] [--compute annual_salary]
 ```
 
 Percorre os Employees preguiçosamente (todas as versões de schema do tipo),
@@ -521,6 +522,16 @@ Index created on Employee.salary (field 2)
 $ modb query phase3.modb --schema 2 --salary 18000
 Employee: name=Bia salary=18000 country=PT
 1 employee(s) streamed (via index); data pages read: 0
+```
+
+`--project` e `--compute` (Fase 7C) emitem uma linha projetada só com os campos
+pedidos e/ou valores computados registrados (`annual_salary = salary * 12`):
+
+```text
+$ modb query phase3.modb --schema 2 --project name,salary --compute annual_salary
+Employee: name=Ana salary=16000.000000 annual_salary=192000.000000
+Employee: name=Bia salary=18000.000000 annual_salary=216000.000000
+2 employee(s) streamed (projected); data pages read: 1
 ```
 
 ## `modb blob` — binários encadeados (ODB++ Fase 4)

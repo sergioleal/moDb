@@ -15,6 +15,7 @@
 // Importa o gerador e os operadores de streaming (Fase 7A).
 #include "modb/query/generator.hpp"
 #include "modb/query/operators.hpp"
+#include "modb/query/projected_row.hpp"
 // Importa PageFile, mantido por ponteiro estável.
 #include "modb/storage/page_file.hpp"
 // Importa a fábrica do WAL (injeção de failpoint) usada no commit.
@@ -32,6 +33,7 @@
 #include <mutex>
 // Disponibiliza nomes de tipos nas migrações.
 #include <string>
+#include <vector>
 // Disponibiliza std::optional na época de snapshot mais antiga.
 #include <optional>
 // Disponibiliza o registro de épocas de snapshots abertos.
@@ -48,6 +50,10 @@ namespace modb::object {
 class Database;
 template <typename T>
 class Query;
+template <typename T>
+class ProjectedQuery;
+template <typename Out>
+class MappedQuery;
 
 // Fase até onde o commit avança. `full` é o commit de produção; as demais são
 // costuras de teste que congelam o WAL num ponto específico, para a matriz de
@@ -124,9 +130,10 @@ private:
     bool registered_{false};
 };
 
-// Consulta em streaming (Fase 7A): construtor fluente que descreve um scan
-// preguiçoso sobre o tipo T — filtrável (`where`), limitável (`limit`) e
-// cancelável (`cancel_on`) — e o materializa em `stream()`. O `Snapshot` é
+// Consulta em streaming (Fase 7A/7B/7C): construtor fluente que descreve um
+// scan preguiçoso sobre o tipo T — filtrável (`where`), limitável (`limit`),
+// cancelável (`cancel_on`), indexável (`equals`/`between`) e projetável
+// (`select`/`compute`/`map`) — e o materializa em `stream()`. O `Snapshot` é
 // aberto na construção e MOVIDO para dentro do Generator em `stream()`: a
 // leitura vê um estado lógico estável por toda a sua vida, mesmo que a Query
 // temporária morra antes do consumo (padrão `for (auto& r : db.query<T>()...
@@ -141,8 +148,6 @@ public:
     Query& operator=(Query&&) = delete;
 
     // Operador Predicate: mantém só os valores materializados que satisfazem.
-    // Encadeável (`.where(...).limit(...)`) ou aplicável em separado sobre uma
-    // Query nomeada via `std::move(q).where(...)`.
     Query&& where(std::function<bool(const T&)> predicate) && {
         predicate_ = std::move(predicate);
         return std::move(*this);
@@ -158,9 +163,7 @@ public:
         has_token_ = true;
         return std::move(*this);
     }
-    // Index Scan por igualdade (Fase 7B): usa a B+ tree do campo para gerar só
-    // os candidatos, revalidados contra o snapshot. Exige um índice sobre o
-    // campo; senão `stream()` devolve `type_not_found`.
+    // Index Scan por igualdade (Fase 7B).
     Query&& equals(FieldId field, AttributeValue value) && {
         index_field_ = field.value;
         index_lo_ = value;
@@ -174,11 +177,25 @@ public:
         index_hi_ = std::move(hi);
         return std::move(*this);
     }
+    // Projection (Fase 7C): só os FieldIds pedidos, como ProjectedRow.
+    [[nodiscard]] ProjectedQuery<T> select(std::vector<FieldId> fields) &&;
+    // Computed Function registrada (Fase 7C): acrescenta o valor nomeado à linha
+    // projetada (se ainda não houve select, a linha começa só com o computado).
+    [[nodiscard]] ProjectedQuery<T> compute(std::string name) &&;
+    // Transformação tipada elemento a elemento (Fase 7C): cobre projeção/
+    // compute ad-hoc sem registro.
+    template <typename Out>
+    [[nodiscard]] MappedQuery<Out> map(std::function<Out(const T&)> fn) &&;
+    template <typename Out>
+    [[nodiscard]] MappedQuery<Out> map(std::function<Result<Out>(const T&)> fn) &&;
+
     // Constrói o Generator preguiçoso; consome a Query (move o Snapshot).
     [[nodiscard]] query::Generator<Result<T>> stream() &&;
 
 private:
     friend class Database;
+    template <typename U>
+    friend class ProjectedQuery;
     Query(Database* database, std::optional<Snapshot> snapshot,
           std::optional<Error> setup_error)
         : database_{database},
@@ -186,18 +203,86 @@ private:
           setup_error_{std::move(setup_error)} {}
 
     Database* database_;
-    // O snapshot que segura o estado lógico, ou o erro de configuração que
-    // impediu de abri-lo (tipo não bound, banco não anexado, etc.).
     std::optional<Snapshot> snapshot_;
     std::optional<Error> setup_error_;
     std::function<bool(const T&)> predicate_;
     std::size_t limit_{0};
     query::CancellationToken token_;
     bool has_token_{false};
-    // Index Scan: quando presente, o campo e a faixa [lo, hi] da busca.
     std::optional<std::uint16_t> index_field_;
     AttributeValue index_lo_;
     AttributeValue index_hi_;
+};
+
+// Consulta projetada (Fase 7C): produz ProjectedRow com campos selecionados e/ou
+// funções computadas registradas. Continua preguiçosa e com memória O(1).
+template <typename T>
+class ProjectedQuery {
+public:
+    ProjectedQuery(const ProjectedQuery&) = delete;
+    ProjectedQuery& operator=(const ProjectedQuery&) = delete;
+    ProjectedQuery(ProjectedQuery&&) = default;
+    ProjectedQuery& operator=(ProjectedQuery&&) = delete;
+
+    ProjectedQuery&& select(std::vector<FieldId> fields) && {
+        selected_ = std::move(fields);
+        return std::move(*this);
+    }
+    ProjectedQuery&& compute(std::string name) && {
+        computed_.push_back(std::move(name));
+        return std::move(*this);
+    }
+    ProjectedQuery&& limit(std::size_t count) && {
+        limit_ = count;
+        return std::move(*this);
+    }
+
+    [[nodiscard]] query::Generator<Result<query::ProjectedRow>> stream() &&;
+
+private:
+    friend class Query<T>;
+    ProjectedQuery(Query<T> base, std::vector<FieldId> selected, std::vector<std::string> computed)
+        : database_{base.database_},
+          snapshot_{std::move(base.snapshot_)},
+          setup_error_{std::move(base.setup_error_)},
+          predicate_{std::move(base.predicate_)},
+          limit_{base.limit_},
+          token_{std::move(base.token_)},
+          has_token_{base.has_token_},
+          index_field_{base.index_field_},
+          index_lo_{std::move(base.index_lo_)},
+          index_hi_{std::move(base.index_hi_)},
+          selected_{std::move(selected)},
+          computed_{std::move(computed)} {}
+
+    Database* database_;
+    std::optional<Snapshot> snapshot_;
+    std::optional<Error> setup_error_;
+    std::function<bool(const T&)> predicate_;
+    std::size_t limit_{0};
+    query::CancellationToken token_;
+    bool has_token_{false};
+    std::optional<std::uint16_t> index_field_;
+    AttributeValue index_lo_;
+    AttributeValue index_hi_;
+    std::vector<FieldId> selected_;
+    std::vector<std::string> computed_;
+};
+
+// Resultado tipado de `.map(...)` (Fase 7C).
+template <typename Out>
+class MappedQuery {
+public:
+    explicit MappedQuery(query::Generator<Result<Out>> stream) : stream_{std::move(stream)} {}
+    MappedQuery(const MappedQuery&) = delete;
+    MappedQuery& operator=(const MappedQuery&) = delete;
+    MappedQuery(MappedQuery&&) = default;
+    MappedQuery& operator=(MappedQuery&&) = delete;
+
+    [[nodiscard]] query::Generator<Result<Out>> stream() && { return std::move(stream_); }
+
+private:
+    query::Generator<Result<Out>> stream_;
 };
 
 // Registro de processo que mantém bancos vivos e permite que Handles resolvam
@@ -519,6 +604,27 @@ public:
             (void)rollback_transaction();
             return std::unexpected(committed.error());
         }
+        return {};
+    }
+
+    // Registra uma Computed Function nomeada sobre o tipo T (Fase 7C). Avaliada
+    // elemento a elemento em `.compute("nome")`. Substitui registro anterior
+    // com o mesmo nome para o mesmo tipo.
+    template <typename T>
+    Result<void> register_computed(std::string name,
+                                   std::function<Result<AttributeValue>(const T&)> function) {
+        if (name.empty()) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_argument, "computed function name must not be empty"});
+        }
+        if (!function) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_argument, "computed function must not be empty"});
+        }
+        computed_fns_[type_key<T>()][std::move(name)] =
+            [fn = std::move(function)](const void* object) -> Result<AttributeValue> {
+                return fn(*static_cast<const T*>(object));
+            };
         return {};
     }
 
@@ -871,8 +977,90 @@ private:
     query::Generator<Result<T>> failed_stream(Error error) {
         co_yield Result<T>{std::unexpected(std::move(error))};
     }
+
+    // Monta uma ProjectedRow a partir de um objeto T (campos + computados).
+    template <typename T>
+    Result<query::ProjectedRow> project_object(const T& value,
+                                               const std::vector<FieldId>& selected,
+                                               const std::vector<std::string>& computed) const {
+        query::ProjectedRow row;
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
+        }
+        for (const FieldId field : selected) {
+            const FieldBinder* binder = nullptr;
+            for (const auto& candidate : bound->binding.fields()) {
+                if (candidate.id.value == field.value) {
+                    binder = &candidate;
+                    break;
+                }
+            }
+            if (binder == nullptr) {
+                return std::unexpected(
+                    Error{ErrorCode::invalid_argument, "projected field is not in the binding"});
+            }
+            auto loaded = binder->load(&value);
+            if (!loaded) {
+                return std::unexpected(loaded.error());
+            }
+            row.fields.push_back(
+                query::ProjectedField{binder->id, binder->name, std::move(*loaded)});
+        }
+        if (!computed.empty()) {
+            const auto type_it = computed_fns_.find(type_key<T>());
+            for (const auto& name : computed) {
+                if (type_it == computed_fns_.end()) {
+                    return std::unexpected(
+                        Error{ErrorCode::type_not_found, "computed function is not registered"});
+                }
+                const auto fn_it = type_it->second.find(name);
+                if (fn_it == type_it->second.end()) {
+                    return std::unexpected(
+                        Error{ErrorCode::type_not_found, "computed function is not registered"});
+                }
+                auto value_attr = fn_it->second(&value);
+                if (!value_attr) {
+                    return std::unexpected(value_attr.error());
+                }
+                row.fields.push_back(
+                    query::ProjectedField{FieldId{0}, name, std::move(*value_attr)});
+            }
+        }
+        return row;
+    }
+
+    // Scan/Index Scan + Projection/Compute (Fase 7C).
+    template <typename T>
+    query::Generator<Result<query::ProjectedRow>> run_projected_stream(
+        Snapshot snapshot, std::function<bool(const T&)> predicate, std::size_t limit_count,
+        query::CancellationToken token, bool has_token, std::optional<std::uint16_t> index_field,
+        AttributeValue lo, AttributeValue hi, std::vector<FieldId> selected,
+        std::vector<std::string> computed) {
+        auto objects = index_field
+                           ? run_index_stream<T>(std::move(snapshot), *index_field, std::move(lo),
+                                                 std::move(hi), std::move(predicate), limit_count,
+                                                 std::move(token), has_token)
+                           : run_stream<T>(std::move(snapshot), std::move(predicate), limit_count,
+                                           std::move(token), has_token);
+        for (auto& item : objects) {
+            if (!item) {
+                co_yield Result<query::ProjectedRow>{std::unexpected(item.error())};
+                co_return;
+            }
+            auto row = project_object<T>(*item, selected, computed);
+            if (!row) {
+                co_yield Result<query::ProjectedRow>{std::unexpected(row.error())};
+                co_return;
+            }
+            co_yield Result<query::ProjectedRow>{std::move(*row)};
+        }
+    }
+
     template <typename U>
     friend class Query;
+    template <typename U>
+    friend class ProjectedQuery;
 
     // Época do snapshot aberto mais antigo (nullopt se nenhum estiver aberto).
     // Consultada antes de toda escrita que possa conflitar com uma versão
@@ -905,6 +1093,10 @@ private:
     ObjectStore store_;
     std::unordered_map<const void*, BoundType> bound_;
     std::unordered_map<std::string, std::unordered_map<std::uint64_t, Migration>> migrations_;
+    // Computed Functions (Fase 7C): type_key → (nome → invocador type-erased).
+    std::unordered_map<const void*,
+                       std::unordered_map<std::string, std::function<Result<AttributeValue>(const void*)>>>
+        computed_fns_;
     DatabaseId database_id_{};
     // Caminho do write-ahead log (`<db>.wal`).
     std::filesystem::path wal_path_;
@@ -943,6 +1135,47 @@ query::Generator<Result<T>> Query<T>::stream() && {
     }
     return database_->template run_stream<T>(std::move(*snapshot_), std::move(predicate_), limit_,
                                              std::move(token_), has_token_);
+}
+
+template <typename T>
+ProjectedQuery<T> Query<T>::select(std::vector<FieldId> fields) && {
+    return ProjectedQuery<T>{std::move(*this), std::move(fields), {}};
+}
+
+template <typename T>
+ProjectedQuery<T> Query<T>::compute(std::string name) && {
+    std::vector<std::string> names;
+    names.push_back(std::move(name));
+    return ProjectedQuery<T>{std::move(*this), {}, std::move(names)};
+}
+
+template <typename T>
+template <typename Out>
+MappedQuery<Out> Query<T>::map(std::function<Out(const T&)> fn) && {
+    auto source = std::move(*this).stream();
+    return MappedQuery<Out>{query::project<T, Out>(
+        std::move(source), [fn = std::move(fn)](const T& value) -> Result<Out> { return fn(value); })};
+}
+
+template <typename T>
+template <typename Out>
+MappedQuery<Out> Query<T>::map(std::function<Result<Out>(const T&)> fn) && {
+    auto source = std::move(*this).stream();
+    return MappedQuery<Out>{
+        query::compute<T, Out>(std::move(source), [fn = std::move(fn)](const T& value) {
+            return fn(value);
+        })};
+}
+
+template <typename T>
+query::Generator<Result<query::ProjectedRow>> ProjectedQuery<T>::stream() && {
+    if (setup_error_) {
+        return database_->template failed_stream<query::ProjectedRow>(std::move(*setup_error_));
+    }
+    return database_->template run_projected_stream<T>(
+        std::move(*snapshot_), std::move(predicate_), limit_, std::move(token_), has_token_,
+        index_field_, std::move(index_lo_), std::move(index_hi_), std::move(selected_),
+        std::move(computed_));
 }
 
 template <typename T>

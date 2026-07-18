@@ -5,8 +5,9 @@
 // valor duplicado são permitidas e ordenadas de forma estável. Valor = ObjectId.
 // Páginas BTLF (folha) e BTIN (interna) com header de 32 bytes; folhas
 // encadeadas por `next_leaf` para varredura por faixa. Split de folha e interna
-// propaga até a raiz, que pode crescer em altura. A raiz é devolvida por
-// `root_page()` para ser persistida no catálogo do índice.
+// propaga até a raiz, que pode crescer em altura. Remoção rebalanceia por
+// borrow (irmão) ou merge; a raiz pode encolher quando fica com um único filho.
+// A raiz é devolvida por `root_page()` para ser persistida no catálogo do índice.
 
 // Importa Result e códigos de erro.
 #include "modb/error.hpp"

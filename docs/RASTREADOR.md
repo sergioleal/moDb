@@ -47,11 +47,11 @@
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
-| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 7/14 | Fases 4, 6 |
+| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 9/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **75/110 (~68%)** | |
+| **Total** | | | **77/110 (~70%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -449,8 +449,8 @@ processo (`modb.snapshot`, `modb.mvcc_recovery`). Suíte completa 64/64 em Debug
 
 ## Fase 7 — Índices e consultas em streaming (embedded)
 
-Status: 🔄 Em andamento (7/14) — cinco entregas verticais; 7A e 7B
-concluídas, 7C–7E não iniciadas. Definição completa:
+Status: 🔄 Em andamento (9/14) — cinco entregas verticais; 7A–7C
+concluídas, 7D–7E não iniciadas. Definição completa:
 [PLANO_ODB.md §Fase 7](PLANO_ODB.md#fase-7--índices-e-consultas-em-streaming-embedded) ·
 [PROTOCOLO_FASES.md §Fase 7](PROTOCOLO_FASES.md#fase-7--índices-e-consultas-em-streaming-embedded)
 
@@ -469,14 +469,14 @@ Status: ✅ Concluída (4/4) — commit `a585fab`, 2026-07-17.
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.generator` | preguiça (contador + limit), composição filter/limit, propagação de erro, cancelamento, destruição precoce | ✅ |
-| `modb.streaming_query` | **TTFR: `limit 1` lê ≤ 2 páginas**; varredura completa; filtro; filter+limit curto-circuita; cancelamento; estabilidade do snapshot | ✅ |
+| `modb.generator` | preguiça (contador + limit), composição filter/limit, propagação de erro, cancelamento, destruição precoce; **pico constante de payloads em 100 mil entradas** | ✅ |
+| `modb.streaming_query` | **TTFR: `limit 1` lê ≤ 2 páginas sobre 100 mil objetos**; varredura completa; filtro; filter+limit curto-circuita; cancelamento; estabilidade do snapshot | ✅ |
 | `modb.cli.query` | `modb query` (streaming, filtro, limite) sobre o tipo evoluído | ✅ |
 
-Critério de aceite 7A: ✅ `limit 1` lê ≤ 2 páginas de dados (num heap com muitas
-páginas), mantém memória O(1) (pipeline preguiçoso, nada materializado),
+Critério de aceite 7A: ✅ `limit 1` lê ≤ 2 páginas de dados sobre 100 mil
+objetos, mantém memória O(1) (pico instrumentado de payloads permanece constante),
 preserva o estado lógico do snapshot por toda a leitura e encerra o upstream ao
-atingir o limite ou ao cancelar. Suíte completa 69/69 em Debug, `-Werror` e
+atingir o limite ou ao cancelar. Suíte completa 75/75 em Debug, `-Werror` e
 sanitizers.
 
 ### Fase 7B — Consultas indexadas
@@ -493,33 +493,44 @@ Status: ✅ Concluída (3/3) — commit `e3d76a3`, 2026-07-18.
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.btree` | inserção ordenada/embaralhada (2–3 mil), invariantes (ordem, profundidade uniforme, split interno), duplicatas, faixa, remoção, reabertura, ordem por tipo (int com sinal, float, string) | ✅ |
+| `modb.btree` | inserção ordenada/embaralhada (2–3 mil), invariantes (ordem, profundidade uniforme, fill mínimo, split interno), duplicatas, faixa, remoção com borrow/merge e encolhimento de raiz, reabertura, ordem por tipo | ✅ |
 | `modb.indexed_query` | criação com backfill, igualdade/faixa em ordem, duplicatas, índice lê menos páginas que scan, manutenção em update/remove, reabertura e **recovery** de objeto + índice | ✅ |
+| `modb.index_catalog` | diretório IXDR multipágina (cadeia), `set_root`, reabertura completa | ✅ |
 | `modb.cli.oo_index` / `modb.cli.query_indexed` | `oo employee index` + `modb query --salary` (Index Scan por igualdade) | ✅ |
 
-Critério de aceite 7B: ✅ buscas por igualdade e faixa usam comprovadamente a B+
-tree (uma consulta seletiva lê menos páginas que o scan completo), preservam
-duplicatas (chave composta valor+ObjectId) e permanecem corretas após commit,
-recovery (objeto e índice refeitos juntos pelo WAL) e reabertura (raiz
-persistida no catálogo). Suíte completa 73/73 em Debug, `-Werror` e sanitizers.
+ Critério de aceite 7B: ✅ buscas por igualdade e faixa usam comprovadamente a B+
+ tree (uma consulta seletiva lê menos páginas que o scan completo), preservam
+ duplicatas (chave composta valor+ObjectId) e permanecem corretas após commit,
+ recovery (objeto e índice refeitos juntos pelo WAL) e reabertura (raiz
+ persistida no catálogo). Remoção rebalanceia por borrow/merge; o diretório de
+ índices cresce em cadeia IXDR. Suíte completa 75/75 em Debug, `-Werror` e
+ sanitizers.
 
-Limitação documentada (MVP): a remoção na B+ tree não faz merge/borrow (folha
-pode ficar abaixo do mínimo — `find`/`range` seguem corretos); o diretório de
-índices cabe em uma página; o Index Scan usa o índice corrente e revalida cada
-candidato contra a versão do snapshot (sem falso-positivo; um valor alterado
-depois de o snapshot abrir pode causar um miss — cenário raro no single-writer).
+Limitação documentada (MVP): páginas liberadas por merge da B+ tree ou por
+encolhimento da cadeia IXDR ficam órfãs (sem free list geral — Fase 10). O Index
+Scan usa o índice corrente e revalida cada candidato contra a versão do snapshot
+(sem falso-positivo; um valor alterado depois de o snapshot abrir pode causar um
+miss — cenário raro no single-writer).
 
 ### Fase 7C — Projeção e transformação
 
-Status: ⬜ Não iniciada (0/2) — bloqueada pelas Fases 7A e 7B.
+Status: ✅ Concluída (2/2) — commit `b6284c4`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 7C.1 | Projection com resultados tipados | ⬜ | Somente campos solicitados |
-| 7C.2 | Computed Functions registradas no fluxo | ⬜ | Avaliação elemento a elemento |
+| 7C.1 | Projection com resultados tipados | ✅ | `ProjectedRow` + `Query::select` / operadores `project` |
+| 7C.2 | Computed Functions registradas no fluxo | ✅ | `Database::register_computed` + `Query::compute` / `map` |
 
-Critério de aceite 7C: ⬜ projeções e funções computadas compõem com os
-operadores existentes mantendo preguiça e memória O(1).
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.projection_query` | project∘filter∘limit preguiçoso; select de campos; compute registrado; select+compute+where+limit; map tipado; compute ausente | ✅ |
+| `modb.cli.query_project` | `modb query --project name,salary --compute annual_salary` | ✅ |
+
+Critério de aceite 7C: ✅ projeções e funções computadas compõem com Scan/Index
+Scan, Predicate e Limit mantendo avaliação preguiçosa e memória O(1). Suíte
+completa 77/77 em Debug, `-Werror` e sanitizers.
 
 ### Fase 7D — Ordenação e agregação
 

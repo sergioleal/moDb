@@ -335,6 +335,363 @@ Result<void> propagate(storage::PageFile& file, PageId& root, Entry separator, P
     }
 }
 
+bool underfull(const std::vector<Entry>& entries, bool leaf) {
+    // Com chaves de tamanho variável o split não garante 50/50; 1/3 da
+    // capacidade é o mínimo exigido das não-raiz após remoção.
+    return total_bytes(entries, 0, entries.size(), leaf) < node_capacity / 3;
+}
+
+// Índice do filho em `parent`: -1 = leftmost (`link`), senão o slot cujo
+// `child` aponta para `child_id`.
+int child_slot(const Page& parent, PageId child_id) {
+    if (PageId{node_link(parent)} == child_id) {
+        return -1;
+    }
+    const auto count = node_key_count(parent);
+    for (std::size_t i = 0; i < count; ++i) {
+        if (PageId{cell_child(parent, slot_at(parent, i))} == child_id) {
+            return static_cast<int>(i);
+        }
+    }
+    return -2;
+}
+
+PageId sibling_at(const Page& parent, int slot) {
+    if (slot < 0) {
+        return PageId{node_link(parent)};
+    }
+    return PageId{cell_child(parent, slot_at(parent, static_cast<std::size_t>(slot)))};
+}
+
+Result<void> write_orphan(storage::PageFile& file, PageId id) {
+    return file.write(id, Page{});
+}
+
+// Sobe o rebalanceamento após uma remoção: borrow do irmão ou merge. `node_id`
+// é o nó já reescrito em memória nas `entries`/`link`/`leaf`/`level` passados.
+Result<void> rebalance(storage::PageFile& file, PageId& root, PageId node_id, bool leaf,
+                       std::uint16_t level, std::uint64_t link, std::vector<Entry> entries,
+                       std::vector<PageId>& path) {
+    while (true) {
+        if (path.empty()) {
+            // Raiz: pode ficar abaixo do mínimo. Se uma interna ficou sem
+            // separadores, o único filho vira a nova raiz (altura −1).
+            if (!leaf && entries.empty()) {
+                const PageId child{link};
+                if (auto orphaned = write_orphan(file, node_id); !orphaned) {
+                    return orphaned;
+                }
+                root = child;
+                return {};
+            }
+            Page page;
+            write_node(page, leaf, level, link, entries);
+            return file.write(node_id, page);
+        }
+
+        if (!underfull(entries, leaf)) {
+            Page page;
+            write_node(page, leaf, level, link, entries);
+            return file.write(node_id, page);
+        }
+
+        const PageId parent_id = path.back();
+        path.pop_back();
+        auto parent = file.read(parent_id);
+        if (!parent) {
+            return std::unexpected(parent.error());
+        }
+        const std::uint16_t parent_level = node_level(*parent);
+        std::uint64_t parent_leftmost = node_link(*parent);
+        auto parent_entries = read_all(*parent);
+        const int slot = child_slot(*parent, node_id);
+        if (slot < -1) {
+            return std::unexpected(Error{ErrorCode::corrupt_page, "B+ child missing from parent"});
+        }
+
+        const int right_slot = slot + 1;
+        const bool has_right = right_slot < static_cast<int>(parent_entries.size());
+        const bool has_left = slot >= 0;
+
+        auto try_borrow_right = [&]() -> Result<bool> {
+            if (!has_right) {
+                return false;
+            }
+            const PageId right_id = PageId{parent_entries[static_cast<std::size_t>(right_slot)].child};
+            auto right = file.read(right_id);
+            if (!right) {
+                return std::unexpected(right.error());
+            }
+            auto right_entries = read_all(*right);
+            const std::uint64_t right_link = node_link(*right);
+            if (leaf) {
+                std::size_t take = 0;
+                while (take < right_entries.size()) {
+                    std::vector<Entry> donor(right_entries.begin() + static_cast<std::ptrdiff_t>(take + 1),
+                                             right_entries.end());
+                    if (underfull(donor, true)) {
+                        break;
+                    }
+                    ++take;
+                    std::vector<Entry> trial = entries;
+                    trial.insert(trial.end(), right_entries.begin(),
+                                 right_entries.begin() + static_cast<std::ptrdiff_t>(take));
+                    if (!underfull(trial, true) && fits(trial, true)) {
+                        entries = std::move(trial);
+                        right_entries.erase(right_entries.begin(),
+                                            right_entries.begin() + static_cast<std::ptrdiff_t>(take));
+                        parent_entries[static_cast<std::size_t>(right_slot)].key =
+                            right_entries.front().key;
+                        parent_entries[static_cast<std::size_t>(right_slot)].objid =
+                            right_entries.front().objid;
+                        Page left_page;
+                        write_node(left_page, true, level, link, entries);
+                        Page right_page;
+                        write_node(right_page, true, level, right_link, right_entries);
+                        Page parent_page;
+                        write_node(parent_page, false, parent_level, parent_leftmost, parent_entries);
+                        if (auto w = file.write(node_id, left_page); !w) {
+                            return std::unexpected(w.error());
+                        }
+                        if (auto w = file.write(right_id, right_page); !w) {
+                            return std::unexpected(w.error());
+                        }
+                        if (auto w = file.write(parent_id, parent_page); !w) {
+                            return std::unexpected(w.error());
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            }
+            if (right_entries.empty()) {
+                return false;
+            }
+            std::vector<Entry> donor(right_entries.begin() + 1, right_entries.end());
+            if (underfull(donor, false)) {
+                return false;
+            }
+            Entry down = parent_entries[static_cast<std::size_t>(right_slot)];
+            down.child = right_link;
+            Entry up = right_entries.front();
+            const std::uint64_t new_right_link = up.child;
+            std::vector<Entry> trial = entries;
+            trial.push_back(std::move(down));
+            if (underfull(trial, false) || !fits(trial, false)) {
+                return false;
+            }
+            parent_entries[static_cast<std::size_t>(right_slot)].key = up.key;
+            parent_entries[static_cast<std::size_t>(right_slot)].objid = up.objid;
+            entries = std::move(trial);
+            right_entries.erase(right_entries.begin());
+            Page left_page;
+            write_node(left_page, false, level, link, entries);
+            Page right_page;
+            write_node(right_page, false, level, new_right_link, right_entries);
+            Page parent_page;
+            write_node(parent_page, false, parent_level, parent_leftmost, parent_entries);
+            if (auto w = file.write(node_id, left_page); !w) {
+                return std::unexpected(w.error());
+            }
+            if (auto w = file.write(right_id, right_page); !w) {
+                return std::unexpected(w.error());
+            }
+            if (auto w = file.write(parent_id, parent_page); !w) {
+                return std::unexpected(w.error());
+            }
+            return true;
+        };
+
+        auto try_borrow_left = [&]() -> Result<bool> {
+            if (!has_left) {
+                return false;
+            }
+            const PageId left_id = sibling_at(*parent, slot - 1);
+            auto left = file.read(left_id);
+            if (!left) {
+                return std::unexpected(left.error());
+            }
+            auto left_entries = read_all(*left);
+            const std::uint64_t left_link = node_link(*left);
+            if (leaf) {
+                std::size_t take = 0;
+                while (take < left_entries.size()) {
+                    std::vector<Entry> donor(
+                        left_entries.begin(),
+                        left_entries.end() - static_cast<std::ptrdiff_t>(take + 1));
+                    if (underfull(donor, true)) {
+                        break;
+                    }
+                    ++take;
+                    std::vector<Entry> trial;
+                    trial.insert(trial.end(), left_entries.end() - static_cast<std::ptrdiff_t>(take),
+                                 left_entries.end());
+                    trial.insert(trial.end(), entries.begin(), entries.end());
+                    if (!underfull(trial, true) && fits(trial, true)) {
+                        entries = std::move(trial);
+                        left_entries.erase(left_entries.end() - static_cast<std::ptrdiff_t>(take),
+                                           left_entries.end());
+                        parent_entries[static_cast<std::size_t>(slot)].key = entries.front().key;
+                        parent_entries[static_cast<std::size_t>(slot)].objid = entries.front().objid;
+                        Page left_page;
+                        write_node(left_page, true, level, left_link, left_entries);
+                        Page right_page;
+                        write_node(right_page, true, level, link, entries);
+                        Page parent_page;
+                        write_node(parent_page, false, parent_level, parent_leftmost, parent_entries);
+                        if (auto w = file.write(left_id, left_page); !w) {
+                            return std::unexpected(w.error());
+                        }
+                        if (auto w = file.write(node_id, right_page); !w) {
+                            return std::unexpected(w.error());
+                        }
+                        if (auto w = file.write(parent_id, parent_page); !w) {
+                            return std::unexpected(w.error());
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            }
+            // Interna: empresta uma entrada (o separador do pai desce; o último
+            // do irmão sobe e vira o novo separador).
+            if (left_entries.empty()) {
+                return false;
+            }
+            std::vector<Entry> donor(left_entries.begin(), left_entries.end() - 1);
+            if (underfull(donor, false)) {
+                return false;
+            }
+            Entry up = left_entries.back();
+            Entry old_sep = parent_entries[static_cast<std::size_t>(slot)];
+            old_sep.child = link;
+            std::vector<Entry> trial;
+            trial.push_back(std::move(old_sep));
+            trial.insert(trial.end(), entries.begin(), entries.end());
+            if (underfull(trial, false) || !fits(trial, false)) {
+                return false;
+            }
+            parent_entries[static_cast<std::size_t>(slot)].key = up.key;
+            parent_entries[static_cast<std::size_t>(slot)].objid = up.objid;
+            left_entries.pop_back();
+            entries = std::move(trial);
+            const std::uint64_t new_link = up.child;
+            Page left_page;
+            write_node(left_page, false, level, left_link, left_entries);
+            Page right_page;
+            write_node(right_page, false, level, new_link, entries);
+            Page parent_page;
+            write_node(parent_page, false, parent_level, parent_leftmost, parent_entries);
+            if (auto w = file.write(left_id, left_page); !w) {
+                return std::unexpected(w.error());
+            }
+            if (auto w = file.write(node_id, right_page); !w) {
+                return std::unexpected(w.error());
+            }
+            if (auto w = file.write(parent_id, parent_page); !w) {
+                return std::unexpected(w.error());
+            }
+            return true;
+        };
+
+        if (auto borrowed = try_borrow_right(); !borrowed) {
+            return std::unexpected(borrowed.error());
+        } else if (*borrowed) {
+            return {};
+        }
+        if (auto borrowed = try_borrow_left(); !borrowed) {
+            return std::unexpected(borrowed.error());
+        } else if (*borrowed) {
+            return {};
+        }
+
+        // Merge com o irmão direito (preferido) ou esquerdo.
+        PageId keep_id = node_id;
+        PageId drop_id{};
+        std::vector<Entry> merged = entries;
+        std::uint64_t merged_link = link;
+        int drop_parent_slot = -1;
+
+        if (has_right) {
+            drop_id = PageId{parent_entries[static_cast<std::size_t>(right_slot)].child};
+            auto right = file.read(drop_id);
+            if (!right) {
+                return std::unexpected(right.error());
+            }
+            auto right_entries = read_all(*right);
+            const std::uint64_t right_link = node_link(*right);
+            if (!leaf) {
+                Entry sep = parent_entries[static_cast<std::size_t>(right_slot)];
+                sep.child = right_link;
+                merged.push_back(std::move(sep));
+            }
+            merged.insert(merged.end(), right_entries.begin(), right_entries.end());
+            if (leaf) {
+                merged_link = right_link;  // herda o next_leaf do direito
+            }
+            drop_parent_slot = right_slot;
+        } else if (has_left) {
+            keep_id = sibling_at(*parent, slot - 1);
+            drop_id = node_id;
+            auto left = file.read(keep_id);
+            if (!left) {
+                return std::unexpected(left.error());
+            }
+            auto left_entries = read_all(*left);
+            merged_link = node_link(*left);
+            merged = std::move(left_entries);
+            if (!leaf) {
+                Entry sep = parent_entries[static_cast<std::size_t>(slot)];
+                sep.child = link;
+                merged.push_back(std::move(sep));
+            }
+            merged.insert(merged.end(), entries.begin(), entries.end());
+            if (leaf) {
+                merged_link = link;  // next_leaf do nó removido (direito no par)
+            }
+            drop_parent_slot = slot;
+        } else {
+            // Sem irmãos: é o único filho — grava e sobe (a raiz tratará).
+            Page page;
+            write_node(page, leaf, level, link, entries);
+            if (auto w = file.write(node_id, page); !w) {
+                return std::unexpected(w.error());
+            }
+            node_id = parent_id;
+            leaf = false;
+            level = parent_level;
+            link = parent_leftmost;
+            entries = std::move(parent_entries);
+            continue;
+        }
+
+        if (!fits(merged, leaf)) {
+            // Chaves variáveis impediram o merge; deixa o nó abaixo do mínimo
+            // (ainda correto para find/range) em vez de corromper a página.
+            Page page;
+            write_node(page, leaf, level, link, entries);
+            return file.write(node_id, page);
+        }
+
+        parent_entries.erase(parent_entries.begin() + drop_parent_slot);
+        Page keep_page;
+        write_node(keep_page, leaf, level, merged_link, merged);
+        if (auto w = file.write(keep_id, keep_page); !w) {
+            return std::unexpected(w.error());
+        }
+        if (auto orphaned = write_orphan(file, drop_id); !orphaned) {
+            return orphaned;
+        }
+
+        // Continua o rebalanceamento no pai (já sem o separador removido).
+        node_id = parent_id;
+        leaf = false;
+        level = parent_level;
+        link = parent_leftmost;
+        entries = std::move(parent_entries);
+    }
+}
+
 } // namespace
 
 Result<BTree> BTree::create(storage::PageFile& file) {
@@ -438,12 +795,23 @@ Result<void> BTree::insert(std::span<const std::byte> key, std::uint64_t object_
 }
 
 Result<void> BTree::remove(std::span<const std::byte> key, std::uint64_t object_id) {
-    // Remoção de folha, sem rebalance: desce direto à folha.
-    auto current_id = descend(*file_, root_, key, object_id);
-    if (!current_id) {
-        return std::unexpected(current_id.error());
+    // Desce até a folha guardando o caminho (necessário para borrow/merge).
+    std::vector<PageId> path;
+    PageId current = root_;
+    while (true) {
+        auto page = file_->read(current);
+        if (!page) {
+            return std::unexpected(page.error());
+        }
+        if (node_is_leaf(*page)) {
+            break;
+        }
+        path.push_back(current);
+        const auto idx = upper_bound_index(*page, key, object_id);
+        current = (idx == 0) ? PageId{node_link(*page)}
+                             : PageId{cell_child(*page, slot_at(*page, idx - 1))};
     }
-    const PageId current = *current_id;
+
     auto leaf = file_->read(current);
     if (!leaf) {
         return std::unexpected(leaf.error());
@@ -458,11 +826,8 @@ Result<void> BTree::remove(std::span<const std::byte> key, std::uint64_t object_
     }
     auto entries = read_all(*leaf);
     entries.erase(entries.begin() + static_cast<std::ptrdiff_t>(idx));
-    Page page;
-    // Remoção simples de folha: sem merge/borrow (a folha pode ficar abaixo do
-    // mínimo). find/range seguem corretos; a compactação plena é pós-MVP.
-    write_node(page, true, 0, node_link(*leaf), entries);
-    return file_->write(current, page);
+    return rebalance(*file_, root_, current, /*leaf=*/true, /*level=*/0, node_link(*leaf),
+                     std::move(entries), path);
 }
 
 Result<std::vector<std::uint64_t>> BTree::range(std::span<const std::byte> lo,
@@ -506,13 +871,14 @@ Result<std::vector<std::uint64_t>> BTree::find(std::span<const std::byte> key) c
 
 Result<std::uint32_t> BTree::validate() const {
     // Percorre a árvore conferindo: ordenação estrita dentro de cada nó,
-    // profundidade uniforme das folhas e consistência separador == menor chave
-    // do filho direito. Devolve a altura (folha = 1).
+    // profundidade uniforme das folhas, preenchimento mínimo nas não-raiz e
+    // consistência estrutural. Devolve a altura (folha = 1).
     struct Frame {
         PageId id;
         std::uint32_t depth;
+        bool is_root;
     };
-    std::vector<Frame> stack{{root_, 1}};
+    std::vector<Frame> stack{{root_, 1, true}};
     std::uint32_t leaf_depth = 0;
     while (!stack.empty()) {
         const Frame frame = stack.back();
@@ -522,6 +888,7 @@ Result<std::uint32_t> BTree::validate() const {
             return std::unexpected(page.error());
         }
         const auto count = node_key_count(*page);
+        const bool leaf = node_is_leaf(*page);
         // Ordenação estrita.
         for (std::size_t i = 1; i < count; ++i) {
             const auto a = slot_at(*page, i - 1);
@@ -531,7 +898,14 @@ Result<std::uint32_t> BTree::validate() const {
                 return std::unexpected(Error{ErrorCode::corrupt_page, "B+ node keys out of order"});
             }
         }
-        if (node_is_leaf(*page)) {
+        if (!frame.is_root) {
+            auto entries = read_all(*page);
+            if (underfull(entries, leaf)) {
+                return std::unexpected(
+                    Error{ErrorCode::corrupt_page, "B+ non-root node is underfull"});
+            }
+        }
+        if (leaf) {
             if (leaf_depth == 0) {
                 leaf_depth = frame.depth;
             } else if (leaf_depth != frame.depth) {
@@ -540,10 +914,9 @@ Result<std::uint32_t> BTree::validate() const {
             }
             continue;
         }
-        // Interno: empilha filhos.
-        stack.push_back({PageId{node_link(*page)}, frame.depth + 1});
+        stack.push_back({PageId{node_link(*page)}, frame.depth + 1, false});
         for (std::size_t i = 0; i < count; ++i) {
-            stack.push_back({PageId{cell_child(*page, slot_at(*page, i))}, frame.depth + 1});
+            stack.push_back({PageId{cell_child(*page, slot_at(*page, i))}, frame.depth + 1, false});
         }
     }
     return leaf_depth;

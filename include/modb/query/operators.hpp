@@ -1,9 +1,10 @@
 #pragma once
 
-// Operadores de stream preguiçosos da Fase 7A. Todos consomem e produzem
+// Operadores de stream preguiçosos das Fases 7A/7C. Todos consomem e produzem
 // Generator<Result<T>> e avaliam sob demanda: nada roda além do que o consumidor
-// puxa. `limit` encerra o upstream ao atingir a contagem (curto-circuito), e
-// `cancellable` encerra assim que o token é sinalizado.
+// puxa. `limit` encerra o upstream ao atingir a contagem (curto-circuito),
+// `cancellable` encerra assim que o token é sinalizado, e `project`/`compute`
+// transformam elemento a elemento mantendo memória O(1).
 
 // Importa Result e códigos de erro.
 #include "modb/error.hpp"
@@ -72,6 +73,33 @@ Generator<Result<T>> filter(Generator<Result<T>> source, Predicate predicate) {
         if (predicate(*item)) {
             co_yield std::move(item);
         }
+    }
+}
+
+// project (Fase 7C): transforma cada Ok em Out via `projector`, elemento a
+// elemento. Erros do upstream ou do projector encerram o fluxo. Streaming e
+// memória O(1): só o item corrente vive.
+template <typename In, typename Out, typename Projector>
+Generator<Result<Out>> project(Generator<Result<In>> source, Projector projector) {
+    for (auto& item : source) {
+        if (!item) {
+            co_yield Result<Out>{std::unexpected(std::move(item).error())};
+            co_return;
+        }
+        co_yield projector(*item);
+    }
+}
+
+// compute (Fase 7C): mesmo pipeline streaming que `project` — nome semântico
+// para funções computadas/registradas aplicadas elemento a elemento.
+template <typename In, typename Out, typename Function>
+Generator<Result<Out>> compute(Generator<Result<In>> source, Function function) {
+    for (auto& item : source) {
+        if (!item) {
+            co_yield Result<Out>{std::unexpected(std::move(item).error())};
+            co_return;
+        }
+        co_yield function(*item);
     }
 }
 

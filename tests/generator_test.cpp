@@ -6,6 +6,8 @@
 #include "modb/query/operators.hpp"
 #include "test_support.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <vector>
 
 using namespace modb;
@@ -26,6 +28,39 @@ Generator<Result<int>> counting(int start, int* produced) {
 Generator<Result<int>> from_vector(std::vector<int> values) {
     for (int value : values) {
         co_yield Result<int>{value};
+    }
+}
+
+// Payload que mede quantas instâncias ficam vivas simultaneamente. Assim o
+// teste de volume comprova o espaço O(1) sem depender do alocador ou de uma
+// medição de RSS sujeita a cache.
+struct TrackedValue {
+    explicit TrackedValue(int value) : value{value} { acquired(); }
+    TrackedValue(const TrackedValue& other) : value{other.value} { acquired(); }
+    TrackedValue(TrackedValue&& other) noexcept : value{other.value} { acquired(); }
+    TrackedValue& operator=(const TrackedValue&) = default;
+    TrackedValue& operator=(TrackedValue&&) noexcept = default;
+    ~TrackedValue() { --live; }
+
+    static void reset() {
+        live = 0;
+        peak = 0;
+    }
+
+    int value;
+    static inline std::size_t live{};
+    static inline std::size_t peak{};
+
+private:
+    static void acquired() {
+        ++live;
+        peak = std::max(peak, live);
+    }
+};
+
+Generator<Result<TrackedValue>> tracked_counting(int count) {
+    for (int value = 0; value < count; ++value) {
+        co_yield Result<TrackedValue>{TrackedValue{value}};
     }
 }
 
@@ -76,6 +111,24 @@ int main() {
         auto positive = [](int value) { return value > 0; };
         auto got = collect(filter(from_vector({-1, 2, -3, 4, 0, 5}), positive));
         suite.check(got == std::vector<int>{2, 4, 5}, "filter keeps only matching values");
+    }
+
+    // --- memória O(1): o pico de payloads não cresce com 100 mil elementos ---
+    {
+        constexpr int total = 100'000;
+        TrackedValue::reset();
+        std::size_t accepted = 0;
+        auto even = [](const TrackedValue& item) { return item.value % 2 == 0; };
+        for (auto& item : filter(tracked_counting(total), even)) {
+            if (item) {
+                ++accepted;
+            }
+        }
+        suite.check(accepted == static_cast<std::size_t>(total / 2),
+                    "filter streams all matching values from 100k inputs");
+        suite.check(TrackedValue::live == 0, "the completed pipeline retains no payload");
+        suite.check(TrackedValue::peak <= 8,
+                    "the 100k-element pipeline keeps only a constant number of payloads");
     }
 
     // --- um erro no fluxo é propagado e encerra ---

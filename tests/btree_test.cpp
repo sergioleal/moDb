@@ -226,7 +226,47 @@ int main() {
         suite.check(gone.has_value() && gone->empty(), "D: a removed key is no longer found");
         suite.check(kept.has_value() && kept->size() == 1 && kept->front() == 4,
                     "D: a neighbour of a removed key survives");
-        suite.check(tree->validate().has_value(), "D: structure still ordered after removals");
+        suite.check(tree->validate().has_value(),
+                    "D: structure stays ordered and at minimum fill after removals");
+    }
+
+    // === D2. remoção em massa: borrow/merge + encolhimento da raiz ===
+    {
+        TemporaryFile temp{"rm-mass"};
+        auto file = PageFile::create(temp.path());
+        auto tree = file ? BTree::create(*file)
+                         : Result<BTree>{std::unexpected(Error{ErrorCode::io_error, "no file"})};
+        suite.check(file.has_value() && tree.has_value(), "D2: tree created");
+        if (!file || !tree) {
+            return suite.finish();
+        }
+        constexpr int total = 3000;
+        for (int v = 0; v < total; ++v) {
+            static_cast<void>(tree->insert(int_key(v), static_cast<std::uint64_t>(v) + 1));
+        }
+        auto tall = tree->validate();
+        suite.check(tall.has_value() && *tall >= 2, "D2: tree is taller than a single leaf");
+        const auto tall_root = tree->root_page();
+        // Remove quase tudo, deixando 3 chaves — deve mergear folhas e encolher a raiz.
+        bool removed = true;
+        for (int v = 0; v < total - 3; ++v) {
+            removed =
+                removed && tree->remove(int_key(v), static_cast<std::uint64_t>(v) + 1).has_value();
+        }
+        suite.check(removed, "D2: bulk removal succeeds");
+        auto short_height = tree->validate();
+        suite.check(short_height.has_value(),
+                    "D2: tree remains valid (min fill) after bulk removal");
+        suite.check(short_height.has_value() && *short_height == 1,
+                    "D2: root shrinks back to a single leaf");
+        suite.check(tree->root_page().value != tall_root.value,
+                    "D2: root page identity changes when height shrinks");
+        for (int v = total - 3; v < total; ++v) {
+            auto hits = tree->find(int_key(v));
+            suite.check(hits.has_value() && hits->size() == 1 &&
+                            hits->front() == static_cast<std::uint64_t>(v) + 1,
+                        "D2: surviving keys remain findable");
+        }
     }
 
     // === E. reabertura: árvore íntegra após fechar e reabrir o arquivo ===
