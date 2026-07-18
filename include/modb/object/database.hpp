@@ -12,9 +12,12 @@
 #include "modb/object/object_store.hpp"
 // Importa ProjectionPlan para materializar versões históricas.
 #include "modb/object/projection_plan.hpp"
+// Importa o encoding ordenável usado no fallback Scan+Predicate (Fase 7E).
+#include "modb/index/key_codec.hpp"
 // Importa o gerador e os operadores de streaming (Fase 7A).
 #include "modb/query/generator.hpp"
 #include "modb/query/operators.hpp"
+#include "modb/query/planner.hpp"
 #include "modb/query/projected_row.hpp"
 // Importa PageFile, mantido por ponteiro estável.
 #include "modb/storage/page_file.hpp"
@@ -130,13 +133,15 @@ private:
     bool registered_{false};
 };
 
-// Consulta em streaming (Fases 7A–7D): construtor fluente que descreve um
+// Consulta em streaming (Fases 7A–7E): construtor fluente que descreve um
 // scan preguiçoso sobre o tipo T — filtrável (`where`), limitável (`limit`),
 // cancelável (`cancel_on`), indexável (`equals`/`between`), projetável
 // (`select`/`compute`/`map`) e ordenável/agregável (`order_by`/`top_k`/
-// `distinct_by`) — e o materializa em `stream()`. O `Snapshot` é aberto na
-// construção e MOVIDO para dentro do Generator em `stream()`. Move-only; os
-// métodos fluentes são `&&`-qualificados para encadear sobre a temporária.
+// `distinct_by`) — e o materializa em `stream()`. O planner (7E) escolhe
+// Index Scan ou Scan+Predicate, faz pushdown seguro de Limit e seleciona
+// Top-K quando há `order_by`+`limit`. O `Snapshot` é aberto na construção e
+// MOVIDO para dentro do Generator em `stream()`. Move-only; os métodos
+// fluentes são `&&`-qualificados para encadear sobre a temporária.
 template <typename T>
 class Query {
 public:
@@ -151,8 +156,9 @@ public:
         return std::move(*this);
     }
     // Operador Limit: encerra o upstream ao atingir a contagem. 0 = sem limite.
-    // Com order_by/top_k/distinct, o limite aplica-se DEPOIS do operador
-    // bloqueante (não há pushdown para o scan).
+    // Em planos streaming o Limit é empurrado até a fonte (7E). Com sort/top_k/
+    // distinct (ou seleção automática de Top-K a partir de order_by+limit), o
+    // limite aplica-se depois do operador parcialmente/bloqueante.
     Query&& limit(std::size_t count) && {
         limit_ = count;
         return std::move(*this);
@@ -216,15 +222,15 @@ public:
     // Constrói o Generator preguiçoso; consome a Query (move o Snapshot).
     [[nodiscard]] query::Generator<Result<T>> stream() &&;
 
-    // Natureza do plano após os operadores enfileirados (Fase 7D).
-    [[nodiscard]] query::OperatorNature nature() const noexcept {
-        if (top_k_ > 0) {
-            return query::OperatorNature::partially_blocking;
-        }
-        if (order_less_ || distinct_key_) {
-            return query::OperatorNature::blocking;
-        }
-        return query::OperatorNature::streaming;
+    // Plano determinístico (Fase 7E): access method, natureza, pushdown e custo.
+    [[nodiscard]] query::QueryPlan plan() const;
+
+    // Natureza do plano (Fase 7D/7E) — delega ao planner.
+    [[nodiscard]] query::OperatorNature nature() const noexcept { return plan().nature; }
+
+    // Objetos estimados até o 1º yield (Fase 7E) — base da métrica TTFR.
+    [[nodiscard]] std::size_t first_result_cost() const noexcept {
+        return plan().first_result_cost;
     }
 
 private:
@@ -608,6 +614,20 @@ public:
         return Query<T>{this, std::move(*opened), std::nullopt};
     }
 
+    // Indica se há índice B+ tree no campo do tipo T (Fase 7E — planner).
+    template <typename T>
+    [[nodiscard]] bool has_index_for(FieldId field) const noexcept {
+        return has_index_for<T>(field.value);
+    }
+    template <typename T>
+    [[nodiscard]] bool has_index_for(std::uint16_t field) const noexcept {
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return false;
+        }
+        return store_.has_index(bound->binding.type_name(), field);
+    }
+
     // Cria um índice B+ tree sobre o campo `field` do tipo T (Fase 7B): monta a
     // árvore, indexa os objetos atuais (backfill) e registra no catálogo, tudo
     // numa transação interna (WAL). Depois, `query<T>().equals/.between` usam a
@@ -968,10 +988,11 @@ private:
         }
     }
 
-    // Index Scan (Fase 7B): a B+ tree do campo gera os candidatos (em ordem de
-    // valor); cada um é revalidado contra a versão do snapshot antes de
+    // Index Scan (Fase 7B/7E): a B+ tree do campo gera os candidatos (em ordem
+    // de valor); cada um é revalidado contra a versão do snapshot antes de
     // materializar, aplicar Predicate e Limit. O Snapshot vive na moldura da
-    // coroutine (leitura estável). Sem índice sobre o campo → erro.
+    // coroutine (leitura estável). Sem índice, o planner faz fallback para
+    // Scan + Predicate (ver `Query::stream`).
     template <typename T>
     query::Generator<Result<T>> run_index_stream(Snapshot snapshot, std::uint16_t field,
                                                  AttributeValue lo, AttributeValue hi,
@@ -1103,7 +1124,39 @@ private:
         };
 
         std::size_t emitted = 0;
-        if (index_field) {
+        const bool use_index =
+            index_field && store_.has_index(bound->binding.type_name(), *index_field);
+        if (index_field && !use_index) {
+            const FieldBinder* binder = nullptr;
+            for (const auto& candidate : bound->binding.fields()) {
+                if (candidate.id.value == *index_field) {
+                    binder = &candidate;
+                    break;
+                }
+            }
+            auto previous = std::move(predicate);
+            predicate = [binder, lo, hi, previous = std::move(previous)](const T& value) {
+                if (binder == nullptr) {
+                    return false;
+                }
+                auto loaded = binder->load(&value);
+                if (!loaded) {
+                    return false;
+                }
+                auto encoded = index::encode_key(*loaded);
+                auto lo_key = index::encode_key(lo);
+                auto hi_key = index::encode_key(hi);
+                if (!encoded || !lo_key || !hi_key) {
+                    return false;
+                }
+                if (*encoded < *lo_key || *hi_key < *encoded) {
+                    return false;
+                }
+                return !previous || previous(value);
+            };
+            index_field.reset();
+        }
+        if (index_field && use_index) {
             auto ids = store_.index_range(bound->binding.type_name(), *index_field, lo, hi);
             if (!ids) {
                 co_yield Result<query::ProjectedRow>{std::unexpected(ids.error())};
@@ -1242,29 +1295,90 @@ private:
 };
 
 template <typename T>
+query::QueryPlan Query<T>::plan() const {
+    query::QueryIntent intent;
+    intent.index_requested = index_field_.has_value();
+    intent.index_field = index_field_;
+    intent.index_available =
+        index_field_ && database_ != nullptr && database_->template has_index_for<T>(*index_field_);
+    intent.has_opaque_predicate = static_cast<bool>(predicate_);
+    intent.limit = limit_;
+    intent.top_k = top_k_;
+    intent.has_order = static_cast<bool>(order_less_);
+    intent.has_distinct = static_cast<bool>(distinct_key_);
+    return query::plan_query(intent);
+}
+
+template <typename T>
 query::Generator<Result<T>> Query<T>::stream() && {
     if (setup_error_) {
         return database_->template failed_stream<T>(std::move(*setup_error_));
     }
-    const bool blocking_tail = top_k_ > 0 || static_cast<bool>(order_less_) ||
-                               static_cast<bool>(distinct_key_);
-    const std::size_t scan_limit = blocking_tail ? 0 : limit_;
+    const query::QueryPlan planned = plan();
+    const bool blocking_tail = planned.uses_top_k || planned.uses_sort || planned.uses_distinct;
+    const std::size_t scan_limit = planned.limit_pushed ? limit_ : 0;
+
+    // Fallback Scan+Predicate quando equals/between pediu índice inexistente.
+    std::function<bool(const T&)> predicate = std::move(predicate_);
+    if (index_field_ && !planned.index_available) {
+        const std::uint16_t field = *index_field_;
+        AttributeValue lo = std::move(index_lo_);
+        AttributeValue hi = std::move(index_hi_);
+        const Database::BoundType* bound = database_->bound_for(type_key<T>());
+        const FieldBinder* binder = nullptr;
+        if (bound != nullptr) {
+            for (const auto& candidate : bound->binding.fields()) {
+                if (candidate.id.value == field) {
+                    binder = &candidate;
+                    break;
+                }
+            }
+        }
+        predicate = [binder, lo = std::move(lo), hi = std::move(hi),
+                     previous = std::move(predicate)](const T& value) {
+            if (binder == nullptr) {
+                return false;
+            }
+            auto loaded = binder->load(&value);
+            if (!loaded) {
+                return false;
+            }
+            auto encoded = index::encode_key(*loaded);
+            auto lo_key = index::encode_key(lo);
+            auto hi_key = index::encode_key(hi);
+            if (!encoded || !lo_key || !hi_key) {
+                return false;
+            }
+            if (*encoded < *lo_key || *hi_key < *encoded) {
+                return false;
+            }
+            return !previous || previous(value);
+        };
+        index_field_.reset();
+    }
 
     query::Generator<Result<T>> gen = [&]() {
-        if (index_field_) {
+        if (index_field_ && planned.index_available) {
             return database_->template run_index_stream<T>(
                 std::move(*snapshot_), *index_field_, std::move(index_lo_), std::move(index_hi_),
-                std::move(predicate_), scan_limit, std::move(token_), has_token_);
+                std::move(predicate), scan_limit, std::move(token_), has_token_);
         }
-        return database_->template run_stream<T>(std::move(*snapshot_), std::move(predicate_),
+        return database_->template run_stream<T>(std::move(*snapshot_), std::move(predicate),
                                                  scan_limit, std::move(token_), has_token_);
     }();
 
-    // top_k exige order_less_ (definido em Query::top_k). Sem comparador
-    // explícito não há fallback std::less<T>: T tipicamente não é ordenável.
+    // Top-K explícito (maiores segundo `less`).
     if (top_k_ > 0 && order_less_) {
         gen = query::top_k<T>(std::move(gen), top_k_, std::move(order_less_), peak_);
-    } else if (order_less_) {
+    } else if (planned.uses_top_k && order_less_) {
+        // order_by + limit → Top-K dos menores segundo `less` (equivalente a
+        // sort + limit k), invertendo o comparador do heap de top_k.
+        auto inverted = [less = std::move(order_less_)](const T& left, const T& right) {
+            return less(right, left);
+        };
+        gen = query::top_k<T>(std::move(gen), limit_, std::move(inverted), peak_);
+        limit_ = 0;  // já aplicado como K
+    } else if (planned.uses_sort && order_less_) {
         gen = query::sort<T>(std::move(gen), std::move(order_less_), peak_);
     }
     if (distinct_key_) {

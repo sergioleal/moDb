@@ -147,6 +147,7 @@ struct Query7dOptions {
     std::size_t top{0};
     bool distinct_name{false};
     bool count_only{false};
+    bool explain{false};
 };
 
 int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
@@ -315,7 +316,7 @@ void print_query_help() {
                  "[--salary S]\n"
                  "             [--project id[,name[,salary[,country]]]] [--compute annual_salary]\n"
                  "             [--order-by salary|name|-salary|-name] [--top K]\n"
-                 "             [--distinct name] [--count]\n"
+                 "             [--distinct name] [--count] [--explain]\n"
                  "\n"
                  "Streams the Employees lazily (ODB++ Fase 7A) instead of materializing them\n"
                  "all: --min-salary filters (Predicate), --limit stops the scan early\n"
@@ -330,7 +331,10 @@ void print_query_help() {
                  "--order-by / --top / --distinct / --count (ODB++ Fase 7D): sort is\n"
                  "blocking; --top K keeps a heap of at most K rows (partially blocking);\n"
                  "--distinct name keeps the first row per name; --count aggregates.\n"
-                 "With --order-by/--top/--distinct, --limit applies after those operators.\n";
+                 "With --order-by/--top/--distinct, --limit applies after those operators.\n"
+                 "\n"
+                 "--explain (ODB++ Fase 7E) prints the deterministic plan: access method\n"
+                 "(table_scan|index_scan), nature, first_result_cost and limit pushdown.\n";
 }
 
 void print_blob_help() {
@@ -2035,6 +2039,32 @@ void print_projected_row(const modb::query::ProjectedRow& row) {
 
 } // namespace
 
+void print_query_plan(const modb::query::QueryPlan& plan) {
+    std::cout << "plan: access=" << plan.access_name()
+              << " nature=" << modb::query::nature_name(plan.nature)
+              << " first_result_cost=";
+    if (plan.first_result_cost == modb::query::QueryPlan::kFullInput) {
+        std::cout << "full_input";
+    } else {
+        std::cout << plan.first_result_cost;
+    }
+    std::cout << " limit_pushed=" << (plan.limit_pushed ? "true" : "false");
+    if (plan.uses_top_k) {
+        std::cout << " top_k=true";
+    }
+    if (plan.uses_sort) {
+        std::cout << " sort=true";
+    }
+    if (plan.uses_distinct) {
+        std::cout << " distinct=true";
+    }
+    if (plan.index_requested) {
+        std::cout << " index_requested=true index_available="
+                  << (plan.index_available ? "true" : "false");
+    }
+    std::cout << '\n';
+}
+
 template <typename Employee>
 void apply_query_7d(modb::object::Query<Employee>& query, const Query7dOptions& agg) {
     const auto field = agg.order == Query7dOptions::OrderField::none && agg.top > 0
@@ -2115,6 +2145,9 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
         if (limit != 0) {
             std::move(query).limit(limit);
         }
+        if (agg.explain) {
+            print_query_plan(query.plan());
+        }
         nature = query.nature();
         if (agg.count_only) {
             for (auto& result : std::move(query).aggregate(
@@ -2178,6 +2211,9 @@ int command_employee_query(const std::filesystem::path& path, int schema, std::s
         apply_query_7d(query, agg);
         if (limit != 0) {
             std::move(query).limit(limit);
+        }
+        if (agg.explain) {
+            print_query_plan(query.plan());
         }
         nature = query.nature();
         if (agg.count_only) {
@@ -3439,7 +3475,7 @@ int run_query_command(int argc, char* argv[]) {
     constexpr const char* usage =
         "modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S] "
         "[--project fields] [--compute name] [--order-by field] [--top K] "
-        "[--distinct name] [--count]";
+        "[--distinct name] [--count] [--explain]";
     std::optional<int> schema;
     std::size_t limit = 0;
     std::optional<double> min_salary;
@@ -3511,6 +3547,8 @@ int run_query_command(int argc, char* argv[]) {
             agg.distinct_name = true;
         } else if (flag == "--count") {
             agg.count_only = true;
+        } else if (flag == "--explain") {
+            agg.explain = true;
         } else {
             return print_usage_error(usage);
         }
