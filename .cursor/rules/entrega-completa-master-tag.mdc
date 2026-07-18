@@ -1,0 +1,35 @@
+---
+description: Ciclo completo de entrega — branch, testes, CLI, merge em master e tag 0.0.#task
+alwaysApply: true
+---
+
+# Procedimento de entrega (moDb)
+
+Toda entrega de fase/subfase nesta sessão deve fechar o ciclo completo, sem
+parar no branch de feature.
+
+## Sequência obrigatória
+
+1. **Branch** — criar a partir de `master` atualizado (`feat/...` ou equivalente).
+2. **Codificar** — implementar só o escopo pedido.
+3. **Testar** — suítes `debug` e `sanitizers` verdes (`ctest --preset ...`).
+4. **CLI** — exercer os comandos novos/alterados com `modb` (demo real).
+5. **Commit** — mensagem no estilo do repo; atualizar rastreador/plano se couber.
+6. **Push** do branch de feature.
+7. **Merge em `master`** — `merge --no-ff`, push de `master`.
+8. **Tag** — criar e enviar `0.0.#da-task` (anotada).
+9. **Apagar o branch** — local e remoto, após o merge.
+
+## Formato da tag
+
+- Padrão: `0.0.` + identificador da task em minúsculas.
+- Exemplos: Fase 7C → `0.0.7c`; Fase 7D → `0.0.7d`; Fase 6D → `0.0.6d`.
+- Mensagem da tag: uma linha com o entregável (ex.: `ODB++ Fase 7C: ...`).
+- A tag aponta para o merge commit em `master` (ou o HEAD de `master` após o merge).
+
+## Não encerrar a entrega
+
+- só com o branch empurrado;
+- sem merge em `master`;
+- sem a tag `0.0.#da-task` no remoto;
+- com o branch de feature ainda existindo após o merge.
