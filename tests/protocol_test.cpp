@@ -252,5 +252,110 @@ int main() {
         suite.check(!decoded, "lying string length is rejected without huge allocation");
     }
 
+    // --- 8F: compressão RLE ---
+    {
+        std::vector<std::byte> zeros(256, std::byte{0});
+        auto compressed = modb::net::compress_rle(zeros);
+        suite.check(compressed.has_value(), "RLE compresses zeros");
+        if (compressed) {
+            suite.check(compressed->size() < zeros.size(), "RLE shrinks repeated bytes");
+            auto inflated = modb::net::decompress_rle(*compressed, static_cast<std::uint32_t>(zeros.size()));
+            suite.check(inflated.has_value() && *inflated == zeros, "RLE round-trip zeros");
+        }
+    }
+    {
+        // Frame compressível: payload repetitivo grande o bastante para o limiar.
+        std::vector<std::byte> payload(128, std::byte{'A'});
+        ObjectEnvelope fat{
+            .object_id = ObjectId{1},
+            .type_definition_id = TypeDefinitionId{2},
+            .payload = payload,
+        };
+        ObjectFrame original{.query_id = 3, .compression = Compression::rle, .records = {fat}};
+        auto encoded = modb::net::encode_message(original);
+        suite.check(encoded.has_value(), "compressible ObjectFrame encodes");
+        if (encoded) {
+            auto decoded = modb::net::decode_message(*encoded);
+            suite.check(decoded.has_value(), "compressible ObjectFrame decodes");
+            if (decoded) {
+                const auto* frame = std::get_if<ObjectFrame>(&*decoded);
+                suite.check(frame != nullptr && frame->compression == Compression::rle,
+                            "compressible frame stays compressed on wire");
+                suite.check(frame != nullptr && frame->records == original.records,
+                            "compressible frame logical payload matches");
+            }
+        }
+    }
+    {
+        // Incompressível: preferência rle faz fallback para none.
+        std::vector<std::byte> random_bytes(128);
+        for (std::size_t i = 0; i < random_bytes.size(); ++i) {
+            random_bytes[i] = static_cast<std::byte>((i * 131u + 17u) & 0xffu);
+        }
+        ObjectEnvelope noisy{
+            .object_id = ObjectId{9},
+            .type_definition_id = TypeDefinitionId{2},
+            .payload = random_bytes,
+        };
+        ObjectFrame original{.query_id = 4, .compression = Compression::rle, .records = {noisy}};
+        auto encoded = modb::net::encode_message(original);
+        suite.check(encoded.has_value(), "incompressible ObjectFrame encodes");
+        if (encoded) {
+            auto decoded = modb::net::decode_message(*encoded);
+            suite.check(decoded.has_value(), "incompressible ObjectFrame decodes");
+            if (decoded) {
+                const auto* frame = std::get_if<ObjectFrame>(&*decoded);
+                suite.check(frame != nullptr && frame->compression == Compression::none,
+                            "incompressible frame falls back to none");
+                suite.check(frame != nullptr && frame->records == original.records,
+                            "incompressible frame logical payload matches");
+            }
+        }
+    }
+    {
+        // Codec desconhecido rejeitado sem alocar área descomprimida enorme.
+        BinaryWriter payload;
+        payload.write_u32(1); // query_id
+        payload.write_u32(0); // record_count
+        payload.write_u8(99); // codec desconhecido
+        payload.write_u8(0);
+        payload.write_u8(0);
+        payload.write_u8(0);
+        payload.write_u32(1u << 20); // uncompressed_size hostil
+        payload.write_u32(1);        // encoded_size mínimo
+        payload.write_u8(0);
+
+        BinaryWriter frame;
+        frame.write_u32(static_cast<std::uint32_t>(1 + payload.bytes().size()));
+        frame.write_u8(static_cast<std::uint8_t>(modb::net::MessageType::object_frame));
+        frame.write_bytes(payload.bytes());
+
+        auto decoded = modb::net::decode_message(frame.bytes());
+        suite.check(!decoded && decoded.error().code == ErrorCode::protocol_error,
+                    "unknown compression codec is rejected");
+    }
+    {
+        // Razão de expansão inválida: rejeita antes de alocar.
+        BinaryWriter payload;
+        payload.write_u32(1);
+        payload.write_u32(0);
+        payload.write_u8(static_cast<std::uint8_t>(Compression::rle));
+        payload.write_u8(0);
+        payload.write_u8(0);
+        payload.write_u8(0);
+        payload.write_u32(1024); // uncompressed
+        payload.write_u32(1);    // encoded — razão 1024 > default 8
+        payload.write_u8(0);
+
+        BinaryWriter frame;
+        frame.write_u32(static_cast<std::uint32_t>(1 + payload.bytes().size()));
+        frame.write_u8(static_cast<std::uint8_t>(modb::net::MessageType::object_frame));
+        frame.write_bytes(payload.bytes());
+
+        auto decoded = modb::net::decode_message(frame.bytes());
+        suite.check(!decoded && decoded.error().code == ErrorCode::protocol_error,
+                    "excessive expansion ratio is rejected");
+    }
+
     return suite.finish();
 }

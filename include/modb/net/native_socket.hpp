@@ -32,6 +32,9 @@ public:
     [[nodiscard]] Result<void> set_send_buffer_bytes(std::size_t bytes);
     [[nodiscard]] Result<void> set_recv_buffer_bytes(std::size_t bytes);
 
+    // Timeout de recv (Fase 8F); 0 = bloqueante sem limite.
+    [[nodiscard]] Result<void> set_recv_timeout_ms(std::uint32_t milliseconds);
+
     [[nodiscard]] Result<std::uint16_t> local_port() const;
     [[nodiscard]] Result<void> close();
     [[nodiscard]] bool is_open() const noexcept;

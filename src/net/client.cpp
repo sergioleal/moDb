@@ -136,8 +136,9 @@ Result<void> ObjectStream::refill() {
         if (frame->query_id != query_id_) {
             return std::unexpected(make_protocol("ObjectFrame query_id mismatch"));
         }
-        if (frame->compression != Compression::none) {
-            return std::unexpected(make_protocol("only compression=none is accepted"));
+        if (frame->compression != Compression::none &&
+            frame->compression != conn_->selected_codec) {
+            return std::unexpected(make_protocol("ObjectFrame compression was not negotiated"));
         }
         pending_.clear();
         pending_index_ = 0;
@@ -220,7 +221,7 @@ Result<Client> Client::connect(std::string_view host, std::uint16_t port,
 
     Hello hello{.version = protocol_version,
                 .database_name = std::string{database_name},
-                .accepted_codecs = {Compression::none}};
+                .accepted_codecs = {Compression::none, Compression::rle}};
     if (auto status = send_message(*socket, hello); !status) {
         return std::unexpected(status.error());
     }
@@ -236,11 +237,16 @@ Result<Client> Client::connect(std::string_view host, std::uint16_t port,
     if (ok->version != protocol_version) {
         return std::unexpected(make_protocol("server selected unsupported protocol version"));
     }
-    if (ok->selected_codec != Compression::none) {
-        return std::unexpected(make_protocol("only compression=none is accepted"));
+    if (!is_known_compression(ok->selected_codec)) {
+        return std::unexpected(make_protocol("server selected unknown compression codec"));
+    }
+    if (ok->max_expansion_ratio == 0) {
+        return std::unexpected(make_protocol("server sent invalid max_expansion_ratio"));
     }
 
     auto conn = std::make_shared<ClientConn>(std::move(*socket));
+    conn->selected_codec = ok->selected_codec;
+    conn->max_expansion_ratio = ok->max_expansion_ratio;
     return Client{std::move(conn), *ok};
 }
 

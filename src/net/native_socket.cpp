@@ -309,6 +309,18 @@ Result<void> NativeSocket::set_recv_buffer_bytes(std::size_t bytes) {
     return {};
 }
 
+Result<void> NativeSocket::set_recv_timeout_ms(std::uint32_t milliseconds) {
+    if (!is_open()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "set_recv_timeout on closed socket"});
+    }
+    DWORD value = milliseconds;
+    if (::setsockopt(static_cast<SocketHandle>(socket_), SOL_SOCKET, SO_RCVTIMEO,
+                     reinterpret_cast<const char*>(&value), sizeof(value)) == SOCKET_ERROR) {
+        return std::unexpected(make_io("setsockopt SO_RCVTIMEO failed", last_error()));
+    }
+    return {};
+}
+
 #else
 
 NativeSocket::NativeSocket(NativeSocket&& other) noexcept : fd_{std::exchange(other.fd_, -1)} {}
@@ -463,6 +475,19 @@ Result<void> NativeSocket::set_recv_buffer_bytes(std::size_t bytes) {
     const int value = static_cast<int>(bytes);
     if (::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF, &value, sizeof(value)) != 0) {
         return std::unexpected(make_io("setsockopt SO_RCVBUF failed", last_error()));
+    }
+    return {};
+}
+
+Result<void> NativeSocket::set_recv_timeout_ms(std::uint32_t milliseconds) {
+    if (!is_open()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "set_recv_timeout on closed socket"});
+    }
+    timeval value{};
+    value.tv_sec = static_cast<long>(milliseconds / 1000u);
+    value.tv_usec = static_cast<long>((milliseconds % 1000u) * 1000u);
+    if (::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) != 0) {
+        return std::unexpected(make_io("setsockopt SO_RCVTIMEO failed", last_error()));
     }
     return {};
 }

@@ -30,6 +30,8 @@ class Client;
 // Estado compartilhado da conexão: leitor em background demultiplexa frames.
 struct ClientConn {
     NativeSocket socket;
+    Compression selected_codec{Compression::none};
+    std::uint16_t max_expansion_ratio{default_max_expansion_ratio};
     std::mutex mu;
     std::condition_variable cv;
     std::unordered_map<std::uint32_t, std::deque<Message>> mailboxes;

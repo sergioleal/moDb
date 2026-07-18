@@ -22,7 +22,7 @@ std::filesystem::path temp_db_path(const char* tag) {
     const auto stamp =
         std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path() /
-           ("modb-8e-" + std::string{tag} + "-" + std::to_string(stamp) + ".modb");
+           ("modb-8f-" + std::string{tag} + "-" + std::to_string(stamp) + ".modb");
 }
 
 struct Item {
@@ -135,8 +135,13 @@ int main() {
                 suite.check(hello_ok.has_value(), "client handshake succeeds");
                 if (hello_ok) {
                     suite.check(hello_ok->version == protocol_version, "HelloOk version matches");
-                    suite.check(hello_ok->selected_codec == Compression::none,
-                                "HelloOk selects compression=none");
+                    suite.check(hello_ok->selected_codec == Compression::rle,
+                                "HelloOk selects compression=rle when client accepts it");
+                    suite.check(hello_ok->max_concurrent_streams >= 1,
+                                "HelloOk advertises concurrent stream limit");
+                    suite.check(hello_ok->max_expansion_ratio >= 1,
+                                "HelloOk advertises expansion ratio");
+                    suite.check(hello_ok->idle_timeout_ms > 0, "HelloOk advertises idle timeout");
                 }
                 acceptor.join();
             }
@@ -709,6 +714,131 @@ int main() {
                 }
             }
             acceptor.join();
+        }
+    }
+
+    // --- 8F: compressão negociada (rle) no fio ---
+    {
+        auto server = Server::listen(path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "compression server listens");
+        if (server) {
+            const auto port = server->port();
+            const auto db_name = std::string{server->database_name()};
+            std::thread acceptor([&server, &suite] {
+                suite.check(server->serve_one().has_value(), "compression serve_one completes");
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "compression client connects");
+                if (client) {
+                    suite.check(client->hello_ok().selected_codec == Compression::rle,
+                                "session negotiated rle");
+                    auto stream =
+                        client->query(QueryDescription{.type = type_id, .limit = 16});
+                    suite.check(stream.has_value(), "compression query starts");
+                    if (stream) {
+                        std::size_t count = 0;
+                        while (true) {
+                            auto next = stream->next();
+                            if (!next) {
+                                suite.check(false, "compression stream error");
+                                break;
+                            }
+                            if (!*next) {
+                                break;
+                            }
+                            ++count;
+                        }
+                        suite.check(count == 16, "compression stream delivered objects");
+                    }
+                }
+            }
+            acceptor.join();
+        }
+    }
+
+    // --- 8F: limite de streams concorrentes ---
+    {
+        auto server = Server::listen(path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "stream-limit server listens");
+        if (server) {
+            server->set_max_concurrent_streams(1);
+            const auto port = server->port();
+            const auto db_name = std::string{server->database_name()};
+            std::thread acceptor([&server, &suite] {
+                suite.check(server->serve_one().has_value(), "stream-limit serve_one completes");
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "stream-limit client connects");
+                if (client) {
+                    auto slow = client->query(QueryDescription{.type = type_id});
+                    auto overflow = client->query(QueryDescription{.type = type_id, .limit = 1});
+                    suite.check(slow.has_value() && overflow.has_value(),
+                                "stream-limit both queries sent");
+                    if (slow && overflow) {
+                        // A segunda deve falhar com StreamError (limite=1).
+                        auto overflow_next = overflow->next();
+                        suite.check(!overflow_next &&
+                                        overflow_next.error().code == ErrorCode::invalid_argument,
+                                    "excess concurrent stream rejected");
+
+                        std::size_t count = 0;
+                        while (true) {
+                            auto next = slow->next();
+                            if (!next) {
+                                suite.check(false, "primary stream failed after limit reject");
+                                break;
+                            }
+                            if (!*next) {
+                                break;
+                            }
+                            ++count;
+                            if (count >= 5) {
+                                break;
+                            }
+                        }
+                        suite.check(count >= 1, "primary stream still usable");
+                        (void)client->cancel(slow->query_id());
+                        while (true) {
+                            auto next = slow->next();
+                            if (!next || !*next) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            acceptor.join();
+        }
+    }
+
+    // --- 8F: idle timeout encerra sessão ociosa ---
+    {
+        auto server = Server::listen(path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "timeout server listens");
+        if (server) {
+            server->set_idle_timeout_ms(150);
+            const auto port = server->port();
+            const auto db_name = std::string{server->database_name()};
+            bool serve_ok = false;
+            std::thread acceptor([&server, &serve_ok] {
+                serve_ok = static_cast<bool>(server->serve_one());
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "timeout client connects");
+                // Sem Query: o servidor deve sair por idle timeout.
+                std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            }
+            acceptor.join();
+            suite.check(serve_ok, "idle timeout ends session cleanly");
         }
     }
 

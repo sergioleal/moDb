@@ -93,6 +93,11 @@ Result<void> send_message(NativeSocket& socket, const Message& message) {
 }
 
 Result<Message> recv_message(NativeSocket& socket) {
+    return recv_message(socket, max_frame_bytes, default_max_expansion_ratio);
+}
+
+Result<Message> recv_message(NativeSocket& socket, std::uint32_t negotiated_max_frame,
+                             std::uint16_t max_expansion_ratio) {
     std::array<std::byte, 4> length_bytes{};
     if (auto status = socket.recv_exact(length_bytes); !status) {
         return std::unexpected(status.error());
@@ -102,9 +107,9 @@ Result<Message> recv_message(NativeSocket& socket) {
     if (length == 0) {
         return std::unexpected(make_protocol("frame length is zero"));
     }
-    if (length > max_frame_bytes) {
+    if (length > negotiated_max_frame || length > max_frame_bytes) {
         return std::unexpected(
-            Error{ErrorCode::frame_too_large, "frame length exceeds 16 MiB"});
+            Error{ErrorCode::frame_too_large, "frame length exceeds negotiated max"});
     }
 
     std::vector<std::byte> frame(4u + length);
@@ -112,7 +117,7 @@ Result<Message> recv_message(NativeSocket& socket) {
     if (auto status = socket.recv_exact(std::span<std::byte>{frame.data() + 4, length}); !status) {
         return std::unexpected(status.error());
     }
-    return decode_message(frame);
+    return decode_message(frame, negotiated_max_frame, max_expansion_ratio);
 }
 
 Server::Server(std::shared_ptr<object::Database> database, object::DatabaseId database_id,
@@ -184,7 +189,8 @@ Result<Server> Server::listen(const std::filesystem::path& path, std::string_vie
 namespace {
 
 Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Database> database,
-                              const Query& query, std::optional<std::size_t> fail_after) {
+                              const Query& query, std::optional<std::size_t> fail_after,
+                              Compression preferred_codec) {
     StreamStats stats{};
     query::CancellationToken token;
     {
@@ -209,7 +215,7 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
         spec.equals = std::pair{query.description.equals->field, query.description.equals->value};
     }
 
-    ObjectFrame batch{.query_id = query.query_id, .compression = Compression::none};
+    ObjectFrame batch{.query_id = query.query_id, .compression = preferred_codec};
     bool cancelled = false;
 
     auto note_outstanding = [&] {
@@ -332,14 +338,31 @@ Result<void> Server::handle_connection(NativeSocket peer) {
     if (!accepts_none) {
         return std::unexpected(make_protocol("client must accept compression=none"));
     }
+
+    Compression selected = Compression::none;
+    if (preferred_codec_ != Compression::none &&
+        std::find(hello->accepted_codecs.begin(), hello->accepted_codecs.end(),
+                  preferred_codec_) != hello->accepted_codecs.end()) {
+        selected = preferred_codec_;
+    }
+    selected_codec_ = selected;
     (void)database_name_;
 
     HelloOk ok{.version = protocol_version,
                .baseline = baseline_,
-               .selected_codec = Compression::none,
-               .max_frame_bytes = max_frame_bytes};
+               .selected_codec = selected,
+               .max_frame_bytes = max_frame_bytes,
+               .max_concurrent_streams = max_concurrent_streams_,
+               .max_expansion_ratio = default_max_expansion_ratio,
+               .idle_timeout_ms = idle_timeout_ms_};
     if (auto status = send_message(peer, ok); !status) {
         return status;
+    }
+
+    if (idle_timeout_ms_ > 0) {
+        if (auto status = peer.set_recv_timeout_ms(idle_timeout_ms_); !status) {
+            return status;
+        }
     }
 
     SessionState session;
@@ -352,22 +375,13 @@ Result<void> Server::handle_connection(NativeSocket peer) {
     std::atomic<int> live_workers{0};
     std::mutex stats_mu;
 
-    auto join_finished = [&] {
-        std::vector<std::thread> done;
-        {
-            const std::scoped_lock lock{workers_mu};
-            // Junta todos ao sair; durante o loop deixamos correr.
-            (void)done;
-        }
-    };
-    (void)join_finished;
-
     Result<void> session_status{};
     while (!session.stop.load(std::memory_order_relaxed)) {
         auto inbound = wait_inbound(session);
         if (!inbound) {
             // Peer fechou o socket (FIN ou RST/WSAECONNRESET no Windows após
             // closesocket com recv pendente). Sessão encerra sem erro.
+            // Timeout de idle também chega como io_error.
             const auto code = inbound.error().code;
             if (code == ErrorCode::connection_closed || code == ErrorCode::io_error) {
                 session_status = {};
@@ -382,11 +396,20 @@ Result<void> Server::handle_connection(NativeSocket peer) {
             break;
         }
 
-        // Copia a Query para o worker (inbound será destruído).
         Query query_copy = *query;
+        if (live_workers.load(std::memory_order_relaxed) >=
+            static_cast<int>(max_concurrent_streams_)) {
+            (void)send_locked(session,
+                              StreamError{.query_id = query_copy.query_id,
+                                          .code = ErrorCode::invalid_argument,
+                                          .message = "max concurrent streams exceeded"});
+            continue;
+        }
+
         live_workers.fetch_add(1, std::memory_order_relaxed);
-        std::thread worker([&, query_copy]() mutable {
-            auto stats = run_query(session, database_, query_copy, fail_after_);
+        const Compression codec = selected_codec_;
+        std::thread worker([&, query_copy, codec]() mutable {
+            auto stats = run_query(session, database_, query_copy, fail_after_, codec);
             if (stats) {
                 const std::scoped_lock lock{stats_mu};
                 last_stats_ = *stats;

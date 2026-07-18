@@ -48,11 +48,11 @@
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
-| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 10/12 | Fase 7 |
+| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
 | [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10 |
-| **Total** | | | **92/124 (~74%)** | |
+| **Total** | | | **94/124 (~76%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -585,7 +585,7 @@ objetos (TTFR); buscas por chave via índice.
 
 ## Fase 8 — Servidor, protocolo binário e backpressure
 
-Status: 🔄 Em andamento (10/12) — seis entregas verticais 8A–8F.
+Status: ✅ Concluída (12/12) — seis entregas verticais 8A–8F.
 Definição completa:
 [PLANO_ODB.md §Fase 8](PLANO_ODB.md#fase-8--servidor-protocolo-binário-e-backpressure) ·
 [PROTOCOLO_FASES.md §Fase 8](PROTOCOLO_FASES.md#fase-8--servidor-protocolo-binário-e-backpressure)
@@ -689,23 +689,25 @@ sanitizers.
 
 ### Fase 8F — Limites, timeout, compressão e fechamento
 
-Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8f`. Depende de 8E.
+Status: ✅ Concluída (2/2) — tag prevista `0.0.8f`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8F.1 | Timeout, limites de stream/frame/expansão; compressão negociada | ⬜ | Codec por benchmark; `none` obrigatório e fallback |
-| 8F.2 | Suíte completa + demo CLI entre processos | ⬜ | Fecha critério da Fase 8 |
+| 8F.1 | Timeout, limites de stream/frame/expansão; compressão negociada | ✅ | RLE embutido; `none` obrigatório/fallback; HelloOk anuncia limites |
+| 8F.2 | Suíte completa + demo CLI entre processos | ✅ | `serve process-demo`; CTest `modb.cli.serve_process_demo` |
 
 ### Testes automatizados desta subfase
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.protocol` (compressão) | negociada; incompressível → `none`; inválida rejeitada | ⬜ |
-| `modb.server_streaming` (fechamento) | limites/timeout; demo entre processos | ⬜ |
+| `modb.protocol` (compressão) | negociada; incompressível → `none`; inválida rejeitada | ✅ |
+| `modb.server_streaming` (fechamento) | limites/timeout; compressão no fio | ✅ |
+| `modb.cli.serve_process_demo` | cliente e servidor em processos distintos | ✅ |
 
-Critério de aceite 8F / da Fase 8: ⬜ cliente em outro processo com
+Critério de aceite 8F / da Fase 8: ✅ cliente em outro processo com
 backpressure comprovado e `StreamError` correto; compressão inválida
-rejeitada sem alocação excessiva.
+rejeitada sem alocação excessiva. Suíte completa 93/93 em Debug e
+sanitizers.
 
 ---
 

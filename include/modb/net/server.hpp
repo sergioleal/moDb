@@ -1,7 +1,7 @@
 #pragma once
 
-// Servidor TCP das Fases 8B–8E: sessão com leitor ativo, Cancel, multiplexação
-// de query_id (escrita serializada) e backpressure (fila ≤ max_in_flight).
+// Servidor TCP das Fases 8B–8F: sessão com leitor ativo, Cancel, multiplexação,
+// backpressure, limites/timeout e compressão negociada (RLE com fallback none).
 
 #include "modb/error.hpp"
 #include "modb/net/native_socket.hpp"
@@ -24,6 +24,8 @@ inline constexpr std::size_t max_in_flight_objects = 8;
 
 [[nodiscard]] Result<void> send_message(NativeSocket& socket, const Message& message);
 [[nodiscard]] Result<Message> recv_message(NativeSocket& socket);
+[[nodiscard]] Result<Message> recv_message(NativeSocket& socket, std::uint32_t negotiated_max_frame,
+                                           std::uint16_t max_expansion_ratio);
 
 // Contadores do último fluxo (produzidos − enviados = objetos na fila local).
 struct StreamStats {
@@ -51,9 +53,17 @@ public:
     [[nodiscard]] std::size_t open_snapshot_count() const noexcept {
         return database_ ? database_->open_snapshot_count() : 0;
     }
+    [[nodiscard]] Compression selected_codec() const noexcept { return selected_codec_; }
 
     void fail_stream_after(std::size_t objects) noexcept { fail_after_ = objects; }
     void use_small_socket_buffers(bool enabled) noexcept { small_buffers_ = enabled; }
+    void set_max_concurrent_streams(std::uint16_t limit) noexcept {
+        max_concurrent_streams_ = limit == 0 ? 1 : limit;
+    }
+    void set_idle_timeout_ms(std::uint32_t milliseconds) noexcept {
+        idle_timeout_ms_ = milliseconds;
+    }
+    void set_preferred_codec(Compression codec) noexcept { preferred_codec_ = codec; }
 
     // Aceita uma conexão e mantém a sessão até o peer fechar (Hello + Queries).
     [[nodiscard]] Result<void> serve_one();
@@ -73,6 +83,10 @@ private:
     object::BaselineId baseline_{};
     std::optional<std::size_t> fail_after_{};
     bool small_buffers_{false};
+    std::uint16_t max_concurrent_streams_{default_max_concurrent_streams};
+    std::uint32_t idle_timeout_ms_{default_idle_timeout_ms};
+    Compression preferred_codec_{Compression::rle};
+    Compression selected_codec_{Compression::none};
     StreamStats last_stats_{};
 };
 
