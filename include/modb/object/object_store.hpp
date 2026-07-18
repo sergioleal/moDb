@@ -13,6 +13,8 @@
 // Importa PageFile e o TableHeap de dados.
 #include "modb/storage/page_file.hpp"
 #include "modb/storage/table_heap.hpp"
+// Importa o gerador de streaming (Fase 7A).
+#include "modb/query/generator.hpp"
 
 // Disponibiliza std::size_t no resultado do GC.
 #include <cstddef>
@@ -82,6 +84,21 @@ public:
     [[nodiscard]] Result<void> scan_at(
         std::uint64_t snapshot_epoch,
         const std::function<Result<void>(const DecodedObject&)>& visitor);
+
+    // Fonte de scan PREGUIÇOSA (Fase 7A): um Generator que percorre o heap
+    // página a página, cedendo cada objeto visível na época do snapshot (mesma
+    // regra de `scan_at`: filtra por identidade para não expor versões previous
+    // nem cópias órfãs). Lê uma página de dados só quando o consumidor a
+    // alcança — a base do critério TTFR (`limit 1` lê ≤ 2 páginas). `type`
+    // nullopt visita todos os tipos.
+    [[nodiscard]] query::Generator<Result<DecodedObject>> scan_stream(
+        std::uint64_t snapshot_epoch, std::optional<TypeDefinitionId> type);
+    // Páginas de dados lidas pelo scan preguiçoso desde o último reset
+    // (instrumentação do critério TTFR da Fase 7A).
+    [[nodiscard]] std::uint64_t data_pages_read() const noexcept {
+        return data_heap_.data_pages_read();
+    }
+    void reset_data_pages_read() noexcept { data_heap_.reset_data_pages_read(); }
 
     // Baseline corrente (nullopt antes de qualquer tipo ser registrado).
     [[nodiscard]] const std::optional<Baseline>& current_baseline() const noexcept {

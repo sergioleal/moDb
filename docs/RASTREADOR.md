@@ -47,11 +47,11 @@
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
-| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ⬜ Não iniciada | 0/14 | Fases 4, 6 |
+| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 4/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **68/110 (~62%)** | |
+| **Total** | | | **72/110 (~65%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -449,23 +449,35 @@ processo (`modb.snapshot`, `modb.mvcc_recovery`). Suíte completa 64/64 em Debug
 
 ## Fase 7 — Índices e consultas em streaming (embedded)
 
-Status: ⬜ Não iniciada (0/14) — cinco entregas verticais. Definição completa:
+Status: 🔄 Em andamento (4/14) — cinco entregas verticais; 7A concluída,
+7B–7E não iniciadas. Definição completa:
 [PLANO_ODB.md §Fase 7](PLANO_ODB.md#fase-7--índices-e-consultas-em-streaming-embedded) ·
 [PROTOCOLO_FASES.md §Fase 7](PROTOCOLO_FASES.md#fase-7--índices-e-consultas-em-streaming-embedded)
 
 ### Fase 7A — Consulta streaming básica
 
-Status: ⬜ Não iniciada (0/4) — bloqueada pela Fase 6D.
+Status: ✅ Concluída (4/4) — commit `a585fab`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 7A.1 | `Generator<Result<T>>` + cursor de scan com estado mínimo | ⬜ | Validar MinGW GCC, MSVC e Clang |
-| 7A.2 | Operadores preguiçosos Scan, Predicate e Limit | ⬜ | Limit encerra o upstream |
-| 7A.3 | Snapshot durante todo o fluxo + cancelamento cooperativo | ⬜ | Depende da Fase 6D |
-| 7A.4 | API embedded `query.stream()` | ⬜ | Consumo incremental |
+| 7A.1 | `Generator<Result<T>>` + cursor de scan com estado mínimo | ✅ | coroutines C++20; `TableHeap::read_page_records` + `ObjectStore::scan_stream` |
+| 7A.2 | Operadores preguiçosos Scan, Predicate e Limit | ✅ | `query::{limit,filter,cancellable}`; Limit encerra o upstream |
+| 7A.3 | Snapshot durante todo o fluxo + cancelamento cooperativo | ✅ | Snapshot movido para a moldura da coroutine; `CancellationToken` |
+| 7A.4 | API embedded `query.stream()` | ✅ | `Database::query<T>()` fluente; filtro por nome (todas as versões) |
 
-Critério de aceite 7A: ⬜ `limit 1` sobre 100 mil objetos lê no máximo duas
-páginas, usa memória O(1), preserva o snapshot e encerra o upstream.
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.generator` | preguiça (contador + limit), composição filter/limit, propagação de erro, cancelamento, destruição precoce | ✅ |
+| `modb.streaming_query` | **TTFR: `limit 1` lê ≤ 2 páginas**; varredura completa; filtro; filter+limit curto-circuita; cancelamento; estabilidade do snapshot | ✅ |
+| `modb.cli.oo_query` | `oo employee query` (streaming, filtro, limite) sobre o tipo evoluído | ✅ |
+
+Critério de aceite 7A: ✅ `limit 1` lê ≤ 2 páginas de dados (num heap com muitas
+páginas), mantém memória O(1) (pipeline preguiçoso, nada materializado),
+preserva o estado lógico do snapshot por toda a leitura e encerra o upstream ao
+atingir o limite ou ao cancelar. Suíte completa 69/69 em Debug, `-Werror` e
+sanitizers.
 
 ### Fase 7B — Consultas indexadas
 

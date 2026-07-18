@@ -459,6 +459,7 @@ modb oo employee create <file> <name> <salary> [country] --schema <1|2>
 modb oo employee evolve <file> --schema <1|2>
 modb oo employee get <file> <object-id> --schema <1|2>
 modb oo employee set-salary <file> <object-id> <salary> --schema <1|2>
+modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S]
 modb oo employee demo <file> [--force]
 ```
 
@@ -484,6 +485,17 @@ Baseline 20 (1 types) [current]
 `get --schema 2` materializa objetos da versão 1 através do `ProjectionPlan`; o
 default de `country` é `"BR"`. `set-salary --schema 2` usa `Handle::set` e regrava o
 objeto antigo com a definição corrente, demonstrando a migração preguiçosa.
+
+`query` exercita a consulta em streaming da Fase 7A: percorre os Employees
+preguiçosamente (todas as versões de schema do tipo), `--min-salary S` filtra e
+`--limit N` encerra a varredura cedo. Ao final reporta quantas páginas de dados
+foram lidas — com `--limit`, poucas (o critério TTFR):
+
+```text
+$ modb oo employee query phase3.modb --schema 2 --min-salary 17000
+Employee: name=Bia salary=18000 country=PT
+1 employee(s) streamed; data pages read: 1
+```
 
 ## `modb blob` — binários encadeados (ODB++ Fase 4)
 

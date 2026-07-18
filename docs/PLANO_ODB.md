@@ -368,13 +368,13 @@ infraestrutura interna das entregas, não marcos isolados.
 
 #### Fase 7A — Consulta streaming básica
 
-- [ ] Implementar `Generator<Result<T>>` com coroutines C++20 e cursor de
+- [x] Implementar `Generator<Result<T>>` com coroutines C++20 e cursor de
       varredura com estado mínimo; validar MinGW GCC, MSVC e Clang.
-- [ ] Implementar Scan, Predicate e Limit com avaliação preguiçosa e
+- [x] Implementar Scan, Predicate e Limit com avaliação preguiçosa e
       curto-circuito do upstream.
-- [ ] Fazer toda consulta manter um `Snapshot` até o fim e implementar
+- [x] Fazer toda consulta manter um `Snapshot` até o fim e implementar
       cancelamento cooperativo.
-- [ ] Expor `query.stream()` para consumo incremental, sem materializar o
+- [x] Expor `query.stream()` para consumo incremental, sem materializar o
       conjunto de resultados.
 
 Entregável 7A: consulta embedded por varredura, filtrável e cancelável.

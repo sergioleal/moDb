@@ -210,6 +210,12 @@ if(BUILD_TESTING)
     add_executable(modb_mvcc_recovery_tests tests/mvcc_recovery_test.cpp)
     target_link_libraries(modb_mvcc_recovery_tests PRIVATE modb::modb)
 
+    add_executable(modb_generator_tests tests/generator_test.cpp)
+    target_link_libraries(modb_generator_tests PRIVATE modb::modb)
+
+    add_executable(modb_streaming_query_tests tests/streaming_query_test.cpp)
+    target_link_libraries(modb_streaming_query_tests PRIVATE modb::modb)
+
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
@@ -273,6 +279,8 @@ if(BUILD_TESTING)
         target_link_options(modb_object_store_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_snapshot_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_mvcc_recovery_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_generator_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_streaming_query_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -304,6 +312,8 @@ if(BUILD_TESTING)
     add_test(NAME modb.object_store COMMAND modb_object_store_tests)
     add_test(NAME modb.snapshot COMMAND modb_snapshot_tests)
     add_test(NAME modb.mvcc_recovery COMMAND modb_mvcc_recovery_tests)
+    add_test(NAME modb.generator COMMAND modb_generator_tests)
+    add_test(NAME modb.streaming_query COMMAND modb_streaming_query_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)
@@ -340,6 +350,12 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.oo_demo
         COMMAND modb_cli oo employee demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --force)
+    # Consulta em streaming (Fase 7A) sobre o arquivo evoluído da demo (2
+    # Employees, tipo lógico único em duas versões). Ordem fixada via DEPENDS.
+    add_test(NAME modb.cli.oo_query
+        COMMAND modb_cli oo employee query
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2 --limit 1)
+    set_tests_properties(modb.cli.oo_query PROPERTIES DEPENDS modb.cli.oo_demo)
     add_test(NAME modb.cli.blob_help COMMAND modb_cli blob --help)
     add_test(NAME modb.cli.graph_help COMMAND modb_cli graph --help)
     add_test(NAME modb.cli.coll_help COMMAND modb_cli coll --help)

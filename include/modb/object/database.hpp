@@ -12,6 +12,9 @@
 #include "modb/object/object_store.hpp"
 // Importa ProjectionPlan para materializar versões históricas.
 #include "modb/object/projection_plan.hpp"
+// Importa o gerador e os operadores de streaming (Fase 7A).
+#include "modb/query/generator.hpp"
+#include "modb/query/operators.hpp"
 // Importa PageFile, mantido por ponteiro estável.
 #include "modb/storage/page_file.hpp"
 // Importa a fábrica do WAL (injeção de failpoint) usada no commit.
@@ -43,6 +46,8 @@
 namespace modb::object {
 
 class Database;
+template <typename T>
+class Query;
 
 // Fase até onde o commit avança. `full` é o commit de produção; as demais são
 // costuras de teste que congelam o WAL num ponto específico, para a matriz de
@@ -117,6 +122,62 @@ private:
     DatabaseId database_;
     std::uint64_t epoch_;
     bool registered_{false};
+};
+
+// Consulta em streaming (Fase 7A): construtor fluente que descreve um scan
+// preguiçoso sobre o tipo T — filtrável (`where`), limitável (`limit`) e
+// cancelável (`cancel_on`) — e o materializa em `stream()`. O `Snapshot` é
+// aberto na construção e MOVIDO para dentro do Generator em `stream()`: a
+// leitura vê um estado lógico estável por toda a sua vida, mesmo que a Query
+// temporária morra antes do consumo (padrão `for (auto& r : db.query<T>()...
+// .stream())`). Move-only; os métodos fluentes são `&&`-qualificados para
+// encadear sobre a temporária.
+template <typename T>
+class Query {
+public:
+    Query(const Query&) = delete;
+    Query& operator=(const Query&) = delete;
+    Query(Query&&) = default;
+    Query& operator=(Query&&) = delete;
+
+    // Operador Predicate: mantém só os valores materializados que satisfazem.
+    // Encadeável (`.where(...).limit(...)`) ou aplicável em separado sobre uma
+    // Query nomeada via `std::move(q).where(...)`.
+    Query&& where(std::function<bool(const T&)> predicate) && {
+        predicate_ = std::move(predicate);
+        return std::move(*this);
+    }
+    // Operador Limit: encerra o upstream ao atingir a contagem. 0 = sem limite.
+    Query&& limit(std::size_t count) && {
+        limit_ = count;
+        return std::move(*this);
+    }
+    // Cancelamento cooperativo: o fluxo encerra quando o token é sinalizado.
+    Query&& cancel_on(query::CancellationToken token) && {
+        token_ = std::move(token);
+        has_token_ = true;
+        return std::move(*this);
+    }
+    // Constrói o Generator preguiçoso; consome a Query (move o Snapshot).
+    [[nodiscard]] query::Generator<Result<T>> stream() &&;
+
+private:
+    friend class Database;
+    Query(Database* database, std::optional<Snapshot> snapshot,
+          std::optional<Error> setup_error)
+        : database_{database},
+          snapshot_{std::move(snapshot)},
+          setup_error_{std::move(setup_error)} {}
+
+    Database* database_;
+    // O snapshot que segura o estado lógico, ou o erro de configuração que
+    // impediu de abri-lo (tipo não bound, banco não anexado, etc.).
+    std::optional<Snapshot> snapshot_;
+    std::optional<Error> setup_error_;
+    std::function<bool(const T&)> predicate_;
+    std::size_t limit_{0};
+    query::CancellationToken token_;
+    bool has_token_{false};
 };
 
 // Registro de processo que mantém bancos vivos e permite que Handles resolvam
@@ -378,6 +439,24 @@ public:
                             oldest_open_snapshot_epoch());
     }
 
+    // Abre uma consulta em streaming sobre o tipo T (Fase 7A). Abre um snapshot
+    // na época corrente e devolve um construtor fluente; o consumo real
+    // (preguiçoso) começa em `.stream()`. Ex.:
+    //   for (auto& r : db.query<Account>().where(...).limit(10).stream()) { ... }
+    template <typename T>
+    [[nodiscard]] Query<T> query() {
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return Query<T>{this, std::nullopt,
+                            Error{ErrorCode::type_not_found, "type is not bound"}};
+        }
+        auto opened = snapshot();
+        if (!opened) {
+            return Query<T>{this, std::nullopt, opened.error()};
+        }
+        return Query<T>{this, std::move(*opened), std::nullopt};
+    }
+
     Result<void> register_migration(std::string type_name, std::uint64_t from_type_id,
                                     Migration migration);
 
@@ -472,6 +551,14 @@ public:
         }
         return store_.version_info(id);
     }
+
+    // Páginas de dados lidas pelo scan preguiçoso desde o último reset
+    // (instrumentação do critério TTFR da Fase 7A: `limit 1` deve manter isto
+    // em ≤ 2). Diagnóstico de sessão, zerável.
+    [[nodiscard]] std::uint64_t data_pages_read() const noexcept {
+        return store_.data_pages_read();
+    }
+    void reset_data_pages_read() noexcept { store_.reset_data_pages_read(); }
 
     // Recicla o espaço das versões antigas que nenhum snapshot aberto ainda
     // pode enxergar (Fase 6C). Roda numa transação própria (as liberações
@@ -617,6 +704,62 @@ private:
         return result;
     }
 
+    // Fonte typed do pipeline de streaming (Fase 7A): possui o `Snapshot` (por
+    // valor → vive na moldura da coroutine, logo o fluxo mantém o estado lógico
+    // estável por toda a leitura), percorre o scan preguiçoso já filtrado pelo
+    // tipo, materializa cada objeto em T e aplica Predicate e Limit. `Limit`
+    // encerra (`co_return`) destruindo o scan a montante — o curto-circuito.
+    template <typename T>
+    query::Generator<Result<T>> run_stream(Snapshot snapshot,
+                                           std::function<bool(const T&)> predicate,
+                                           std::size_t limit_count, query::CancellationToken token,
+                                           bool has_token) {
+        std::size_t emitted = 0;
+        // Fonte percorre TODOS os objetos visíveis na época; o filtro por tipo é
+        // por NOME (todas as versões de schema do mesmo tipo lógico), igual a
+        // Database::scan<T> — um objeto de uma versão antiga ainda é um T.
+        for (auto& item : store_.scan_stream(snapshot.epoch(), std::nullopt)) {
+            if (has_token && token.cancelled()) {
+                co_return;
+            }
+            if (!item) {
+                co_yield Result<T>{std::unexpected(item.error())};
+                co_return;
+            }
+            const BoundType* bound = bound_for(type_key<T>());
+            if (bound == nullptr) {
+                co_yield Result<T>{std::unexpected(Error{ErrorCode::type_not_found,
+                                                         "type is not bound"})};
+                co_return;
+            }
+            auto stored_type = store_.find_type(item->type);
+            if (!stored_type || stored_type->get().name() != bound->binding.type_name()) {
+                continue;  // objeto de outro tipo lógico
+            }
+            auto value = materialize_decoded<T>(*bound, *item);
+            if (!value) {
+                co_yield Result<T>{std::unexpected(value.error())};
+                co_return;
+            }
+            if (predicate && !predicate(*value)) {
+                continue;
+            }
+            co_yield Result<T>{std::move(*value)};
+            if (limit_count != 0 && ++emitted >= limit_count) {
+                co_return;
+            }
+        }
+    }
+
+    // Fluxo que cede um único erro — usado quando a configuração da Query falhou
+    // (tipo não bound, snapshot não pôde abrir) antes de qualquer leitura.
+    template <typename T>
+    query::Generator<Result<T>> failed_stream(Error error) {
+        co_yield Result<T>{std::unexpected(std::move(error))};
+    }
+    template <typename U>
+    friend class Query;
+
     // Época do snapshot aberto mais antigo (nullopt se nenhum estiver aberto).
     // Consultada antes de toda escrita que possa conflitar com uma versão
     // `previous` ainda visível (Fase 6B) e pelo GC (Fase 6C). O acesso ao
@@ -673,6 +816,15 @@ private:
     // transação falha com `transaction_active`.
     std::unique_ptr<std::mutex> snapshot_registry_mutex_{std::make_unique<std::mutex>()};
 };
+
+template <typename T>
+query::Generator<Result<T>> Query<T>::stream() && {
+    if (setup_error_) {
+        return database_->template failed_stream<T>(std::move(*setup_error_));
+    }
+    return database_->template run_stream<T>(std::move(*snapshot_), std::move(predicate_), limit_,
+                                             std::move(token_), has_token_);
+}
 
 template <typename T>
 template <auto Member>

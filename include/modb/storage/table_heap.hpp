@@ -75,6 +75,14 @@ struct HeapRecord {
     friend bool operator==(const HeapRecord&, const HeapRecord&) = default;
 };
 
+// Registros de uma única página de dados e o ponteiro para a próxima da cadeia.
+// É o átomo de um scan preguiçoso (Fase 7A): o consumidor lê uma página, produz
+// seus registros e só então segue para `next` — nunca materializa o heap todo.
+struct HeapPageSlice {
+    std::vector<HeapRecord> records;
+    std::optional<PageId> next;
+};
+
 // Trata uma cadeia de slotted pages como uma coleção única de registros.
 class TableHeap {
 public:
@@ -93,6 +101,15 @@ public:
     [[nodiscard]] Result<std::vector<RecordId>> scan();
     // Retorna endereços e bytes de todos os registros lendo cada página uma vez.
     [[nodiscard]] Result<std::vector<HeapRecord>> scan_records();
+    // Lê UMA página de dados e devolve seus registros vivos e a próxima da
+    // cadeia (Fase 7A): o átomo de um scan preguiçoso. Incrementa o contador de
+    // páginas de dados lidas.
+    [[nodiscard]] Result<HeapPageSlice> read_page_records(PageId id);
+    // Contador de páginas de dados lidas por `read_page_records` — instrumenta o
+    // critério TTFR da Fase 7A (`limit 1` deve ler ≤ 2 páginas). Diagnóstico de
+    // sessão, zerável.
+    [[nodiscard]] std::uint64_t data_pages_read() const noexcept { return data_pages_read_; }
+    void reset_data_pages_read() noexcept { data_pages_read_ = 0; }
     // Retorna informações compreensíveis de todas as páginas.
     [[nodiscard]] Result<std::vector<TableHeapPageInfo>> layout();
     // Retorna a página usada para abrir o heap.
@@ -143,6 +160,8 @@ private:
     // Espelham os contadores persistidos na raiz dedicada.
     std::uint64_t page_count_{};
     std::uint64_t record_count_{};
+    // Conta páginas de dados lidas por `read_page_records` (instrumentação 7A).
+    std::uint64_t data_pages_read_{};
     // Permite validar e localizar diretamente páginas pertencentes ao heap.
     std::unordered_set<std::uint64_t> page_ids_;
     // Evita leituras de páginas que certamente não comportam uma inserção.

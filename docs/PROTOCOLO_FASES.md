@@ -1057,6 +1057,94 @@ intercalados no mesmo processo.
 
 # Fase 7 — Índices e consultas em streaming (embedded)
 
+## Sequência de entregas verticais
+
+A Fase 7 não usa componentes internos como critério de entrega. Um `Generator`
+isolado ou uma B+ tree ainda não resolvem um caso de uso da API. Cada subfase
+abaixo termina com uma capacidade consumível e uma prova automatizada de seu
+valor. A Fase 7A só pode ser encerrada depois da Fase 6D, porque a consulta
+streaming precisa conservar o snapshot sob commits concorrentes.
+
+### Fase 7A — Consulta streaming básica
+
+Escopo:
+
+- `Generator<Result<T>>` próprio sobre coroutines C++20, compilando em MinGW
+  GCC, MSVC e Clang;
+- cursor físico de scan com estado mínimo;
+- operadores Scan, Predicate e Limit preguiçosos;
+- `Snapshot` mantido por toda a vida do fluxo;
+- `CancellationToken` cooperativo;
+- API embedded `query.stream()` para consumo incremental.
+
+Valor entregue: consultar e filtrar grandes volumes sem carregar todos os
+objetos, interrompendo o fluxo quando o consumidor já tem o resultado.
+
+Critério de conclusão 7A: `limit 1` sobre 100 mil objetos lê no máximo duas
+páginas de dados; o pipeline mantém memória O(1), preserva o snapshot e encerra
+o upstream ao cancelar ou atingir o limite.
+
+### Fase 7B — Consultas indexadas
+
+Escopo:
+
+- `IndexDefinition` persistente e B+ tree com igualdade e range;
+- manutenção transacional do índice em create/update/remove;
+- reabertura e recovery consistentes entre objeto e índice;
+- Index Scan integrado ao mesmo fluxo da Fase 7A.
+
+Valor entregue: buscas por chave e intervalo deixam de varrer todos os objetos.
+
+Critério de conclusão 7B: equality/range usam comprovadamente a B+ tree,
+preservam duplicatas e retornam o mesmo estado após commit, recovery e
+reabertura.
+
+### Fase 7C — Projeção e transformação
+
+Escopo:
+
+- Projection para resultados tipados contendo apenas os campos pedidos;
+- Computed Functions registradas, avaliadas elemento a elemento;
+- composição com Scan, Index Scan, Predicate e Limit.
+
+Valor entregue: reduzir dados materializados e calcular valores durante o
+fluxo, sem uma etapa intermediária em memória.
+
+Critério de conclusão 7C: projeções e funções computadas produzem resultados
+corretos, continuam preguiçosas e mantêm memória O(1).
+
+### Fase 7D — Ordenação e agregação
+
+Escopo:
+
+- Sort global e Top-K;
+- Aggregate, Distinct e Merge;
+- classificação explícita de cada operador como streaming, parcialmente
+  bloqueante ou bloqueante;
+- contadores de pico para comprovar os limites de memória declarados.
+
+Valor entregue: rankings, ordenação e consultas analíticas no pipeline
+embedded.
+
+Critério de conclusão 7D: resultados são corretos, Top-K usa memória O(k) e
+nenhum operador que materializa sua entrada é apresentado como streaming.
+
+### Fase 7E — Planejamento automático e comprovação
+
+Escopo:
+
+- planner determinístico para escolher Index Scan ou Scan + Predicate;
+- pushdown seguro de Limit e seleção de Top-K;
+- `nature()` e `first_result_cost()` no plano;
+- benchmarks reproduzíveis de TTFR, pico de memória e ganho de índice.
+
+Valor entregue: o consumidor descreve a consulta sem montar manualmente o
+pipeline e consegue observar as decisões e custos estimados.
+
+Critério de conclusão 7E: predicados elegíveis usam índice, Limit é empurrado
+até o ponto seguro mais profundo e os benchmarks confirmam TTFR e memória
+declarados.
+
 ## Artefatos novos
 
 ```text

@@ -138,6 +138,8 @@ int command_mvcc_tick(const std::filesystem::path& path);
 int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force);
 int command_mvcc_gc(const std::filesystem::path& path);
 int command_mvcc_versions(const std::filesystem::path& path, std::uint64_t object_id);
+int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
+                           std::optional<double> min_salary);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -284,7 +286,12 @@ void print_oo_help() {
                  "  modb oo employee get <file> <object-id> --schema <1|2>\n"
                  "  modb oo employee set-salary <file> <object-id> <salary> "
                  "--schema <1|2>\n"
-                 "  modb oo employee demo <file> [--force]\n";
+                 "  modb oo employee query <file> --schema <1|2> [--limit N] "
+                 "[--min-salary S]\n"
+                 "  modb oo employee demo <file> [--force]\n"
+                 "\n"
+                 "query streams the employees lazily (ODB++ Fase 7A): --min-salary filters,\n"
+                 "--limit stops the scan early, and it reports how many data pages were read.\n";
 }
 
 void print_blob_help() {
@@ -1910,6 +1917,68 @@ int command_employee_get(const std::filesystem::path& path, std::uint64_t object
     return 0;
 }
 
+// modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S]
+// Consulta em streaming (Fase 7A): percorre os Employees preguiçosamente,
+// opcionalmente filtrando por salário mínimo e limitando a N resultados, e
+// reporta quantas páginas de dados foram lidas — com `--limit`, poucas.
+int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
+                           std::optional<double> min_salary) {
+    auto session = DatabaseSession::open(path);
+    if (!session) {
+        return print_error(session.error());
+    }
+    auto& database = session->database();
+    database.reset_data_pages_read();
+    std::size_t shown = 0;
+
+    if (schema == 1) {
+        if (auto bound = database.bind(employee_v1_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        auto query = database.query<EmployeeV1>();
+        if (min_salary) {
+            std::move(query).where(
+                [threshold = *min_salary](const EmployeeV1& e) { return e.salary >= threshold; });
+        }
+        if (limit != 0) {
+            std::move(query).limit(limit);
+        }
+        for (auto& result : std::move(query).stream()) {
+            if (!result) {
+                return print_error(result.error());
+            }
+            std::cout << "Employee: name=" << modb::escape_for_terminal(result->name)
+                      << " salary=" << result->salary << '\n';
+            ++shown;
+        }
+    } else {
+        if (auto bound = database.bind(employee_v2_binding()); !bound) {
+            return print_error(bound.error());
+        }
+        auto query = database.query<EmployeeV2>();
+        if (min_salary) {
+            std::move(query).where(
+                [threshold = *min_salary](const EmployeeV2& e) { return e.salary >= threshold; });
+        }
+        if (limit != 0) {
+            std::move(query).limit(limit);
+        }
+        for (auto& result : std::move(query).stream()) {
+            if (!result) {
+                return print_error(result.error());
+            }
+            std::cout << "Employee: name=" << modb::escape_for_terminal(result->name)
+                      << " salary=" << result->salary
+                      << " country=" << modb::escape_for_terminal(result->country) << '\n';
+            ++shown;
+        }
+    }
+
+    std::cout << shown << " employee(s) streamed; data pages read: " << database.data_pages_read()
+              << '\n';
+    return 0;
+}
+
 int command_employee_set_salary(const std::filesystem::path& path, std::uint64_t object_id,
                                 double salary, int schema) {
     auto session = DatabaseSession::open(path);
@@ -3065,6 +3134,44 @@ int run_oo_command(int argc, char* argv[]) {
             return print_usage_error("modb oo employee demo <file> [--force]");
         }
         return command_employee_demo(argv[4], argc == 6);
+    }
+    if (subcommand == "query") {
+        constexpr const char* usage =
+            "modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S]";
+        if (argc < 5) {
+            return print_usage_error(usage);
+        }
+        std::optional<int> schema;
+        std::size_t limit = 0;
+        std::optional<double> min_salary;
+        for (int i = 5; i < argc; ++i) {
+            const std::string_view flag{argv[i]};
+            if (flag == "--schema" && i + 1 < argc) {
+                auto parsed = parse_employee_schema(argv[++i]);
+                if (!parsed) {
+                    return print_error(parsed.error());
+                }
+                schema = *parsed;
+            } else if (flag == "--limit" && i + 1 < argc) {
+                auto parsed = parse_integer(argv[++i]);
+                if (!parsed || *parsed < 0) {
+                    return print_usage_error("--limit expects a non-negative integer");
+                }
+                limit = static_cast<std::size_t>(*parsed);
+            } else if (flag == "--min-salary" && i + 1 < argc) {
+                auto parsed = parse_real(argv[++i]);
+                if (!parsed) {
+                    return print_error(parsed.error());
+                }
+                min_salary = *parsed;
+            } else {
+                return print_usage_error(usage);
+            }
+        }
+        if (!schema) {
+            return print_usage_error(usage);
+        }
+        return command_employee_query(argv[4], *schema, limit, min_salary);
     }
     std::cerr << "Unknown oo employee command: " << subcommand << '\n';
     return 2;

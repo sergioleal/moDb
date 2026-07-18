@@ -531,6 +531,28 @@ Result<std::vector<HeapRecord>> TableHeap::scan_records() {
     }
 }
 
+Result<HeapPageSlice> TableHeap::read_page_records(PageId id) {
+    // Uma leitura de página de dados — a unidade que o critério TTFR conta.
+    ++data_pages_read_;
+    auto current = load_trusted(id);
+    if (!current) {
+        return std::unexpected(current.error());
+    }
+    HeapPageSlice slice;
+    for (const auto& slot : current->slots()) {
+        if (slot.occupied()) {
+            auto bytes = current->read(slot.id);
+            if (!bytes) {
+                return std::unexpected(bytes.error());
+            }
+            slice.records.push_back(
+                HeapRecord{RecordId{id, slot.id, slot.generation}, std::move(*bytes)});
+        }
+    }
+    slice.next = current->next_page();
+    return slice;
+}
+
 // Percorre e resume a cadeia completa.
 Result<std::vector<TableHeapPageInfo>> TableHeap::layout() {
     // Detecta ciclos antes que o percurso possa ficar infinito.
