@@ -388,11 +388,12 @@ ODB++ protocol demo (Fase 8A, in-memory, no network)
 Result: all protocol round-trips passed
 ```
 
-## `modb serve` / `modb ping` — rede (Fases 8B–8C)
+## `modb serve` / `modb ping` — rede (Fases 8B–8D)
 
 ```text
 modb serve demo <file> [--force]
 modb serve query-demo <file> [--force]
+modb serve backpressure-demo <file> [--force]
 modb serve <file> [--port N] --once
 modb ping <host> <port> <database-name>
 ```
@@ -400,8 +401,8 @@ modb ping <host> <port> <database-name>
 `serve demo` sobe um listener em porta efêmera no loopback, completa
 `Hello`/`HelloOk` com um cliente local e encerra. `serve query-demo`
 semeia objetos, executa uma `Query` remota via `ObjectStream` e imprime
-os primeiros resultados. `serve … --once` fica escutando até uma
-conexão (handshake + Query opcional).
+os primeiros resultados. `serve backpressure-demo` consome 1 objeto /
+50 ms com buffers TCP pequenos e imprime `max_outstanding` (Fase 8D).
 
 ```text
 $ modb serve demo serve.modb --force
@@ -419,6 +420,13 @@ ODB++ serve query-demo (Fase 8C)
   object id=… value=1
   object id=… value=2
 Result: received 3 objects via remote ObjectStream
+
+$ modb serve backpressure-demo bp.modb --force
+ODB++ serve backpressure-demo (Fase 8D)
+  … max_in_flight: 8
+  produced=40 sent=40 max_outstanding=…
+  open_snapshots=0
+Result: backpressure OK (max_outstanding <= 8)
 ```
 
 ## `modb types` — modelo de objetos em memória (ODB++)

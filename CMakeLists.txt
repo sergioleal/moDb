@@ -399,6 +399,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.serve_query_demo
         COMMAND modb_cli serve query-demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-query-demo.modb --force)
+    add_test(NAME modb.cli.serve_backpressure_demo
+        COMMAND modb_cli serve backpressure-demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-backpressure-demo.modb --force)
     add_test(NAME modb.cli.ping_help COMMAND modb_cli ping --help)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
     add_test(NAME modb.cli.types_help COMMAND modb_cli types --help)

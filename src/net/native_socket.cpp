@@ -285,6 +285,30 @@ Result<std::uint16_t> NativeSocket::local_port() const {
     return ntohs(address.sin_port);
 }
 
+Result<void> NativeSocket::set_send_buffer_bytes(std::size_t bytes) {
+    if (!is_open()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "set_send_buffer on closed socket"});
+    }
+    const int value = static_cast<int>(bytes);
+    if (::setsockopt(static_cast<SocketHandle>(socket_), SOL_SOCKET, SO_SNDBUF,
+                     reinterpret_cast<const char*>(&value), sizeof(value)) == SOCKET_ERROR) {
+        return std::unexpected(make_io("setsockopt SO_SNDBUF failed", last_error()));
+    }
+    return {};
+}
+
+Result<void> NativeSocket::set_recv_buffer_bytes(std::size_t bytes) {
+    if (!is_open()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "set_recv_buffer on closed socket"});
+    }
+    const int value = static_cast<int>(bytes);
+    if (::setsockopt(static_cast<SocketHandle>(socket_), SOL_SOCKET, SO_RCVBUF,
+                     reinterpret_cast<const char*>(&value), sizeof(value)) == SOCKET_ERROR) {
+        return std::unexpected(make_io("setsockopt SO_RCVBUF failed", last_error()));
+    }
+    return {};
+}
+
 #else
 
 NativeSocket::NativeSocket(NativeSocket&& other) noexcept : fd_{std::exchange(other.fd_, -1)} {}
@@ -419,6 +443,28 @@ Result<std::uint16_t> NativeSocket::local_port() const {
         return std::unexpected(make_io("getsockname failed", last_error()));
     }
     return ntohs(address.sin_port);
+}
+
+Result<void> NativeSocket::set_send_buffer_bytes(std::size_t bytes) {
+    if (!is_open()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "set_send_buffer on closed socket"});
+    }
+    const int value = static_cast<int>(bytes);
+    if (::setsockopt(fd_, SOL_SOCKET, SO_SNDBUF, &value, sizeof(value)) != 0) {
+        return std::unexpected(make_io("setsockopt SO_SNDBUF failed", last_error()));
+    }
+    return {};
+}
+
+Result<void> NativeSocket::set_recv_buffer_bytes(std::size_t bytes) {
+    if (!is_open()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "set_recv_buffer on closed socket"});
+    }
+    const int value = static_cast<int>(bytes);
+    if (::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF, &value, sizeof(value)) != 0) {
+        return std::unexpected(make_io("setsockopt SO_RCVBUF failed", last_error()));
+    }
+    return {};
 }
 
 #endif

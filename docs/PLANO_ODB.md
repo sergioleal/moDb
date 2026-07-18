@@ -503,10 +503,10 @@ objeto; falha injetada após N objetos entrega exatamente N +
 
 #### Fase 8D — Backpressure e ciclo de recursos
 
-- [ ] Limitar frame, fila de saída (no máximo um frame / constante
+- [x] Limitar frame, fila de saída (no máximo um frame / constante
       pequena de objetos em trânsito) e propagar bloqueio do socket até
       o generator e o storage.
-- [ ] Instrumentar produzidos − enviados, snapshots e cursores vivos;
+- [x] Instrumentar produzidos − enviados, snapshots e cursores vivos;
       liberar recursos em desconexão abrupta.
 
 Entregável 8D: backpressure fim-a-fim comprovado.

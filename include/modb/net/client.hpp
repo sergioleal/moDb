@@ -60,6 +60,11 @@ public:
 
     [[nodiscard]] const HelloOk& hello_ok() const noexcept { return hello_ok_; }
 
+    // Ajusta SO_RCVBUF do socket (Fase 8D: janela TCP pequena nos testes).
+    [[nodiscard]] Result<void> set_recv_buffer_bytes(std::size_t bytes) {
+        return socket_.set_recv_buffer_bytes(bytes);
+    }
+
     // Envia Query e devolve um stream sobre a mesma conexão.
     [[nodiscard]] Result<ObjectStream> query(QueryDescription description);
 
