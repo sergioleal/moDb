@@ -12,6 +12,7 @@
 #include "modb/value.hpp"
 #include "modb/storage/codec.hpp"
 #include "modb/net/protocol.hpp"
+#include "modb/net/server.hpp"
 #include "modb/storage/page.hpp"
 #include "modb/storage/page_file.hpp"
 #include "modb/storage/slotted_page.hpp"
@@ -20,6 +21,7 @@
 #include "modb/version.hpp"
 
 #include <charconv>
+#include <chrono>
 // Disponibiliza std::isfinite para validar valores REAL.
 #include <cmath>
 // Disponibiliza std::byte, std::size_t e std::to_integer.
@@ -44,6 +46,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 // Disponibiliza std::variant e std::visit.
 #include <variant>
@@ -69,6 +72,8 @@ void print_record_help();
 void print_heap_help();
 void print_codec_help();
 void print_protocol_help();
+void print_serve_help();
+void print_ping_help();
 void print_types_help();
 void print_type_help();
 void print_baseline_help();
@@ -118,6 +123,9 @@ int command_heap_delete(const std::filesystem::path& path,
 int command_heap_repair(const std::filesystem::path& path, modb::storage::PageId root_page);
 int command_codec_run();
 int command_protocol_demo();
+int command_serve_demo(const std::filesystem::path& path, bool force);
+int command_serve_once(const std::filesystem::path& path, std::uint16_t port);
+int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name);
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
 int run_baseline_command(int argc, char* argv[]);
@@ -199,6 +207,8 @@ void print_help() {
            "  heap     Manage multi-page table heaps.\n"
            "  codec    Encode and decode a row in memory.\n"
            "  protocol Encode/decode protocol frames in memory (ODB++ Fase 8A).\n"
+           "  serve    Host a database and complete Hello/HelloOk (ODB++ Fase 8B).\n"
+           "  ping     Connect and negotiate Hello with a running server (Fase 8B).\n"
            "  types    Exercise the in-memory object model (ODB++).\n"
            "  type     Define and list persistent object types (ODB++).\n"
            "  baseline Inspect immutable catalog baselines (ODB++).\n"
@@ -278,6 +288,22 @@ void print_protocol_help() {
                  "Commands:\n"
                  "  demo  Show, step by step, how Hello, Query and ObjectFrame are\n"
                  "        encoded and decoded in memory (no network).\n";
+}
+
+void print_serve_help() {
+    std::cout << "Usage:\n"
+                 "  modb serve demo <file> [--force]\n"
+                 "  modb serve <file> [--port N] --once\n"
+                 "\n"
+                 "demo  Listen on an ephemeral port, handshake with a local client and exit.\n"
+                 "--once  Accept one Hello/HelloOk and exit (for scripting).\n";
+}
+
+void print_ping_help() {
+    std::cout << "Usage:\n"
+                 "  modb ping <host> <port> <database-name>\n"
+                 "\n"
+                 "Connect to a moDb server, send Hello and print HelloOk.\n";
 }
 
 void print_types_help() {
@@ -1327,6 +1353,87 @@ int command_protocol_demo() {
                                   : "a protocol round-trip failed")
               << '\n';
     return ok ? 0 : 1;
+}
+
+int command_serve_demo(const std::filesystem::path& path, bool force) {
+    std::error_code filesystem_error;
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            std::cerr << "Error: file already exists (use --force)\n";
+            return 1;
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            std::cerr << "Error: could not remove existing file\n";
+            return 1;
+        }
+        std::filesystem::remove(path.string() + ".wal", filesystem_error);
+    }
+
+    {
+        auto created = modb::object::Database::create(path);
+        if (!created) {
+            return print_error(created.error());
+        }
+    }
+
+    auto server = modb::net::Server::listen(path, "127.0.0.1", 0);
+    if (!server) {
+        return print_error(server.error());
+    }
+
+    std::cout << "ODB++ serve demo (Fase 8B)\n"
+              << "  database: " << path.string() << '\n'
+              << "  listening: 127.0.0.1:" << server->port() << '\n';
+
+    const auto port = server->port();
+    const auto db_name = std::string{server->database_name()};
+    bool serve_ok = false;
+    std::thread acceptor([&server, &serve_ok] {
+        serve_ok = static_cast<bool>(server->serve_one());
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+    auto hello_ok = modb::net::Client::handshake("127.0.0.1", port, db_name);
+    acceptor.join();
+    if (!hello_ok) {
+        return print_error(hello_ok.error());
+    }
+    if (!serve_ok) {
+        std::cerr << "Error: server handshake failed\n";
+        return 1;
+    }
+
+    std::cout << "  HelloOk: version=" << hello_ok->version
+              << " baseline=" << hello_ok->baseline.value
+              << " codec=none max_frame=" << hello_ok->max_frame_bytes << '\n'
+              << "Result: handshake OK\n";
+    return 0;
+}
+
+int command_serve_once(const std::filesystem::path& path, std::uint16_t port) {
+    auto server = modb::net::Server::listen(path, "127.0.0.1", port);
+    if (!server) {
+        return print_error(server.error());
+    }
+    std::cout << "Serving " << path.filename().string() << " on 127.0.0.1:" << server->port()
+              << " (one handshake)\n";
+    std::cout.flush();
+    if (auto status = server->serve_one(); !status) {
+        return print_error(status.error());
+    }
+    std::cout << "Handshake completed; exiting.\n";
+    return 0;
+}
+
+int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name) {
+    auto hello_ok = modb::net::Client::handshake(host, port, database_name);
+    if (!hello_ok) {
+        return print_error(hello_ok.error());
+    }
+    std::cout << "Pong from " << host << ':' << port << '\n'
+              << "  version=" << hello_ok->version << " baseline=" << hello_ok->baseline.value
+              << " codec=none max_frame=" << hello_ok->max_frame_bytes << '\n';
+    return 0;
 }
 
 // Command group: types.
@@ -4380,6 +4487,65 @@ int run(int argc, char* argv[]) {
             return command_protocol_demo();
         }
         return print_usage_error("modb protocol demo");
+    }
+    if (command == "serve") {
+        if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+            print_serve_help();
+            return 0;
+        }
+        if (std::string_view{argv[2]} == "demo") {
+            if (argc < 4 || argc > 5) {
+                return print_usage_error("modb serve demo <file> [--force]");
+            }
+            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
+            if (argc == 5 && !force) {
+                return print_usage_error("modb serve demo <file> [--force]");
+            }
+            return command_serve_demo(argv[3], force);
+        }
+        // modb serve <file> [--port N] --once
+        if (argc < 4) {
+            return print_usage_error("modb serve <file> [--port N] --once");
+        }
+        std::uint16_t port = 0;
+        bool once = false;
+        for (int index = 3; index < argc; ++index) {
+            const std::string_view arg{argv[index]};
+            if (arg == "--once") {
+                once = true;
+                continue;
+            }
+            if (arg == "--port") {
+                if (index + 1 >= argc) {
+                    return print_usage_error("modb serve <file> [--port N] --once");
+                }
+                auto parsed = parse_generation(argv[++index]);
+                if (!parsed) {
+                    return print_error(parsed.error());
+                }
+                port = *parsed;
+                continue;
+            }
+            return print_usage_error("modb serve <file> [--port N] --once");
+        }
+        if (!once) {
+            return print_usage_error("modb serve <file> [--port N] --once");
+        }
+        return command_serve_once(argv[2], port);
+    }
+    if (command == "ping") {
+        if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+            print_ping_help();
+            return 0;
+        }
+        if (argc != 5) {
+            return print_usage_error("modb ping <host> <port> <database-name>");
+        }
+        auto port = parse_generation(argv[3]);
+        if (!port) {
+            return print_error(port.error());
+        }
+        return command_ping(argv[2], *port, argv[4]);
     }
     if (command == "types") {
         if (argc == 3 && is_help_argument(argv[2])) {

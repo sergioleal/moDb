@@ -48,11 +48,11 @@
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
-| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 2/12 | Fase 7 |
+| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 4/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
 | [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/10 | Fases 8, 9, 10 |
-| **Total** | | | **84/123 (~68%)** | |
+| **Total** | | | **86/123 (~70%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -585,7 +585,7 @@ objetos (TTFR); buscas por chave via índice.
 
 ## Fase 8 — Servidor, protocolo binário e backpressure
 
-Status: 🔄 Em andamento (2/12) — seis entregas verticais 8A–8F.
+Status: 🔄 Em andamento (4/12) — seis entregas verticais 8A–8F.
 Definição completa:
 [PLANO_ODB.md §Fase 8](PLANO_ODB.md#fase-8--servidor-protocolo-binário-e-backpressure) ·
 [PROTOCOLO_FASES.md §Fase 8](PROTOCOLO_FASES.md#fase-8--servidor-protocolo-binário-e-backpressure)
@@ -612,21 +612,22 @@ Critério de aceite 8A: ✅ encode→decode idêntico; entradas hostis →
 
 ### Fase 8B — Transporte e processo servidor
 
-Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8b`. Depende de 8A.
+Status: ✅ Concluída (2/2) — tag prevista `0.0.8b`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8B.1 | `NativeSocket` Win32/POSIX | ⬜ | Mesmo padrão do `NativeFile` |
-| 8B.2 | Processo servidor + `Hello`/`HelloOk` em porta efêmera | ⬜ | Hospeda `DatabaseRegistry`; CLI `modb serve` / ping |
+| 8B.1 | `NativeSocket` Win32/POSIX | ✅ | `modb/net/native_socket.hpp`; link `ws2_32` no Windows |
+| 8B.2 | Processo servidor + `Hello`/`HelloOk` em porta efêmera | ✅ | `Server` + `Client::handshake`; CLI `serve`/`ping` |
 
 ### Testes automatizados desta subfase
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.server_streaming` (handshake) | loopback: conexão, negociação, encerramento limpo | ⬜ |
+| `modb.server_streaming` | loopback: conexão, negociação, encerramento limpo | ✅ |
+| `modb.cli.serve_demo` | `modb serve demo` handshake in-process | ✅ |
 
-Critério de aceite 8B: ⬜ handshake e encerramento limpos; CLI demonstra
-servidor e ping/info remoto.
+Critério de aceite 8B: ✅ handshake e encerramento limpos; CLI demonstra
+servidor e ping/info remoto. Suíte completa 89/89 em Debug e sanitizers.
 
 ### Fase 8C — Primeiro streaming remoto
 

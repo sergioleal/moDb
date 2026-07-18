@@ -473,9 +473,9 @@ são rejeitados com erro de protocolo, sem alocação gigante.
 
 #### Fase 8B — Transporte e processo servidor
 
-- [ ] Implementar `NativeSocket` (Win32/POSIX, mesmo padrão do
+- [x] Implementar `NativeSocket` (Win32/POSIX, mesmo padrão do
       `NativeFile`) e o processo servidor hospedando `DatabaseRegistry`.
-- [ ] Abrir/registrar o banco, fazer bind em porta efêmera e negociar
+- [x] Abrir/registrar o banco, fazer bind em porta efêmera e negociar
       `Hello`/`HelloOk` (versão, baseline, codecs e limites).
 
 Entregável 8B: servidor dedicado que aceita conexão e completa o
