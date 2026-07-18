@@ -514,7 +514,7 @@ miss — cenário raro no single-writer).
 
 ### Fase 7C — Projeção e transformação
 
-Status: ✅ Concluída (2/2) — commit (esta entrega), 2026-07-18.
+Status: ✅ Concluída (2/2) — commit `b6284c4`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
