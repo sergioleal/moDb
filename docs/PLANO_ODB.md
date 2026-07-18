@@ -532,10 +532,10 @@ consulta na mesma conexão; duas consultas concorrentes intercalam
 
 #### Fase 8F — Limites, timeout, compressão e fechamento
 
-- [ ] Aplicar timeout, limite de streams concorrentes, frame máximo e
+- [x] Aplicar timeout, limite de streams concorrentes, frame máximo e
       razão de expansão; negociar compressão (codec escolhido por
       benchmark; `none` permanece obrigatório e fallback).
-- [ ] Fechar a suíte `modb.protocol` + `modb.server_streaming` e
+- [x] Fechar a suíte `modb.protocol` + `modb.server_streaming` e
       demonstrar consumo entre processos com a CLI.
 
 Entregáveis: servidor + cliente streaming; protocolo documentado;

@@ -13,6 +13,7 @@
 #include "modb/storage/codec.hpp"
 #include "modb/net/protocol.hpp"
 #include "modb/net/client.hpp"
+#include "modb/net/native_socket.hpp"
 #include "modb/net/server.hpp"
 #include "modb/storage/page.hpp"
 #include "modb/storage/page_file.hpp"
@@ -52,6 +53,20 @@
 // Disponibiliza std::variant e std::visit.
 #include <variant>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -128,7 +143,10 @@ int command_serve_demo(const std::filesystem::path& path, bool force);
 int command_serve_query_demo(const std::filesystem::path& path, bool force);
 int command_serve_backpressure_demo(const std::filesystem::path& path, bool force);
 int command_serve_cancel_demo(const std::filesystem::path& path, bool force);
-int command_serve_once(const std::filesystem::path& path, std::uint16_t port);
+int command_serve_process_demo(const std::filesystem::path& path, bool force,
+                               const std::filesystem::path& exe_path);
+int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
+                       std::optional<std::size_t> fail_after, bool small_buffers);
 int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name);
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
@@ -300,12 +318,14 @@ void print_serve_help() {
                  "  modb serve query-demo <file> [--force]\n"
                  "  modb serve backpressure-demo <file> [--force]\n"
                  "  modb serve cancel-demo <file> [--force]\n"
-                 "  modb serve <file> [--port N] --once\n"
+                 "  modb serve process-demo <file> [--force]\n"
+                 "  modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]\n"
                  "\n"
                  "demo               Listen, complete Hello/HelloOk with a local client and exit.\n"
                  "query-demo         Seed objects, stream a remote Query end-to-end and exit.\n"
                  "backpressure-demo  Slow client (50 ms/obj); print produzidos-enviados bound.\n"
                  "cancel-demo        Cancel mid-stream then reuse the connection (Fase 8E).\n"
+                 "process-demo       Client in this process, server child process (Fase 8F).\n"
                  "--once             Accept one connection session until the client disconnects.\n";
 }
 
@@ -1802,19 +1822,226 @@ int command_serve_cancel_demo(const std::filesystem::path& path, bool force) {
                : 1;
 }
 
-int command_serve_once(const std::filesystem::path& path, std::uint16_t port) {
+int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
+                       std::optional<std::size_t> fail_after, bool small_buffers) {
     auto server = modb::net::Server::listen(path, "127.0.0.1", port);
     if (!server) {
         return print_error(server.error());
     }
+    if (fail_after) {
+        server->fail_stream_after(*fail_after);
+    }
+    if (small_buffers) {
+        server->use_small_socket_buffers(true);
+    }
+    std::cout << "READY " << server->port() << '\n';
+    std::cout.flush();
     std::cout << "Serving " << path.filename().string() << " on 127.0.0.1:" << server->port()
-              << " (one handshake)\n";
+              << " (one session)\n";
     std::cout.flush();
     if (auto status = server->serve_one(); !status) {
         return print_error(status.error());
     }
-    std::cout << "Handshake completed; exiting.\n";
+    const auto& stats = server->last_stream_stats();
+    std::cout << "STATS produced=" << stats.produced << " sent=" << stats.sent
+              << " max_outstanding=" << stats.max_outstanding
+              << " codec="
+              << (server->selected_codec() == modb::net::Compression::rle ? "rle" : "none")
+              << '\n';
+    if (stats.max_outstanding > modb::net::max_in_flight_objects) {
+        std::cerr << "Error: backpressure bound exceeded\n";
+        return 1;
+    }
+    std::cout << "Session completed; exiting.\n";
     return 0;
+}
+
+int command_serve_process_demo(const std::filesystem::path& path, bool force,
+                               const std::filesystem::path& exe_path) {
+    struct Item {
+        std::string name;
+        std::int64_t value{};
+    };
+
+    std::error_code filesystem_error;
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            std::cerr << "Error: file already exists (use --force)\n";
+            return 1;
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            std::cerr << "Error: could not remove existing file\n";
+            return 1;
+        }
+        std::filesystem::remove(path.string() + ".wal", filesystem_error);
+    }
+
+    constexpr int total = 120;
+    modb::object::TypeDefinitionId type_id{};
+    {
+        auto created = modb::object::Database::create(path);
+        if (!created) {
+            return print_error(created.error());
+        }
+        auto database = std::make_shared<modb::object::Database>(std::move(*created));
+        auto attached = modb::object::DatabaseRegistry::instance().attach(database);
+        if (!attached) {
+            return print_error(attached.error());
+        }
+        modb::object::BindingBuilder<Item> builder{"Item"};
+        builder.field<1>("name", &Item::name).field<2>("value", &Item::value);
+        if (auto bound = database->bind(std::move(builder)); !bound) {
+            return print_error(bound.error());
+        }
+        auto tid = database->type_id_of<Item>();
+        if (!tid) {
+            return print_error(tid.error());
+        }
+        type_id = *tid;
+        auto tx = database->begin();
+        if (!tx) {
+            return print_error(tx.error());
+        }
+        for (int i = 0; i < total; ++i) {
+            // Nomes repetitivos favorecem RLE no ObjectFrame.
+            auto handle = database->create(*tx, Item{std::string(32, 'x') + std::to_string(i), i});
+            if (!handle) {
+                return print_error(handle.error());
+            }
+        }
+        if (auto committed = tx->commit(); !committed) {
+            return print_error(committed.error());
+        }
+        modb::object::DatabaseRegistry::instance().detach(*attached);
+    }
+
+    // Reserva uma porta efêmera e libera antes de subir o processo filho.
+    std::uint16_t port = 0;
+    {
+        auto probe = modb::net::NativeSocket::listen("127.0.0.1", 0);
+        if (!probe) {
+            return print_error(probe.error());
+        }
+        auto bound = probe->local_port();
+        if (!bound) {
+            return print_error(bound.error());
+        }
+        port = *bound;
+    }
+
+    const auto db_name = path.filename().string();
+    const std::string port_text = std::to_string(port);
+    const std::string fail_after_text = "40";
+
+#ifdef _WIN32
+    std::wstring command = L"\"" + exe_path.wstring() + L"\" serve \"" + path.wstring() +
+                           L"\" --port " + std::to_wstring(port) +
+                           L" --once --fail-after " + std::wstring(fail_after_text.begin(),
+                                                                   fail_after_text.end()) +
+                           L" --small-buffers";
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    std::vector<wchar_t> mutable_cmd(command.begin(), command.end());
+    mutable_cmd.push_back(L'\0');
+    if (!CreateProcessW(nullptr, mutable_cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr,
+                        &si, &pi)) {
+        std::cerr << "Error: failed to spawn server child process\n";
+        return 1;
+    }
+    CloseHandle(pi.hThread);
+#else
+    const auto pid = fork();
+    if (pid < 0) {
+        std::cerr << "Error: fork failed\n";
+        return 1;
+    }
+    if (pid == 0) {
+        const std::string exe = exe_path.string();
+        const std::string file = path.string();
+        execl(exe.c_str(), exe.c_str(), "serve", file.c_str(), "--port", port_text.c_str(), "--once",
+              "--fail-after", fail_after_text.c_str(), "--small-buffers", static_cast<char*>(nullptr));
+        _exit(127);
+    }
+#endif
+
+    std::cout << "ODB++ serve process-demo (Fase 8F)\n"
+              << "  database: " << path.string() << '\n'
+              << "  child server: 127.0.0.1:" << port << '\n';
+
+    // Aguarda o filho abrir a porta.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    std::size_t count = 0;
+    bool saw_stream_error = false;
+    {
+        auto client = modb::net::Client::connect("127.0.0.1", port, db_name);
+        if (!client) {
+#ifdef _WIN32
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 5000);
+            CloseHandle(pi.hProcess);
+#else
+            kill(pid, SIGTERM);
+            int status = 0;
+            waitpid(pid, &status, 0);
+#endif
+            return print_error(client.error());
+        }
+        std::cout << "  negotiated codec="
+                  << (client->hello_ok().selected_codec == modb::net::Compression::rle ? "rle"
+                                                                                        : "none")
+                  << " max_frame=" << client->hello_ok().max_frame_bytes
+                  << " max_streams=" << client->hello_ok().max_concurrent_streams << '\n';
+        (void)client->set_recv_buffer_bytes(4 * 1024);
+
+        auto stream = client->query(modb::net::QueryDescription{.type = type_id});
+        if (!stream) {
+#ifdef _WIN32
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 5000);
+            CloseHandle(pi.hProcess);
+#else
+            kill(pid, SIGTERM);
+            int status = 0;
+            waitpid(pid, &status, 0);
+#endif
+            return print_error(stream.error());
+        }
+        while (true) {
+            auto next = stream->next();
+            if (!next) {
+                saw_stream_error = next.error().code == modb::ErrorCode::io_error;
+                std::cout << "  StreamError after " << count
+                          << " objects: " << next.error().message << '\n';
+                break;
+            }
+            if (!*next) {
+                break;
+            }
+            ++count;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+
+    int child_exit = 1;
+#ifdef _WIN32
+    WaitForSingleObject(pi.hProcess, 15000);
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
+    child_exit = static_cast<int>(code);
+    CloseHandle(pi.hProcess);
+#else
+    int status = 0;
+    if (waitpid(pid, &status, 0) >= 0 && WIFEXITED(status)) {
+        child_exit = WEXITSTATUS(status);
+    }
+#endif
+
+    std::cout << "  client received=" << count << " child_exit=" << child_exit << '\n'
+              << "Result: process-demo "
+              << ((saw_stream_error && count == 40 && child_exit == 0) ? "OK" : "FAILED") << '\n';
+    return (saw_stream_error && count == 40 && child_exit == 0) ? 0 : 1;
 }
 
 int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name) {
@@ -1824,7 +2051,10 @@ int command_ping(std::string_view host, std::uint16_t port, std::string_view dat
     }
     std::cout << "Pong from " << host << ':' << port << '\n'
               << "  version=" << hello_ok->version << " baseline=" << hello_ok->baseline.value
-              << " codec=none max_frame=" << hello_ok->max_frame_bytes << '\n';
+              << " codec="
+              << (hello_ok->selected_codec == modb::net::Compression::rle ? "rle" : "none")
+              << " max_frame=" << hello_ok->max_frame_bytes
+              << " max_streams=" << hello_ok->max_concurrent_streams << '\n';
     return 0;
 }
 
@@ -4925,35 +5155,64 @@ int run(int argc, char* argv[]) {
             }
             return command_serve_cancel_demo(argv[3], force);
         }
-        // modb serve <file> [--port N] --once
-        if (argc < 4) {
-            return print_usage_error("modb serve <file> [--port N] --once");
+        if (std::string_view{argv[2]} == "process-demo") {
+            if (argc < 4 || argc > 5) {
+                return print_usage_error("modb serve process-demo <file> [--force]");
+            }
+            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
+            if (argc == 5 && !force) {
+                return print_usage_error("modb serve process-demo <file> [--force]");
+            }
+            return command_serve_process_demo(argv[3], force, argv[0]);
         }
+        // modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]
+        if (argc < 4) {
+            return print_usage_error(
+                "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+        }
+        const std::filesystem::path file = argv[2];
         std::uint16_t port = 0;
         bool once = false;
-        for (int index = 3; index < argc; ++index) {
-            const std::string_view arg{argv[index]};
+        std::optional<std::size_t> fail_after;
+        bool small_buffers = false;
+        for (int i = 3; i < argc; ++i) {
+            const std::string_view arg{argv[i]};
             if (arg == "--once") {
                 once = true;
-                continue;
-            }
-            if (arg == "--port") {
-                if (index + 1 >= argc) {
-                    return print_usage_error("modb serve <file> [--port N] --once");
+            } else if (arg == "--small-buffers") {
+                small_buffers = true;
+            } else if (arg == "--port") {
+                if (i + 1 >= argc) {
+                    return print_usage_error(
+                        "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
                 }
-                auto parsed = parse_generation(argv[++index]);
-                if (!parsed) {
-                    return print_error(parsed.error());
+                auto parsed = parse_integer(argv[++i]);
+                if (!parsed || *parsed < 0 || *parsed > 65535) {
+                    return print_usage_error(
+                        "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
                 }
-                port = *parsed;
-                continue;
+                port = static_cast<std::uint16_t>(*parsed);
+            } else if (arg == "--fail-after") {
+                if (i + 1 >= argc) {
+                    return print_usage_error(
+                        "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+                }
+                auto parsed = parse_integer(argv[++i]);
+                if (!parsed || *parsed < 0) {
+                    return print_usage_error(
+                        "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+                }
+                fail_after = static_cast<std::size_t>(*parsed);
+            } else {
+                return print_usage_error(
+                    "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
             }
-            return print_usage_error("modb serve <file> [--port N] --once");
         }
         if (!once) {
-            return print_usage_error("modb serve <file> [--port N] --once");
+            return print_usage_error(
+                "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
         }
-        return command_serve_once(argv[2], port);
+        return command_serve_once(file, port, fail_after, small_buffers);
     }
     if (command == "ping") {
         if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {

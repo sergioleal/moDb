@@ -405,6 +405,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.serve_cancel_demo
         COMMAND modb_cli serve cancel-demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-cancel-demo.modb --force)
+    add_test(NAME modb.cli.serve_process_demo
+        COMMAND modb_cli serve process-demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-process-demo.modb --force)
     add_test(NAME modb.cli.ping_help COMMAND modb_cli ping --help)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
     add_test(NAME modb.cli.types_help COMMAND modb_cli types --help)

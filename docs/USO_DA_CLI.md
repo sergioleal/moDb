@@ -388,14 +388,15 @@ ODB++ protocol demo (Fase 8A, in-memory, no network)
 Result: all protocol round-trips passed
 ```
 
-## `modb serve` / `modb ping` — rede (Fases 8B–8E)
+## `modb serve` / `modb ping` — rede (Fases 8B–8F)
 
 ```text
 modb serve demo <file> [--force]
 modb serve query-demo <file> [--force]
 modb serve backpressure-demo <file> [--force]
 modb serve cancel-demo <file> [--force]
-modb serve <file> [--port N] --once
+modb serve process-demo <file> [--force]
+modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]
 modb ping <host> <port> <database-name>
 ```
 
@@ -409,6 +410,18 @@ ODB++ serve cancel-demo (Fase 8E)
   first stream ended with … objects
   second query received 5 objects
 Result: cancel + reusable connection OK
+```
+
+`serve process-demo` (Fase 8F) sobe o servidor num processo filho e o
+cliente neste processo: negociacao RLE, consumo lento com backpressure e
+`StreamError` injetado apos 40 objetos.
+
+```text
+$ modb serve process-demo phase8.modb --force
+ODB++ serve process-demo (Fase 8F)
+  negotiated codec=rle …
+  StreamError after 40 objects: injected stream failure
+Result: process-demo OK
 ```
 
 ## `modb types` — modelo de objetos em memória (ODB++)
