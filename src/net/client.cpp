@@ -13,26 +13,107 @@ Error make_protocol(std::string message) {
     return Error{ErrorCode::protocol_error, std::move(message)};
 }
 
+[[nodiscard]] std::optional<std::uint32_t> message_query_id(const Message& message) {
+    if (const auto* begin = std::get_if<StreamBegin>(&message)) {
+        return begin->query_id;
+    }
+    if (const auto* frame = std::get_if<ObjectFrame>(&message)) {
+        return frame->query_id;
+    }
+    if (const auto* end = std::get_if<StreamEnd>(&message)) {
+        return end->query_id;
+    }
+    if (const auto* error = std::get_if<StreamError>(&message)) {
+        return error->query_id;
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
-ObjectStream::ObjectStream(NativeSocket* socket, std::uint32_t query_id)
-    : socket_{socket}, query_id_{query_id} {}
+ClientConn::ClientConn(NativeSocket sock) : socket{std::move(sock)} {
+    reader = std::thread([this] { reader_loop(); });
+}
+
+ClientConn::~ClientConn() {
+    stop.store(true, std::memory_order_relaxed);
+    (void)socket.close();
+    if (reader.joinable()) {
+        reader.join();
+    }
+}
+
+void ClientConn::reader_loop() {
+    while (!stop.load(std::memory_order_relaxed)) {
+        auto message = recv_message(socket);
+        if (!message) {
+            failed.store(true, std::memory_order_relaxed);
+            failure = message.error();
+            stop.store(true, std::memory_order_relaxed);
+            cv.notify_all();
+            return;
+        }
+        const auto query_id = message_query_id(*message);
+        if (!query_id) {
+            failed.store(true, std::memory_order_relaxed);
+            failure = make_protocol("server sent message without query_id");
+            stop.store(true, std::memory_order_relaxed);
+            cv.notify_all();
+            return;
+        }
+        {
+            const std::scoped_lock lock{mu};
+            mailboxes[*query_id].push_back(std::move(*message));
+        }
+        cv.notify_all();
+    }
+}
+
+Result<Message> ClientConn::recv_for(std::uint32_t query_id) {
+    std::unique_lock lock{mu};
+    cv.wait(lock, [&] {
+        return stop.load(std::memory_order_relaxed) || !mailboxes[query_id].empty();
+    });
+    if (!mailboxes[query_id].empty()) {
+        Message message = std::move(mailboxes[query_id].front());
+        mailboxes[query_id].pop_front();
+        return message;
+    }
+    if (failed.load(std::memory_order_relaxed)) {
+        return std::unexpected(failure);
+    }
+    return std::unexpected(Error{ErrorCode::connection_closed, "client connection stopped"});
+}
+
+Result<void> ClientConn::send(const Message& message) {
+    const std::scoped_lock lock{send_mu};
+    return send_message(socket, message);
+}
+
+void NextAwaitable::await_suspend(std::coroutine_handle<> handle) {
+    // Executor = thread do chamador: next() bloqueia no mailbox/socket e em
+    // seguida retoma a coroutine (ADR-011).
+    result_ = stream->next();
+    handle.resume();
+}
+
+ObjectStream::ObjectStream(std::shared_ptr<ClientConn> conn, std::uint32_t query_id)
+    : conn_{std::move(conn)}, query_id_{query_id} {}
 
 ObjectStream::ObjectStream(ObjectStream&& other) noexcept
-    : socket_{other.socket_}, query_id_{other.query_id_}, pending_{std::move(other.pending_)},
+    : conn_{std::move(other.conn_)}, query_id_{other.query_id_}, pending_{std::move(other.pending_)},
       pending_index_{other.pending_index_}, begun_{other.begun_}, finished_{other.finished_},
       received_{other.received_} {
-    other.socket_ = nullptr;
     other.finished_ = true;
 }
 
 ObjectStream::~ObjectStream() = default;
 
 Result<void> ObjectStream::refill() {
-    if (socket_ == nullptr) {
-        return std::unexpected(make_protocol("object stream has no socket"));
+    if (!conn_) {
+        return std::unexpected(make_protocol("object stream has no connection"));
     }
-    auto message = recv_message(*socket_);
+    auto message = conn_->recv_for(query_id_);
     if (!message) {
         return std::unexpected(message.error());
     }
@@ -56,7 +137,7 @@ Result<void> ObjectStream::refill() {
             return std::unexpected(make_protocol("ObjectFrame query_id mismatch"));
         }
         if (frame->compression != Compression::none) {
-            return std::unexpected(make_protocol("Fase 8C only accepts compression=none"));
+            return std::unexpected(make_protocol("only compression=none is accepted"));
         }
         pending_.clear();
         pending_index_ = 0;
@@ -81,12 +162,6 @@ Result<void> ObjectStream::refill() {
         }
         if (end->query_id != query_id_) {
             return std::unexpected(make_protocol("StreamEnd query_id mismatch"));
-        }
-        if (end->total != received_ + pending_.size() - pending_index_) {
-            // total conta objetos já entregues ao cliente + ainda no pending.
-            // Ajuste: received_ ainda não inclui pending; total do servidor é
-            // o total emitido. Aceitamos total == received_ + remaining pending
-            // no momento do End (pending já carregado).
         }
         const auto remaining = pending_.size() - pending_index_;
         if (end->total != received_ + remaining) {
@@ -127,14 +202,12 @@ Result<std::optional<object::DecodedObject>> ObjectStream::next() {
     return object;
 }
 
-Client::Client(NativeSocket socket, HelloOk hello_ok)
-    : socket_{std::move(socket)}, hello_ok_{std::move(hello_ok)} {}
+Client::Client(std::shared_ptr<ClientConn> conn, HelloOk hello_ok)
+    : conn_{std::move(conn)}, hello_ok_{std::move(hello_ok)} {}
 
 Client::Client(Client&& other) noexcept
-    : socket_{std::move(other.socket_)}, hello_ok_{std::move(other.hello_ok_)},
-      next_query_id_{other.next_query_id_}, stream_active_{other.stream_active_} {
-    other.stream_active_ = false;
-}
+    : conn_{std::move(other.conn_)}, hello_ok_{std::move(other.hello_ok_)},
+      next_query_id_{other.next_query_id_} {}
 
 Client::~Client() = default;
 
@@ -164,26 +237,37 @@ Result<Client> Client::connect(std::string_view host, std::uint16_t port,
         return std::unexpected(make_protocol("server selected unsupported protocol version"));
     }
     if (ok->selected_codec != Compression::none) {
-        return std::unexpected(make_protocol("Fase 8C only accepts compression=none"));
+        return std::unexpected(make_protocol("only compression=none is accepted"));
     }
-    return Client{std::move(*socket), *ok};
+
+    auto conn = std::make_shared<ClientConn>(std::move(*socket));
+    return Client{std::move(conn), *ok};
+}
+
+Result<void> Client::set_recv_buffer_bytes(std::size_t bytes) {
+    if (!conn_) {
+        return std::unexpected(Error{ErrorCode::connection_closed, "client has no connection"});
+    }
+    return conn_->socket.set_recv_buffer_bytes(bytes);
 }
 
 Result<ObjectStream> Client::query(QueryDescription description) {
-    if (!socket_.is_open()) {
+    if (!conn_) {
         return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
-    }
-    if (stream_active_) {
-        return std::unexpected(
-            make_protocol("another object stream is still active on this connection"));
     }
     const auto query_id = next_query_id_++;
     Query message{.query_id = query_id, .description = std::move(description)};
-    if (auto status = send_message(socket_, message); !status) {
+    if (auto status = conn_->send(message); !status) {
         return std::unexpected(status.error());
     }
-    stream_active_ = true;
-    return ObjectStream{&socket_, query_id};
+    return ObjectStream{conn_, query_id};
+}
+
+Result<void> Client::cancel(std::uint32_t query_id) {
+    if (!conn_) {
+        return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
+    }
+    return conn_->send(Cancel{.query_id = query_id});
 }
 
 Result<HelloOk> Client::handshake(std::string_view host, std::uint16_t port,

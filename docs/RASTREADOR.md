@@ -48,11 +48,11 @@
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
-| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 8/12 | Fase 7 |
+| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 10/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
 | [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10 |
-| **Total** | | | **90/124 (~73%)** | |
+| **Total** | | | **92/124 (~74%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -585,7 +585,7 @@ objetos (TTFR); buscas por chave via índice.
 
 ## Fase 8 — Servidor, protocolo binário e backpressure
 
-Status: 🔄 Em andamento (8/12) — seis entregas verticais 8A–8F.
+Status: 🔄 Em andamento (10/12) — seis entregas verticais 8A–8F.
 Definição completa:
 [PLANO_ODB.md §Fase 8](PLANO_ODB.md#fase-8--servidor-protocolo-binário-e-backpressure) ·
 [PROTOCOLO_FASES.md §Fase 8](PROTOCOLO_FASES.md#fase-8--servidor-protocolo-binário-e-backpressure)
@@ -669,21 +669,23 @@ desconexão libera snapshot. Suíte completa 91/91 em Debug e sanitizers.
 
 ### Fase 8E — Cancelamento, multiplexação e API assíncrona
 
-Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8e`. Depende de 8D.
+Status: ✅ Concluída (2/2) — tag prevista `0.0.8e`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8E.1 | `Cancel` durante envio; conexão reutilizável | ⬜ | Leitor desacoplado do escritor |
-| 8E.2 | Multiplexação de `query_id` + `co_await stream.next()` | ⬜ | Semântica/executor na ADR-011 |
+| 8E.1 | `Cancel` durante envio; conexão reutilizável | ✅ | Leitor em thread; `CancellationToken`; `StreamEnd` parcial |
+| 8E.2 | Multiplexação de `query_id` + `co_await stream.next()` | ✅ | Escrita serializada; `await_next()` (executor = thread do chamador) |
 
 ### Testes automatizados desta subfase
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.server_streaming` (concorrência) | cancelamento; duas consultas na mesma conexão | ⬜ |
+| `modb.server_streaming` | cancel + nova query; dois `query_id`; `co_await` | ✅ |
+| `modb.cli.serve_cancel_demo` | demo CLI cancel + conexão reutilizável | ✅ |
 
-Critério de aceite 8E: ⬜ cancelamento interrompe produção e permite nova
-consulta; dois `query_id`s íntegros.
+Critério de aceite 8E: ✅ cancelamento interrompe produção e permite nova
+consulta; dois `query_id`s íntegros. Suíte completa 92/92 em Debug e
+sanitizers.
 
 ### Fase 8F — Limites, timeout, compressão e fechamento
 

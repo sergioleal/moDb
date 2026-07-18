@@ -127,6 +127,7 @@ int command_protocol_demo();
 int command_serve_demo(const std::filesystem::path& path, bool force);
 int command_serve_query_demo(const std::filesystem::path& path, bool force);
 int command_serve_backpressure_demo(const std::filesystem::path& path, bool force);
+int command_serve_cancel_demo(const std::filesystem::path& path, bool force);
 int command_serve_once(const std::filesystem::path& path, std::uint16_t port);
 int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name);
 int command_types_run();
@@ -298,12 +299,14 @@ void print_serve_help() {
                  "  modb serve demo <file> [--force]\n"
                  "  modb serve query-demo <file> [--force]\n"
                  "  modb serve backpressure-demo <file> [--force]\n"
+                 "  modb serve cancel-demo <file> [--force]\n"
                  "  modb serve <file> [--port N] --once\n"
                  "\n"
                  "demo               Listen, complete Hello/HelloOk with a local client and exit.\n"
                  "query-demo         Seed objects, stream a remote Query end-to-end and exit.\n"
                  "backpressure-demo  Slow client (50 ms/obj); print produzidos-enviados bound.\n"
-                 "--once             Accept one connection (handshake + optional Query) and exit.\n";
+                 "cancel-demo        Cancel mid-stream then reuse the connection (Fase 8E).\n"
+                 "--once             Accept one connection session until the client disconnects.\n";
 }
 
 void print_ping_help() {
@@ -1491,39 +1494,41 @@ int command_serve_query_demo(const std::filesystem::path& path, bool force) {
     });
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
 
-    auto client = modb::net::Client::connect("127.0.0.1", port, db_name);
-    if (!client) {
-        acceptor.join();
-        return print_error(client.error());
-    }
-
-    auto stream = client->query(modb::net::QueryDescription{.type = type_id, .limit = 3});
-    if (!stream) {
-        acceptor.join();
-        return print_error(stream.error());
-    }
-
     std::size_t count = 0;
-    while (true) {
-        auto next = stream->next();
-        if (!next) {
+    {
+        auto client = modb::net::Client::connect("127.0.0.1", port, db_name);
+        if (!client) {
             acceptor.join();
-            return print_error(next.error());
+            return print_error(client.error());
         }
-        if (!*next) {
-            break;
+
+        auto stream = client->query(modb::net::QueryDescription{.type = type_id, .limit = 3});
+        if (!stream) {
+            acceptor.join();
+            return print_error(stream.error());
         }
-        ++count;
-        std::int64_t value = -1;
-        for (const auto& [field, attr] : (**next).fields) {
-            if (field.value == 2) {
-                if (auto as_int = attr.as_int64()) {
-                    value = *as_int;
+
+        while (true) {
+            auto next = stream->next();
+            if (!next) {
+                acceptor.join();
+                return print_error(next.error());
+            }
+            if (!*next) {
+                break;
+            }
+            ++count;
+            std::int64_t value = -1;
+            for (const auto& [field, attr] : (**next).fields) {
+                if (field.value == 2) {
+                    if (auto as_int = attr.as_int64()) {
+                        value = *as_int;
+                    }
                 }
             }
+            std::cout << "  object id=" << (**next).id.value << " value=" << value << '\n';
         }
-        std::cout << "  object id=" << (**next).id.value << " value=" << value << '\n';
-    }
+    } // fecha o cliente → sessão do servidor encerra
     acceptor.join();
     if (!serve_ok) {
         std::cerr << "Error: server streaming failed\n";
@@ -1610,31 +1615,33 @@ int command_serve_backpressure_demo(const std::filesystem::path& path, bool forc
     });
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
 
-    auto client = modb::net::Client::connect("127.0.0.1", port, db_name);
-    if (!client) {
-        acceptor.join();
-        return print_error(client.error());
-    }
-    (void)client->set_recv_buffer_bytes(4 * 1024);
-
-    auto stream = client->query(modb::net::QueryDescription{.type = type_id});
-    if (!stream) {
-        acceptor.join();
-        return print_error(stream.error());
-    }
-
     std::size_t count = 0;
-    while (true) {
-        auto next = stream->next();
-        if (!next) {
+    {
+        auto client = modb::net::Client::connect("127.0.0.1", port, db_name);
+        if (!client) {
             acceptor.join();
-            return print_error(next.error());
+            return print_error(client.error());
         }
-        if (!*next) {
-            break;
+        (void)client->set_recv_buffer_bytes(4 * 1024);
+
+        auto stream = client->query(modb::net::QueryDescription{.type = type_id});
+        if (!stream) {
+            acceptor.join();
+            return print_error(stream.error());
         }
-        ++count;
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        while (true) {
+            auto next = stream->next();
+            if (!next) {
+                acceptor.join();
+                return print_error(next.error());
+            }
+            if (!*next) {
+                break;
+            }
+            ++count;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
     }
     acceptor.join();
     if (!serve_ok) {
@@ -1651,6 +1658,146 @@ int command_serve_backpressure_demo(const std::filesystem::path& path, bool forc
     return (count == static_cast<std::size_t>(total) &&
             stats.max_outstanding <= modb::net::max_in_flight_objects &&
             server->open_snapshot_count() == 0)
+               ? 0
+               : 1;
+}
+
+int command_serve_cancel_demo(const std::filesystem::path& path, bool force) {
+    struct Item {
+        std::string name;
+        std::int64_t value{};
+    };
+
+    std::error_code filesystem_error;
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            std::cerr << "Error: file already exists (use --force)\n";
+            return 1;
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            std::cerr << "Error: could not remove existing file\n";
+            return 1;
+        }
+        std::filesystem::remove(path.string() + ".wal", filesystem_error);
+    }
+
+    constexpr int total = 200;
+    modb::object::TypeDefinitionId type_id{};
+    {
+        auto created = modb::object::Database::create(path);
+        if (!created) {
+            return print_error(created.error());
+        }
+        auto database = std::make_shared<modb::object::Database>(std::move(*created));
+        auto attached = modb::object::DatabaseRegistry::instance().attach(database);
+        if (!attached) {
+            return print_error(attached.error());
+        }
+        modb::object::BindingBuilder<Item> builder{"Item"};
+        builder.field<1>("name", &Item::name).field<2>("value", &Item::value);
+        if (auto bound = database->bind(std::move(builder)); !bound) {
+            return print_error(bound.error());
+        }
+        auto tid = database->type_id_of<Item>();
+        if (!tid) {
+            return print_error(tid.error());
+        }
+        type_id = *tid;
+        auto tx = database->begin();
+        if (!tx) {
+            return print_error(tx.error());
+        }
+        for (int i = 0; i < total; ++i) {
+            auto handle = database->create(*tx, Item{"item-" + std::to_string(i), i});
+            if (!handle) {
+                return print_error(handle.error());
+            }
+        }
+        if (auto committed = tx->commit(); !committed) {
+            return print_error(committed.error());
+        }
+        modb::object::DatabaseRegistry::instance().detach(*attached);
+    }
+
+    auto server = modb::net::Server::listen(path, "127.0.0.1", 0);
+    if (!server) {
+        return print_error(server.error());
+    }
+
+    std::cout << "ODB++ serve cancel-demo (Fase 8E)\n"
+              << "  database: " << path.string() << '\n'
+              << "  listening: 127.0.0.1:" << server->port() << '\n';
+
+    const auto port = server->port();
+    const auto db_name = std::string{server->database_name()};
+    bool serve_ok = false;
+    std::thread acceptor([&server, &serve_ok] {
+        serve_ok = static_cast<bool>(server->serve_one());
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+    std::size_t first_count = 0;
+    std::size_t second_count = 0;
+    {
+        auto client = modb::net::Client::connect("127.0.0.1", port, db_name);
+        if (!client) {
+            acceptor.join();
+            return print_error(client.error());
+        }
+
+        auto stream = client->query(modb::net::QueryDescription{.type = type_id});
+        if (!stream) {
+            acceptor.join();
+            return print_error(stream.error());
+        }
+        const auto qid = stream->query_id();
+        bool sent_cancel = false;
+        while (true) {
+            auto next = stream->next();
+            if (!next) {
+                acceptor.join();
+                return print_error(next.error());
+            }
+            if (!*next) {
+                break;
+            }
+            ++first_count;
+            if (!sent_cancel && first_count >= 10) {
+                if (auto status = client->cancel(qid); !status) {
+                    acceptor.join();
+                    return print_error(status.error());
+                }
+                sent_cancel = true;
+                std::cout << "  Cancel sent after " << first_count << " objects\n";
+            }
+        }
+
+        auto again = client->query(modb::net::QueryDescription{.type = type_id, .limit = 5});
+        if (!again) {
+            acceptor.join();
+            return print_error(again.error());
+        }
+        while (true) {
+            auto next = again->next();
+            if (!next) {
+                acceptor.join();
+                return print_error(next.error());
+            }
+            if (!*next) {
+                break;
+            }
+            ++second_count;
+        }
+        std::cout << "  first stream ended with " << first_count << " objects\n"
+                  << "  second query received " << second_count << " objects\n";
+    }
+    acceptor.join();
+    if (!serve_ok) {
+        std::cerr << "Error: server session failed\n";
+        return 1;
+    }
+    std::cout << "Result: cancel + reusable connection OK\n";
+    return (first_count > 0 && first_count < static_cast<std::size_t>(total) && second_count == 5)
                ? 0
                : 1;
 }
@@ -4767,6 +4914,16 @@ int run(int argc, char* argv[]) {
                 return print_usage_error("modb serve backpressure-demo <file> [--force]");
             }
             return command_serve_backpressure_demo(argv[3], force);
+        }
+        if (std::string_view{argv[2]} == "cancel-demo") {
+            if (argc < 4 || argc > 5) {
+                return print_usage_error("modb serve cancel-demo <file> [--force]");
+            }
+            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
+            if (argc == 5 && !force) {
+                return print_usage_error("modb serve cancel-demo <file> [--force]");
+            }
+            return command_serve_cancel_demo(argv[3], force);
         }
         // modb serve <file> [--port N] --once
         if (argc < 4) {

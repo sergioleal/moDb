@@ -8,8 +8,10 @@
 #include "test_support.hpp"
 
 #include <chrono>
+#include <coroutine>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -20,7 +22,7 @@ std::filesystem::path temp_db_path(const char* tag) {
     const auto stamp =
         std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path() /
-           ("modb-8c-" + std::string{tag} + "-" + std::to_string(stamp) + ".modb");
+           ("modb-8e-" + std::string{tag} + "-" + std::to_string(stamp) + ".modb");
 }
 
 struct Item {
@@ -67,6 +69,31 @@ void cleanup(const std::filesystem::path& path) {
     std::filesystem::remove(path.string() + ".wal", ignored);
 }
 
+// Coroutine mínima para co_await ObjectStream::await_next() (Fase 8E).
+struct VoidTask {
+    struct promise_type {
+        VoidTask get_return_object() { return {}; }
+        std::suspend_never initial_suspend() noexcept { return {}; }
+        std::suspend_never final_suspend() noexcept { return {}; }
+        void return_void() noexcept {}
+        void unhandled_exception() { std::terminate(); }
+    };
+};
+
+VoidTask collect_await(modb::net::ObjectStream& stream,
+                       std::vector<modb::object::DecodedObject>& out) {
+    while (true) {
+        auto next = co_await stream.await_next();
+        if (!next) {
+            co_return;
+        }
+        if (!*next) {
+            co_return;
+        }
+        out.push_back(std::move(**next));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -81,6 +108,7 @@ int main() {
     using modb::object::AttributeValue;
     using modb::object::Database;
     using modb::object::DatabaseRegistry;
+    using modb::object::DecodedObject;
     using modb::object::FieldId;
     using modb::object::encode_object_payload;
 
@@ -102,6 +130,7 @@ int main() {
                     suite.check(server->serve_one().has_value(), "serve_one after close is ok");
                 });
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                // Client::handshake destrói o cliente internamente.
                 auto hello_ok = Client::handshake("127.0.0.1", port, db_name);
                 suite.check(hello_ok.has_value(), "client handshake succeeds");
                 if (hello_ok) {
@@ -155,61 +184,57 @@ int main() {
         });
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
-        auto client = Client::connect("127.0.0.1", port, db_name);
-        suite.check(client.has_value(), "client connects for streaming");
-        if (!client) {
-            acceptor.join();
-            return suite.finish();
-        }
+        {
+            auto client = Client::connect("127.0.0.1", port, db_name);
+            suite.check(client.has_value(), "client connects for streaming");
+            if (client) {
+                auto stream = client->query(QueryDescription{.type = type_id});
+                suite.check(stream.has_value(), "remote query starts");
+                if (stream) {
+                    std::vector<std::int64_t> values;
+                    values.reserve(total);
+                    bool order_ok = true;
+                    bool payload_ok = true;
+                    while (true) {
+                        auto next = stream->next();
+                        if (!next) {
+                            suite.check(false, "stream next failed unexpectedly");
+                            break;
+                        }
+                        if (!*next) {
+                            break;
+                        }
+                        const auto& object = **next;
+                        suite.check(object.type == type_id, "envelope type matches");
+                        if (object.fields.size() != 2) {
+                            payload_ok = false;
+                        }
+                        std::int64_t value = -1;
+                        for (const auto& [field, attr] : object.fields) {
+                            if (field.value == 2) {
+                                auto as_int = attr.as_int64();
+                                if (as_int) {
+                                    value = *as_int;
+                                }
+                            }
+                        }
+                        if (!values.empty() && value < values.back()) {
+                            order_ok = false;
+                        }
+                        values.push_back(value);
 
-        auto stream = client->query(QueryDescription{.type = type_id});
-        suite.check(stream.has_value(), "remote query starts");
-        if (!stream) {
-            acceptor.join();
-            return suite.finish();
-        }
-
-        std::vector<std::int64_t> values;
-        values.reserve(total);
-        bool order_ok = true;
-        bool payload_ok = true;
-        while (true) {
-            auto next = stream->next();
-            if (!next) {
-                suite.check(false, "stream next failed unexpectedly");
-                break;
-            }
-            if (!*next) {
-                break;
-            }
-            const auto& object = **next;
-            suite.check(object.type == type_id, "envelope type matches");
-            if (object.fields.size() != 2) {
-                payload_ok = false;
-            }
-            std::int64_t value = -1;
-            for (const auto& [field, attr] : object.fields) {
-                if (field.value == 2) {
-                    auto as_int = attr.as_int64();
-                    if (as_int) {
-                        value = *as_int;
+                        if (!encode_object_payload(object.fields)) {
+                            payload_ok = false;
+                        }
                     }
+
+                    suite.check(static_cast<int>(values.size()) == total,
+                                "received exactly 10k objects");
+                    suite.check(order_ok, "production order preserved");
+                    suite.check(payload_ok, "logical payloads round-trip without physical ids");
                 }
             }
-            if (!values.empty() && value < values.back()) {
-                order_ok = false;
-            }
-            values.push_back(value);
-
-            // Independência física: payload é só codec lógico.
-            if (!encode_object_payload(object.fields)) {
-                payload_ok = false;
-            }
-        }
-
-        suite.check(static_cast<int>(values.size()) == total, "received exactly 10k objects");
-        suite.check(order_ok, "production order preserved");
-        suite.check(payload_ok, "logical payloads round-trip without physical ids");
+        } // client destruído → socket fechado → sessão do servidor termina
         acceptor.join();
     }
 
@@ -224,36 +249,40 @@ int main() {
                 suite.check(server->serve_one().has_value(), "filtered serve_one ok");
             });
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            auto client = Client::connect("127.0.0.1", port, db_name);
-            suite.check(client.has_value(), "filter client connects");
-            if (client) {
-                QueryDescription description{
-                    .type = type_id,
-                    .limit = 3,
-                    .equals = modb::net::EqualityFilter{FieldId{2}, AttributeValue{std::int64_t{42}}},
-                    .project = {FieldId{2}},
-                };
-                auto stream = client->query(description);
-                suite.check(stream.has_value(), "filtered query starts");
-                if (stream) {
-                    std::size_t count = 0;
-                    bool projected = true;
-                    while (true) {
-                        auto next = stream->next();
-                        if (!next || !*next) {
-                            if (next && !*next) {
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "filter client connects");
+                if (client) {
+                    QueryDescription description{
+                        .type = type_id,
+                        .limit = 3,
+                        .equals =
+                            modb::net::EqualityFilter{FieldId{2}, AttributeValue{std::int64_t{42}}},
+                        .project = {FieldId{2}},
+                    };
+                    auto stream = client->query(description);
+                    suite.check(stream.has_value(), "filtered query starts");
+                    if (stream) {
+                        std::size_t count = 0;
+                        bool projected = true;
+                        while (true) {
+                            auto next = stream->next();
+                            if (!next || !*next) {
+                                if (next && !*next) {
+                                    break;
+                                }
+                                suite.check(false, "filtered stream error");
                                 break;
                             }
-                            suite.check(false, "filtered stream error");
-                            break;
+                            ++count;
+                            if ((**next).fields.size() != 1 ||
+                                (**next).fields[0].first.value != 2) {
+                                projected = false;
+                            }
                         }
-                        ++count;
-                        if ((**next).fields.size() != 1 || (**next).fields[0].first.value != 2) {
-                            projected = false;
-                        }
+                        suite.check(count == 1, "equals+limit returns the matching object");
+                        suite.check(projected, "projection keeps only requested fields");
                     }
-                    suite.check(count == 1, "equals+limit returns the matching object");
-                    suite.check(projected, "projection keeps only requested fields");
                 }
             }
             acceptor.join();
@@ -273,29 +302,31 @@ int main() {
                 suite.check(server->serve_one().has_value(), "failpoint serve_one completes");
             });
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            auto client = Client::connect("127.0.0.1", port, db_name);
-            suite.check(client.has_value(), "failpoint client connects");
-            if (client) {
-                auto stream = client->query(QueryDescription{.type = type_id});
-                suite.check(stream.has_value(), "failpoint query starts");
-                if (stream) {
-                    std::size_t count = 0;
-                    bool saw_error = false;
-                    bool io_error = false;
-                    while (true) {
-                        auto next = stream->next();
-                        if (!next) {
-                            saw_error = true;
-                            io_error = next.error().code == ErrorCode::io_error;
-                            break;
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "failpoint client connects");
+                if (client) {
+                    auto stream = client->query(QueryDescription{.type = type_id});
+                    suite.check(stream.has_value(), "failpoint query starts");
+                    if (stream) {
+                        std::size_t count = 0;
+                        bool saw_error = false;
+                        bool io_error = false;
+                        while (true) {
+                            auto next = stream->next();
+                            if (!next) {
+                                saw_error = true;
+                                io_error = next.error().code == ErrorCode::io_error;
+                                break;
+                            }
+                            if (!*next) {
+                                break;
+                            }
+                            ++count;
                         }
-                        if (!*next) {
-                            break;
-                        }
-                        ++count;
+                        suite.check(count == fail_after, "exactly N objects before StreamError");
+                        suite.check(saw_error && io_error, "StreamError surfaces as io_error");
                     }
-                    suite.check(count == fail_after, "exactly N objects before StreamError");
-                    suite.check(saw_error && io_error, "StreamError surfaces as io_error");
                 }
             }
             acceptor.join();
@@ -359,25 +390,28 @@ int main() {
             const auto db_name = std::string{server->database_name()};
             std::thread acceptor([&server] { (void)server->serve_one(); });
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            auto client = Client::connect("127.0.0.1", port, db_name);
-            if (client) {
-                auto stream = client->query(QueryDescription{
-                    .type = type_id,
-                    .equals =
-                        modb::net::EqualityFilter{FieldId{2}, AttributeValue{std::int64_t{100}}},
-                });
-                if (stream) {
-                    auto next = stream->next();
-                    suite.check(next.has_value() && next->has_value(), "object after relocation");
-                    if (next && *next) {
-                        auto after_payload = encode_object_payload((**next).fields);
-                        suite.check(after_payload.has_value() && *after_payload == before_payload,
-                                    "logical payload unchanged after physical relocation");
-                    }
-                    while (true) {
-                        auto rest = stream->next();
-                        if (!rest || !*rest) {
-                            break;
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                if (client) {
+                    auto stream = client->query(QueryDescription{
+                        .type = type_id,
+                        .equals = modb::net::EqualityFilter{FieldId{2},
+                                                            AttributeValue{std::int64_t{100}}},
+                    });
+                    if (stream) {
+                        auto next = stream->next();
+                        suite.check(next.has_value() && next->has_value(),
+                                    "object after relocation");
+                        if (next && *next) {
+                            auto after_payload = encode_object_payload((**next).fields);
+                            suite.check(after_payload.has_value() && *after_payload == before_payload,
+                                        "logical payload unchanged after physical relocation");
+                        }
+                        while (true) {
+                            auto rest = stream->next();
+                            if (!rest || !*rest) {
+                                break;
+                            }
                         }
                     }
                 }
@@ -423,29 +457,31 @@ int main() {
             });
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
-            auto client = Client::connect("127.0.0.1", port, db_name);
-            suite.check(client.has_value(), "backpressure client connects");
-            if (client) {
-                suite.check(client->set_recv_buffer_bytes(4 * 1024).has_value(),
-                            "client recv buffer shrunk");
-                auto stream = client->query(QueryDescription{.type = slow_type});
-                suite.check(stream.has_value(), "backpressure query starts");
-                if (stream) {
-                    std::size_t count = 0;
-                    while (true) {
-                        auto next = stream->next();
-                        if (!next) {
-                            suite.check(false, "backpressure stream error");
-                            break;
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "backpressure client connects");
+                if (client) {
+                    suite.check(client->set_recv_buffer_bytes(4 * 1024).has_value(),
+                                "client recv buffer shrunk");
+                    auto stream = client->query(QueryDescription{.type = slow_type});
+                    suite.check(stream.has_value(), "backpressure query starts");
+                    if (stream) {
+                        std::size_t count = 0;
+                        while (true) {
+                            auto next = stream->next();
+                            if (!next) {
+                                suite.check(false, "backpressure stream error");
+                                break;
+                            }
+                            if (!*next) {
+                                break;
+                            }
+                            ++count;
+                            std::this_thread::sleep_for(std::chrono::milliseconds(50));
                         }
-                        if (!*next) {
-                            break;
-                        }
-                        ++count;
-                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        suite.check(static_cast<int>(count) == slow_total,
+                                    "slow client received every object");
                     }
-                    suite.check(static_cast<int>(count) == slow_total,
-                                "slow client received every object");
                 }
             }
             acceptor.join();
@@ -469,8 +505,6 @@ int main() {
             const auto port = server->port();
             const auto db_name = std::string{server->database_name()};
             std::thread acceptor([&server, &suite] {
-                // Send pode falhar quando o cliente fecha — ainda assim não
-                // deve vazar snapshot.
                 (void)server->serve_one();
                 suite.check(server->open_snapshot_count() == 0,
                             "disconnect releases query snapshot");
@@ -502,6 +536,7 @@ int main() {
         }
     }
 
+    // --- NativeSocket: connect recusado ---
     {
         auto listener = NativeSocket::listen("127.0.0.1", 0);
         suite.check(listener.has_value(), "temp listener for refuse test");
@@ -512,6 +547,168 @@ int main() {
                 auto refused = NativeSocket::connect("127.0.0.1", *closed_port);
                 suite.check(!refused, "connect to closed port fails");
             }
+        }
+    }
+
+    // --- 8E: Cancel no meio + conexão reutilizável ---
+    {
+        auto server = Server::listen(path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "cancel server listens");
+        if (server) {
+            const auto port = server->port();
+            const auto db_name = std::string{server->database_name()};
+            std::thread acceptor([&server, &suite] {
+                suite.check(server->serve_one().has_value(), "cancel serve_one completes");
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "cancel client connects");
+                if (client) {
+                    auto stream = client->query(QueryDescription{.type = type_id});
+                    suite.check(stream.has_value(), "cancel query starts");
+                    if (stream) {
+                        const auto qid = stream->query_id();
+                        std::size_t received = 0;
+                        bool cancelled = false;
+                        while (true) {
+                            auto next = stream->next();
+                            if (!next) {
+                                suite.check(false, "cancel stream error before end");
+                                break;
+                            }
+                            if (!*next) {
+                                break;
+                            }
+                            ++received;
+                            if (!cancelled && received >= 10) {
+                                suite.check(client->cancel(qid).has_value(),
+                                            "cancel message sent");
+                                cancelled = true;
+                            }
+                        }
+                        suite.check(received > 0, "cancel received some objects");
+                        suite.check(static_cast<int>(received) < total,
+                                    "cancel stopped before full dataset");
+                    }
+
+                    // Segunda consulta na mesma conexão.
+                    auto again = client->query(QueryDescription{.type = type_id, .limit = 5});
+                    suite.check(again.has_value(), "second query after cancel starts");
+                    if (again) {
+                        std::size_t second = 0;
+                        while (true) {
+                            auto next = again->next();
+                            if (!next) {
+                                suite.check(false, "second query stream error");
+                                break;
+                            }
+                            if (!*next) {
+                                break;
+                            }
+                            ++second;
+                        }
+                        suite.check(second >= 1, "connection reusable after cancel");
+                    }
+                }
+            }
+            acceptor.join();
+        }
+    }
+
+    // --- 8E: multiplexação de duas consultas concorrentes ---
+    {
+        auto server = Server::listen(path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "multiplex server listens");
+        if (server) {
+            const auto port = server->port();
+            const auto db_name = std::string{server->database_name()};
+            std::thread acceptor([&server, &suite] {
+                suite.check(server->serve_one().has_value(), "multiplex serve_one completes");
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "multiplex client connects");
+                if (client) {
+                    constexpr std::uint64_t multiplex_limit = 40;
+                    auto stream_a = client->query(
+                        QueryDescription{.type = type_id, .limit = multiplex_limit});
+                    auto stream_b = client->query(
+                        QueryDescription{.type = type_id, .limit = multiplex_limit});
+                    suite.check(stream_a.has_value() && stream_b.has_value(),
+                                "two concurrent queries start");
+                    if (stream_a && stream_b) {
+                        suite.check(stream_a->query_id() != stream_b->query_id(),
+                                    "concurrent query_ids differ");
+
+                        std::size_t count_a = 0;
+                        std::size_t count_b = 0;
+                        bool done_a = false;
+                        bool done_b = false;
+                        while (!done_a || !done_b) {
+                            if (!done_a) {
+                                auto next = stream_a->next();
+                                if (!next) {
+                                    suite.check(false, "stream A error");
+                                    done_a = true;
+                                } else if (!*next) {
+                                    done_a = true;
+                                } else {
+                                    ++count_a;
+                                }
+                            }
+                            if (!done_b) {
+                                auto next = stream_b->next();
+                                if (!next) {
+                                    suite.check(false, "stream B error");
+                                    done_b = true;
+                                } else if (!*next) {
+                                    done_b = true;
+                                } else {
+                                    ++count_b;
+                                }
+                            }
+                        }
+                        suite.check(count_a == multiplex_limit, "stream A received all objects");
+                        suite.check(count_b == multiplex_limit, "stream B received all objects");
+                    }
+                }
+            }
+            acceptor.join();
+        }
+    }
+
+    // --- 8E: co_await stream.await_next() ---
+    {
+        auto server = Server::listen(path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "await server listens");
+        if (server) {
+            const auto port = server->port();
+            const auto db_name = std::string{server->database_name()};
+            std::thread acceptor([&server, &suite] {
+                suite.check(server->serve_one().has_value(), "await serve_one completes");
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "await client connects");
+                if (client) {
+                    auto stream =
+                        client->query(QueryDescription{.type = type_id, .limit = 25});
+                    suite.check(stream.has_value(), "await query starts");
+                    if (stream) {
+                        std::vector<DecodedObject> collected;
+                        collect_await(*stream, collected);
+                        suite.check(!collected.empty(), "co_await collected objects");
+                        suite.check(collected.size() == 25, "co_await received limited set");
+                    }
+                }
+            }
+            acceptor.join();
         }
     }
 

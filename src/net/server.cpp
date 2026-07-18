@@ -5,6 +5,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -16,6 +22,65 @@ Error make_protocol(std::string message) {
 }
 
 constexpr std::size_t k_small_socket_buffer = 4 * 1024;
+
+struct SessionState {
+    NativeSocket* peer{nullptr};
+    std::mutex write_mu;
+    std::mutex inbox_mu;
+    std::condition_variable inbox_cv;
+    std::deque<Message> inbox;
+    std::unordered_map<std::uint32_t, query::CancellationToken> tokens;
+    std::mutex tokens_mu;
+    std::atomic<bool> stop{false};
+    std::atomic<bool> reader_failed{false};
+    Error reader_error{ErrorCode::connection_closed, "reader stopped"};
+};
+
+[[nodiscard]] Result<void> send_locked(SessionState& session, const Message& message) {
+    const std::scoped_lock lock{session.write_mu};
+    return send_message(*session.peer, message);
+}
+
+void reader_loop(SessionState& session) {
+    while (!session.stop.load(std::memory_order_relaxed)) {
+        auto message = recv_message(*session.peer);
+        if (!message) {
+            session.reader_failed.store(true, std::memory_order_relaxed);
+            session.reader_error = message.error();
+            session.stop.store(true, std::memory_order_relaxed);
+            session.inbox_cv.notify_all();
+            return;
+        }
+        if (const auto* cancel = std::get_if<Cancel>(&*message)) {
+            const std::scoped_lock lock{session.tokens_mu};
+            if (auto found = session.tokens.find(cancel->query_id); found != session.tokens.end()) {
+                found->second.cancel();
+            }
+            continue;
+        }
+        {
+            const std::scoped_lock lock{session.inbox_mu};
+            session.inbox.push_back(std::move(*message));
+        }
+        session.inbox_cv.notify_all();
+    }
+}
+
+[[nodiscard]] Result<Message> wait_inbound(SessionState& session) {
+    std::unique_lock lock{session.inbox_mu};
+    session.inbox_cv.wait(lock, [&] {
+        return session.stop.load(std::memory_order_relaxed) || !session.inbox.empty();
+    });
+    if (!session.inbox.empty()) {
+        Message message = std::move(session.inbox.front());
+        session.inbox.pop_front();
+        return message;
+    }
+    if (session.reader_failed.load(std::memory_order_relaxed)) {
+        return std::unexpected(session.reader_error);
+    }
+    return std::unexpected(Error{ErrorCode::connection_closed, "session stopped"});
+}
 
 } // namespace
 
@@ -116,31 +181,41 @@ Result<Server> Server::listen(const std::filesystem::path& path, std::string_vie
                   path.filename().string(), baseline};
 }
 
-Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
-    last_stats_ = {};
+namespace {
 
-    if (auto status = send_message(peer, StreamBegin{.query_id = query.query_id}); !status) {
-        return status;
+Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Database> database,
+                              const Query& query, std::optional<std::size_t> fail_after) {
+    StreamStats stats{};
+    query::CancellationToken token;
+    {
+        const std::scoped_lock lock{session.tokens_mu};
+        session.tokens[query.query_id] = token;
+    }
+
+    if (auto status = send_locked(session, StreamBegin{.query_id = query.query_id}); !status) {
+        const std::scoped_lock lock{session.tokens_mu};
+        session.tokens.erase(query.query_id);
+        return std::unexpected(status.error());
     }
 
     object::Database::ObjectQuerySpec spec{
         .type = query.description.type,
         .limit = query.description.limit,
         .project = query.description.project,
+        .cancel = token,
+        .has_cancel = true,
     };
     if (query.description.equals) {
         spec.equals = std::pair{query.description.equals->field, query.description.equals->value};
     }
 
-    // Fila de saída: no máximo um frame com ≤ max_in_flight_objects. Enquanto
-    // send_all bloqueia (cliente lento / SO_SNDBUF cheio), o generator não
-    // avança — backpressure natural até o scan.
     ObjectFrame batch{.query_id = query.query_id, .compression = Compression::none};
+    bool cancelled = false;
 
     auto note_outstanding = [&] {
-        const auto outstanding = last_stats_.produced - last_stats_.sent;
-        if (outstanding > last_stats_.max_outstanding) {
-            last_stats_.max_outstanding = outstanding;
+        const auto outstanding = stats.produced - stats.sent;
+        if (outstanding > stats.max_outstanding) {
+            stats.max_outstanding = outstanding;
         }
     };
 
@@ -149,39 +224,49 @@ Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
             return {};
         }
         const auto count = batch.records.size();
-        if (auto status = send_message(peer, batch); !status) {
-            // Desconexão no meio do fluxo: abandona o generator ao sair do
-            // laço — o Snapshot RAII libera o cursor (Fase 8D).
+        if (auto status = send_locked(session, batch); !status) {
             return status;
         }
-        last_stats_.sent += count;
+        stats.sent += count;
         note_outstanding();
         batch.records.clear();
         return {};
     };
 
-    for (auto& item : database_->query_objects(std::move(spec))) {
+    for (auto& item : database->query_objects(std::move(spec))) {
+        if (token.cancelled()) {
+            cancelled = true;
+            break;
+        }
         if (!item) {
             (void)flush_batch();
-            return send_message(peer, StreamError{.query_id = query.query_id,
-                                                  .code = item.error().code,
-                                                  .message = item.error().message});
+            (void)send_locked(session, StreamError{.query_id = query.query_id,
+                                                   .code = item.error().code,
+                                                   .message = item.error().message});
+            const std::scoped_lock lock{session.tokens_mu};
+            session.tokens.erase(query.query_id);
+            return stats;
         }
 
-        if (fail_after_ && last_stats_.produced >= *fail_after_) {
+        if (fail_after && stats.produced >= *fail_after) {
             (void)flush_batch();
-            return send_message(peer,
-                                StreamError{.query_id = query.query_id,
-                                            .code = ErrorCode::io_error,
-                                            .message = "injected stream failure"});
+            (void)send_locked(session, StreamError{.query_id = query.query_id,
+                                                   .code = ErrorCode::io_error,
+                                                   .message = "injected stream failure"});
+            const std::scoped_lock lock{session.tokens_mu};
+            session.tokens.erase(query.query_id);
+            return stats;
         }
 
         auto payload = object::encode_object_payload(item->fields);
         if (!payload) {
             (void)flush_batch();
-            return send_message(peer, StreamError{.query_id = query.query_id,
-                                                  .code = payload.error().code,
-                                                  .message = payload.error().message});
+            (void)send_locked(session, StreamError{.query_id = query.query_id,
+                                                   .code = payload.error().code,
+                                                   .message = payload.error().message});
+            const std::scoped_lock lock{session.tokens_mu};
+            session.tokens.erase(query.query_id);
+            return stats;
         }
 
         batch.records.push_back(ObjectEnvelope{
@@ -189,22 +274,41 @@ Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
             .type_definition_id = item->type,
             .payload = std::move(*payload),
         });
-        ++last_stats_.produced;
+        ++stats.produced;
         note_outstanding();
 
         if (batch.records.size() >= max_in_flight_objects) {
             if (auto status = flush_batch(); !status) {
-                return status;
+                const std::scoped_lock lock{session.tokens_mu};
+                session.tokens.erase(query.query_id);
+                return std::unexpected(status.error());
             }
         }
     }
 
     if (auto status = flush_batch(); !status) {
-        return status;
+        const std::scoped_lock lock{session.tokens_mu};
+        session.tokens.erase(query.query_id);
+        return std::unexpected(status.error());
     }
-    return send_message(peer,
-                        StreamEnd{.query_id = query.query_id, .total = last_stats_.produced});
+    // Cancel ou fim natural: StreamEnd com o total produzido (conexão reutilizável).
+    (void)cancelled;
+    if (auto status =
+            send_locked(session, StreamEnd{.query_id = query.query_id, .total = stats.produced});
+        !status) {
+        const std::scoped_lock lock{session.tokens_mu};
+        session.tokens.erase(query.query_id);
+        return std::unexpected(status.error());
+    }
+
+    {
+        const std::scoped_lock lock{session.tokens_mu};
+        session.tokens.erase(query.query_id);
+    }
+    return stats;
 }
+
+} // namespace
 
 Result<void> Server::handle_connection(NativeSocket peer) {
     if (small_buffers_) {
@@ -238,25 +342,87 @@ Result<void> Server::handle_connection(NativeSocket peer) {
         return status;
     }
 
-    // Após o handshake, uma Query opcional. Desconexão limpa sem Query também
-    // é válida (comportamento 8B / ping).
-    auto next = recv_message(peer);
-    if (!next) {
-        if (next.error().code == ErrorCode::connection_closed) {
-            return peer.close();
+    SessionState session;
+    session.peer = &peer;
+    std::thread reader{[&session] { reader_loop(session); }};
+
+    // Workers ativos para multiplexação (query_id → thread).
+    std::mutex workers_mu;
+    std::vector<std::thread> workers;
+    std::atomic<int> live_workers{0};
+    std::mutex stats_mu;
+
+    auto join_finished = [&] {
+        std::vector<std::thread> done;
+        {
+            const std::scoped_lock lock{workers_mu};
+            // Junta todos ao sair; durante o loop deixamos correr.
+            (void)done;
         }
-        return std::unexpected(next.error());
+    };
+    (void)join_finished;
+
+    Result<void> session_status{};
+    while (!session.stop.load(std::memory_order_relaxed)) {
+        auto inbound = wait_inbound(session);
+        if (!inbound) {
+            // Peer fechou o socket (FIN ou RST/WSAECONNRESET no Windows após
+            // closesocket com recv pendente). Sessão encerra sem erro.
+            const auto code = inbound.error().code;
+            if (code == ErrorCode::connection_closed || code == ErrorCode::io_error) {
+                session_status = {};
+            } else {
+                session_status = std::unexpected(inbound.error());
+            }
+            break;
+        }
+        const auto* query = std::get_if<Query>(&*inbound);
+        if (query == nullptr) {
+            session_status = std::unexpected(make_protocol("expected Query in session"));
+            break;
+        }
+
+        // Copia a Query para o worker (inbound será destruído).
+        Query query_copy = *query;
+        live_workers.fetch_add(1, std::memory_order_relaxed);
+        std::thread worker([&, query_copy]() mutable {
+            auto stats = run_query(session, database_, query_copy, fail_after_);
+            if (stats) {
+                const std::scoped_lock lock{stats_mu};
+                last_stats_ = *stats;
+            }
+            live_workers.fetch_sub(1, std::memory_order_relaxed);
+        });
+        {
+            const std::scoped_lock lock{workers_mu};
+            workers.push_back(std::move(worker));
+        }
     }
-    const auto* query = std::get_if<Query>(&*next);
-    if (query == nullptr) {
-        return std::unexpected(make_protocol("expected Query after HelloOk"));
+
+    session.stop.store(true, std::memory_order_relaxed);
+    // Cancela consultas ativas para os workers saírem do generator.
+    {
+        const std::scoped_lock lock{session.tokens_mu};
+        for (auto& [id, token] : session.tokens) {
+            (void)id;
+            token.cancel();
+        }
     }
-    if (auto status = handle_query(peer, *query); !status) {
-        // Erro de envio/desconexão: snapshot já liberado ao destruir o
-        // generator; propaga o status para o chamador.
-        return status;
+    // Junta workers ANTES de fechar o socket (eles ainda podem estar em send).
+    {
+        const std::scoped_lock lock{workers_mu};
+        for (auto& worker : workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        workers.clear();
     }
-    return peer.close();
+    (void)peer.close();
+    if (reader.joinable()) {
+        reader.join();
+    }
+    return session_status;
 }
 
 Result<void> Server::serve_one() {
