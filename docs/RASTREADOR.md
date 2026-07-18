@@ -534,7 +534,7 @@ Status: ✅ Concluída (4/4) — commit `b6284c4`; identidade uniforme `2f9adee`
 
 Critério de aceite 7C: ✅ projeções e funções computadas compõem com Scan/Index
 Scan, Predicate e Limit mantendo avaliação preguiçosa e memória O(1). Suíte
-completa 77/77 em Debug, `-Werror` e sanitizers.
+completa 82/82 em Debug e sanitizers.
 
 ### Fase 7D — Ordenação e agregação
 
