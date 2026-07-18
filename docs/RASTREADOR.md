@@ -514,19 +514,21 @@ miss — cenário raro no single-writer).
 
 ### Fase 7C — Projeção e transformação
 
-Status: ✅ Concluída (2/2) — commit `b6284c4`, 2026-07-18.
+Status: ✅ Concluída (3/3) — commit `b6284c4`; identidade uniforme no commit
+`2f9adee`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
 | 7C.1 | Projection com resultados tipados | ✅ | `ProjectedRow` + `Query::select` / operadores `project` |
 | 7C.2 | Computed Functions registradas no fluxo | ✅ | `Database::register_computed` + `Query::compute` / `map` |
+| 7C.3 | `ObjectId` como campo projetado uniforme | ✅ | `FieldId{0}`, `ProjectedField{name="id"}` e `row.get("id")` |
 
 ### Testes automatizados desta subfase
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
 | `modb.projection_query` | project∘filter∘limit preguiçoso; select de campos; compute registrado; select+compute+where+limit; map tipado; compute ausente | ✅ |
-| `modb.cli.query_project` | `modb query --project name,salary --compute annual_salary` | ✅ |
+| `modb.cli.query_project` | `modb query --project id,name,salary --compute annual_salary` | ✅ |
 
 Critério de aceite 7C: ✅ projeções e funções computadas compõem com Scan/Index
 Scan, Predicate e Limit mantendo avaliação preguiçosa e memória O(1). Suíte
