@@ -557,7 +557,7 @@ Suíte completa 79/79 em Debug, `-Werror` e sanitizers.
 
 ### Fase 7E — Planejamento automático e comprovação
 
-Status: ✅ Concluída (3/3) — commit `TBD`, 2026-07-18.
+Status: ✅ Concluída (3/3) — commit `17ad869`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
