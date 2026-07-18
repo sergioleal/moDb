@@ -47,11 +47,11 @@
 | [4](#fase-4--relacionamentos-coleções-e-blobstore) | Relacionamentos, coleções, BlobStore | ✅ Concluída | 9/9 | Fase 3 |
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
-| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 9/14 | Fases 4, 6 |
+| [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | 🔄 Em andamento | 11/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ⬜ Não iniciada | 0/9 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| **Total** | | | **77/110 (~70%)** | |
+| **Total** | | | **79/110 (~72%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -449,8 +449,8 @@ processo (`modb.snapshot`, `modb.mvcc_recovery`). Suíte completa 64/64 em Debug
 
 ## Fase 7 — Índices e consultas em streaming (embedded)
 
-Status: 🔄 Em andamento (9/14) — cinco entregas verticais; 7A–7C
-concluídas, 7D–7E não iniciadas. Definição completa:
+Status: 🔄 Em andamento (11/14) — cinco entregas verticais; 7A–7D
+concluídas, 7E não iniciada. Definição completa:
 [PLANO_ODB.md §Fase 7](PLANO_ODB.md#fase-7--índices-e-consultas-em-streaming-embedded) ·
 [PROTOCOLO_FASES.md §Fase 7](PROTOCOLO_FASES.md#fase-7--índices-e-consultas-em-streaming-embedded)
 
@@ -534,19 +534,27 @@ completa 77/77 em Debug, `-Werror` e sanitizers.
 
 ### Fase 7D — Ordenação e agregação
 
-Status: ⬜ Não iniciada (0/2) — bloqueada pela Fase 7A.
+Status: ✅ Concluída (2/2) — commit `TBD`, 2026-07-18.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 7D.1 | Sort global e Top-K | ⬜ | Top-K com memória O(k) |
-| 7D.2 | Aggregate, Distinct e Merge | ⬜ | Natureza bloqueante documentada |
+| 7D.1 | Sort global e Top-K | ✅ | `query::sort` / `top_k`; `Query::order_by` / `top_k`; pico O(k) |
+| 7D.2 | Aggregate, Distinct e Merge | ✅ | `aggregate` / `distinct` / `merge`; `OperatorNature` + `Query::nature()` |
 
-Critério de aceite 7D: ⬜ resultados corretos, Top-K com pico O(k) e operadores
-que materializam entrada classificados como bloqueantes.
+### Testes automatizados desta subfase
+
+| Teste (CTest) | Cobre | Status |
+|---|---|---|
+| `modb.aggregation_query` | sort/top_k/distinct/aggregate/merge isolados; nature; order_by/top_k/distinct_by/aggregate na API; pico O(k) no Top-K | ✅ |
+| `modb.cli.query_topk` | `modb query --order-by salary --top 1` | ✅ |
+
+Critério de aceite 7D: ✅ resultados corretos, Top-K com pico O(k) e operadores
+que materializam entrada classificados como bloqueantes (não como streaming).
+Suíte completa 79/79 em Debug, `-Werror` e sanitizers.
 
 ### Fase 7E — Planejamento automático e comprovação
 
-Status: ⬜ Não iniciada (0/3) — bloqueada pelas Fases 7B, 7C e 7D.
+Status: ⬜ Não iniciada (0/3) — bloqueada pela Fase 7D.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
