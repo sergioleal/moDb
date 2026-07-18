@@ -48,11 +48,11 @@
 | [5](#fase-5--transações-wal-e-recuperação) | Transações, WAL, recuperação | ✅ Concluída | 11/11 | Fase 2 |
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
-| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 6/12 | Fase 7 |
+| [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | 🔄 Em andamento | 8/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
 | [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10 |
-| **Total** | | | **88/124 (~71%)** | |
+| **Total** | | | **90/124 (~73%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -585,7 +585,7 @@ objetos (TTFR); buscas por chave via índice.
 
 ## Fase 8 — Servidor, protocolo binário e backpressure
 
-Status: 🔄 Em andamento (6/12) — seis entregas verticais 8A–8F.
+Status: 🔄 Em andamento (8/12) — seis entregas verticais 8A–8F.
 Definição completa:
 [PLANO_ODB.md §Fase 8](PLANO_ODB.md#fase-8--servidor-protocolo-binário-e-backpressure) ·
 [PROTOCOLO_FASES.md §Fase 8](PROTOCOLO_FASES.md#fase-8--servidor-protocolo-binário-e-backpressure)
@@ -650,21 +650,22 @@ entrega N + `StreamError`. Suíte completa 90/90 em Debug e sanitizers.
 
 ### Fase 8D — Backpressure e ciclo de recursos
 
-Status: ⬜ Não iniciada (0/2) — tag prevista `0.0.8d`. Depende de 8C.
+Status: ✅ Concluída (2/2) — tag prevista `0.0.8d`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8D.1 | Fila/frame limitados; socket lento suspende o generator | ⬜ | ≤ 1 frame / constante pequena em trânsito |
-| 8D.2 | Instrumentação e liberação em desconexão | ⬜ | produzidos − enviados; cursor/snapshot |
+| 8D.1 | Fila/frame limitados; socket lento suspende o generator | ✅ | `max_in_flight_objects=8`; `send_all` bloqueia o scan |
+| 8D.2 | Instrumentação e liberação em desconexão | ✅ | `StreamStats`; `open_snapshot_count`; RAII do Snapshot |
 
 ### Testes automatizados desta subfase
 
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
-| `modb.server_streaming` (backpressure) | cliente lento 1 obj/50 ms; desconexão sem vazamento | ⬜ |
+| `modb.server_streaming` | cliente lento 50 ms/obj; desconexão sem vazamento de snapshot | ✅ |
+| `modb.cli.serve_backpressure_demo` | demo CLI com max_outstanding limitado | ✅ |
 
-Critério de aceite 8D: ⬜ produzidos − enviados ≤ constante; memória não
-cresce com o tamanho do fluxo.
+Critério de aceite 8D: ✅ produzidos − enviados ≤ `max_in_flight_objects`;
+desconexão libera snapshot. Suíte completa 91/91 em Debug e sanitizers.
 
 ### Fase 8E — Cancelamento, multiplexação e API assíncrona
 

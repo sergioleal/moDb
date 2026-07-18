@@ -386,6 +386,122 @@ int main() {
         }
     }
 
+    // --- 8D: backpressure com cliente lento (1 obj/50 ms) ---
+    {
+        constexpr int slow_total = 80;
+        const auto slow_path = temp_db_path("backpressure");
+        cleanup(slow_path);
+        modb::object::TypeDefinitionId slow_type{};
+        {
+            auto created = Database::create(slow_path);
+            auto database = share(created);
+            suite.check(database != nullptr, "backpressure database created");
+            if (!database) {
+                return suite.finish();
+            }
+            auto attached = DatabaseRegistry::instance().attach(database);
+            suite.check(database->bind(item_builder()).has_value(), "backpressure Item bound");
+            auto tid = database->type_id_of<Item>();
+            suite.check(tid.has_value(), "backpressure type id");
+            if (!tid) {
+                return suite.finish();
+            }
+            slow_type = *tid;
+            suite.check(seed(*database, slow_total).has_value(), "backpressure dataset seeded");
+            DatabaseRegistry::instance().detach(*attached);
+        }
+
+        auto server = Server::listen(slow_path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "backpressure server listens");
+        if (server) {
+            server->use_small_socket_buffers(true);
+            const auto port = server->port();
+            const auto db_name = std::string{server->database_name()};
+            std::thread acceptor([&server, &suite] {
+                auto status = server->serve_one();
+                suite.check(status.has_value(), "backpressure serve_one completes");
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+            auto client = Client::connect("127.0.0.1", port, db_name);
+            suite.check(client.has_value(), "backpressure client connects");
+            if (client) {
+                suite.check(client->set_recv_buffer_bytes(4 * 1024).has_value(),
+                            "client recv buffer shrunk");
+                auto stream = client->query(QueryDescription{.type = slow_type});
+                suite.check(stream.has_value(), "backpressure query starts");
+                if (stream) {
+                    std::size_t count = 0;
+                    while (true) {
+                        auto next = stream->next();
+                        if (!next) {
+                            suite.check(false, "backpressure stream error");
+                            break;
+                        }
+                        if (!*next) {
+                            break;
+                        }
+                        ++count;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    }
+                    suite.check(static_cast<int>(count) == slow_total,
+                                "slow client received every object");
+                }
+            }
+            acceptor.join();
+            const auto& stats = server->last_stream_stats();
+            suite.check(stats.produced == static_cast<std::uint64_t>(slow_total),
+                        "produced equals dataset size");
+            suite.check(stats.sent == stats.produced, "all produced objects were sent");
+            suite.check(stats.max_outstanding <= modb::net::max_in_flight_objects,
+                        "produzidos-enviados bounded by max_in_flight_objects");
+            suite.check(server->open_snapshot_count() == 0,
+                        "no snapshots remain after slow stream");
+        }
+        cleanup(slow_path);
+    }
+
+    // --- 8D: desconexão abrupta libera snapshot ---
+    {
+        auto server = Server::listen(path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "disconnect server listens");
+        if (server) {
+            const auto port = server->port();
+            const auto db_name = std::string{server->database_name()};
+            std::thread acceptor([&server, &suite] {
+                // Send pode falhar quando o cliente fecha — ainda assim não
+                // deve vazar snapshot.
+                (void)server->serve_one();
+                suite.check(server->open_snapshot_count() == 0,
+                            "disconnect releases query snapshot");
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+            {
+                auto client = Client::connect("127.0.0.1", port, db_name);
+                suite.check(client.has_value(), "disconnect client connects");
+                if (client) {
+                    auto stream = client->query(QueryDescription{.type = type_id});
+                    suite.check(stream.has_value(), "disconnect query starts");
+                    if (stream) {
+                        for (int i = 0; i < 5; ++i) {
+                            auto next = stream->next();
+                            suite.check(next.has_value() && next->has_value(),
+                                        "received object before disconnect");
+                            if (!next || !*next) {
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Client e ObjectStream destruídos aqui → fecha o socket.
+            }
+            acceptor.join();
+            suite.check(server->open_snapshot_count() == 0,
+                        "snapshots cleared after abrupt disconnect");
+        }
+    }
+
     {
         auto listener = NativeSocket::listen("127.0.0.1", 0);
         suite.check(listener.has_value(), "temp listener for refuse test");

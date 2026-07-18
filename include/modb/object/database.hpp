@@ -820,6 +820,12 @@ public:
     }
     void reset_data_pages_read() noexcept { store_.reset_data_pages_read(); }
 
+    // Snapshots abertos nesta sessão (Fase 8D: detectar vazamento após desconexão).
+    [[nodiscard]] std::size_t open_snapshot_count() const noexcept {
+        const std::scoped_lock lock{*snapshot_registry_mutex_};
+        return open_snapshot_epochs_.size();
+    }
+
     // Recicla o espaço das versões antigas que nenhum snapshot aberto ainda
     // pode enxergar (Fase 6C). Roda numa transação própria (as liberações
     // passam pelo WAL); respeita o snapshot aberto mais antigo, então versões

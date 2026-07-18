@@ -15,7 +15,7 @@ Error make_protocol(std::string message) {
     return Error{ErrorCode::protocol_error, std::move(message)};
 }
 
-constexpr std::size_t k_max_records_per_frame = 32;
+constexpr std::size_t k_small_socket_buffer = 4 * 1024;
 
 } // namespace
 
@@ -60,9 +60,12 @@ Server::Server(Server&& other) noexcept
     : database_{std::move(other.database_)}, database_id_{other.database_id_},
       listener_{std::move(other.listener_)}, port_{other.port_},
       database_name_{std::move(other.database_name_)}, baseline_{other.baseline_},
-      fail_after_{other.fail_after_} {
+      fail_after_{other.fail_after_}, small_buffers_{other.small_buffers_},
+      last_stats_{other.last_stats_} {
     other.database_id_ = object::DatabaseId{};
     other.fail_after_.reset();
+    other.small_buffers_ = false;
+    other.last_stats_ = {};
 }
 
 Server::~Server() {
@@ -114,6 +117,8 @@ Result<Server> Server::listen(const std::filesystem::path& path, std::string_vie
 }
 
 Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
+    last_stats_ = {};
+
     if (auto status = send_message(peer, StreamBegin{.query_id = query.query_id}); !status) {
         return status;
     }
@@ -127,16 +132,30 @@ Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
         spec.equals = std::pair{query.description.equals->field, query.description.equals->value};
     }
 
+    // Fila de saída: no máximo um frame com ≤ max_in_flight_objects. Enquanto
+    // send_all bloqueia (cliente lento / SO_SNDBUF cheio), o generator não
+    // avança — backpressure natural até o scan.
     ObjectFrame batch{.query_id = query.query_id, .compression = Compression::none};
-    std::uint64_t total = 0;
+
+    auto note_outstanding = [&] {
+        const auto outstanding = last_stats_.produced - last_stats_.sent;
+        if (outstanding > last_stats_.max_outstanding) {
+            last_stats_.max_outstanding = outstanding;
+        }
+    };
 
     auto flush_batch = [&]() -> Result<void> {
         if (batch.records.empty()) {
             return {};
         }
+        const auto count = batch.records.size();
         if (auto status = send_message(peer, batch); !status) {
+            // Desconexão no meio do fluxo: abandona o generator ao sair do
+            // laço — o Snapshot RAII libera o cursor (Fase 8D).
             return status;
         }
+        last_stats_.sent += count;
+        note_outstanding();
         batch.records.clear();
         return {};
     };
@@ -149,7 +168,7 @@ Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
                                                   .message = item.error().message});
         }
 
-        if (fail_after_ && total >= *fail_after_) {
+        if (fail_after_ && last_stats_.produced >= *fail_after_) {
             (void)flush_batch();
             return send_message(peer,
                                 StreamError{.query_id = query.query_id,
@@ -170,9 +189,10 @@ Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
             .type_definition_id = item->type,
             .payload = std::move(*payload),
         });
-        ++total;
+        ++last_stats_.produced;
+        note_outstanding();
 
-        if (batch.records.size() >= k_max_records_per_frame) {
+        if (batch.records.size() >= max_in_flight_objects) {
             if (auto status = flush_batch(); !status) {
                 return status;
             }
@@ -182,10 +202,15 @@ Result<void> Server::handle_query(NativeSocket& peer, const Query& query) {
     if (auto status = flush_batch(); !status) {
         return status;
     }
-    return send_message(peer, StreamEnd{.query_id = query.query_id, .total = total});
+    return send_message(peer,
+                        StreamEnd{.query_id = query.query_id, .total = last_stats_.produced});
 }
 
 Result<void> Server::handle_connection(NativeSocket peer) {
+    if (small_buffers_) {
+        (void)peer.set_send_buffer_bytes(k_small_socket_buffer);
+    }
+
     auto message = recv_message(peer);
     if (!message) {
         return std::unexpected(message.error());
@@ -213,8 +238,8 @@ Result<void> Server::handle_connection(NativeSocket peer) {
         return status;
     }
 
-    // Após o handshake, uma Query opcional (8C). Desconexão limpa sem Query
-    // também é válida (comportamento 8B / ping).
+    // Após o handshake, uma Query opcional. Desconexão limpa sem Query também
+    // é válida (comportamento 8B / ping).
     auto next = recv_message(peer);
     if (!next) {
         if (next.error().code == ErrorCode::connection_closed) {
@@ -227,6 +252,8 @@ Result<void> Server::handle_connection(NativeSocket peer) {
         return std::unexpected(make_protocol("expected Query after HelloOk"));
     }
     if (auto status = handle_query(peer, *query); !status) {
+        // Erro de envio/desconexão: snapshot já liberado ao destruir o
+        // generator; propaga o status para o chamador.
         return status;
     }
     return peer.close();

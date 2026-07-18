@@ -28,6 +28,10 @@ public:
     [[nodiscard]] Result<void> send_all(std::span<const std::byte> bytes);
     [[nodiscard]] Result<void> recv_exact(std::span<std::byte> destination);
 
+    // Ajusta SO_SNDBUF/SO_RCVBUF (Fase 8D: janela TCP pequena nos testes).
+    [[nodiscard]] Result<void> set_send_buffer_bytes(std::size_t bytes);
+    [[nodiscard]] Result<void> set_recv_buffer_bytes(std::size_t bytes);
+
     [[nodiscard]] Result<std::uint16_t> local_port() const;
     [[nodiscard]] Result<void> close();
     [[nodiscard]] bool is_open() const noexcept;
