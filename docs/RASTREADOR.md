@@ -592,7 +592,7 @@ Definição completa:
 
 ### Fase 8A — Contratos e codec do protocolo
 
-Status: ✅ Concluída (2/2) — tag prevista `0.0.8a`.
+Status: ✅ Concluída (2/2) — commit `9f65f81`, tag `0.0.8a`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
