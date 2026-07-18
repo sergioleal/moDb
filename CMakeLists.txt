@@ -362,22 +362,24 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.oo_demo
         COMMAND modb_cli oo employee demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --force)
-    # Consulta em streaming (Fase 7A) sobre o arquivo evoluído da demo (2
-    # Employees, tipo lógico único em duas versões). Ordem fixada via DEPENDS.
-    add_test(NAME modb.cli.oo_query
-        COMMAND modb_cli oo employee query
+    add_test(NAME modb.cli.query_help COMMAND modb_cli query --help)
+    # Consulta em streaming (Fase 7A), comando top-level `query`, sobre o
+    # arquivo evoluído da demo (2 Employees, tipo lógico único em duas
+    # versões). Ordem fixada via DEPENDS.
+    add_test(NAME modb.cli.query
+        COMMAND modb_cli query
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2 --limit 1)
-    set_tests_properties(modb.cli.oo_query PROPERTIES DEPENDS modb.cli.oo_demo)
-    # Índice (Fase 7B): cria sobre a demo, depois consulta por igualdade de
-    # salário via Index Scan. Ordem fixada via DEPENDS.
+    set_tests_properties(modb.cli.query PROPERTIES DEPENDS modb.cli.oo_demo)
+    # Índice (Fase 7B): cria sobre a demo (ainda em `oo employee index`), depois
+    # consulta por igualdade de salário via Index Scan no comando `query`.
     add_test(NAME modb.cli.oo_index
         COMMAND modb_cli oo employee index
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2)
-    add_test(NAME modb.cli.oo_query_indexed
-        COMMAND modb_cli oo employee query
+    add_test(NAME modb.cli.query_indexed
+        COMMAND modb_cli query
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --schema 2 --salary 18000)
-    set_tests_properties(modb.cli.oo_index PROPERTIES DEPENDS modb.cli.oo_query)
-    set_tests_properties(modb.cli.oo_query_indexed PROPERTIES DEPENDS modb.cli.oo_index)
+    set_tests_properties(modb.cli.oo_index PROPERTIES DEPENDS modb.cli.query)
+    set_tests_properties(modb.cli.query_indexed PROPERTIES DEPENDS modb.cli.oo_index)
     add_test(NAME modb.cli.blob_help COMMAND modb_cli blob --help)
     add_test(NAME modb.cli.graph_help COMMAND modb_cli graph --help)
     add_test(NAME modb.cli.coll_help COMMAND modb_cli coll --help)

@@ -72,6 +72,7 @@ void print_type_help();
 void print_baseline_help();
 void print_object_help();
 void print_oo_help();
+void print_query_help();
 void print_blob_help();
 void print_graph_help();
 void print_coll_help();
@@ -119,6 +120,7 @@ int run_type_command(int argc, char* argv[]);
 int run_baseline_command(int argc, char* argv[]);
 int run_object_command(int argc, char* argv[]);
 int run_oo_command(int argc, char* argv[]);
+int run_query_command(int argc, char* argv[]);
 int run_blob_command(int argc, char* argv[]);
 int run_graph_command(int argc, char* argv[]);
 int run_coll_command(int argc, char* argv[]);
@@ -184,6 +186,7 @@ void print_help() {
            "  baseline Inspect immutable catalog baselines (ODB++).\n"
            "  object   Create, read and remove persistent objects (ODB++).\n"
            "  oo       Use compiled C++ bindings, handles and schema projection.\n"
+           "  query    Stream/filter/index-scan Employees lazily (ODB++ Fase 7A/7B).\n"
            "  blob     Store and read chained BLBP blobs (ODB++ Fase 4).\n"
            "  graph    Demo an object graph: refs, embedded, cascade (ODB++ Fase 4).\n"
            "  coll     Demo persistent vector/set/map collections (ODB++ Fase 4).\n"
@@ -288,14 +291,23 @@ void print_oo_help() {
                  "  modb oo employee set-salary <file> <object-id> <salary> "
                  "--schema <1|2>\n"
                  "  modb oo employee index <file> --schema <1|2>\n"
-                 "  modb oo employee query <file> --schema <1|2> [--limit N] "
-                 "[--min-salary S] [--salary S]\n"
                  "  modb oo employee demo <file> [--force]\n"
                  "\n"
-                 "query streams the employees lazily (ODB++ Fase 7A): --min-salary filters,\n"
-                 "--limit stops the scan early, and it reports how many data pages were read.\n"
-                 "index builds a B+ tree on Employee.salary (ODB++ Fase 7B); then\n"
-                 "query --salary S does an equality Index Scan instead of a full scan.\n";
+                 "index builds a B+ tree on Employee.salary (ODB++ Fase 7B). See\n"
+                 "'modb query --help' to stream/filter/index-scan the Employees.\n";
+}
+
+void print_query_help() {
+    std::cout << "Usage:\n"
+                 "  modb query <file> --schema <1|2> [--limit N] [--min-salary S] "
+                 "[--salary S]\n"
+                 "\n"
+                 "Streams the Employees lazily (ODB++ Fase 7A) instead of materializing them\n"
+                 "all: --min-salary filters (Predicate), --limit stops the scan early\n"
+                 "(curto-circuito), and it reports how many data pages were read.\n"
+                 "\n"
+                 "--salary S does an equality Index Scan via the B+ tree built by\n"
+                 "'modb oo employee index' (ODB++ Fase 7B), instead of a full scan.\n";
 }
 
 void print_blob_help() {
@@ -1921,10 +1933,12 @@ int command_employee_get(const std::filesystem::path& path, std::uint64_t object
     return 0;
 }
 
-// modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S]
+// modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
 // Consulta em streaming (Fase 7A): percorre os Employees preguiçosamente,
 // opcionalmente filtrando por salário mínimo e limitando a N resultados, e
 // reporta quantas páginas de dados foram lidas — com `--limit`, poucas.
+// `--salary` faz um Index Scan por igualdade via a B+ tree (Fase 7B), quando
+// `modb oo employee index` já criou o índice sobre o campo.
 int command_employee_query(const std::filesystem::path& path, int schema, std::size_t limit,
                            std::optional<double> min_salary, std::optional<double> eq_salary) {
     auto session = DatabaseSession::open(path);
@@ -3174,52 +3188,6 @@ int run_oo_command(int argc, char* argv[]) {
         }
         return command_employee_demo(argv[4], argc == 6);
     }
-    if (subcommand == "query") {
-        constexpr const char* usage =
-            "modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S] "
-            "[--salary S]";
-        if (argc < 5) {
-            return print_usage_error(usage);
-        }
-        std::optional<int> schema;
-        std::size_t limit = 0;
-        std::optional<double> min_salary;
-        std::optional<double> eq_salary;
-        for (int i = 5; i < argc; ++i) {
-            const std::string_view flag{argv[i]};
-            if (flag == "--schema" && i + 1 < argc) {
-                auto parsed = parse_employee_schema(argv[++i]);
-                if (!parsed) {
-                    return print_error(parsed.error());
-                }
-                schema = *parsed;
-            } else if (flag == "--limit" && i + 1 < argc) {
-                auto parsed = parse_integer(argv[++i]);
-                if (!parsed || *parsed < 0) {
-                    return print_usage_error("--limit expects a non-negative integer");
-                }
-                limit = static_cast<std::size_t>(*parsed);
-            } else if (flag == "--min-salary" && i + 1 < argc) {
-                auto parsed = parse_real(argv[++i]);
-                if (!parsed) {
-                    return print_error(parsed.error());
-                }
-                min_salary = *parsed;
-            } else if (flag == "--salary" && i + 1 < argc) {
-                auto parsed = parse_real(argv[++i]);
-                if (!parsed) {
-                    return print_error(parsed.error());
-                }
-                eq_salary = *parsed;
-            } else {
-                return print_usage_error(usage);
-            }
-        }
-        if (!schema) {
-            return print_usage_error(usage);
-        }
-        return command_employee_query(argv[4], *schema, limit, min_salary, eq_salary);
-    }
     if (subcommand == "index") {
         if (argc != 7 || std::string_view{argv[5]} != "--schema") {
             return print_usage_error("modb oo employee index <file> --schema <1|2>");
@@ -3232,6 +3200,54 @@ int run_oo_command(int argc, char* argv[]) {
     }
     std::cerr << "Unknown oo employee command: " << subcommand << '\n';
     return 2;
+}
+
+// modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
+int run_query_command(int argc, char* argv[]) {
+    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+        print_query_help();
+        return 0;
+    }
+    constexpr const char* usage =
+        "modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]";
+    std::optional<int> schema;
+    std::size_t limit = 0;
+    std::optional<double> min_salary;
+    std::optional<double> eq_salary;
+    for (int i = 3; i < argc; ++i) {
+        const std::string_view flag{argv[i]};
+        if (flag == "--schema" && i + 1 < argc) {
+            auto parsed = parse_employee_schema(argv[++i]);
+            if (!parsed) {
+                return print_error(parsed.error());
+            }
+            schema = *parsed;
+        } else if (flag == "--limit" && i + 1 < argc) {
+            auto parsed = parse_integer(argv[++i]);
+            if (!parsed || *parsed < 0) {
+                return print_usage_error("--limit expects a non-negative integer");
+            }
+            limit = static_cast<std::size_t>(*parsed);
+        } else if (flag == "--min-salary" && i + 1 < argc) {
+            auto parsed = parse_real(argv[++i]);
+            if (!parsed) {
+                return print_error(parsed.error());
+            }
+            min_salary = *parsed;
+        } else if (flag == "--salary" && i + 1 < argc) {
+            auto parsed = parse_real(argv[++i]);
+            if (!parsed) {
+                return print_error(parsed.error());
+            }
+            eq_salary = *parsed;
+        } else {
+            return print_usage_error(usage);
+        }
+    }
+    if (!schema) {
+        return print_usage_error(usage);
+    }
+    return command_employee_query(argv[2], *schema, limit, min_salary, eq_salary);
 }
 
 int run_blob_command(int argc, char* argv[]) {
@@ -3877,6 +3893,9 @@ int run(int argc, char* argv[]) {
     }
     if (command == "oo") {
         return run_oo_command(argc, argv);
+    }
+    if (command == "query") {
+        return run_query_command(argc, argv);
     }
     if (command == "blob") {
         return run_blob_command(argc, argv);

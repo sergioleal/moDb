@@ -471,7 +471,7 @@ Status: ✅ Concluída (4/4) — commit `a585fab`, 2026-07-17.
 |---|---|---|
 | `modb.generator` | preguiça (contador + limit), composição filter/limit, propagação de erro, cancelamento, destruição precoce | ✅ |
 | `modb.streaming_query` | **TTFR: `limit 1` lê ≤ 2 páginas**; varredura completa; filtro; filter+limit curto-circuita; cancelamento; estabilidade do snapshot | ✅ |
-| `modb.cli.oo_query` | `oo employee query` (streaming, filtro, limite) sobre o tipo evoluído | ✅ |
+| `modb.cli.query` | `modb query` (streaming, filtro, limite) sobre o tipo evoluído | ✅ |
 
 Critério de aceite 7A: ✅ `limit 1` lê ≤ 2 páginas de dados (num heap com muitas
 páginas), mantém memória O(1) (pipeline preguiçoso, nada materializado),
@@ -495,7 +495,7 @@ Status: ✅ Concluída (3/3) — commit `e3d76a3`, 2026-07-18.
 |---|---|---|
 | `modb.btree` | inserção ordenada/embaralhada (2–3 mil), invariantes (ordem, profundidade uniforme, split interno), duplicatas, faixa, remoção, reabertura, ordem por tipo (int com sinal, float, string) | ✅ |
 | `modb.indexed_query` | criação com backfill, igualdade/faixa em ordem, duplicatas, índice lê menos páginas que scan, manutenção em update/remove, reabertura e **recovery** de objeto + índice | ✅ |
-| `modb.cli.oo_index` / `modb.cli.oo_query_indexed` | `oo employee index` + `query --salary` (Index Scan por igualdade) | ✅ |
+| `modb.cli.oo_index` / `modb.cli.query_indexed` | `oo employee index` + `modb query --salary` (Index Scan por igualdade) | ✅ |
 
 Critério de aceite 7B: ✅ buscas por igualdade e faixa usam comprovadamente a B+
 tree (uma consulta seletiva lê menos páginas que o scan completo), preservam

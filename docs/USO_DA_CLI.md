@@ -460,7 +460,6 @@ modb oo employee evolve <file> --schema <1|2>
 modb oo employee get <file> <object-id> --schema <1|2>
 modb oo employee set-salary <file> <object-id> <salary> --schema <1|2>
 modb oo employee index <file> --schema <1|2>
-modb oo employee query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
 modb oo employee demo <file> [--force]
 ```
 
@@ -487,30 +486,39 @@ Baseline 20 (1 types) [current]
 default de `country` é `"BR"`. `set-salary --schema 2` usa `Handle::set` e regrava o
 objeto antigo com a definição corrente, demonstrando a migração preguiçosa.
 
-`query` exercita a consulta em streaming da Fase 7A: percorre os Employees
-preguiçosamente (todas as versões de schema do tipo), `--min-salary S` filtra e
-`--limit N` encerra a varredura cedo. Ao final reporta quantas páginas de dados
-foram lidas — com `--limit`, poucas (o critério TTFR):
+`index` cria uma B+ tree sobre `Employee.salary` (Fase 7B); a consulta
+propriamente dita é um comando à parte, `modb query` (abaixo).
+
+## `modb query` — consulta em streaming (ODB++ Fase 7A/7B)
 
 ```text
-$ modb oo employee query phase3.modb --schema 2 --min-salary 17000
+modb query <file> --schema <1|2> [--limit N] [--min-salary S] [--salary S]
+```
+
+Percorre os Employees preguiçosamente (todas as versões de schema do tipo),
+sem materializar tudo de uma vez: `--min-salary S` filtra (operador Predicate),
+`--limit N` encerra a varredura cedo (curto-circuito). Ao final reporta quantas
+páginas de dados foram lidas — com `--limit`, poucas (o critério TTFR):
+
+```text
+$ modb query phase3.modb --schema 2 --min-salary 17000
 Employee: name=Bia salary=18000 country=PT
 1 employee(s) streamed; data pages read: 1
 ```
 
-`index` cria uma B+ tree sobre `Employee.salary` (Fase 7B); depois
-`query --salary S` faz um **Index Scan por igualdade** em vez de varrer tudo,
-retornando todos os empregados com aquele salário (duplicatas incluídas) em
-ordem, sem passar pelo scan sequencial:
+`--salary S` faz um **Index Scan por igualdade** via a B+ tree criada por
+`modb oo employee index`, em vez de varrer tudo — retorna todos os empregados
+com aquele salário (duplicatas incluídas), em ordem, sem passar pelo scan
+sequencial:
 
 ```text
-$ modb oo employee query phase3.modb --schema 2 --salary 18000
+$ modb query phase3.modb --schema 2 --salary 18000
 Error: no index on this field
 
 $ modb oo employee index phase3.modb --schema 2
 Index created on Employee.salary (field 2)
 
-$ modb oo employee query phase3.modb --schema 2 --salary 18000
+$ modb query phase3.modb --schema 2 --salary 18000
 Employee: name=Bia salary=18000 country=PT
 1 employee(s) streamed (via index); data pages read: 0
 ```
