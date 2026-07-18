@@ -363,6 +363,16 @@ if(BUILD_TESTING)
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase6b-snapshot-demo.modb)
     set_tests_properties(modb.cli.mvcc_gc PROPERTIES
         DEPENDS modb.cli.mvcc_snapshot_demo)
+    # status/versions são diagnósticos read-only sobre o arquivo que a demo
+    # deixou (Ana = id 18). Ordem fixada via DEPENDS para o arquivo existir.
+    add_test(NAME modb.cli.mvcc_status
+        COMMAND modb_cli mvcc status
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase6b-snapshot-demo.modb)
+    add_test(NAME modb.cli.mvcc_versions
+        COMMAND modb_cli mvcc versions
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase6b-snapshot-demo.modb 18)
+    set_tests_properties(modb.cli.mvcc_status modb.cli.mvcc_versions PROPERTIES
+        DEPENDS modb.cli.mvcc_snapshot_demo)
     add_test(NAME modb.cli.tx_demo
         COMMAND modb_cli tx demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-tx-demo.modb --force)

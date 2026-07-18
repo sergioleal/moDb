@@ -95,6 +95,12 @@ public:
     [[nodiscard]] std::uint64_t data_record_count() const noexcept {
         return data_heap_.record_count();
     }
+    // Estado de versionamento de um objeto (Fase 6): época/localização current
+    // e, se houver, a versão `previous` retida. Diagnóstico read-only para a
+    // CLI (`mvcc versions`).
+    [[nodiscard]] Result<IdentityMap::VersionInfo> version_info(ObjectId id) const {
+        return identity_.inspect(id);
+    }
 
     // Próximo ObjectId a ser alocado (contador persistido). Exposto para o
     // rollback de transação (Fase 5) preservar a garantia de não-reuso mesmo

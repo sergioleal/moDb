@@ -464,6 +464,15 @@ public:
         return store_.data_record_count();
     }
 
+    // Estado de versionamento de um objeto (Fase 6): época/localização da
+    // versão `current` e, se retida, da `previous`. Diagnóstico read-only.
+    [[nodiscard]] Result<IdentityMap::VersionInfo> version_info(ObjectId id) {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        return store_.version_info(id);
+    }
+
     // Recicla o espaço das versões antigas que nenhum snapshot aberto ainda
     // pode enxergar (Fase 6C). Roda numa transação própria (as liberações
     // passam pelo WAL); respeita o snapshot aberto mais antigo, então versões

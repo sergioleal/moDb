@@ -670,11 +670,25 @@ completo da Fase 3.
 modb mvcc status <file>
 modb mvcc upgrade <file>
 modb mvcc tick <file>
+modb mvcc versions <file> <object-id>
 ```
 
-`status` abre o banco e informa a época global. `upgrade` exercita a abertura
+`status` abre o banco e informa a época global, a versão do formato e a
+contagem física de registros de dados (útil para ver o acúmulo de versões
+`previous` retidas e decidir quando rodar `gc`). `upgrade` exercita a abertura
 compatível que converte DBRT/IDMP v1 para v2 quando necessário. `tick` faz um
 commit sem objetos para demonstrar que a época avança pelo WAL.
+
+`versions <object-id>` mostra o estado de versionamento de um objeto: a época e
+a localização física da versão `current` (ou que ela é um tombstone, se
+removido) e, se houver, a versão `previous` ainda retida e sua época — ou seja,
+o que um `gc` poderia recuperar. Exemplo, logo após um update sem GC:
+
+```text
+Object 18
+  current: epoch 5, location page 6 slot 1
+  previous: epoch 3, location page 6 slot 0 (retained — reclaimable by gc ...)
+```
 
 Roteiro passo a passo:
 

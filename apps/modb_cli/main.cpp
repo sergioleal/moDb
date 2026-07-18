@@ -137,6 +137,7 @@ int command_mvcc_status(const std::filesystem::path& path, bool explicit_upgrade
 int command_mvcc_tick(const std::filesystem::path& path);
 int command_mvcc_snapshot_demo(const std::filesystem::path& path, bool force);
 int command_mvcc_gc(const std::filesystem::path& path);
+int command_mvcc_versions(const std::filesystem::path& path, std::uint64_t object_id);
 int run_db_command(int argc, char* argv[]);
 int run_page_command(int argc, char* argv[]);
 int run_record_command(int argc, char* argv[]);
@@ -1615,12 +1616,17 @@ void print_mvcc_help() {
                  "  modb mvcc status <file>\n"
                  "  modb mvcc upgrade <file>\n"
                  "  modb mvcc tick <file>\n"
+                 "  modb mvcc versions <file> <object-id>\n"
                  "  modb mvcc snapshot-demo <file> [--force]\n"
                  "  modb mvcc gc <file>\n"
                  "\n"
-                 "Exercises Fase 6A: status opens and validates DBRT/IDMP v2; upgrade\n"
-                 "opens legacy v1 files and persists their compatible upgrade; tick commits\n"
-                 "an epoch-only transaction through the WAL.\n"
+                 "Exercises Fase 6A: status reports the epoch, the DBRT/IDMP version and\n"
+                 "the physical data-record count; upgrade opens legacy v1 files and persists\n"
+                 "their compatible upgrade; tick commits an epoch-only transaction.\n"
+                 "\n"
+                 "versions reports the versioning state of one object (Fase 6B/6C): the\n"
+                 "current epoch and physical location, and whether a previous version is\n"
+                 "still retained (with its epoch) — i.e. what a gc could reclaim.\n"
                  "\n"
                  "snapshot-demo exercises Fase 6B/6C: it opens a Snapshot, commits an update\n"
                  "behind its back, shows the snapshot still reading the old value while a\n"
@@ -1717,7 +1723,35 @@ int command_mvcc_status(const std::filesystem::path& path, bool explicit_upgrade
     std::cout << (explicit_upgrade ? "MVCC format upgrade: complete\n" : "MVCC status\n")
               << "DBRT version: 2\n"
               << "IDMP version: 2\n"
-              << "Epoch: " << opened->epoch() << '\n';
+              << "Epoch: " << opened->epoch() << '\n'
+              << "Data records (physical): " << opened->data_record_count() << '\n';
+    return 0;
+}
+
+// modb mvcc versions <file> <object-id>
+int command_mvcc_versions(const std::filesystem::path& path, std::uint64_t object_id) {
+    auto opened = modb::object::Database::open(path);
+    if (!opened) {
+        return print_error(opened.error());
+    }
+    auto info = opened->version_info(modb::object::ObjectId{object_id});
+    if (!info) {
+        return print_error(info.error());
+    }
+    std::cout << "Object " << object_id << '\n';
+    if (info->removed) {
+        std::cout << "  current: removed (tombstone) at epoch " << info->current_epoch << '\n';
+    } else if (info->current) {
+        std::cout << "  current: epoch " << info->current_epoch << ", location page "
+                  << info->current->page.value << " slot " << info->current->slot.value << '\n';
+    }
+    if (info->previous) {
+        std::cout << "  previous: epoch " << info->previous_epoch << ", location page "
+                  << info->previous->page.value << " slot " << info->previous->slot.value
+                  << " (retained — reclaimable by gc once no snapshot needs it)\n";
+    } else {
+        std::cout << "  previous: none\n";
+    }
     return 0;
 }
 
@@ -3325,6 +3359,16 @@ int run_mvcc_command(int argc, char* argv[]) {
             return print_usage_error("modb mvcc tick <file>");
         }
         return command_mvcc_tick(argv[3]);
+    }
+    if (subcommand == "versions") {
+        if (argc != 5) {
+            return print_usage_error("modb mvcc versions <file> <object-id>");
+        }
+        auto id = parse_object_id(argv[4]);
+        if (!id) {
+            return print_error(id.error());
+        }
+        return command_mvcc_versions(argv[3], *id);
     }
     if (subcommand == "snapshot-demo") {
         if (argc != 4 && !(argc == 5 && std::string_view{argv[4]} == "--force")) {
