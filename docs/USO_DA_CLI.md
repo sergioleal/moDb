@@ -384,19 +384,29 @@ demonstrando o codec da
 ```text
 $ modb protocol demo
 ODB++ protocol demo (Fase 8A, in-memory, no network)
-
-[1/3] Hello: negotiate protocol version, database and compression
-  input: version=1 database='demo' codecs=[none]
-  encoded frame: 17 bytes
-  decoded equals input: OK
-
-[2/3] Query: describe the remote query without C++ callbacks
-  ...
-
-[3/3] ObjectFrame: carry logical object identity and payload
-  ...
-
+...
 Result: all protocol round-trips passed
+```
+
+## `modb serve` / `modb ping` — handshake de rede (Fase 8B)
+
+```text
+modb serve demo <file> [--force]
+modb serve <file> [--port N] --once
+modb ping <host> <port> <database-name>
+```
+
+`serve demo` sobe um listener em porta efêmera no loopback, completa
+`Hello`/`HelloOk` com um cliente local e encerra. `serve … --once` fica
+escutando até um único handshake (útil com `ping` em outro processo).
+
+```text
+$ modb serve demo serve.modb --force
+ODB++ serve demo (Fase 8B)
+  database: serve.modb
+  listening: 127.0.0.1:54321
+  HelloOk: version=1 baseline=… codec=none max_frame=16777216
+Result: handshake OK
 ```
 
 ## `modb types` — modelo de objetos em memória (ODB++)
