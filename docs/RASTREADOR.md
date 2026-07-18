@@ -388,7 +388,7 @@ sanitizers.
 
 ### Fase 6C — Retenção, GC e concorrência
 
-Status: ✅ Concluída (2/2) — commit `PREENCHER`, 2026-07-17.
+Status: ✅ Concluída (2/2) — commit `06bd103`, 2026-07-17.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
