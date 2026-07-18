@@ -650,7 +650,7 @@ entrega N + `StreamError`. Suíte completa 90/90 em Debug e sanitizers.
 
 ### Fase 8D — Backpressure e ciclo de recursos
 
-Status: ✅ Concluída (2/2) — tag prevista `0.0.8d`.
+Status: ✅ Concluída (2/2) — commit `189447c`, tag `0.0.8d`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
