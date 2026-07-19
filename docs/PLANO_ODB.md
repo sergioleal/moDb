@@ -777,9 +777,9 @@ explicitamente se ausente. Tag: `0.0.12b`.
 
 #### Fase 12C — BFS e DFS
 
-- [ ] Implementar BFS e DFS canceláveis/lazy, com limite de profundidade,
+- [x] Implementar BFS e DFS canceláveis/lazy, com limite de profundidade,
       máximo de vértices e política explícita para refs órfãs.
-- [ ] Cobrir snapshot único e cancelamento nos testes de travessia.
+- [x] Cobrir snapshot único e cancelamento nos testes de travessia.
 
 Critério de aceite: ordem determinística; limites → `graph_limit_exceeded`;
 cancelamento interrompe expansão. Tag: `0.0.12c`.
