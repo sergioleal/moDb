@@ -17,10 +17,10 @@ Visão (3 MDs na raiz) → Plano OO → Protocolo por fase → ADRs da Fase 0
 ## Quer saber só "onde estamos agora"?
 
 **[RASTREADOR.md](RASTREADOR.md)** — o rastreador de andamento. Lista as
-~123 tarefas das 12 fases com status (`⬜`/`🔄`/`✅`/`🚫`), o teste automatizado
-de cada fase e o painel geral de progresso. É o único documento desta pasta
-que reflete estado vivo; os demais (Plano, Protocolo, ADRs) definem escopo e
-não mudam a cada tarefa concluída.
+~134 tarefas das 13 fases (0 a 12) com status (`⬜`/`🔄`/`✅`/`🚫`), o teste
+automatizado de cada fase e o painel geral de progresso. É o único documento
+desta pasta que reflete estado vivo; os demais (Plano, Protocolo, ADRs)
+definem escopo e não mudam a cada tarefa concluída.
 
 ## 1. Documentos de visão (na raiz do repositório, não em `docs/`)
 
@@ -40,7 +40,7 @@ descreve *como* chegar lá.
 ## 2. Plano e protocolo (vigentes) — comece por aqui
 
 - **[PLANO_ODB.md](PLANO_ODB.md)** — o plano de desenvolvimento vigente.
-  Traduz os três documentos de visão em **12 fases verticais** (0 a 11), cada
+  Traduz os três documentos de visão em **13 fases verticais** (0 a 12), cada
   uma com objetivo, tarefas, entregáveis e critério de aceite. Define o MVP OO
   (fases 0–3) e a ordem recomendada de execução.
 - **[PROTOCOLO_FASES.md](PROTOCOLO_FASES.md)** — o mesmo plano, mas no nível de
@@ -83,7 +83,8 @@ principalmente as da **Fase 0**:
 | [ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) | Protocolo binário próximo do armazenamento lógico, sem expor localização física |
 | [ADR-011](decisions/ADR-011-concorrencia-do-servidor.md) | Modelo de concorrência do servidor (leitor, workers, escritor, fila limitada) |
 | [ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md) | Interface por métodos C++, consultas internas e módulos confiáveis no processo |
-| [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) | Container serverless stateful: volume persistente, writer único, escala a zero |
+| [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) | Container serverless stateful: volume persistente, writer único, escala a zero (Fase 12) |
+| [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md) | Catálogo de facades, `FacadeHandle` tipado e descoberta/negociação (Fase 11) |
 
 A ADR-011 foi entregue na subfase 8A. A ADR-009 (épocas / IDMP v2) já foi
 entregue com a Fase 6.

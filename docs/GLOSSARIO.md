@@ -40,6 +40,12 @@
   servidor (ex.: `TransferFunds`).
 - **ExecutionContext**: única porta de entrada de uma Operation para o banco
   (transação, objetos, log); nunca expõe páginas ou WAL.
+- **Facade**: agrupamento descobrível de operações de domínio sob um
+  `FacadeId` e versão; o catálogo é um vetor de descritores cuja posição não
+  é identidade (Fase 11, ADR-014).
+- **FacadeHandle**: handle tipado do consumidor (sessão + `FacadeId` + versão
+  negociada) que invoca métodos daquela facade via `invoke<Method>(...)`,
+  delegando ao `OperationRegistry`.
 - **TTFR**: *Time To First Result* — tempo até o primeiro objeto de uma
   consulta; principal métrica de desempenho do streaming.
 - **Streaming**: modelo nativo de execução de consultas; resultados fluem assim

@@ -1,14 +1,14 @@
 # ADR-013 — Execução serverless em container
 
-- Estado: aceito para a Fase 11
+- Estado: aceito para a Fase 12
 - Data: 2026-07-18
 
 ## Contexto
 
-Após o servidor de rede (Fase 8), o runtime de módulos (Fase 9) e a
-estabilização (Fase 10), o moDb precisa de um modo de implantação moderno:
-imagem OCI, escala a zero e operação em plataformas de containers
-"serverless".
+Após o servidor de rede (Fase 8), o runtime de módulos (Fase 9), a
+estabilização (Fase 10) e o catálogo de facades (Fase 11), o moDb precisa de
+um modo de implantação moderno: imagem OCI, escala a zero e operação em
+plataformas de containers "serverless".
 
 O motor, porém, é **stateful**. A durabilidade depende de escrita posicional
 e de `fsync`/`FlushFileBuffers` no arquivo do banco e no WAL
@@ -28,7 +28,7 @@ em containers com CPU limitada.
 
 ## Decisão
 
-**A Fase 11 empacota o servidor moDb como container serverless stateful**,
+**A Fase 12 empacota o servidor moDb como container serverless stateful**,
 não como função sem estado.
 
 1. **Volume persistente obrigatório.** Os arquivos `<db>` e `<db>.wal` ficam
@@ -40,7 +40,7 @@ não como função sem estado.
 3. **Cold start = open + recovery.** Readiness só fica verde depois que o
    banco abriu e o WAL recovery terminou. Liveness não deve matar a
    instância durante recovery longo; usa-se startup probe com prazo adequado.
-4. **I/O assíncrono real.** A Fase 11 introduz uma abstração de arquivo
+4. **I/O assíncrono real.** A Fase 12 introduz uma abstração de arquivo
    orientada a completion: `io_uring` no Linux e IOCP no Windows. Não será
    considerado assíncrono apenas deslocar operações bloqueantes para
    `std::async` ou uma thread por requisição. Submissão, completion,
@@ -65,7 +65,7 @@ não como função sem estado.
    nem enfraquece backpressure ou cancelamento.
 
 A plataforma de referência concreta (Kubernetes com scale-to-zero, Cloud Run
-com volume, etc.) é escolhida na implementação da Fase 11 e registrada no
+com volume, etc.) é escolhida na implementação da Fase 12 e registrada no
 guia operacional, desde que satisfaça volume durável e no máximo uma
 réplica writer.
 

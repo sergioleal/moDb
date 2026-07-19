@@ -68,7 +68,8 @@ Mantida do plano anterior. Uma tarefa só está concluída quando:
 | 8 | Servidor, protocolo binário e backpressure | streaming pela rede | 7 |
 | 9 | Runtime de módulos de domínio | `client.call<TransferFunds>(...)` | 5, 8 |
 | 10 | Desempenho e estabilização | benchmarks, buffer pool, fuzzing | todas |
-| 11 | Container serverless | imagem OCI com escala a zero e dados duráveis | 8, 9, 10 |
+| 11 | Catálogo de facades e handles | `FacadeHandle` tipado sobre operações | 9, 10 |
+| 12 | Container serverless | imagem OCI com escala a zero e dados duráveis | 8, 9, 10, 11 |
 
 O **MVP OO** compreende as fases 0 a 3. Critério, análogo ao MVP relacional:
 criar um tipo `Employee`, persistir um objeto, fechar completamente a
@@ -590,22 +591,77 @@ por crash simulado volta consistente após restart + recovery.
 
 Objetivo: medir, otimizar e preparar interfaces estáveis.
 
-Tarefas:
+A fase é dividida em seis entregas verticais, cada uma com teste, demonstração
+ou artefato reproduzível e tag própria.
 
-- [ ] Implementar o [plano completo de benchmarks](PLANO_BENCHMARKS.md): runner,
-      datasets determinísticos, perfis, coleta uniforme de todas as camadas e um
-      arquivo JSONL autocontido por campanha, nomeado com data/hora UTC.
-- [ ] Completar o BufferPool (política de substituição, pin/unpin, métricas),
-      evoluindo o cache mínimo da fase 5.
-- [ ] Profiling antes de cada otimização relevante; garantir que o caminho
-      crítico usa Binding + ProjectionPlan cacheado (sem interpretação
-      dinâmica completa).
-- [ ] Fuzzing dos decoders (codec genérico, ObjectHeader, catálogo, protocolo).
-- [ ] Testar bancos maiores que a memória do cache.
-- [ ] Política de compatibilidade do formato de arquivo e do protocolo.
-- [ ] Estabilizar a API pública C++ e documentá-la.
-- [ ] Reescrever `README.md` e documentação de formato para o modelo OO.
-- [ ] Guia de backup, restauração, diagnóstico e operação.
+#### Fase 10A — Runner e baseline de benchmarks
+
+- [ ] Implementar o [plano completo de benchmarks](PLANO_BENCHMARKS.md):
+      runner, datasets determinísticos, perfis, coleta uniforme de todas as
+      camadas e um JSONL autocontido por campanha, nomeado com data/hora UTC.
+- [ ] Registrar a baseline antes das otimizações, incluindo TTFR, throughput,
+      p50/p95/p99, CPU, memória, I/O, espaço e metadados do ambiente.
+
+Critério de aceite: duas campanhas com o mesmo seed são comparáveis e produzem
+JSONL válido/autocontido; falha de correção invalida a campanha. Tag:
+`0.0.10a`.
+
+#### Fase 10B — BufferPool e bancos maiores que o cache
+
+- [ ] Completar o BufferPool (capacidade configurável, LRU, pin/unpin,
+      write-back integrado ao WAL e métricas de hits/misses/evictions),
+      evoluindo o cache mínimo da Fase 5.
+- [ ] Testar banco pelo menos 10× maior que o cache, incluindo pressão de
+      leitura/escrita, eviction e recovery.
+
+Critério de aceite: corretude e durabilidade preservadas sob eviction; pins não
+são evictados; métricas fecham; `modb.buffer_pool` verde. Tag: `0.0.10b`.
+
+#### Fase 10C — Profiling e otimizações medidas
+
+- [ ] Fazer profiling antes de cada otimização relevante e garantir que o
+      caminho crítico usa Binding + ProjectionPlan cacheado, sem interpretação
+      dinâmica completa.
+- [ ] Otimizar somente gargalos demonstrados; registrar comparação
+      antes/depois e impedir regressão relevante nos demais perfis.
+
+Critério de aceite: cada alteração de performance referencia evidência do
+perfil e benchmark reproduzível; nenhum ganho é aceito só por hipótese. Tag:
+`0.0.10c`.
+
+#### Fase 10D — Robustez, fuzzing e entradas hostis
+
+- [ ] Implementar fuzzing dos decoders (codec genérico, ObjectHeader,
+      TypeDefinition, catálogo, blobs, protocolo e WAL), com corpus mínimo e
+      preset dedicado.
+- [ ] Rodar sanitizers e campanha mínima documentada, mantendo limites de
+      alocação para entradas hostis.
+
+Critério de aceite: alvos executam por 1 h sem crash/OOM/UB; corpus de regressão
+fica versionado; suítes debug/sanitizers continuam verdes. Tag: `0.0.10d`.
+
+#### Fase 10E — Compatibilidade e API pública
+
+- [ ] Definir política de compatibilidade do formato de arquivo e do protocolo
+      (major incompatível; minor somente aditivo).
+- [ ] Estabilizar e documentar a API pública C++, separando headers públicos de
+      detalhes internos e cobrindo recusas de versão com erros claros.
+
+Critério de aceite: matriz de compatibilidade automatizada cobre
+arquivo/protocolo/API; exemplos públicos compilam como consumidores externos.
+Tag: `0.0.10e`.
+
+#### Fase 10F — Documentação, operação e fechamento
+
+- [ ] Reescrever `README.md` e a documentação do formato para o modelo OO.
+- [ ] Publicar guia de backup, restauração, diagnóstico e operação sob
+      supervisor.
+- [ ] Executar a matriz final de build/teste/benchmark e consolidar os
+      resultados da Fase 10.
+
+Critério de aceite: usuário novo percorre o exemplo OO, faz backup/restauração e
+diagnóstico somente com a documentação; suíte inteira verde nos presets
+suportados e baseline final registrada. Tag: `0.0.10f`.
 
 Entregáveis: runner e arquivos históricos de benchmark; API e formato
 versionados; documentação completa para usuários e contribuidores.
@@ -613,7 +669,53 @@ versionados; documentação completa para usuários e contribuidores.
 Critério de aceite: resultados reproduzíveis, regressões detectadas
 automaticamente, interfaces públicas documentadas.
 
-### Fase 11 — Container serverless
+### Fase 11 — Catálogo de facades e handles
+
+Objetivo: agrupar as operações da Fase 9 em facades descobríveis e oferecer ao
+consumidor um handle tipado que invoca métodos daquela facade, sem expor o
+armazenamento físico nem substituir o `OperationRegistry`.
+
+A Fase 9 permanece a unidade de execução (`Operation` + despacho + contrato
+transacional). A Fase 11 acrescenta a superfície de API: catálogo heterogêneo
+(`vector<FacadeDescriptor>`), descoberta/negociação de versão e
+`FacadeHandle<TFacade>` com `invoke<Method>(args...)`.
+([ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md)).
+
+Tarefas:
+
+- [ ] Registrar em ADR o modelo de facades, handles, identidade estável
+      (`FacadeId`) e a separação com o registry da Fase 9
+      ([ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md)).
+- [ ] Definir `FacadeDescriptor` / `MethodDescriptor` e o catálogo em memória
+      como `vector<FacadeDescriptor>` (posição no vetor nunca é identidade).
+- [ ] Implementar `FacadeCatalog` (registro, listagem, lookup por `FacadeId`
+      e versão).
+- [ ] Implementar `FacadeHandle<TFacade>` no cliente: sessão + `FacadeId` +
+      versão negociada; `invoke<Method>(args...)` tipado.
+- [ ] Descoberta e negociação de versão/capacidades no protocolo (listar
+      facades/métodos; obter handle somente se compatível).
+- [ ] Validar que o método invocado pertence à facade do handle; erros
+      `facade_not_found`, `facade_method_not_found`,
+      `incompatible_facade_version`.
+- [ ] Delegar a invocação ao `OperationRegistry` / `OpCall` da Fase 9,
+      preservando commit/rollback, cancelamento e deadline.
+- [ ] Expor facades a partir dos módulos carregados (manifesto → métodos
+      agrupados), sem o cliente escolher caminhos ou enviar binários.
+- [ ] Exemplo ponta a ponta: facade `Accounts` com `transfer` via handle;
+      saldo insuficiente → rollback; método inexistente rejeitado.
+- [ ] Documentar o contrato consumidor → handle → facade → registry e o
+      modelo de evolução de versão de facade.
+
+Entregáveis: catálogo e handles tipados; mensagens de descoberta/invocação;
+exemplo `Accounts`/`transfer`; testes embedded e pela rede; ADR-014.
+
+Critério de aceite: o consumidor obtém um `FacadeHandle` para uma facade
+registrada, invoca um método tipado pela rede, a operação executa com o
+mesmo contrato transacional da Fase 9; descoberta lista facades/métodos;
+versão incompatível e método alheio à facade são rejeitados com ErrorCode
+adequado.
+
+### Fase 12 — Container serverless
 
 Objetivo: empacotar e operar o servidor moDb em uma plataforma de containers
 serverless, preservando as garantias de durabilidade e recuperação do banco.
@@ -660,13 +762,13 @@ referência; camada de I/O assíncrono real; guia operacional; testes de
 container, cold start e recovery.
 
 Critério de aceite: a imagem sobe a partir de zero, monta armazenamento
-durável, recupera o banco quando necessário e atende um cliente da fase 8/9;
-após término completo e nova inicialização, os objetos commitados permanecem e
-transações incompletas não aparecem. A validação deve comprovar uso de uma única
-instância ativa, memória limitada, backpressure e execução sem privilégios.
-Nos ambientes compatíveis, métricas e testes devem comprovar uso efetivo de
-`io_uring`/IOCP sem bloquear o executor; o fallback deve ser explícito e
-preservar a mesma correção e durabilidade.
+durável, recupera o banco quando necessário e atende um cliente das fases
+8/9/11; após término completo e nova inicialização, os objetos commitados
+permanecem e transações incompletas não aparecem. A validação deve comprovar
+uso de uma única instância ativa, memória limitada, backpressure e execução
+sem privilégios. Nos ambientes compatíveis, métricas e testes devem comprovar
+uso efetivo de `io_uring`/IOCP sem bloquear o executor; o fallback deve ser
+explícito e preservar a mesma correção e durabilidade.
 
 ## 6. Itens deliberadamente fora deste plano
 
@@ -707,6 +809,8 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
 - evolução de schema: matriz de casos v1→v2 (add/remove/convert/migração);
 - falha simulada para WAL, commit, recovery e crash de módulo;
 - streaming: TTFR, memória O(1), backpressure, cancelamento, Stream Error;
+- facades/handles: descoberta, negociação de versão, invoke tipado e
+  rejeição de método alheio à facade;
 - container serverless: build da imagem, cold start, término gracioso,
   persistência em volume e recovery após término forçado;
 - sanitizers nos toolchains que os suportam (preset já configurado);
@@ -738,8 +842,9 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
    de cursor de longa duração.
 4. Fases 8–9 introduzem rede, concorrência e módulos somente sobre um núcleo
    com garantias comprovadas.
-5. A Fase 10 estabiliza o produto antes da Fase 11, que adiciona os riscos
-   operacionais de container, cold start e armazenamento remoto persistente.
+5. A Fase 10 estabiliza o produto; a Fase 11 organiza a superfície de
+   domínio em facades/handles; a Fase 12 adiciona os riscos operacionais de
+   container, cold start e armazenamento remoto persistente.
 
 Não iniciar índices, streaming ou servidor antes de existir um teste confiável
 de persistência, reabertura e recuperação. Cada fase preserva os testes e

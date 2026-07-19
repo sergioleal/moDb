@@ -51,8 +51,9 @@
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
-| [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10 |
-| **Total** | | | **104/124 (~84%)** | |
+| [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 |
+| [12](#fase-12--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11 |
+| **Total** | | | **104/134 (~78%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -747,21 +748,77 @@ exceção/saldo insuficiente, consistente após reopen + recovery.
 
 ## Fase 10 — Desempenho e estabilização
 
-Status: ⬜ Não iniciada (0/9) — Definição completa:
+Status: ⬜ Não iniciada (0/9) — seis entregas verticais 10A–10F.
+Definição completa:
 [PLANO_ODB.md §Fase 10](PLANO_ODB.md#fase-10--desempenho-e-estabilização) ·
 [PROTOCOLO_FASES.md §Fase 10](PROTOCOLO_FASES.md#fase-10--desempenho-e-estabilização)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 10.1 | Plano completo e runner de benchmarks reproduzíveis | ⬜ | [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md): todas as camadas; um JSONL timestampado e autocontido por campanha |
-| 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ⬜ | |
-| 10.3 | Profiling antes de cada otimização | ⬜ | |
-| 10.4 | Fuzzing dos decoders | ⬜ | |
-| 10.5 | Testar bancos maiores que o cache | ⬜ | |
-| 10.6 | Política de compatibilidade (formato + protocolo) | ⬜ | |
-| 10.7 | Estabilizar e documentar a API pública | ⬜ | |
-| 10.8 | Reescrever `README.md`/formato de arquivo | ⬜ | |
-| 10.9 | Guia de backup/restauração/diagnóstico | ⬜ | |
+| 10.1 | Plano completo e runner de benchmarks reproduzíveis | ⬜ | 10A · [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md) |
+| 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ⬜ | 10B |
+| 10.3 | Profiling antes de cada otimização | ⬜ | 10C |
+| 10.4 | Fuzzing dos decoders | ⬜ | 10D |
+| 10.5 | Testar bancos maiores que o cache | ⬜ | 10B |
+| 10.6 | Política de compatibilidade (formato + protocolo) | ⬜ | 10E |
+| 10.7 | Estabilizar e documentar a API pública | ⬜ | 10E |
+| 10.8 | Reescrever `README.md`/formato de arquivo | ⬜ | 10F |
+| 10.9 | Guia de backup/restauração/diagnóstico | ⬜ | 10F |
+
+### Fase 10A — Runner e baseline de benchmarks
+
+Status: ⬜ Não iniciada — tag prevista `0.0.10a`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Runner, datasets/perfis determinísticos e JSONL autocontido | ⬜ | Duas campanhas comparáveis com mesmo seed |
+| Baseline pré-otimização | ⬜ | TTFR, percentis, CPU, memória, I/O, espaço, rede e correção |
+
+### Fase 10B — BufferPool e bancos maiores que o cache
+
+Status: ⬜ Não iniciada — depende de 10A; tag prevista `0.0.10b`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| BufferPool com LRU, pin/unpin, dirty/write-back e métricas | ⬜ | Pins e ordering WAL preservados |
+| Banco ≥10× o cache | ⬜ | Eviction + recovery corretos; `modb.buffer_pool` verde |
+
+### Fase 10C — Profiling e otimizações medidas
+
+Status: ⬜ Não iniciada — depende de 10A/10B; tag prevista `0.0.10c`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Perfis antes de cada mudança | ⬜ | Gargalo demonstrado com cenário/seed/commit |
+| Otimizações selecionadas | ⬜ | Comparação antes/depois reproduzível, sem regressão relevante |
+
+### Fase 10D — Robustez, fuzzing e entradas hostis
+
+Status: ⬜ Não iniciada — tag prevista `0.0.10d`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Alvos para objeto/tipo/blob/protocolo/WAL + corpus | ⬜ | Preset fuzz executável |
+| Campanha com sanitizers | ⬜ | 1 h/alvo sem crash, OOM ou UB |
+
+### Fase 10E — Compatibilidade e API pública
+
+Status: ⬜ Não iniciada — depende de 10A–10D; tag prevista `0.0.10e`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Matriz formato/protocolo | ⬜ | Major recusado; minor aditivo coberto por fixtures |
+| API C++ pública estabilizada | ⬜ | Projeto consumidor externo compila contra instalação |
+
+### Fase 10F — Documentação, operação e fechamento
+
+Status: ⬜ Não iniciada — depende de 10A–10E; tag prevista `0.0.10f`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| README OO + formato + API | ⬜ | Fluxo do zero validado |
+| Backup/restauração/diagnóstico/supervisor | ⬜ | Backup restaurado e `db check` verde |
+| Matriz final e baseline consolidada | ⬜ | Presets suportados verdes e comparação com 10A |
 
 **Dívidas de performance herdadas da Fase 3** (nenhuma bloqueou o critério de
 aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
@@ -815,25 +872,58 @@ automaticamente, interfaces públicas documentadas.
 
 ---
 
-## Fase 11 — Container serverless
+## Fase 11 — Catálogo de facades e handles
 
-Status: ⬜ Não iniciada (0/11) — Definição completa:
-[PLANO_ODB.md §Fase 11](PLANO_ODB.md#fase-11--container-serverless) ·
-[PROTOCOLO_FASES.md §Fase 11](PROTOCOLO_FASES.md#fase-11--container-serverless)
+Status: ⬜ Não iniciada (0/10) — Definição completa:
+[PLANO_ODB.md §Fase 11](PLANO_ODB.md#fase-11--catálogo-de-facades-e-handles) ·
+[PROTOCOLO_FASES.md §Fase 11](PROTOCOLO_FASES.md#fase-11--catálogo-de-facades-e-handles)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 11.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ⬜ | [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
-| 11.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ⬜ | `deploy/Dockerfile` |
-| 11.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | Sem expor formato físico; backpressure preservado |
-| 11.4 | Configuração só por env/secrets | ⬜ | Sem dados nem credenciais na imagem |
-| 11.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | Disco efêmero proibido como fonte de verdade |
-| 11.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ⬜ | Completion/`co_await`, cancelamento, fila limitada, ordering WAL explícito |
-| 11.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
-| 11.8 | Recovery em cold start e após término forçado | ⬜ | Inclui WAL pendente |
-| 11.9 | Logs estruturados e métricas operacionais | ⬜ | Inclui backend de I/O, queue depth, completions e fallbacks |
-| 11.10 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | |
-| 11.11 | Guia de operação local e implantação de referência | ⬜ | `docs/OPERACAO_SERVERLESS.md` |
+| 11.1 | ADR do modelo de facades/handles e separação com a Fase 9 | ⬜ | [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md) — texto aceito no planejamento; implementação da fase ainda não iniciada |
+| 11.2 | `FacadeDescriptor` / `MethodDescriptor` + catálogo `vector<>` | ⬜ | Posição no vetor ≠ identidade |
+| 11.3 | `FacadeCatalog` (registro, listagem, lookup) | ⬜ | |
+| 11.4 | `FacadeHandle<TFacade>` no cliente (`invoke<Method>`) | ⬜ | Sessão + FacadeId + versão |
+| 11.5 | Descoberta e negociação de versão no protocolo | ⬜ | `FacadeList` / `FacadeOpen` |
+| 11.6 | Validação método∈facade + ErrorCodes | ⬜ | `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
+| 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ⬜ | Mesmo commit/rollback/cancel da Fase 9 |
+| 11.8 | Facades a partir de módulos carregados (manifesto) | ⬜ | Cliente não envia binários |
+| 11.9 | Exemplo `Accounts`/`transfer` ponta a ponta | ⬜ | |
+| 11.10 | Documentar contrato consumidor → handle → facade → registry | ⬜ | |
+
+### Testes automatizados desta fase
+
+| Teste (CTest) | Arquivo | Status |
+|---|---|---|
+| `modb.facade_catalog` | `tests/facade_catalog_test.cpp` | ⬜ |
+| `modb.facade_handle` | `tests/facade_handle_test.cpp` | ⬜ |
+| `modb.facade_server` | `tests/facade_server_test.cpp` | ⬜ |
+
+Critério de aceite: ⬜ consumidor obtém `FacadeHandle`, invoca método tipado
+pela rede com contrato da Fase 9; descoberta lista facades/métodos; versão
+incompatível e método alheio são rejeitados.
+
+---
+
+## Fase 12 — Container serverless
+
+Status: ⬜ Não iniciada (0/11) — Definição completa:
+[PLANO_ODB.md §Fase 12](PLANO_ODB.md#fase-12--container-serverless) ·
+[PROTOCOLO_FASES.md §Fase 12](PROTOCOLO_FASES.md#fase-12--container-serverless)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 12.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ⬜ | [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
+| 12.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ⬜ | `deploy/Dockerfile` |
+| 12.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | Sem expor formato físico; backpressure preservado |
+| 12.4 | Configuração só por env/secrets | ⬜ | Sem dados nem credenciais na imagem |
+| 12.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | Disco efêmero proibido como fonte de verdade |
+| 12.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ⬜ | Completion/`co_await`, cancelamento, fila limitada, ordering WAL explícito |
+| 12.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
+| 12.8 | Recovery em cold start e após término forçado | ⬜ | Inclui WAL pendente |
+| 12.9 | Logs estruturados e métricas operacionais | ⬜ | Inclui backend de I/O, queue depth, completions e fallbacks |
+| 12.10 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | |
+| 12.11 | Guia de operação local e implantação de referência | ⬜ | `docs/OPERACAO_SERVERLESS.md` |
 
 ### Testes/artefatos desta fase
 
@@ -846,7 +936,7 @@ Status: ⬜ Não iniciada (0/11) — Definição completa:
 | Manifesto de referência | `deploy/` | ⬜ |
 
 Critério de aceite: ⬜ imagem sobe do zero com volume durável, recupera WAL,
-atende cliente 8/9, preserva commits após término forçado, uma instância
+atende cliente 8/9/11, preserva commits após término forçado, uma instância
 ativa, sem privilégios, com backpressure. Em ambientes compatíveis, testes e
 métricas comprovam completions reais por `io_uring`/IOCP; fallback explícito
 mantém a mesma durabilidade.
