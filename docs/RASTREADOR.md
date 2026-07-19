@@ -713,7 +713,7 @@ sanitizers.
 
 ## Fase 9 — Runtime de módulos de domínio
 
-Status: ✅ Concluída (10/10) — commit previsto no merge; tag prevista `0.0.9`.
+Status: ✅ Concluída (10/10) — commit `eaaabf3`, tag `0.0.9`.
 Definição completa:
 [PLANO_ODB.md §Fase 9](PLANO_ODB.md#fase-9--runtime-de-módulos-de-domínio) ·
 [PROTOCOLO_FASES.md §Fase 9](PROTOCOLO_FASES.md#fase-9--runtime-de-módulos-de-domínio) ·
