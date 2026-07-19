@@ -786,10 +786,10 @@ cancelamento interrompe expansão. Tag: `0.0.12c`.
 
 #### Fase 12D — Caminho, ciclo, toposort e componentes
 
-- [ ] Implementar caminho mínimo sem peso com reconstrução do caminho.
-- [ ] Implementar detecção de ciclo e ordenação topológica (erro explícito
+- [x] Implementar caminho mínimo sem peso com reconstrução do caminho.
+- [x] Implementar detecção de ciclo e ordenação topológica (erro explícito
       para grafo cíclico).
-- [ ] Implementar componentes conexos para uma view explicitamente não
+- [x] Implementar componentes conexos para uma view explicitamente não
       direcionada.
 
 Critério de aceite: caminho mínimo, `graph_cycle` em toposort cíclico,
