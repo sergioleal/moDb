@@ -49,10 +49,10 @@
 | [6](#fase-6--snapshots-e-mvcc) | Snapshots e MVCC | ✅ Concluída | 9/9 | Fase 5 |
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
-| [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ⬜ Não iniciada | 0/10 | Fases 5, 8 |
+| [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
 | [11](#fase-11--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10 |
-| **Total** | | | **94/124 (~76%)** | |
+| **Total** | | | **104/124 (~84%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -713,32 +713,35 @@ sanitizers.
 
 ## Fase 9 — Runtime de módulos de domínio
 
-Status: ⬜ Não iniciada (0/10) — Definição completa:
+Status: ✅ Concluída (10/10) — commit previsto no merge; tag prevista `0.0.9`.
+Definição completa:
 [PLANO_ODB.md §Fase 9](PLANO_ODB.md#fase-9--runtime-de-módulos-de-domínio) ·
-[PROTOCOLO_FASES.md §Fase 9](PROTOCOLO_FASES.md#fase-9--runtime-de-módulos-de-domínio)
+[PROTOCOLO_FASES.md §Fase 9](PROTOCOLO_FASES.md#fase-9--runtime-de-módulos-de-domínio) ·
+[OPERACAO_MODULOS.md](OPERACAO_MODULOS.md)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 9.1 | Interface `Operation` + `OperationResult` | ⬜ | |
-| 9.2 | `ExecutionContext` (transaction/objects/logger apenas) | ⬜ | |
-| 9.3 | `OperationRegistry` | ⬜ | |
-| 9.4 | Despacho pelo protocolo (OperationId + args) | ⬜ | |
-| 9.5 | Contrato transacional (commit/rollback automático) | ⬜ | |
-| 9.6 | `ModuleManifest` + `ModuleLoader` confiável no processo | ⬜ | [ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md): origem administrativa + hash; sem binário enviado pelo cliente |
-| 9.7 | `client.call<Op>(...)` | ⬜ | |
-| 9.8 | Migrações como Operations | ⬜ | |
-| 9.9 | Documentar modelo de falhas (crash/supervisor/WAL recovery) | ⬜ | [ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md): sem sandbox inicialmente; isolamento futuro preservado pelo contrato serializado |
-| 9.10 | Exemplo `TransferFunds` completo + teste de atomicidade | ⬜ | |
+| 9.1 | Interface `Operation` + `OperationResult` | ✅ | `modb/ops/operation.hpp` |
+| 9.2 | `ExecutionContext` (transaction/objects/logger apenas) | ✅ | + `ObjectAccess` / `Logger` |
+| 9.3 | `OperationRegistry` | ✅ | dispatch com commit/rollback |
+| 9.4 | Despacho pelo protocolo (OperationId + args) | ✅ | `OpCall`/`OpResult` |
+| 9.5 | Contrato transacional (commit/rollback automático) | ✅ | via `Database::transact` |
+| 9.6 | `ModuleManifest` + `ModuleLoader` confiável no processo | ✅ | allowlist de hash; ADR-012 |
+| 9.7 | `client.call<Op>(...)` | ✅ | `Client::call(op_id, args)` |
+| 9.8 | Migrações como Operations | ✅ | `MigrationBumpBalance` |
+| 9.9 | Documentar modelo de falhas (crash/supervisor/WAL recovery) | ✅ | [OPERACAO_MODULOS.md](OPERACAO_MODULOS.md) |
+| 9.10 | Exemplo `TransferFunds` completo + teste de atomicidade | ✅ | `examples/transfer_funds/` |
 
 ### Testes automatizados desta fase
 
 | Teste (CTest) | Arquivo | Status |
 |---|---|---|
-| `modb.operation` | `tests/operation_test.cpp` | ⬜ |
-| `modb.operation_server` | `tests/operation_server_test.cpp` | ⬜ |
+| `modb.operation` | `tests/operation_test.cpp` | ✅ |
+| `modb.operation_server` | `tests/operation_server_test.cpp` | ✅ |
+| `modb.cli.ops_transfer_demo` | CLI `ops transfer-demo` | ✅ |
 
-Critério de aceite: ⬜ `TransferFunds` atômico via `client.call`, rollback em
-exceção, consistente após crash simulado + recovery.
+Critério de aceite: ✅ `TransferFunds` atômico via `client.call`, rollback em
+exceção/saldo insuficiente, consistente após reopen + recovery.
 
 ---
 

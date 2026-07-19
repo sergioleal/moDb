@@ -26,6 +26,9 @@ Error make_protocol(std::string message) {
     if (const auto* error = std::get_if<StreamError>(&message)) {
         return error->query_id;
     }
+    if (const auto* result = std::get_if<OpResult>(&message)) {
+        return result->call_id;
+    }
     return std::nullopt;
 }
 
@@ -274,6 +277,35 @@ Result<void> Client::cancel(std::uint32_t query_id) {
         return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
     }
     return conn_->send(Cancel{.query_id = query_id});
+}
+
+Result<std::vector<std::byte>> Client::call(std::string_view operation_id,
+                                            std::span<const std::byte> args) {
+    if (!conn_) {
+        return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
+    }
+    const auto call_id = next_query_id_++;
+    OpCall message{.call_id = call_id,
+                   .operation_id = std::string{operation_id},
+                   .args = {args.begin(), args.end()}};
+    if (auto status = conn_->send(message); !status) {
+        return std::unexpected(status.error());
+    }
+    auto reply = conn_->recv_for(call_id);
+    if (!reply) {
+        return std::unexpected(reply.error());
+    }
+    const auto* result = std::get_if<OpResult>(&*reply);
+    if (result == nullptr) {
+        return std::unexpected(make_protocol("expected OpResult from server"));
+    }
+    if (result->call_id != call_id) {
+        return std::unexpected(make_protocol("OpResult call_id mismatch"));
+    }
+    if (!result->ok) {
+        return std::unexpected(Error{result->code, result->message});
+    }
+    return result->payload;
 }
 
 Result<HelloOk> Client::handshake(std::string_view host, std::uint16_t port,

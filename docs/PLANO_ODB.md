@@ -554,29 +554,29 @@ transação, sem expor o armazenamento físico.
 
 Tarefas:
 
-- [ ] Implementar a interface `Operation` (`execute(ExecutionContext&)`) e
+- [x] Implementar a interface `Operation` (`execute(ExecutionContext&)`) e
       `OperationResult`.
-- [ ] Implementar `ExecutionContext` expondo somente `transaction()`,
+- [x] Implementar `ExecutionContext` expondo somente `transaction()`,
       `objects()` e `logger()` — nunca páginas, buffer pool, WAL ou índices.
-- [ ] Implementar o `OperationRegistry`
+- [x] Implementar o `OperationRegistry`
       (`registry.register<TransferFunds>("account.transfer")`).
-- [ ] Despacho pelo protocolo: OperationId + argumentos serializados (nenhum
+- [x] Despacho pelo protocolo: OperationId + argumentos serializados (nenhum
       código C++ trafega pela rede).
-- [ ] Contrato transacional: término normal → commit; exceção → rollback
+- [x] Contrato transacional: término normal → commit; exceção → rollback
       (reutiliza a fase 5).
-- [ ] Implementar `ModuleManifest` (version, baseline, api) e validação de
+- [x] Implementar `ModuleManifest` (version, baseline, api) e validação de
       compatibilidade na carga do módulo; incluir id, hash, métodos exportados
       e modo `read_only`/`read_write`; implementar `ModuleLoader` dentro do
       processo, restrito a uma origem confiável configurada pelo operador — o
       cliente nunca envia binários nem escolhe caminhos de carga
       ([ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md)).
-- [ ] Implementar `client.call<TransferFunds>(source, destination, amount)`.
-- [ ] Migrações como Operations, reutilizando a mesma infraestrutura
+- [x] Implementar `client.call<TransferFunds>(source, destination, amount)`.
+- [x] Migrações como Operations, reutilizando a mesma infraestrutura
       (`MigrationOperation` → ExecutionContext → Transaction → Projection).
-- [ ] Documentar o modelo de falhas: crash do módulo encerra a instância;
+- [x] Documentar o modelo de falhas: crash do módulo encerra a instância;
       recuperação por supervisor externo (systemd/Kubernetes/Windows Service)
       + WAL recovery. Sem sandbox no primeiro runtime, por decisão registrada.
-- [ ] Exemplo completo `TransferFunds` de ponta a ponta com teste de
+- [x] Exemplo completo `TransferFunds` de ponta a ponta com teste de
       atomicidade (saldo insuficiente → rollback).
 
 Entregáveis: runtime de operações e carregamento confiável no processo; exemplo

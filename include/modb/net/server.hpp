@@ -6,7 +6,7 @@
 #include "modb/error.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/protocol.hpp"
-#include "modb/object/database.hpp"
+#include "modb/ops/operation_registry.hpp"
 #include "modb/query/operators.hpp"
 
 #include <cstddef>
@@ -50,6 +50,8 @@ public:
     [[nodiscard]] std::string_view database_name() const noexcept { return database_name_; }
     [[nodiscard]] object::BaselineId baseline() const noexcept { return baseline_; }
     [[nodiscard]] const StreamStats& last_stream_stats() const noexcept { return last_stats_; }
+    [[nodiscard]] object::Database& database() noexcept { return *database_; }
+    [[nodiscard]] const object::Database& database() const noexcept { return *database_; }
     [[nodiscard]] std::size_t open_snapshot_count() const noexcept {
         return database_ ? database_->open_snapshot_count() : 0;
     }
@@ -64,8 +66,11 @@ public:
         idle_timeout_ms_ = milliseconds;
     }
     void set_preferred_codec(Compression codec) noexcept { preferred_codec_ = codec; }
+    void set_operation_registry(std::shared_ptr<ops::OperationRegistry> registry) noexcept {
+        operations_ = std::move(registry);
+    }
 
-    // Aceita uma conexão e mantém a sessão até o peer fechar (Hello + Queries).
+    // Aceita uma conexão e mantém a sessão até o peer fechar (Hello + Queries/OpCalls).
     [[nodiscard]] Result<void> serve_one();
 
 private:
@@ -88,6 +93,7 @@ private:
     Compression preferred_codec_{Compression::rle};
     Compression selected_codec_{Compression::none};
     StreamStats last_stats_{};
+    std::shared_ptr<ops::OperationRegistry> operations_{};
 };
 
 } // namespace modb::net
