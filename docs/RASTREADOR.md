@@ -761,8 +761,8 @@ Definição completa:
 | 10.3 | Profiling antes de cada otimização | ✅ | 10C · merge `2438c1b`, tag `0.0.10c`; [OTIMIZACOES_10C.md](OTIMIZACOES_10C.md) |
 | 10.4 | Fuzzing dos decoders | ✅ | 10D · merge `616cc10`, tag `0.0.10d`; [FUZZING.md](FUZZING.md) |
 | 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
-| 10.6 | Política de compatibilidade (formato + protocolo) | ✅ | 10E · tag `0.0.10e`; [COMPATIBILIDADE.md](COMPATIBILIDADE.md) |
-| 10.7 | Estabilizar e documentar a API pública | ✅ | 10E · [API_PUBLICA.md](API_PUBLICA.md); `modb.consumer` |
+| 10.6 | Política de compatibilidade (formato + protocolo) | ✅ | 10E · merge `dc33551`, tag `0.0.10e`; [COMPATIBILIDADE.md](COMPATIBILIDADE.md) |
+| 10.7 | Estabilizar e documentar a API pública | ✅ | 10E · merge `dc33551`; [API_PUBLICA.md](API_PUBLICA.md); `modb.consumer` |
 | 10.8 | Reescrever `README.md`/formato de arquivo | ⬜ | 10F |
 | 10.9 | Guia de backup/restauração/diagnóstico | ⬜ | 10F |
 
@@ -804,7 +804,7 @@ Status: ✅ Concluída — merge `616cc10`, tag `0.0.10d` (2026-07-19).
 
 ### Fase 10E — Compatibilidade e API pública
 
-Status: ✅ Concluída — tag `0.0.10e` (2026-07-19).
+Status: ✅ Concluída — merge `dc33551`, tag `0.0.10e` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
