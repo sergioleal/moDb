@@ -892,7 +892,7 @@ Definição completa:
 | 11.5 | Descoberta e negociação de versão no protocolo | ✅ | 11C · merge `225d6e7`, tag `0.0.11c` |
 | 11.6 | Validação método∈facade + ErrorCodes | ✅ | 11B · `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
 | 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ✅ | 11B · Mesmo commit/rollback/cancel da Fase 9 |
-| 11.8 | Facades a partir de módulos carregados (manifesto) | ✅ | 11D · `register_facades_from_manifest` |
+| 11.8 | Facades a partir de módulos carregados (manifesto) | ✅ | 11D · merge `2252aa1`, tag `0.0.11d` |
 | 11.9 | Exemplo `Accounts`/`transfer` ponta a ponta | ✅ | 11D · `examples/accounts_facade` |
 | 11.10 | Documentar contrato consumidor → handle → facade → registry | ✅ | 11D · [FACADES.md](FACADES.md) |
 
@@ -922,7 +922,7 @@ Status: ✅ Concluída — merge `225d6e7`, tag `0.0.11c` (2026-07-19).
 
 ### Fase 11D — Módulos, Accounts e documentação
 
-Status: ✅ Concluída — tag `0.0.11d` (2026-07-19).
+Status: ✅ Concluída — merge `2252aa1`, tag `0.0.11d` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|

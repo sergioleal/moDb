@@ -1798,7 +1798,7 @@ incompatível pela rede. Tag: `0.0.11c`.
 
 ## Fase 11D — Módulos, Accounts e documentação
 
-Status: ✅ Concluída — tag `0.0.11d` (2026-07-19).
+Status: ✅ Concluída — merge `2252aa1`, tag `0.0.11d` (2026-07-19).
 
 Artefatos:
 
