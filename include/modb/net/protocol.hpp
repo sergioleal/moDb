@@ -7,6 +7,7 @@
 #include "modb/error.hpp"
 #include "modb/net/query_description.hpp"
 #include "modb/object/ids.hpp"
+#include "modb/ops/facade_descriptor.hpp"
 #include "modb/storage/binary.hpp"
 
 #include <cstddef>
@@ -47,6 +48,10 @@ enum class MessageType : std::uint8_t {
     cancel = 8,
     op_call = 9,
     op_result = 10,
+    facade_list = 11,
+    facade_list_ok = 12,
+    facade_open = 13,
+    facade_open_ok = 14,
 };
 
 enum class Compression : std::uint8_t {
@@ -154,8 +159,42 @@ struct OpResult {
     friend bool operator==(const OpResult&, const OpResult&) = default;
 };
 
+// Fase 11C: descoberta e negociação de facades.
+struct FacadeList {
+    std::uint32_t request_id{0};
+
+    friend bool operator==(const FacadeList&, const FacadeList&) = default;
+};
+
+struct FacadeListOk {
+    std::uint32_t request_id{0};
+    std::vector<ops::FacadeDescriptor> facades{};
+
+    friend bool operator==(const FacadeListOk&, const FacadeListOk&) = default;
+};
+
+struct FacadeOpen {
+    std::uint32_t request_id{0};
+    std::string facade_id{};
+    std::uint32_t facade_version{1};
+
+    friend bool operator==(const FacadeOpen&, const FacadeOpen&) = default;
+};
+
+struct FacadeOpenOk {
+    std::uint32_t request_id{0};
+    bool ok{true};
+    ErrorCode code{ErrorCode::invalid_argument};
+    std::string message{};
+    std::string facade_id{};
+    std::uint32_t facade_version{0};
+
+    friend bool operator==(const FacadeOpenOk&, const FacadeOpenOk&) = default;
+};
+
 using Message = std::variant<Hello, HelloOk, Query, StreamBegin, ObjectFrame, StreamEnd,
-                             StreamError, Cancel, OpCall, OpResult>;
+                             StreamError, Cancel, OpCall, OpResult, FacadeList, FacadeListOk,
+                             FacadeOpen, FacadeOpenOk>;
 
 [[nodiscard]] MessageType message_type(const Message& message) noexcept;
 

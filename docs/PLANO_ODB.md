@@ -716,9 +716,9 @@ erro de domínio faz rollback; método alheio rejeitado. Tag: `0.0.11b`.
 
 #### Fase 11C — Descoberta e negociação no protocolo
 
-- [ ] Descoberta e negociação de versão/capacidades no protocolo (`FacadeList` /
+- [x] Descoberta e negociação de versão/capacidades no protocolo (`FacadeList` /
       `FacadeOpen` e respostas).
-- [ ] Abrir handle remoto somente se a versão for compatível; recusas com
+- [x] Abrir handle remoto somente se a versão for compatível; recusas com
       ErrorCode claro.
 
 Critério de aceite: `modb.facade_server` lista facades/métodos e rejeita versão

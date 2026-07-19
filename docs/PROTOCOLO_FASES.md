@@ -1780,15 +1780,18 @@ domínio; método alheio → `facade_method_not_found`. Tag: `0.0.11b`. Entregue
 
 ## Fase 11C — Descoberta e negociação no protocolo
 
+Status: ✅ Concluída — tag `0.0.11c` (2026-07-19).
+
 Artefatos:
 
 ```text
-include/modb/net/facade_protocol.hpp   (ou extensão em protocol.hpp)
+include/modb/net/protocol.hpp          (MessageType 11–14 + structs)
+src/net/protocol.cpp / client.cpp / server.cpp
 tests/facade_server_test.cpp           (casos de list/open)
 ```
 
-Mensagens `FacadeList`/`FacadeListOk`, `FacadeOpen`/`FacadeOpenOk`. Handle
-remoto só após versão compatível.
+Mensagens `FacadeList`/`FacadeListOk`, `FacadeOpen`/`FacadeOpenOk`. Open remoto
+só com versão compatível (`ok=false` + ErrorCode claro caso contrário).
 
 Critério: `modb.facade_server` lista `accounts`/métodos e rejeita versão
 incompatível pela rede. Tag: `0.0.11c`.

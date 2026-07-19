@@ -19,6 +19,10 @@ namespace {
 using modb::ErrorCode;
 using modb::net::Cancel;
 using modb::net::Compression;
+using modb::net::FacadeList;
+using modb::net::FacadeListOk;
+using modb::net::FacadeOpen;
+using modb::net::FacadeOpenOk;
 using modb::net::Hello;
 using modb::net::HelloOk;
 using modb::net::Message;
@@ -124,6 +128,49 @@ int main() {
                               .code = ErrorCode::invalid_argument,
                               .message = "insufficient funds"},
                      "OpResult error");
+
+    check_round_trip(suite, FacadeList{.request_id = 11}, "FacadeList");
+    check_round_trip(
+        suite,
+        FacadeListOk{
+            .request_id = 11,
+            .facades =
+                {
+                    modb::ops::FacadeDescriptor{
+                        .facade_id = "accounts",
+                        .facade_version = 1,
+                        .mode = modb::ops::FacadeMode::read_write,
+                        .methods =
+                            {
+                                modb::ops::MethodDescriptor{
+                                    .operation_id = "account.transfer",
+                                    .method_version = 1,
+                                    .mode = modb::ops::OperationMode::read_write,
+                                },
+                            },
+                    },
+                },
+        },
+        "FacadeListOk");
+    check_round_trip(suite,
+                     FacadeOpen{.request_id = 12,
+                                .facade_id = "accounts",
+                                .facade_version = 1},
+                     "FacadeOpen");
+    check_round_trip(suite,
+                     FacadeOpenOk{.request_id = 12,
+                                  .ok = true,
+                                  .facade_id = "accounts",
+                                  .facade_version = 1},
+                     "FacadeOpenOk ok");
+    check_round_trip(suite,
+                     FacadeOpenOk{.request_id = 13,
+                                  .ok = false,
+                                  .code = ErrorCode::incompatible_facade_version,
+                                  .message = "wrong version",
+                                  .facade_id = "accounts",
+                                  .facade_version = 99},
+                     "FacadeOpenOk error");
 
     // Frame com um único slot é válido.
     check_round_trip(suite,

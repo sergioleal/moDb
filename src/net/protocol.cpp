@@ -401,6 +401,232 @@ Result<OpResult> decode_op_result(storage::BinaryReader& reader) {
     return message;
 }
 
+Result<void> encode_method_descriptor(storage::BinaryWriter& writer,
+                                      const ops::MethodDescriptor& method) {
+    if (auto status = write_string(writer, method.operation_id); !status) {
+        return status;
+    }
+    writer.write_u32(method.method_version);
+    writer.write_u8(static_cast<std::uint8_t>(method.mode));
+    return {};
+}
+
+Result<ops::MethodDescriptor> decode_method_descriptor(storage::BinaryReader& reader) {
+    ops::MethodDescriptor method;
+    auto operation_id = read_string(reader);
+    if (!operation_id) {
+        return std::unexpected(operation_id.error());
+    }
+    method.operation_id = std::move(*operation_id);
+    const auto version = reader.read_u32();
+    if (!version) {
+        return std::unexpected(version.error());
+    }
+    method.method_version = *version;
+    const auto mode = reader.read_u8();
+    if (!mode) {
+        return std::unexpected(mode.error());
+    }
+    if (*mode > static_cast<std::uint8_t>(ops::OperationMode::read_write)) {
+        return std::unexpected(
+            make_error(ErrorCode::protocol_error, "MethodDescriptor mode is unknown"));
+    }
+    method.mode = static_cast<ops::OperationMode>(*mode);
+    return method;
+}
+
+Result<void> encode_facade_descriptor(storage::BinaryWriter& writer,
+                                      const ops::FacadeDescriptor& facade) {
+    if (auto status = write_string(writer, facade.facade_id); !status) {
+        return status;
+    }
+    writer.write_u32(facade.facade_version);
+    writer.write_u8(static_cast<std::uint8_t>(facade.mode));
+    if (facade.methods.size() > (std::numeric_limits<std::uint16_t>::max)()) {
+        return std::unexpected(
+            make_error(ErrorCode::value_too_large, "FacadeDescriptor has too many methods"));
+    }
+    writer.write_u16(static_cast<std::uint16_t>(facade.methods.size()));
+    for (const auto& method : facade.methods) {
+        if (auto status = encode_method_descriptor(writer, method); !status) {
+            return status;
+        }
+    }
+    return {};
+}
+
+Result<ops::FacadeDescriptor> decode_facade_descriptor(storage::BinaryReader& reader) {
+    ops::FacadeDescriptor facade;
+    auto facade_id = read_string(reader);
+    if (!facade_id) {
+        return std::unexpected(facade_id.error());
+    }
+    facade.facade_id = std::move(*facade_id);
+    const auto version = reader.read_u32();
+    if (!version) {
+        return std::unexpected(version.error());
+    }
+    facade.facade_version = *version;
+    const auto mode = reader.read_u8();
+    if (!mode) {
+        return std::unexpected(mode.error());
+    }
+    if (*mode > static_cast<std::uint8_t>(ops::FacadeMode::mixed)) {
+        return std::unexpected(
+            make_error(ErrorCode::protocol_error, "FacadeDescriptor mode is unknown"));
+    }
+    facade.mode = static_cast<ops::FacadeMode>(*mode);
+    const auto method_count = reader.read_u16();
+    if (!method_count) {
+        return std::unexpected(method_count.error());
+    }
+    facade.methods.reserve(*method_count);
+    for (std::uint16_t i = 0; i < *method_count; ++i) {
+        auto method = decode_method_descriptor(reader);
+        if (!method) {
+            return std::unexpected(method.error());
+        }
+        facade.methods.push_back(std::move(*method));
+    }
+    return facade;
+}
+
+Result<void> encode_facade_list(storage::BinaryWriter& writer, const FacadeList& message) {
+    writer.write_u32(message.request_id);
+    return {};
+}
+
+Result<FacadeList> decode_facade_list(storage::BinaryReader& reader) {
+    const auto request_id = reader.read_u32();
+    if (!request_id) {
+        return std::unexpected(request_id.error());
+    }
+    return FacadeList{.request_id = *request_id};
+}
+
+Result<void> encode_facade_list_ok(storage::BinaryWriter& writer, const FacadeListOk& message) {
+    writer.write_u32(message.request_id);
+    if (message.facades.size() > (std::numeric_limits<std::uint16_t>::max)()) {
+        return std::unexpected(
+            make_error(ErrorCode::value_too_large, "FacadeListOk has too many facades"));
+    }
+    writer.write_u16(static_cast<std::uint16_t>(message.facades.size()));
+    for (const auto& facade : message.facades) {
+        if (auto status = encode_facade_descriptor(writer, facade); !status) {
+            return status;
+        }
+    }
+    return {};
+}
+
+Result<FacadeListOk> decode_facade_list_ok(storage::BinaryReader& reader) {
+    FacadeListOk message;
+    const auto request_id = reader.read_u32();
+    if (!request_id) {
+        return std::unexpected(request_id.error());
+    }
+    message.request_id = *request_id;
+    const auto count = reader.read_u16();
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    message.facades.reserve(*count);
+    for (std::uint16_t i = 0; i < *count; ++i) {
+        auto facade = decode_facade_descriptor(reader);
+        if (!facade) {
+            return std::unexpected(facade.error());
+        }
+        message.facades.push_back(std::move(*facade));
+    }
+    return message;
+}
+
+Result<void> encode_facade_open(storage::BinaryWriter& writer, const FacadeOpen& message) {
+    writer.write_u32(message.request_id);
+    if (auto status = write_string(writer, message.facade_id); !status) {
+        return status;
+    }
+    writer.write_u32(message.facade_version);
+    return {};
+}
+
+Result<FacadeOpen> decode_facade_open(storage::BinaryReader& reader) {
+    FacadeOpen message;
+    const auto request_id = reader.read_u32();
+    if (!request_id) {
+        return std::unexpected(request_id.error());
+    }
+    message.request_id = *request_id;
+    auto facade_id = read_string(reader);
+    if (!facade_id) {
+        return std::unexpected(facade_id.error());
+    }
+    message.facade_id = std::move(*facade_id);
+    const auto version = reader.read_u32();
+    if (!version) {
+        return std::unexpected(version.error());
+    }
+    message.facade_version = *version;
+    return message;
+}
+
+Result<void> encode_facade_open_ok(storage::BinaryWriter& writer, const FacadeOpenOk& message) {
+    writer.write_u32(message.request_id);
+    writer.write_u8(message.ok ? 1U : 0U);
+    if (!message.ok) {
+        writer.write_u16(static_cast<std::uint16_t>(message.code));
+        if (auto status = write_string(writer, message.message); !status) {
+            return status;
+        }
+    }
+    if (auto status = write_string(writer, message.facade_id); !status) {
+        return status;
+    }
+    writer.write_u32(message.facade_version);
+    return {};
+}
+
+Result<FacadeOpenOk> decode_facade_open_ok(storage::BinaryReader& reader) {
+    FacadeOpenOk message;
+    const auto request_id = reader.read_u32();
+    if (!request_id) {
+        return std::unexpected(request_id.error());
+    }
+    message.request_id = *request_id;
+    const auto ok = reader.read_u8();
+    if (!ok) {
+        return std::unexpected(ok.error());
+    }
+    if (*ok > 1) {
+        return std::unexpected(
+            make_error(ErrorCode::protocol_error, "FacadeOpenOk ok must be 0 or 1"));
+    }
+    message.ok = (*ok == 1);
+    if (!message.ok) {
+        const auto code = reader.read_u16();
+        if (!code) {
+            return std::unexpected(code.error());
+        }
+        message.code = static_cast<ErrorCode>(*code);
+        auto text = read_string(reader);
+        if (!text) {
+            return std::unexpected(text.error());
+        }
+        message.message = std::move(*text);
+    }
+    auto facade_id = read_string(reader);
+    if (!facade_id) {
+        return std::unexpected(facade_id.error());
+    }
+    message.facade_id = std::move(*facade_id);
+    const auto version = reader.read_u32();
+    if (!version) {
+        return std::unexpected(version.error());
+    }
+    message.facade_version = *version;
+    return message;
+}
+
 [[nodiscard]] bool materially_smaller(std::size_t encoded, std::size_t uncompressed) noexcept {
     // Exige pelo menos ~12.5% de redução (encoded < uncompressed * 7/8).
     return encoded < (uncompressed * 7u) / 8u;
@@ -652,6 +878,14 @@ Result<void> encode_payload(storage::BinaryWriter& writer, const Message& messag
                 return encode_op_call(writer, body);
             } else if constexpr (std::is_same_v<T, OpResult>) {
                 return encode_op_result(writer, body);
+            } else if constexpr (std::is_same_v<T, FacadeList>) {
+                return encode_facade_list(writer, body);
+            } else if constexpr (std::is_same_v<T, FacadeListOk>) {
+                return encode_facade_list_ok(writer, body);
+            } else if constexpr (std::is_same_v<T, FacadeOpen>) {
+                return encode_facade_open(writer, body);
+            } else if constexpr (std::is_same_v<T, FacadeOpenOk>) {
+                return encode_facade_open_ok(writer, body);
             }
         },
         message);
@@ -727,6 +961,34 @@ Result<Message> decode_payload(MessageType type, storage::BinaryReader& reader,
     }
     case MessageType::op_result: {
         auto body = decode_op_result(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{std::move(*body)};
+    }
+    case MessageType::facade_list: {
+        auto body = decode_facade_list(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{*body};
+    }
+    case MessageType::facade_list_ok: {
+        auto body = decode_facade_list_ok(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{std::move(*body)};
+    }
+    case MessageType::facade_open: {
+        auto body = decode_facade_open(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{std::move(*body)};
+    }
+    case MessageType::facade_open_ok: {
+        auto body = decode_facade_open_ok(reader);
         if (!body) {
             return std::unexpected(body.error());
         }
@@ -837,6 +1099,14 @@ MessageType message_type(const Message& message) noexcept {
                 return MessageType::op_call;
             } else if constexpr (std::is_same_v<T, OpResult>) {
                 return MessageType::op_result;
+            } else if constexpr (std::is_same_v<T, FacadeList>) {
+                return MessageType::facade_list;
+            } else if constexpr (std::is_same_v<T, FacadeListOk>) {
+                return MessageType::facade_list_ok;
+            } else if constexpr (std::is_same_v<T, FacadeOpen>) {
+                return MessageType::facade_open;
+            } else if constexpr (std::is_same_v<T, FacadeOpenOk>) {
+                return MessageType::facade_open_ok;
             }
         },
         message);
