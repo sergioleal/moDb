@@ -23,6 +23,7 @@ desta pasta que reflete estado vivo; os demais (Plano, Protocolo, ADRs)
 definem escopo e não mudam a cada tarefa concluída.
 
 Operação do arquivo (backup/restore/`db check`): **[OPERACAO.md](OPERACAO.md)**.
+Container serverless: **[OPERACAO_SERVERLESS.md](OPERACAO_SERVERLESS.md)**.
 Fechamento da Fase 10: **[FECHAMENTO_10F.md](FECHAMENTO_10F.md)**.
 
 ## 1. Documentos de visão (na raiz do repositório, não em `docs/`)

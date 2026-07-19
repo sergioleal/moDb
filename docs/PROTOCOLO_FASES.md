@@ -1995,15 +1995,18 @@ Tag: `0.0.13d`.
 
 ## Fase 13E — Observabilidade, CI e guia
 
+Status: ✅ Concluída — tag `0.0.13e` (2026-07-19).
+
 Artefatos:
 
 ```text
 docs/OPERACAO_SERVERLESS.md
-(pipeline CI: build → SBOM → scan → publish)
+.github/workflows/oci-image.yml
 ```
 
-Logs/métricas (cold start, recovery, I/O, conexões); publish versionado;
-guia operacional com backup/restore e restrição multi-writer.
+Logs/métricas (`METRICS` / `MODB_METRICS_FILE`: cold start, async backend);
+publish versionado; guia operacional com backup/restore e restrição
+multi-writer.
 
 Critério: pipeline publica; guia opera do zero; métricas observáveis. Tag:
 `0.0.13e`.

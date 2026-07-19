@@ -870,11 +870,11 @@ descarta incompletos; readiness só após recovery. Tag: `0.0.13d`.
 
 #### Fase 13E — Observabilidade, CI e guia operacional
 
-- [ ] Adicionar logs estruturados e métricas de cold start, recovery, conexões,
+- [x] Adicionar logs estruturados e métricas de cold start, recovery, conexões,
       transações, memória, I/O e duração das requisições.
-- [ ] Automatizar build, SBOM, scan de vulnerabilidades e publicação versionada
+- [x] Automatizar build, SBOM, scan de vulnerabilidades e publicação versionada
       da imagem OCI.
-- [ ] Documentar execução local e implantação de referência
+- [x] Documentar execução local e implantação de referência
       (`OPERACAO_SERVERLESS.md`), incluindo backup/restauração e restrições.
 
 Critério de aceite: pipeline publica imagem versionada; guia permite operar do

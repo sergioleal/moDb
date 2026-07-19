@@ -18,6 +18,7 @@
 #include "modb/net/native_socket.hpp"
 #include "modb/net/server.hpp"
 #include "modb/net/probe.hpp"
+#include "modb/storage/async_file.hpp"
 #include "examples/accounts_facade/accounts_facade.hpp"
 #include "examples/transfer_funds/transfer_funds.hpp"
 #include "modb/ops/facade_catalog.hpp"
@@ -44,8 +45,10 @@
 #include <csignal>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 // Disponibiliza std::reference_wrapper usado pelo visitor.
 #include <functional>
 #include <limits>
@@ -1891,14 +1894,20 @@ int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
 
 int command_serve_loop(const std::filesystem::path& path, std::string_view host,
                        std::uint16_t port) {
+    const auto cold_start = std::chrono::steady_clock::now();
     auto server = modb::net::Server::listen(path, host, port);
     if (!server) {
         return print_error(server.error());
     }
+    const auto ready_at = std::chrono::steady_clock::now();
+    const auto cold_start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   ready_at - cold_start)
+                                   .count();
 
     // Readiness só após open+recovery+listen (cold start completo).
     const char* ready_env = std::getenv("MODB_READY_FILE");
     const char* live_env = std::getenv("MODB_LIVE_FILE");
+    const char* metrics_env = std::getenv("MODB_METRICS_FILE");
     const std::filesystem::path ready_file =
         ready_env && *ready_env != '\0' ? ready_env : std::filesystem::path{};
     const std::filesystem::path live_file =
@@ -1911,6 +1920,38 @@ int command_serve_loop(const std::filesystem::path& path, std::string_view host,
     if (!live_file.empty()) {
         if (auto status = modb::net::write_probe_file(live_file, "live\n"); !status) {
             return print_error(status.error());
+        }
+    }
+
+    // Métricas estruturadas (Fase 13E): backend AsyncFile + cold start.
+    {
+        modb::storage::AsyncFileOptions options;
+        options.max_inflight = 1;
+        const auto probe_path = std::filesystem::temp_directory_path() /
+                                ("modb-io-probe-" + std::to_string(server->port()) + ".bin");
+        std::string async_backend = "unavailable";
+        std::string async_reason = "probe skipped";
+        if (auto probe = modb::storage::AsyncFile::open(
+                probe_path, modb::storage::AsyncFile::Mode::create_new, options)) {
+            async_backend = std::string{probe->backend_name()};
+            async_reason = std::string{probe->fallback_reason()};
+            static_cast<void>(probe->close());
+        }
+        std::error_code ignored;
+        std::filesystem::remove(probe_path, ignored);
+
+        std::ostringstream metrics;
+        metrics << "{\"event\":\"ready\",\"cold_start_ms\":" << cold_start_ms
+                << ",\"port\":" << server->port()
+                << ",\"async_file_backend\":\"" << async_backend << "\""
+                << ",\"async_file_reason\":\"" << async_reason << "\"}\n";
+        std::cout << "METRICS " << metrics.str();
+        std::cout.flush();
+        if (metrics_env && *metrics_env != '\0') {
+            std::ofstream out{metrics_env, std::ios::app};
+            if (out) {
+                out << metrics.str();
+            }
         }
     }
 
