@@ -455,6 +455,10 @@ Result<void> Database::register_migration(std::string type_name, std::uint64_t f
 
 const Database::Migration* Database::migration_for(std::string_view type_name,
                                                    TypeDefinitionId from_type_id) const {
+    // Fast-path: a maioria das bases não registra migração (dívida Fase 3 / 10C).
+    if (migrations_.empty()) {
+        return nullptr;
+    }
     const auto by_name = migrations_.find(std::string{type_name});
     if (by_name == migrations_.end()) {
         return nullptr;

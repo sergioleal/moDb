@@ -36,6 +36,14 @@ struct DecodedObject {
     friend bool operator==(const DecodedObject&, const DecodedObject&) = default;
 };
 
+// Lê apenas ObjectId + TypeDefinitionId sem decodificar o payload (Fase 10C).
+struct ObjectHeaderView {
+    ObjectId id{};
+    TypeDefinitionId type{};
+};
+
+[[nodiscard]] Result<ObjectHeaderView> decode_object_header(std::span<const std::byte> record);
+
 // Codifica um objeto completo no formato de registro do TableHeap:
 //   | object_id u64 | type_definition_id u64 | payload |
 // com o payload sendo | versão u8 | field_count u16 | (field_id u16, tag u8,

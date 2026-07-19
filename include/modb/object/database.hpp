@@ -459,11 +459,13 @@ public:
         if (bound == nullptr) {
             return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
         }
-        auto object = store_.get(id);
-        if (!object) {
-            return std::unexpected(object.error());
+        // peek_type evita decodificar o payload só para validar tipo (Fase 10C);
+        // materialize() fará o decode completo uma única vez.
+        auto type_id = store_.peek_type(id);
+        if (!type_id) {
+            return std::unexpected(type_id.error());
         }
-        auto stored_type = store_.find_type(object->type);
+        auto stored_type = store_.find_type(*type_id);
         if (!stored_type) {
             return std::unexpected(stored_type.error());
         }

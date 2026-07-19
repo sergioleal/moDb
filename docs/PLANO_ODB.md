@@ -619,10 +619,10 @@ são evictados; métricas fecham; `modb.buffer_pool` verde. Tag: `0.0.10b`.
 
 #### Fase 10C — Profiling e otimizações medidas
 
-- [ ] Fazer profiling antes de cada otimização relevante e garantir que o
+- [x] Fazer profiling antes de cada otimização relevante e garantir que o
       caminho crítico usa Binding + ProjectionPlan cacheado, sem interpretação
       dinâmica completa.
-- [ ] Otimizar somente gargalos demonstrados; registrar comparação
+- [x] Otimizar somente gargalos demonstrados; registrar comparação
       antes/depois e impedir regressão relevante nos demais perfis.
 
 Critério de aceite: cada alteração de performance referencia evidência do

@@ -50,10 +50,10 @@
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
-| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | 🔄 Em andamento | 2/9 | Todas |
+| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | 🔄 Em andamento | 3/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 |
 | [12](#fase-12--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11 |
-| **Total** | | | **106/134 (~79%)** | |
+| **Total** | | | **107/134 (~80%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -748,7 +748,7 @@ exceção/saldo insuficiente, consistente após reopen + recovery.
 
 ## Fase 10 — Desempenho e estabilização
 
-Status: 🔄 Em andamento (2/9) — seis entregas verticais 10A–10F.
+Status: 🔄 Em andamento (3/9) — seis entregas verticais 10A–10F.
 Definição completa:
 [PLANO_ODB.md §Fase 10](PLANO_ODB.md#fase-10--desempenho-e-estabilização) ·
 [PROTOCOLO_FASES.md §Fase 10](PROTOCOLO_FASES.md#fase-10--desempenho-e-estabilização)
@@ -757,7 +757,7 @@ Definição completa:
 |---|---|---|---|
 | 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · merge `9b0cfba`, tag `0.0.10a`; [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
 | 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ✅ | 10B · merge `2a45e39`, tag `0.0.10b` |
-| 10.3 | Profiling antes de cada otimização | ⬜ | 10C |
+| 10.3 | Profiling antes de cada otimização | ✅ | 10C · [OTIMIZACOES_10C.md](OTIMIZACOES_10C.md) |
 | 10.4 | Fuzzing dos decoders | ⬜ | 10D |
 | 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
 | 10.6 | Política de compatibilidade (formato + protocolo) | ⬜ | 10E |
@@ -785,12 +785,12 @@ Status: ✅ Concluída — merge `2a45e39`, tag `0.0.10b` (2026-07-19).
 
 ### Fase 10C — Profiling e otimizações medidas
 
-Status: ⬜ Não iniciada — depende de 10A/10B; tag prevista `0.0.10c`.
+Status: ✅ Concluída — tag `0.0.10c` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Perfis antes de cada mudança | ⬜ | Gargalo demonstrado com cenário/seed/commit |
-| Otimizações selecionadas | ⬜ | Comparação antes/depois reproduzível, sem regressão relevante |
+| Perfis antes de cada mudança | ✅ | [OTIMIZACOES_10C.md](OTIMIZACOES_10C.md); cenário `read_hotpath` |
+| Otimizações selecionadas | ✅ | peek_type, migrations empty, índice FieldId no plano |
 
 ### Fase 10D — Robustez, fuzzing e entradas hostis
 

@@ -6,6 +6,7 @@
 #include "runner/profile.hpp"
 #include "scenarios/buffer_pool_oversubscribed.hpp"
 #include "scenarios/object_store_lifecycle.hpp"
+#include "scenarios/object_store_read_hotpath.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -30,6 +31,9 @@ std::string parameters_json(const ScenarioProfileOverride& scenario) {
     if (scenario.cache_pages > 0) {
         oss << ",\"cache_pages\":" << scenario.cache_pages;
     }
+    if (scenario.read_rounds > 0) {
+        oss << ",\"read_rounds\":" << scenario.read_rounds;
+    }
     oss << "}";
     return oss.str();
 }
@@ -39,6 +43,9 @@ std::string parameters_key(const ScenarioProfileOverride& scenario) {
                "|stride=" + std::to_string(scenario.stride);
     if (scenario.cache_pages > 0) {
         key += "|cache=" + std::to_string(scenario.cache_pages);
+    }
+    if (scenario.read_rounds > 0) {
+        key += "|rounds=" + std::to_string(scenario.read_rounds);
     }
     return key;
 }
@@ -252,7 +259,8 @@ CampaignResult run_campaign(const CampaignOptions& options) {
             continue;
         }
         if (scenario.scenario_id != "object_store.lifecycle" &&
-            scenario.scenario_id != "storage.buffer_pool.oversubscribed") {
+            scenario.scenario_id != "storage.buffer_pool.oversubscribed" &&
+            scenario.scenario_id != "object_store.read_hotpath") {
             std::ostringstream note;
             note << "{\"schema\":\"modb.benchmark\",\"schema_version\":1,\"record\":\"run_note\","
                     "\"run_id\":"
@@ -300,6 +308,14 @@ CampaignResult run_campaign(const CampaignOptions& options) {
                 params.cache_pages = scenario.cache_pages == 0 ? 8 : scenario.cache_pages;
                 params.work_dir = work_dir.string();
                 return run_buffer_pool_oversubscribed(params);
+            }
+            if (scenario.scenario_id == "object_store.read_hotpath") {
+                ReadHotpathParams params;
+                params.seed = options.seed;
+                params.object_count = scenario.object_count;
+                params.read_rounds = scenario.read_rounds == 0 ? 1 : scenario.read_rounds;
+                params.work_dir = work_dir.string();
+                return run_object_store_read_hotpath(params);
             }
             ScenarioParams params;
             params.scenario_id = scenario.scenario_id;

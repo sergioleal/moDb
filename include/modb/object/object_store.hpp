@@ -68,6 +68,8 @@ public:
     // registrando sua identidade. Devolve o ObjectId atribuído.
     // Recupera a versão "current" de um objeto vivo pelo id (sem snapshot).
     [[nodiscard]] Result<DecodedObject> get(ObjectId id);
+    // Lê só o TypeDefinitionId do registro (sem decodificar campos) — Fase 10C.
+    [[nodiscard]] Result<TypeDefinitionId> peek_type(ObjectId id);
     // Recupera o objeto tal como era visível numa época de snapshot (Fase
     // 6B): current se já valia nessa época, senão previous, senão ausente.
     [[nodiscard]] Result<DecodedObject> get_at(ObjectId id, std::uint64_t snapshot_epoch);

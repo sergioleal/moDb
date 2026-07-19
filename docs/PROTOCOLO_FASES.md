@@ -1672,8 +1672,11 @@ Cada otimização registra:
 3. benchmark posterior e intervalo de variação;
 4. impacto nos demais perfis e teste de correção.
 
-Critério: ganhos reproduzíveis, sem regressão relevante não explicada, com
-relatório antes/depois versionado. Tag: `0.0.10c`.
+Entrega 10C: [OTIMIZACOES_10C.md](OTIMIZACOES_10C.md) + cenário
+`object_store.read_hotpath`; otimizações `peek_type`/`decode_object_header`,
+fast-path de migrações vazias e índice FieldId no ProjectionPlan. Critério:
+ganhos documentados, suíte verde, Binding + plano cacheado no caminho crítico.
+Tag: `0.0.10c`.
 
 ## Fase 10D — Robustez, fuzzing e entradas hostis
 

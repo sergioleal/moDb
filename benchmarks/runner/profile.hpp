@@ -14,6 +14,7 @@ struct ScenarioProfileOverride {
     std::uint64_t object_count{0};
     std::uint64_t stride{1};
     std::size_t cache_pages{0}; // 0 = padrão do cenário
+    std::uint64_t read_rounds{0}; // para object_store.read_hotpath
     int warmup{0};
     int samples{0};
 };
