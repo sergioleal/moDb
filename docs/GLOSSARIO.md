@@ -54,6 +54,20 @@
   para refs órfãs, inclusão de ownership e limites da travessia.
 - **Grafo não direcionado**: view que interpreta cada relacionamento nos dois
   sentidos; não altera a direção persistida da `Ref`.
+- **Primary**: instância única escritora do banco; único produtor de commits.
+- **Follower / Réplica de leitura**: instância read-only que aplica o WAL do
+  primary em arquivo local próprio e serve apenas leituras (Fase 14, ADR-016).
+- **LSN**: *Log Sequence Number* — posição global monotônica e persistente de
+  um registro no WAL v2; `commit_lsn` marca a fronteira replicável de uma
+  transação. No WAL v1 o `lsn` era local ao arquivo e reiniciava por sessão.
+- **DatabaseUuid / timeline_id**: identidade persistente do banco e da linha do
+  tempo; o follower usa ambos para confirmar que a origem não divergiu.
+- **Bootstrap**: cópia inicial de um snapshot base consistente do primary
+  (sob barreira do escritor) a partir da qual o follower começa a aplicar o WAL.
+- **Lag de replicação**: distância entre `applied_lsn` do follower e
+  `primary_commit_lsn`, em bytes, commits ou tempo.
+- **Gap**: LSN pedido pelo follower já descartado pela retenção do primary
+  (`WalGap`); exige novo bootstrap, nunca salto silencioso.
 - **TTFR**: *Time To First Result* — tempo até o primeiro objeto de uma
   consulta; principal métrica de desempenho do streaming.
 - **Streaming**: modelo nativo de execução de consultas; resultados fluem assim

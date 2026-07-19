@@ -71,6 +71,7 @@ Mantida do plano anterior. Uma tarefa só está concluída quando:
 | 11 | Catálogo de facades e handles | `FacadeHandle` tipado sobre operações (11A–11D) | 9, 10 |
 | 12 | Handles de arestas e algoritmos de grafos | BFS/DFS e caminhos sobre relacionamentos tipados (12A–12E) | 4, 6, 7, 10 |
 | 13 | Container serverless | imagem OCI com escala a zero e dados duráveis (13A–13E) | 8, 9, 10, 11, 12 |
+| 14 | Réplica de leitura por streaming do WAL | follower read-only atualizado por WAL contínuo | 5, 6, 8 |
 
 O **MVP OO** compreende as fases 0 a 3. Critério, análogo ao MVP relacional:
 criar um tipo `Employee`, persistir um objeto, fechar completamente a
@@ -888,6 +889,62 @@ durável, recupera o banco quando necessário e atende um cliente das fases
 8/9/11/12; após término completo e nova inicialização, os objetos commitados
 permanecem e transações incompletas não aparecem.
 
+### Fase 14 — Réplica de leitura por streaming do WAL
+
+Objetivo: manter uma réplica de leitura (follower read-only) continuamente
+atualizada a partir do WAL do primary, escalando leitura sem violar o modelo
+single-writer nem alterar o contrato transacional do primary.
+
+O primary continua sendo o único produtor de commits. O follower tem arquivo
+local próprio (nunca volume compartilhado), aplica o stream de forma
+idempotente e serve apenas leituras. Promoção, eleição de líder, failover
+automático e replicação síncrona/quórum ficam fora desta fase; ver
+[ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
+
+Esta fase depende de tornar o WAL durável: hoje ele é recriado e removido a
+cada commit e o `lsn` reinicia por sessão, o que impede reconexão e histórico.
+
+Tarefas:
+
+- [ ] Registrar em ADR o modelo de replicação física read-only, WAL durável,
+      retenção, consistência na réplica e papel do follower.
+      ([ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md))
+- [ ] Dar identidade persistente ao banco: `DatabaseUuid` e `timeline_id`
+      gravados no DBRT ou em página de controle.
+- [ ] Evoluir o WAL para v2 com LSN global monotônico persistente (nunca
+      reiniciado) e `commit_lsn` na fronteira de cada transação.
+- [ ] Segmentar o WAL, transformar checkpoint em posição persistente e
+      implementar política de retenção por checkpoint e ACK do follower.
+- [ ] Implementar snapshot base consistente via barreira do escritor para o
+      bootstrap inicial do follower.
+- [ ] Definir o canal/protocolo de replicação privilegiado (hello, bootstrap,
+      subscribe/frame/ack/gap, heartbeat, cancel), reutilizando framing,
+      backpressure e cancelamento da Fase 8 sem expor o formato ao cliente comum.
+- [ ] Implementar streaming incremental do WAL por LSN com backpressure,
+      heartbeat e cancelamento.
+- [ ] Implementar o applier do follower: spool durável, apply idempotente sob
+      lock exclusivo e ACK somente após durabilidade local.
+- [ ] Impor modo read-only ao follower: escrita/`begin`/evolução/GC retornam
+      erro; consultas, snapshots e operações read-only permanecem permitidas.
+- [ ] Garantir leitura consistente na réplica (lock compartilhado durante o
+      snapshot vs. exclusivo no apply; sem GC local independente).
+- [ ] Tratar reconexão a partir de `applied_lsn + 1`, detecção de gap
+      (`WalGap` → novo bootstrap), UUID/timeline divergentes e métricas de lag.
+- [ ] Expor CLI `modb replicate serve/follow/status`, failpoints de queda e
+      documentação operacional; suítes `debug` e `sanitizers` verdes.
+
+Entregáveis: WAL v2 durável, segmentado e retido; identidade persistente do
+banco; protocolo e serviço de replicação; follower read-only com apply
+idempotente; CLI e guia de operação; testes de bootstrap, apply, recovery,
+reconexão/gap e streaming.
+
+Critério de aceite: partindo de um primary com dados, o follower faz bootstrap
+consistente, assina o WAL e acompanha commits subsequentes; após queda e
+reconexão do follower, ele retoma de `applied_lsn + 1` sem perder nem duplicar
+efeitos; um gap além da retenção força novo bootstrap explícito; escritas no
+follower são rejeitadas e leituras nunca observam estado parcial de uma
+transação replicada.
+
 ## 6. Itens deliberadamente fora deste plano
 
 - herança e polimorfismo persistentes (tipos-base, discriminadores, consultas
@@ -911,7 +968,9 @@ permanecem e transações incompletas não aparecem.
 - múltiplas aplicações/tenants por instância (a instância é dedicada — decisão
   de arquitetura, não pendência);
 - sandbox para código de domínio (o código C++ é confiável por decisão);
-- replicação, alta disponibilidade e execução distribuída;
+- alta disponibilidade, promoção/failover automático, replicação de escrita
+  (multi-writer) e execução distribuída (a réplica **de leitura** por streaming
+  do WAL está na Fase 14);
 - otimizador baseado em custos com estatísticas sofisticadas;
 - criptografia transparente do arquivo;
 - compatibilidade com SQL ou com outro banco.
@@ -933,6 +992,9 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
   cancelamento, limites e snapshots;
 - container serverless: build da imagem, cold start, término gracioso,
   persistência em volume e recovery após término forçado;
+- replicação: WAL v2 com LSN global, bootstrap consistente, apply idempotente,
+  reconexão a partir de `applied_lsn + 1`, detecção de gap, rejeição de escrita
+  no follower e leitura sem estado parcial;
 - sanitizers nos toolchains que os suportam (preset já configurado);
 - benchmarks separados dos testes funcionais.
 
@@ -966,6 +1028,9 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
    domínio em facades/handles; a Fase 12 acrescenta algoritmos de grafos
    sobre relacionamentos; a Fase 13 adiciona os riscos operacionais de
    container, cold start e armazenamento remoto persistente.
+6. A Fase 14 vem por último: só faz sentido escalar leitura por réplica depois
+   de WAL/recuperação (Fases 5–6) e rede/backpressure (Fase 8) comprovados, e
+   ela exige tornar o WAL durável e com LSN global antes de transmiti-lo.
 
 Não iniciar índices, streaming ou servidor antes de existir um teste confiável
 de persistência, reabertura e recuperação. Cada fase preserva os testes e

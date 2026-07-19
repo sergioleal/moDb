@@ -373,6 +373,19 @@ Registrar vértices/arestas por segundo, TTFR, p50/p99 de expansão, páginas
 lidas, RSS e pico do conjunto de visitados. Dataset, seed, direção, política
 de órfãs e inclusão de `OwnedRef` acompanham cada amostra.
 
+#### 8.5.2 Réplica de leitura (Fase 14)
+
+- Throughput do stream do WAL (MB/s, commits/s) sob commits contínuos.
+- Lag de replicação (bytes, commits e tempo) em regime estável e sob rajada.
+- Tempo de bootstrap do follower por tamanho do snapshot base.
+- Tempo de retomada após reconexão a partir de `applied_lsn + 1`.
+- Custo do apply idempotente e da ressincronização do `ObjectStore` por commit.
+- Impacto de consultas longas no follower sobre o lag (lock compartilhado).
+
+Registrar `applied_lsn`, `primary_commit_lsn`, lag, MB/s, p50/p99 do apply,
+páginas reescritas por commit e RSS. Seed, tamanho do banco, taxa de commits e
+duração das consultas concorrentes acompanham cada amostra.
+
 ### 8.6 Transações, WAL e recuperação
 
 | Grupo | Casos | Métricas principais |

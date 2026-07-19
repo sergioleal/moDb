@@ -415,6 +415,16 @@ O handle carrega `DatabaseId`, origem, alvo e `FieldId`; não é persistido.
 porque não possui identidade. A decisão completa está na
 [ADR-015](docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md).
 
+## Réplica de leitura em runtime
+
+O modelo persistente é o mesmo em primary e follower. A Fase 14 acrescenta uma
+**réplica de leitura**: uma instância read-only que aplica o WAL do primary em
+seu próprio arquivo e serve consultas. Para isso o WAL deixa de ser efêmero e
+ganha LSN global persistente, e o banco ganha identidade persistente
+(`DatabaseUuid`, `timeline_id`). O follower nunca escreve pela API pública; seu
+único escritor interno é o applier do stream. A decisão completa está na
+[ADR-016](docs/decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
+
 ---
 
 # 12. Coleções Persistentes
