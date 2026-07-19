@@ -29,6 +29,7 @@ Alvo CMake: `modb::modb`.
 | `modb/ops/facade_descriptor.hpp` | descritores de facade/método (11A) |
 | `modb/ops/facade_catalog.hpp` | catálogo de facades (11A) |
 | `modb/ops/facade_handle.hpp` | handle tipado embedded/remoto (11B/11D) |
+| `modb/graph/edge_handle.hpp` | arestas tipadas runtime `Ref`/`OwnedRef` (12A) |
 
 Contrato de facades (manifesto → catálogo → handle → registry):
 [FACADES.md](FACADES.md).

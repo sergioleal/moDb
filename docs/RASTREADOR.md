@@ -52,7 +52,7 @@
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ✅ Concluída | 9/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | 🔄 Em andamento | 6/10 | Fases 9, 10 · 11A–11D |
-| [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ⬜ Não iniciada | 0/12 | Fases 4, 6, 7, 10 · 12A–12E |
+| [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | 🔄 Em andamento | 3/12 | Fases 4, 6, 7, 10 · 12A–12E |
 | [13](#fase-13--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11, 12 · 13A–13E |
 | [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ⬜ Não iniciada | 0/12 | Fases 5, 6, 8 |
 | **Total** | | | **115/158 (~73%)** | |
@@ -945,16 +945,16 @@ incompatível e método alheio são rejeitados.
 
 ## Fase 12 — Handles de arestas e algoritmos de grafos
 
-Status: ⬜ Não iniciada (0/12) — cinco entregas verticais 12A–12E.
+Status: 🔄 Em andamento (3/12) — cinco entregas verticais 12A–12E.
 Definição completa:
 [PLANO_ODB.md §Fase 12](PLANO_ODB.md#fase-12--handles-de-arestas-e-algoritmos-de-grafos) ·
 [PROTOCOLO_FASES.md §Fase 12](PROTOCOLO_FASES.md#fase-12--handles-de-arestas-e-algoritmos-de-grafos)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 12.1 | ADR de handles de arestas e algoritmos de grafos | ⬜ | 12A · [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md) |
-| 12.2 | `EdgeHandle<From, To, EdgeKind>` runtime-only | ⬜ | 12A · Origem, alvo, FieldId e DatabaseId |
-| 12.3 | Factories tipadas para `Ref` / `OwnedRef` | ⬜ | 12A · `Embedded` e campo inválido rejeitados |
+| 12.1 | ADR de handles de arestas e algoritmos de grafos | ✅ | 12A · [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md) |
+| 12.2 | `EdgeHandle<From, To, EdgeKind>` runtime-only | ✅ | 12A · Origem, alvo, FieldId e DatabaseId |
+| 12.3 | Factories tipadas para `Ref` / `OwnedRef` | ✅ | 12A · `Embedded` e campo inválido rejeitados |
 | 12.4 | Adjacência em `PersistentVector<Ref<T>>` | ⬜ | 12B · Preservar tipo e ordem |
 | 12.5 | BFS e DFS lazy/canceláveis sob snapshot | ⬜ | 12C · Limites de profundidade/vértices; refs órfãs |
 | 12.6 | Caminho mínimo sem peso | ⬜ | 12D · Reconstrução do caminho |
@@ -967,11 +967,11 @@ Definição completa:
 
 ### Fase 12A — EdgeHandle e factories
 
-Status: ⬜ Não iniciada — tag prevista `0.0.12a`.
+Status: ✅ Concluída — tag `0.0.12a` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| ADR-015 + `EdgeHandle` + factories | ⬜ | `modb.edge_handle` |
+| ADR-015 + `EdgeHandle` + factories | ✅ | `modb.edge_handle` |
 
 ### Fase 12B — Adjacência e arestas de entrada
 
@@ -1009,11 +1009,11 @@ Status: ⬜ Não iniciada — tag prevista `0.0.12e`.
 
 | Item | Local | Status |
 |---|---|---|
-| Contrato de `EdgeHandle` | `tests/edge_handle_test.cpp` | ⬜ 12A |
+| Contrato de `EdgeHandle` | `tests/edge_handle_test.cpp` | ✅ 12A |
 | Algoritmos e limites | `tests/graph_algorithms_test.cpp` | ⬜ 12C/12D |
 | CLI de travessia/caminho/toposort | `apps/modb_cli/main.cpp` | ⬜ 12E |
 | Benchmarks de grafos | `benchmarks/` | ⬜ 12E |
-| ADR de grafos | `docs/decisions/ADR-015-*.md` | ⬜ 12A |
+| ADR de grafos | `docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md` | ✅ 12A |
 
 Critério de aceite: ⬜ após reabertura, handles tipados representam arestas
 entre classes e BFS/DFS/caminho mínimo/toposort executam sob snapshot; ciclo,

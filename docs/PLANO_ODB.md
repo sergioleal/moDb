@@ -754,12 +754,12 @@ A fase é dividida em cinco entregas verticais, cada uma com teste e tag própri
 
 #### Fase 12A — EdgeHandle e factories
 
-- [ ] Registrar em ADR identidade, persistência, direção, ownership e política
+- [x] Registrar em ADR identidade, persistência, direção, ownership e política
       de referências órfãs para arestas
       ([ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md)).
-- [ ] Implementar `EdgeHandle<From, To, EdgeKind>` runtime-only, com origem,
+- [x] Implementar `EdgeHandle<From, To, EdgeKind>` runtime-only, com origem,
       alvo, `FieldId` e resolução sob `Snapshot`.
-- [ ] Implementar factories tipadas para campos escalares `Ref<T>` e
+- [x] Implementar factories tipadas para campos escalares `Ref<T>` e
       `OwnedRef<T>`, rejeitando `Embedded<T>` e campos não relacionais.
 
 Critério de aceite: `modb.edge_handle` — associação/ownership, reabertura,
