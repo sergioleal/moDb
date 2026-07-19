@@ -53,6 +53,9 @@ add_library(modb
     src/net/native_socket.cpp
     src/net/server.cpp
     src/net/client.cpp
+    src/ops/operation_registry.cpp
+    src/ops/module_manifest.cpp
+    examples/transfer_funds/transfer_funds.cpp
     src/storage/binary.cpp
     src/storage/codec.cpp
     src/storage/page_file.cpp
@@ -90,6 +93,7 @@ endif()
 target_include_directories(modb
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<INSTALL_INTERFACE:include>
 )
 
@@ -249,6 +253,12 @@ if(BUILD_TESTING)
     add_executable(modb_server_streaming_tests tests/server_streaming_test.cpp)
     target_link_libraries(modb_server_streaming_tests PRIVATE modb::modb)
 
+    add_executable(modb_operation_tests tests/operation_test.cpp)
+    target_link_libraries(modb_operation_tests PRIVATE modb::modb)
+
+    add_executable(modb_operation_server_tests tests/operation_server_test.cpp)
+    target_link_libraries(modb_operation_server_tests PRIVATE modb::modb)
+
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
@@ -322,6 +332,8 @@ if(BUILD_TESTING)
         target_link_options(modb_planner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_protocol_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_server_streaming_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_operation_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_operation_server_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -363,6 +375,8 @@ if(BUILD_TESTING)
     add_test(NAME modb.planner COMMAND modb_planner_tests)
     add_test(NAME modb.protocol COMMAND modb_protocol_tests)
     add_test(NAME modb.server_streaming COMMAND modb_server_streaming_tests)
+    add_test(NAME modb.operation COMMAND modb_operation_tests)
+    add_test(NAME modb.operation_server COMMAND modb_operation_server_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)
@@ -408,6 +422,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.serve_process_demo
         COMMAND modb_cli serve process-demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-process-demo.modb --force)
+    add_test(NAME modb.cli.ops_transfer_demo
+        COMMAND modb_cli ops transfer-demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-ops-transfer-demo.modb --force)
     add_test(NAME modb.cli.ping_help COMMAND modb_cli ping --help)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
     add_test(NAME modb.cli.types_help COMMAND modb_cli types --help)

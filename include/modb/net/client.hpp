@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -118,6 +119,10 @@ public:
 
     // Envia Cancel para interromper a produção no servidor (Fase 8E).
     [[nodiscard]] Result<void> cancel(std::uint32_t query_id);
+
+    // Fase 9: despacha operação de domínio (OpCall/OpResult).
+    [[nodiscard]] Result<std::vector<std::byte>> call(std::string_view operation_id,
+                                                      std::span<const std::byte> args);
 
     [[nodiscard]] static Result<HelloOk> handshake(std::string_view host, std::uint16_t port,
                                                    std::string_view database_name);

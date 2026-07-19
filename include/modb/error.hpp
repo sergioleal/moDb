@@ -114,6 +114,10 @@ enum class ErrorCode {
     frame_too_large,
     // A conexão de rede foi fechada pelo peer ou pelo transporte (Fase 8).
     connection_closed,
+    // Operação de domínio não registrada (Fase 9).
+    operation_not_found,
+    // Manifesto/módulo incompatível com o runtime ou a allowlist (Fase 9).
+    incompatible_module,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

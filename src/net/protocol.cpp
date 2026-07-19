@@ -266,6 +266,111 @@ Result<Cancel> decode_cancel(storage::BinaryReader& reader) {
     return Cancel{.query_id = *query_id};
 }
 
+Result<void> encode_op_call(storage::BinaryWriter& writer, const OpCall& message) {
+    writer.write_u32(message.call_id);
+    if (auto status = write_string(writer, message.operation_id); !status) {
+        return status;
+    }
+    if (message.args.size() > max_frame_bytes) {
+        return std::unexpected(
+            make_error(ErrorCode::value_too_large, "OpCall args exceed max_frame_bytes"));
+    }
+    writer.write_u32(static_cast<std::uint32_t>(message.args.size()));
+    writer.write_bytes(message.args);
+    return {};
+}
+
+Result<OpCall> decode_op_call(storage::BinaryReader& reader) {
+    OpCall message;
+    const auto call_id = reader.read_u32();
+    if (!call_id) {
+        return std::unexpected(call_id.error());
+    }
+    message.call_id = *call_id;
+    auto op_id = read_string(reader);
+    if (!op_id) {
+        return std::unexpected(op_id.error());
+    }
+    message.operation_id = std::move(*op_id);
+    const auto args_len = reader.read_u32();
+    if (!args_len) {
+        return std::unexpected(args_len.error());
+    }
+    if (reader.remaining() < *args_len) {
+        return std::unexpected(
+            make_error(ErrorCode::unexpected_end_of_input, "OpCall args truncated"));
+    }
+    auto args = reader.read_bytes(*args_len);
+    if (!args) {
+        return std::unexpected(args.error());
+    }
+    message.args.assign(args->begin(), args->end());
+    return message;
+}
+
+Result<void> encode_op_result(storage::BinaryWriter& writer, const OpResult& message) {
+    writer.write_u32(message.call_id);
+    writer.write_u8(message.ok ? 1U : 0U);
+    if (!message.ok) {
+        writer.write_u16(static_cast<std::uint16_t>(message.code));
+        if (auto status = write_string(writer, message.message); !status) {
+            return status;
+        }
+        return {};
+    }
+    if (message.payload.size() > max_frame_bytes) {
+        return std::unexpected(
+            make_error(ErrorCode::value_too_large, "OpResult payload exceeds max_frame_bytes"));
+    }
+    writer.write_u32(static_cast<std::uint32_t>(message.payload.size()));
+    writer.write_bytes(message.payload);
+    return {};
+}
+
+Result<OpResult> decode_op_result(storage::BinaryReader& reader) {
+    OpResult message;
+    const auto call_id = reader.read_u32();
+    if (!call_id) {
+        return std::unexpected(call_id.error());
+    }
+    message.call_id = *call_id;
+    const auto ok = reader.read_u8();
+    if (!ok) {
+        return std::unexpected(ok.error());
+    }
+    if (*ok > 1) {
+        return std::unexpected(make_error(ErrorCode::protocol_error, "OpResult ok must be 0 or 1"));
+    }
+    message.ok = (*ok == 1);
+    if (!message.ok) {
+        const auto code = reader.read_u16();
+        if (!code) {
+            return std::unexpected(code.error());
+        }
+        message.code = static_cast<ErrorCode>(*code);
+        auto text = read_string(reader);
+        if (!text) {
+            return std::unexpected(text.error());
+        }
+        message.message = std::move(*text);
+        return message;
+    }
+    const auto payload_len = reader.read_u32();
+    if (!payload_len) {
+        return std::unexpected(payload_len.error());
+    }
+    if (reader.remaining() < *payload_len) {
+        return std::unexpected(
+            make_error(ErrorCode::unexpected_end_of_input, "OpResult payload truncated"));
+    }
+    auto payload = reader.read_bytes(*payload_len);
+    if (!payload) {
+        return std::unexpected(payload.error());
+    }
+    message.payload.assign(payload->begin(), payload->end());
+    return message;
+}
+
 [[nodiscard]] bool materially_smaller(std::size_t encoded, std::size_t uncompressed) noexcept {
     // Exige pelo menos ~12.5% de redução (encoded < uncompressed * 7/8).
     return encoded < (uncompressed * 7u) / 8u;
@@ -513,6 +618,10 @@ Result<void> encode_payload(storage::BinaryWriter& writer, const Message& messag
                 return encode_stream_error(writer, body);
             } else if constexpr (std::is_same_v<T, Cancel>) {
                 return encode_cancel(writer, body);
+            } else if constexpr (std::is_same_v<T, OpCall>) {
+                return encode_op_call(writer, body);
+            } else if constexpr (std::is_same_v<T, OpResult>) {
+                return encode_op_result(writer, body);
             }
         },
         message);
@@ -578,6 +687,20 @@ Result<Message> decode_payload(MessageType type, storage::BinaryReader& reader,
             return std::unexpected(body.error());
         }
         return Message{*body};
+    }
+    case MessageType::op_call: {
+        auto body = decode_op_call(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{std::move(*body)};
+    }
+    case MessageType::op_result: {
+        auto body = decode_op_result(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{std::move(*body)};
     }
     }
     return std::unexpected(make_error(ErrorCode::protocol_error, "unknown message type"));
@@ -680,6 +803,10 @@ MessageType message_type(const Message& message) noexcept {
                 return MessageType::stream_error;
             } else if constexpr (std::is_same_v<T, Cancel>) {
                 return MessageType::cancel;
+            } else if constexpr (std::is_same_v<T, OpCall>) {
+                return MessageType::op_call;
+            } else if constexpr (std::is_same_v<T, OpResult>) {
+                return MessageType::op_result;
             }
         },
         message);

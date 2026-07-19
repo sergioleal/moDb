@@ -391,34 +391,59 @@ Result<void> Server::handle_connection(NativeSocket peer) {
             break;
         }
         const auto* query = std::get_if<Query>(&*inbound);
-        if (query == nullptr) {
-            session_status = std::unexpected(make_protocol("expected Query in session"));
-            break;
-        }
+        if (query != nullptr) {
+            Query query_copy = *query;
+            if (live_workers.load(std::memory_order_relaxed) >=
+                static_cast<int>(max_concurrent_streams_)) {
+                (void)send_locked(session,
+                                  StreamError{.query_id = query_copy.query_id,
+                                              .code = ErrorCode::invalid_argument,
+                                              .message = "max concurrent streams exceeded"});
+                continue;
+            }
 
-        Query query_copy = *query;
-        if (live_workers.load(std::memory_order_relaxed) >=
-            static_cast<int>(max_concurrent_streams_)) {
-            (void)send_locked(session,
-                              StreamError{.query_id = query_copy.query_id,
-                                          .code = ErrorCode::invalid_argument,
-                                          .message = "max concurrent streams exceeded"});
+            live_workers.fetch_add(1, std::memory_order_relaxed);
+            const Compression codec = selected_codec_;
+            std::thread worker([&, query_copy, codec]() mutable {
+                auto stats = run_query(session, database_, query_copy, fail_after_, codec);
+                if (stats) {
+                    const std::scoped_lock lock{stats_mu};
+                    last_stats_ = *stats;
+                }
+                live_workers.fetch_sub(1, std::memory_order_relaxed);
+            });
+            {
+                const std::scoped_lock lock{workers_mu};
+                workers.push_back(std::move(worker));
+            }
             continue;
         }
 
-        live_workers.fetch_add(1, std::memory_order_relaxed);
-        const Compression codec = selected_codec_;
-        std::thread worker([&, query_copy, codec]() mutable {
-            auto stats = run_query(session, database_, query_copy, fail_after_, codec);
-            if (stats) {
-                const std::scoped_lock lock{stats_mu};
-                last_stats_ = *stats;
+        const auto* call = std::get_if<OpCall>(&*inbound);
+        if (call == nullptr) {
+            session_status = std::unexpected(make_protocol("expected Query or OpCall in session"));
+            break;
+        }
+
+        OpResult reply{.call_id = call->call_id};
+        if (!operations_) {
+            reply.ok = false;
+            reply.code = ErrorCode::operation_not_found;
+            reply.message = "server has no operation registry";
+        } else {
+            auto outcome = operations_->dispatch(call->operation_id, call->args, *database_);
+            if (outcome) {
+                reply.ok = true;
+                reply.payload = std::move(outcome->payload);
+            } else {
+                reply.ok = false;
+                reply.code = outcome.error().code;
+                reply.message = outcome.error().message;
             }
-            live_workers.fetch_sub(1, std::memory_order_relaxed);
-        });
-        {
-            const std::scoped_lock lock{workers_mu};
-            workers.push_back(std::move(worker));
+        }
+        if (auto status = send_locked(session, reply); !status) {
+            session_status = std::unexpected(status.error());
+            break;
         }
     }
 

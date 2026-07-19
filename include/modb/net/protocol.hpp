@@ -40,7 +40,8 @@ enum class MessageType : std::uint8_t {
     stream_end = 6,
     stream_error = 7,
     cancel = 8,
-    // 9 OpCall / 10 OpResult — reservados para a Fase 9.
+    op_call = 9,
+    op_result = 10,
 };
 
 enum class Compression : std::uint8_t {
@@ -126,8 +127,26 @@ struct Cancel {
     friend bool operator==(const Cancel&, const Cancel&) = default;
 };
 
+struct OpCall {
+    std::uint32_t call_id{0};
+    std::string operation_id{};
+    std::vector<std::byte> args{};
+
+    friend bool operator==(const OpCall&, const OpCall&) = default;
+};
+
+struct OpResult {
+    std::uint32_t call_id{0};
+    bool ok{true};
+    ErrorCode code{ErrorCode::invalid_argument};
+    std::string message{};
+    std::vector<std::byte> payload{};
+
+    friend bool operator==(const OpResult&, const OpResult&) = default;
+};
+
 using Message = std::variant<Hello, HelloOk, Query, StreamBegin, ObjectFrame, StreamEnd,
-                             StreamError, Cancel>;
+                             StreamError, Cancel, OpCall, OpResult>;
 
 [[nodiscard]] MessageType message_type(const Message& message) noexcept;
 

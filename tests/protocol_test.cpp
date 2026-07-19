@@ -24,6 +24,8 @@ using modb::net::HelloOk;
 using modb::net::Message;
 using modb::net::ObjectEnvelope;
 using modb::net::ObjectFrame;
+using modb::net::OpCall;
+using modb::net::OpResult;
 using modb::net::Query;
 using modb::net::QueryDescription;
 using modb::net::StreamBegin;
@@ -105,6 +107,23 @@ int main() {
                                  .message = "boom"},
                      "StreamError");
     check_round_trip(suite, Cancel{.query_id = 9}, "Cancel");
+
+    check_round_trip(suite,
+                     OpCall{.call_id = 3,
+                            .operation_id = "account.transfer",
+                            .args = {std::byte{1}, std::byte{2}}},
+                     "OpCall");
+    check_round_trip(suite,
+                     OpResult{.call_id = 3,
+                              .ok = true,
+                              .payload = {std::byte{9}}},
+                     "OpResult ok");
+    check_round_trip(suite,
+                     OpResult{.call_id = 4,
+                              .ok = false,
+                              .code = ErrorCode::invalid_argument,
+                              .message = "insufficient funds"},
+                     "OpResult error");
 
     // Frame com um único slot é válido.
     check_round_trip(suite,
