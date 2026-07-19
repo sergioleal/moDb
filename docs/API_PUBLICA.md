@@ -33,6 +33,7 @@ Alvo CMake: `modb::modb`.
 | `modb/graph/graph_view.hpp` | adjacência de coleção e incoming indexado (12B) |
 | `modb/graph/traversal.hpp` | BFS/DFS lazy com limites e cancel (12C) |
 | `modb/graph/algorithms.hpp` | Caminho mínimo, ciclo, toposort, componentes (12D) |
+| `modb/storage/async_file.hpp` | I/O assíncrono com fallback explícito (13B) |
 
 Contrato de facades (manifesto → catálogo → handle → registry):
 [FACADES.md](FACADES.md).

@@ -834,10 +834,10 @@ Tag: `0.0.13a`.
 
 #### Fase 13B — I/O assíncrono real
 
-- [ ] Implementar I/O assíncrono real sob uma abstração única: `io_uring` no
+- [x] Implementar I/O assíncrono real sob uma abstração única: `io_uring` no
       Linux e IOCP no Windows, com leitura, escrita, flush, cancelamento,
       limites de operações em voo e fallback síncrono detectado em runtime.
-- [ ] Garantir que a ordem WAL → flush → páginas depende de completions /
+- [x] Garantir que a ordem WAL → flush → páginas depende de completions /
       barreiras explícitas, nunca só da ordem de submissão.
 
 Critério de aceite: `modb.async_file` comprova completions reais (ou fallback
