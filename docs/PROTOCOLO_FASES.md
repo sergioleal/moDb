@@ -1613,33 +1613,109 @@ recuperação pós-crash.
 
 # Fase 10 — Desempenho e estabilização
 
-## Frentes e protocolo
+## Fase 10A — Runner e baseline de benchmarks
 
-1. **Benchmarks** (`benchmarks/`, alvo CMake separado, nunca no ctest): seguir
-   integralmente [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md). O runner cobre
-   todas as camadas, preserva amostras brutas e gera um único JSONL autocontido
-   por campanha: `modb-benchmark-YYYYMMDDTHHMMSS.mmmZ-<commit>-<host>.jsonl`.
-   TTFR, throughput, p99, CPU, memória, I/O, espaço, rede e correção são métricas
-   de primeira classe; datasets, seeds, ambiente e configuração acompanham os
-   resultados.
-2. **BufferPool completo**: evoluir `PageCache` — capacidade configurável,
-   LRU, pin/unpin, write-back integrado ao WAL, métricas (hits/misses/
-   evictions). Testes: banco 10× maior que o cache mantém corretude
-   (`modb.buffer_pool`); benchmark antes/depois.
-3. **Fuzzing** (preset `fuzz`, clang/libFuzzer): alvos para `decode_object`,
-   decodificação de TypeDefinition, cadeia de blob, frames do protocolo e
-   registros do WAL. Corpus mínimo em `tests/fuzz/corpus/`. Meta: 1 h de fuzz
-   por alvo sem crash/OOM/UB antes do release.
-4. **Otimizações medidas**: só com profiling antes/depois registrado
-   (ex.: append real no PersistentVector, batch de escrita no WAL,
-   `insertion_capacity` incremental). Nenhuma otimização sem número.
-5. **Documentação final**: reescrever `README.md` (exemplo OO completo),
-   `FORMATO_DE_ARQUIVO.md` (todas as páginas: DBRT/IDMD/IDMP/BLBP/BTIN/BTLF/
-   WAL), documentação da API pública, guia de operação (supervisor, backup =
-   cópia de `<db>` + `<db>.wal` quiescente, restauração, `modb db check`).
-6. **Política de compatibilidade**: versionamento do formato (major no
-   superbloco, minor no DBRT) e do protocolo (no Hello); regra: minor = só
-   aditivo; major = recusa com mensagem clara.
+Artefatos:
+
+```text
+benchmarks/runner/                    runner e perfis
+benchmarks/datasets/                  geradores determinísticos
+benchmarks/results/                   JSONL históricos selecionados
+docs/BASELINE_DESEMPENHO.md
+```
+
+O runner segue integralmente
+[PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md), preserva amostras brutas e gera um
+JSONL autocontido por campanha:
+`modb-benchmark-YYYYMMDDTHHMMSS.mmmZ-<commit>-<host>.jsonl`. TTFR, throughput,
+p50/p95/p99, CPU, memória, I/O, espaço, rede e correção são métricas de primeira
+classe; datasets, seeds, ambiente e configuração acompanham os resultados.
+
+Testes/aceite: schema do JSONL validado; mesmo seed reproduz cardinalidade e
+conteúdo; campanha falha se qualquer verificação de correção falhar; duas
+execuções podem ser comparadas pelo runner. Tag: `0.0.10a`.
+
+## Fase 10B — BufferPool e bancos maiores que o cache
+
+Artefatos:
+
+```text
+include/modb/storage/buffer_pool.hpp  src/storage/buffer_pool.cpp
+tests/buffer_pool_test.cpp
+benchmarks/buffer_pool_bench.cpp
+```
+
+Evoluir `PageCache` para capacidade configurável, LRU, pin/unpin, dirty pages,
+write-back obedecendo ao WAL e métricas (`hits`, `misses`, `evictions`,
+`dirty_flushes`, `pinned`). O teste usa banco pelo menos 10× maior que o cache,
+força eviction em leitura/escrita e reabre após recovery.
+
+Invariantes: página pinada nunca é evictada; página dirty só chega ao arquivo
+após a ordem exigida pelo WAL; capacidade e contadores permanecem limitados e
+coerentes. Critério: `modb.buffer_pool` e benchmark antes/depois verdes. Tag:
+`0.0.10b`.
+
+## Fase 10C — Profiling e otimizações medidas
+
+Capturar perfis antes de alterar caminhos quentes. Candidatos incluem
+Binding/ProjectionPlan, dupla decodificação em `get` + `materialize`, append de
+coleções, batch de WAL e gestão de espaço, mas nenhum candidato vira trabalho
+sem aparecer nos dados da 10A/10B.
+
+Cada otimização registra:
+
+1. cenário/seed/commit e perfil anterior;
+2. hipótese e mudança mínima;
+3. benchmark posterior e intervalo de variação;
+4. impacto nos demais perfis e teste de correção.
+
+Critério: ganhos reproduzíveis, sem regressão relevante não explicada, com
+relatório antes/depois versionado. Tag: `0.0.10c`.
+
+## Fase 10D — Robustez, fuzzing e entradas hostis
+
+Artefatos:
+
+```text
+tests/fuzz/fuzz_object_codec.cpp
+tests/fuzz/fuzz_type_definition.cpp
+tests/fuzz/fuzz_blob_chain.cpp
+tests/fuzz/fuzz_protocol.cpp
+tests/fuzz/fuzz_wal.cpp
+tests/fuzz/corpus/
+CMakePresets.json                    preset fuzz
+```
+
+Usar Clang/libFuzzer quando disponível e manter fallback documentado. Cada alvo
+deve impor limites antes de alocar, transformar todo crash corrigido em corpus
+de regressão e rodar com ASan/UBSan. Critério: campanha mínima de 1 h por alvo
+sem crash/OOM/UB, corpus versionado e suítes debug/sanitizers verdes. Tag:
+`0.0.10d`.
+
+## Fase 10E — Compatibilidade e API pública
+
+Definir matriz para:
+
+- formato: major incompatível; minor aditivo e legível por versões compatíveis;
+- protocolo: negociação no `Hello`; major recusado, extensão minor ignorável;
+- API C++: headers públicos, tipos estáveis e detalhes internos não exportados.
+
+Artefatos incluem testes com fixtures de versões anteriores, teste de handshake
+incompatível e projeto consumidor que compila apenas contra a API instalada.
+Critério: recusas retornam erro específico e mensagem clara; matriz automatizada
+e exemplos externos compilam. Tag: `0.0.10e`.
+
+## Fase 10F — Documentação, operação e fechamento
+
+Reescrever `README.md` com exemplo OO completo; consolidar
+`FORMATO_DE_ARQUIVO.md` (DBRT/IDMD/IDMP/BLBP/BTIN/BTLF/WAL); documentar API
+pública e publicar guia de supervisor, backup quiescente de `<db>` + `<db>.wal`,
+restauração e diagnóstico com `modb db check`.
+
+Executar matriz final de build/teste/benchmark, registrar baseline final e
+compará-la à 10A. Critério: fluxo documental validado do zero; backup restaurado
+e verificado; documentação sem referências obsoletas; suíte inteira verde nos
+presets suportados. Tag: `0.0.10f`.
 
 ## Critério de conclusão
 
@@ -1649,15 +1725,157 @@ três presets.
 
 ---
 
-# Fase 11 — Container serverless
+# Fase 11 — Catálogo de facades e handles
 
 ## Objetivo
 
-Empacotar o servidor moDb (Fases 8–9) como imagem OCI reproduzível, adequada
-a plataformas de containers com escala a zero, inicialização sob demanda e
-persistência externa do arquivo do banco e do WAL. Esta fase começa somente
-depois das Fases 8, 9 e 10: rede, runtime de domínio e estabilização precisam
-existir antes da superfície operacional.
+Agrupar as operações da Fase 9 em facades descobríveis e oferecer ao
+consumidor um `FacadeHandle` tipado que invoca métodos daquela facade.
+Esta fase começa depois das Fases 9 e 10: o runtime de operações e a
+estabilização da API precisam existir antes da superfície de catálogo.
+
+Decisão: [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md).
+
+## Artefatos novos
+
+```text
+include/modb/ops/facade_descriptor.hpp
+include/modb/ops/facade_catalog.hpp       src/ops/facade_catalog.cpp
+include/modb/ops/facade_handle.hpp
+include/modb/net/facade_protocol.hpp      (ou extensão em protocol.hpp)
+docs/decisions/ADR-014-catalogo-de-facades-e-handles.md
+tests/facade_catalog_test.cpp
+tests/facade_handle_test.cpp
+tests/facade_server_test.cpp
+examples/accounts_facade/                 (facade exemplo sobre TransferFunds)
+```
+
+## Design
+
+```cpp
+struct MethodDescriptor {
+    std::string operation_id;   // id no OperationRegistry, ex.: "account.transfer"
+    std::uint32_t method_version;
+    enum class Mode { read_only, read_write } mode;
+};
+
+struct FacadeDescriptor {
+    std::string facade_id;      // identidade estável — NÃO o índice no vetor
+    std::uint32_t facade_version;
+    std::vector<MethodDescriptor> methods;
+};
+
+class FacadeCatalog {
+public:
+    Result<void> register_facade(FacadeDescriptor desc);
+    Result<FacadeDescriptor> find(std::string_view facade_id,
+                                  std::uint32_t version) const;
+    std::span<const FacadeDescriptor> list() const; // backing: vector<>
+};
+
+// Cliente — handle tipado por facade
+template <typename TFacade>
+class FacadeHandle {
+public:
+    // Sessão/conexão + FacadeId + versão negociada
+    template <typename Method, typename... Args>
+    Result<typename Method::Result> invoke(Args&&... args);
+};
+```
+
+### Invariantes
+
+1. O catálogo é um `vector<FacadeDescriptor>` heterogêneo; a posição no
+   vetor é só ordem de enumeração. Lookup e protocolo usam `FacadeId` +
+   versão.
+2. Cada método aponta para um `operation_id` já registrado (Fase 9). A
+   facade não reimplementa o despacho: resolve o método e delega ao
+   `OperationRegistry` / `OpCall`.
+3. `FacadeHandle` valida que o método invocado pertence à facade; caso
+   contrário `facade_method_not_found`. Facade ausente →
+   `facade_not_found`; versão incompatível na negociação →
+   `incompatible_facade_version`.
+4. Argumentos/resultados usam o codec versionado; nenhum ponteiro ou ABI
+   C++ na rede (ADR-012 / ADR-014).
+5. Cancelamento e deadline seguem o modelo da Fase 8; commit/rollback o da
+   Fase 9.
+
+### Protocolo (extensão da Fase 8)
+
+Mensagens lógicas (podem reutilizar envelope existente ou adicionar kinds):
+
+- `FacadeList` / `FacadeListOk` — enumerar facades e métodos.
+- `FacadeOpen` / `FacadeOpenOk` — negociar versão e obter handle lógico
+  (sessão + `FacadeId` + versão).
+- Invocação: `handle.invoke` serializa como `OpCall` com o `operation_id`
+  do método (ou kind dedicado que carrega facade+método e o servidor
+  resolve). Resultado continua `OpResult`.
+
+### Exemplo obrigatório: facade `Accounts`
+
+```cpp
+// Servidor (após carregar módulo TransferFunds)
+catalog.register_facade({
+    .facade_id = "accounts",
+    .facade_version = 1,
+    .methods = {{"account.transfer", 1, MethodDescriptor::Mode::read_write}},
+});
+
+// Cliente
+auto handle = client.open_facade<Accounts>("accounts", /*version=*/1);
+auto r = handle.invoke<TransferFunds>(source, destination, amount);
+```
+
+Saldo insuficiente → erro + rollback (mesmo contrato da Fase 9). Método
+`"finance.close-month"` via handle de `accounts` →
+`facade_method_not_found`.
+
+## Testes automatizados
+
+**`tests/facade_catalog_test.cpp`** (`modb.facade_catalog`) — sem rede
+
+| Caso | Verificação |
+|---|---|
+| registro + list | vetor contém descriptor; `list().size()` correto |
+| lookup por id/versão | encontra; versão errada → `incompatible_facade_version` |
+| id ausente | `facade_not_found` |
+| método alheio | invoke/resolução rejeita com `facade_method_not_found` |
+| posição ≠ identidade | reordenar o vetor não altera lookup por `FacadeId` |
+
+**`tests/facade_handle_test.cpp`** (`modb.facade_handle`) — embedded
+
+| Caso | Verificação |
+|---|---|
+| invoke feliz | delega ao registry; TransferFunds commitado |
+| erro de domínio | rollback; saldos intactos |
+| handle com versão errada | falha na abertura/negociação |
+
+**`tests/facade_server_test.cpp`** (`modb.facade_server`)
+
+| Caso | Verificação |
+|---|---|
+| **critério da fase** | `open_facade` + `invoke<TransferFunds>` pela rede; atômico |
+| descoberta | `FacadeList` retorna `accounts` e método `account.transfer` |
+| método errado | invoke de operação de outra facade → erro no cliente |
+
+## Critério de conclusão
+
+Consumidor obtém handle tipado, invoca método da facade pela rede com o
+contrato transacional da Fase 9; descoberta e rejeições de versão/método
+estão cobertas pelos testes.
+
+---
+
+# Fase 12 — Container serverless
+
+## Objetivo
+
+Empacotar o servidor moDb (Fases 8–9 e 11) como imagem OCI reproduzível,
+adequada a plataformas de containers com escala a zero, inicialização sob
+demanda e persistência externa do arquivo do banco e do WAL. Esta fase
+começa somente depois das Fases 8, 9, 10 e 11: rede, runtime de domínio,
+estabilização e catálogo de facades precisam existir antes da superfície
+operacional.
 
 ## Decisões fixadas (conteúdo da ADR-013)
 
@@ -1742,7 +1960,7 @@ tests/async_file_test.cpp
    - sobe com volume vazio → cria banco → escreve objeto/operação → derruba
      container com `kill -9` → sobe de novo no mesmo volume → estado
      commitado presente, incompleto ausente;
-   - cold start a partir de escala zero atende um cliente da Fase 8/9;
+   - cold start a partir de escala zero atende um cliente das Fases 8/9/11;
    - segunda réplica writer tentando o mesmo volume é rejeitada (lock) ou
      documentada como configuração proibida na plataforma.
 7. Pipeline: build → SBOM → scan → publish com tag igual ao versionamento
@@ -1773,6 +1991,7 @@ observável, testado e não altera ordering, atomicidade ou durabilidade.
 | 6 | `snapshot_conflict` |
 | 8 | `protocol_error`, `frame_too_large`, `connection_closed` |
 | 9 | `operation_not_found`, `incompatible_module` |
+| 11 | `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
 
 # Apêndice B — Mapa de páginas do formato
 

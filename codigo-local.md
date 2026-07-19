@@ -262,6 +262,47 @@ Apenas:
 
 ---
 
+# Facades e handles (Fase 11)
+
+As operações continuam sendo a unidade de execução (Fase 9). A Fase 11 as
+agrupa em **facades** descobríveis e dá ao consumidor um **handle** tipado
+para invocar métodos daquela facade.
+([ADR-014](docs/decisions/ADR-014-catalogo-de-facades-e-handles.md)).
+
+O servidor mantém um catálogo heterogêneo:
+
+```cpp
+std::vector<FacadeDescriptor> catalog;
+// cada FacadeDescriptor: FacadeId estável, versão, vector<MethodDescriptor>
+// a posição no vetor NÃO é identidade pública
+```
+
+Fluxo do consumidor:
+
+```text
+Cliente
+  → open_facade<"accounts">(versão)
+  → FacadeHandle
+  → invoke<TransferFunds>(args...)
+  → OperationRegistry / OpCall
+  → Transaction → Commit | Rollback
+```
+
+Exemplo:
+
+```cpp
+auto accounts = client.open_facade<Accounts>("accounts", 1);
+auto r = accounts.invoke<TransferFunds>(source, destination, amount);
+```
+
+Descoberta lista facades e métodos. Versão incompatível,
+facade ausente ou método que não pertence à facade são rejeitados
+(`incompatible_facade_version`, `facade_not_found`,
+`facade_method_not_found`). O handle não substitui o registry: apenas
+resolve o método e delega a invocação.
+
+---
+
 # ExecutionContext
 
 Toda operação recebe um contexto.
