@@ -1935,8 +1935,11 @@ Começa somente depois das Fases 8, 9, 10, 11 e 12. Decisão:
 
 ## Fase 13A — ADR e modelo de implantação
 
+Status: ✅ Concluída — tag `0.0.13a` (2026-07-19).
+
 Registrar volume persistente, writer único, cold start, escala a zero e
-plataforma de referência. Tag: `0.0.13a`.
+plataforma de referência ([ADR-013](decisions/ADR-013-execucao-serverless-em-container.md)).
+Tag: `0.0.13a`.
 
 ## Fase 13B — I/O assíncrono real
 
