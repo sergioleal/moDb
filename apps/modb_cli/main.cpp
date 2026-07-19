@@ -15,7 +15,9 @@
 #include "modb/net/client.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/server.hpp"
+#include "examples/accounts_facade/accounts_facade.hpp"
 #include "examples/transfer_funds/transfer_funds.hpp"
+#include "modb/ops/facade_catalog.hpp"
 #include "modb/ops/module_manifest.hpp"
 #include "modb/ops/operation_registry.hpp"
 #include "modb/storage/page.hpp"
@@ -150,6 +152,7 @@ int command_serve_cancel_demo(const std::filesystem::path& path, bool force);
 int command_serve_process_demo(const std::filesystem::path& path, bool force,
                                const std::filesystem::path& exe_path);
 int command_ops_transfer_demo(const std::filesystem::path& path, bool force);
+int command_ops_facade_demo(const std::filesystem::path& path, bool force);
 int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
                        std::optional<std::size_t> fail_after, bool small_buffers);
 int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name);
@@ -2057,8 +2060,10 @@ int command_serve_process_demo(const std::filesystem::path& path, bool force,
 void print_ops_help() {
     std::cout << "Usage:\n"
                  "  modb ops transfer-demo <file> [--force]\n"
+                 "  modb ops facade-demo <file> [--force]\n"
                  "\n"
-                 "transfer-demo  Seed accounts, serve OpCall TransferFunds and exit (Fase 9).\n";
+                 "transfer-demo  Seed accounts, serve OpCall TransferFunds and exit (Fase 9).\n"
+                 "facade-demo    Accounts facade via open_facade + invoke pela rede (Fase 11D).\n";
 }
 
 int command_ops_transfer_demo(const std::filesystem::path& path, bool force) {
@@ -2187,6 +2192,138 @@ int command_ops_transfer_demo(const std::filesystem::path& path, bool force) {
         return 1;
     }
     std::cout << "Result: TransferFunds atomic via client.call OK\n";
+    return 0;
+}
+
+int command_ops_facade_demo(const std::filesystem::path& path, bool force) {
+    using modb::examples::Account;
+    using modb::examples::AccountsFacade;
+    using modb::examples::TransferFunds;
+    using modb::examples::accounts_facade_manifest;
+    using modb::examples::register_accounts_facade_module;
+
+    std::error_code filesystem_error;
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            std::cerr << "Error: file already exists (use --force)\n";
+            return 1;
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            std::cerr << "Error: could not remove existing file\n";
+            return 1;
+        }
+        std::filesystem::remove(path.string() + ".wal", filesystem_error);
+    }
+
+    modb::object::ObjectId alice{};
+    modb::object::ObjectId bob{};
+    {
+        auto created = modb::object::Database::create(path);
+        if (!created) {
+            return print_error(created.error());
+        }
+        auto database = std::make_shared<modb::object::Database>(std::move(*created));
+        auto attached = modb::object::DatabaseRegistry::instance().attach(database);
+        if (!attached) {
+            return print_error(attached.error());
+        }
+        modb::object::BindingBuilder<Account> builder{"Account"};
+        builder.field<1>("owner", &Account::owner).field<2>("balance", &Account::balance);
+        if (auto bound = database->bind(std::move(builder)); !bound) {
+            return print_error(bound.error());
+        }
+        auto tx = database->begin();
+        if (!tx) {
+            return print_error(tx.error());
+        }
+        auto a = database->create(*tx, Account{"Alice", 100});
+        auto b = database->create(*tx, Account{"Bob", 10});
+        if (!a) {
+            return print_error(a.error());
+        }
+        if (!b) {
+            return print_error(b.error());
+        }
+        alice = a->id();
+        bob = b->id();
+        if (auto committed = tx->commit(); !committed) {
+            return print_error(committed.error());
+        }
+        modb::object::DatabaseRegistry::instance().detach(*attached);
+    }
+
+    auto server = modb::net::Server::listen(path, "127.0.0.1", 0);
+    if (!server) {
+        return print_error(server.error());
+    }
+    {
+        modb::object::BindingBuilder<Account> builder{"Account"};
+        builder.field<1>("owner", &Account::owner).field<2>("balance", &Account::balance);
+        if (auto bound = server->database().bind(std::move(builder)); !bound) {
+            return print_error(bound.error());
+        }
+    }
+
+    auto registry = std::make_shared<modb::ops::OperationRegistry>();
+    auto catalog = std::make_shared<modb::ops::FacadeCatalog>();
+    const auto baseline = server->database().current_baseline()->id();
+    auto manifest = accounts_facade_manifest(baseline);
+    modb::ops::ModuleLoader loader;
+    loader.admit_hash(manifest.hash);
+    if (auto loaded = loader.load(manifest, baseline, *registry, *catalog,
+                                  [](modb::ops::OperationRegistry& reg) {
+                                      return register_accounts_facade_module(reg);
+                                  });
+        !loaded) {
+        return print_error(loaded.error());
+    }
+    server->set_operation_registry(registry);
+    server->set_facade_catalog(catalog);
+
+    std::cout << "ODB++ ops facade-demo (Fase 11D)\n"
+              << "  database: " << path.string() << '\n'
+              << "  listening: 127.0.0.1:" << server->port() << '\n'
+              << "  facade: accounts v1\n";
+
+    const auto port = server->port();
+    const auto db_name = std::string{server->database_name()};
+    bool serve_ok = false;
+    std::thread acceptor([&server, &serve_ok] {
+        serve_ok = static_cast<bool>(server->serve_one());
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+    {
+        auto client = modb::net::Client::connect("127.0.0.1", port, db_name);
+        if (!client) {
+            acceptor.join();
+            return print_error(client.error());
+        }
+        auto handle = client->open_facade<AccountsFacade>();
+        if (!handle) {
+            acceptor.join();
+            return print_error(handle.error());
+        }
+        auto ok = handle->invoke<TransferFunds>(alice, bob, 40);
+        if (!ok) {
+            acceptor.join();
+            return print_error(ok.error());
+        }
+        std::cout << "  invoke TransferFunds 40 Alice→Bob OK\n";
+        auto failed = handle->invoke<TransferFunds>(alice, bob, 1000);
+        if (failed) {
+            acceptor.join();
+            std::cerr << "Error: expected insufficient funds\n";
+            return 1;
+        }
+        std::cout << "  insufficient funds rejected: " << failed.error().message << '\n';
+    }
+    acceptor.join();
+    if (!serve_ok) {
+        std::cerr << "Error: server session failed\n";
+        return 1;
+    }
+    std::cout << "Result: Accounts facade invoke via rede OK\n";
     return 0;
 }
 
@@ -5271,7 +5408,17 @@ int run(int argc, char* argv[]) {
             }
             return command_ops_transfer_demo(argv[3], force);
         }
-        return print_usage_error("modb ops transfer-demo <file> [--force]");
+        if (std::string_view{argv[2]} == "facade-demo") {
+            if (argc < 4 || argc > 5) {
+                return print_usage_error("modb ops facade-demo <file> [--force]");
+            }
+            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
+            if (argc == 5 && !force) {
+                return print_usage_error("modb ops facade-demo <file> [--force]");
+            }
+            return command_ops_facade_demo(argv[3], force);
+        }
+        return print_usage_error("modb ops transfer-demo|facade-demo <file> [--force]");
     }
     if (command == "serve") {
         if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {

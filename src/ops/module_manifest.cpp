@@ -1,6 +1,7 @@
 #include "modb/ops/module_manifest.hpp"
 
 #include <sstream>
+#include <string>
 
 namespace modb::ops {
 namespace {
@@ -17,6 +18,16 @@ namespace {
     return out.str();
 }
 
+[[nodiscard]] const ExportedMethod* find_export(const ModuleManifest& manifest,
+                                                std::string_view operation_id) noexcept {
+    for (const auto& method : manifest.methods) {
+        if (method.id == operation_id) {
+            return &method;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
 
 BinaryHash compute_manifest_hash(const ModuleManifest& manifest) {
@@ -26,7 +37,57 @@ BinaryHash compute_manifest_hash(const ModuleManifest& manifest) {
     for (const auto& method : manifest.methods) {
         body << '|' << method.id << ':' << static_cast<int>(method.mode);
     }
+    for (const auto& facade : manifest.facades) {
+        body << "|F:" << facade.facade_id << ':' << facade.facade_version << ':'
+             << static_cast<int>(facade.mode);
+        for (const auto& method : facade.methods) {
+            body << "|M:" << method.operation_id << ':' << method.method_version << ':'
+                 << static_cast<int>(method.mode);
+        }
+    }
     return fnv1a_hex(body.str());
+}
+
+Result<void> register_facades_from_manifest(const ModuleManifest& manifest,
+                                            const OperationRegistry& operations,
+                                            FacadeCatalog& catalog) {
+    for (const auto& facade : manifest.facades) {
+        if (facade.facade_id.empty()) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_argument, "manifest facade_id must not be empty"});
+        }
+        if (facade.methods.empty()) {
+            return std::unexpected(Error{ErrorCode::invalid_argument,
+                                         "manifest facade '" + facade.facade_id +
+                                             "' exports no methods"});
+        }
+        for (const auto& method : facade.methods) {
+            if (method.operation_id.empty()) {
+                return std::unexpected(Error{ErrorCode::invalid_argument,
+                                             "manifest facade method id must not be empty"});
+            }
+            const auto* exported = find_export(manifest, method.operation_id);
+            if (exported == nullptr) {
+                return std::unexpected(Error{ErrorCode::invalid_argument,
+                                             "facade method not in module exports: " +
+                                                 method.operation_id});
+            }
+            if (exported->mode != method.mode) {
+                return std::unexpected(Error{ErrorCode::invalid_argument,
+                                             "facade method mode mismatches export: " +
+                                                 method.operation_id});
+            }
+            if (!operations.contains(method.operation_id)) {
+                return std::unexpected(Error{ErrorCode::operation_not_found,
+                                             "facade method not registered: " +
+                                                 method.operation_id});
+            }
+        }
+        if (auto status = catalog.register_facade(facade); !status) {
+            return status;
+        }
+    }
+    return {};
 }
 
 Result<void> ModuleLoader::load(const ModuleManifest& manifest,
@@ -60,6 +121,16 @@ Result<void> ModuleLoader::load(const ModuleManifest& manifest,
         return std::unexpected(Error{ErrorCode::invalid_argument, "module registrar is empty"});
     }
     return registrar(registry);
+}
+
+Result<void> ModuleLoader::load(const ModuleManifest& manifest,
+                                object::BaselineId database_baseline,
+                                OperationRegistry& registry, FacadeCatalog& catalog,
+                                Registrar registrar) {
+    if (auto status = load(manifest, database_baseline, registry, std::move(registrar)); !status) {
+        return status;
+    }
+    return register_facades_from_manifest(manifest, registry, catalog);
 }
 
 } // namespace modb::ops

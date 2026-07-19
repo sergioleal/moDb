@@ -79,3 +79,14 @@ de invocação para o consumidor.**
 - Persistência de facades/handles como objetos de banco fica fora do
   escopo; o catálogo é runtime (e, se necessário, derivado do manifesto
   dos módulos carregados).
+
+## Complemento Fase 11D
+
+- `ModuleManifest::facades` agrupa métodos já exportados; o hash do
+  manifesto inclui essa superfície.
+- `register_facades_from_manifest` / `ModuleLoader::load(..., catalog, ...)`
+  populam o `FacadeCatalog` após registrar operações.
+- `FacadeHandle` guarda o `FacadeDescriptor` negociado e um `FacadeInvoker`
+  (embedded → `OperationRegistry::dispatch`; remoto → `Client::call`).
+- `Client::open_facade<TFacade>()` negocia versão e devolve handle tipado.
+- Guia do consumidor: [FACADES.md](../FACADES.md).

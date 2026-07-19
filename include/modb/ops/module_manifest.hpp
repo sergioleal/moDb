@@ -5,6 +5,8 @@
 
 #include "modb/error.hpp"
 #include "modb/object/ids.hpp"
+#include "modb/ops/facade_catalog.hpp"
+#include "modb/ops/facade_descriptor.hpp"
 #include "modb/ops/operation.hpp"
 #include "modb/ops/operation_registry.hpp"
 
@@ -36,6 +38,8 @@ struct ModuleManifest {
     std::uint32_t api_version{runtime_api_version};
     BinaryHash hash{};
     std::vector<ExportedMethod> methods{};
+    // Facades derivadas do módulo (Fase 11D). Vazio → só operações planas (Fase 9).
+    std::vector<FacadeDescriptor> facades{};
     bool migration{false}; // true → baseline divergente permitida (migradora)
 
     friend bool operator==(const ModuleManifest&, const ModuleManifest&) = default;
@@ -43,6 +47,11 @@ struct ModuleManifest {
 
 // Calcula um hash estável do manifesto (conteúdo lógico, sem o campo hash).
 [[nodiscard]] BinaryHash compute_manifest_hash(const ModuleManifest& manifest);
+
+// Registra facades do manifesto no catálogo (métodos ⊆ exports e ∈ registry).
+[[nodiscard]] Result<void> register_facades_from_manifest(const ModuleManifest& manifest,
+                                                          const OperationRegistry& operations,
+                                                          FacadeCatalog& catalog);
 
 class ModuleLoader {
 public:
@@ -57,6 +66,12 @@ public:
     [[nodiscard]] Result<void> load(const ModuleManifest& manifest,
                                     object::BaselineId database_baseline,
                                     OperationRegistry& registry, Registrar registrar);
+
+    // Como load(), e depois registra facades do manifesto no catálogo (Fase 11D).
+    [[nodiscard]] Result<void> load(const ModuleManifest& manifest,
+                                    object::BaselineId database_baseline,
+                                    OperationRegistry& registry, FacadeCatalog& catalog,
+                                    Registrar registrar);
 
 private:
     std::unordered_set<std::string> allowlist_;

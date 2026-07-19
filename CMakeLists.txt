@@ -58,6 +58,7 @@ add_library(modb
     src/ops/module_manifest.cpp
     src/ops/facade_catalog.cpp
     examples/transfer_funds/transfer_funds.cpp
+    examples/accounts_facade/accounts_facade.cpp
     src/storage/binary.cpp
     src/storage/codec.cpp
     src/storage/page_file.cpp
@@ -527,6 +528,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.ops_transfer_demo
         COMMAND modb_cli ops transfer-demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-ops-transfer-demo.modb --force)
+    add_test(NAME modb.cli.ops_facade_demo
+        COMMAND modb_cli ops facade-demo
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-ops-facade-demo.modb --force)
     add_test(NAME modb.cli.ping_help COMMAND modb_cli ping --help)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
     add_test(NAME modb.cli.types_help COMMAND modb_cli types --help)
