@@ -44,12 +44,33 @@ spec:
               value: "0.0.0.0"
             - name: MODB_PORT
               value: "7400"
+            - name: MODB_READY_FILE
+              value: /tmp/modb-ready
+            - name: MODB_LIVE_FILE
+              value: /tmp/modb-live
           volumeMounts:
             - name: data
               mountPath: /data
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+          startupProbe:
+            exec:
+              command: ["test", "-f", "/tmp/modb-ready"]
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/modb-ready"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/modb-live"]
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "kill -TERM 1; sleep 5"]
           resources:
             requests:
               cpu: 100m
@@ -60,6 +81,7 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: modb-data
+      terminationGracePeriodSeconds: 30
 ---
 apiVersion: v1
 kind: Service

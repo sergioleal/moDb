@@ -37,7 +37,9 @@ RUN chmod 755 /usr/local/bin/modb /usr/local/bin/modb-entrypoint
 USER modb
 ENV MODB_DB_PATH=/data/db.modb \
     MODB_HOST=0.0.0.0 \
-    MODB_PORT=7400
+    MODB_PORT=7400 \
+    MODB_READY_FILE=/tmp/modb-ready \
+    MODB_LIVE_FILE=/tmp/modb-live
 EXPOSE 7400
 VOLUME ["/data"]
 ENTRYPOINT ["/usr/local/bin/modb-entrypoint"]

@@ -12,6 +12,8 @@ services:
       MODB_DB_PATH: /data/db.modb
       MODB_HOST: "0.0.0.0"
       MODB_PORT: "7400"
+      MODB_READY_FILE: /tmp/modb-ready
+      MODB_LIVE_FILE: /tmp/modb-live
       # Sem segredos na imagem — apenas variáveis/secrets da plataforma.
     ports:
       - "7400:7400"
@@ -19,6 +21,13 @@ services:
       - modb-data:/data
     user: "10001:10001"
     restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/modb-ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 20s
 
 volumes:
   modb-data:

@@ -859,10 +859,10 @@ atende handshake/cliente da Fase 8. Tag: `0.0.13c`.
 
 #### Fase 13D — Probes, shutdown e recovery
 
-- [ ] Implementar readiness, liveness, startup probe e desligamento gracioso,
+- [x] Implementar readiness, liveness, startup probe e desligamento gracioso,
       bloqueando novas operações e concluindo ou revertendo transações antes do
       prazo de término da plataforma.
-- [ ] Comprovar recovery no cold start e após término forçado do container,
+- [x] Comprovar recovery no cold start e após término forçado do container,
       incluindo banco com WAL pendente.
 
 Critério de aceite: kill -9 + reabertura no mesmo volume preserva commits e

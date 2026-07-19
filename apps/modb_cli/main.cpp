@@ -17,6 +17,7 @@
 #include "modb/net/client.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/server.hpp"
+#include "modb/net/probe.hpp"
 #include "examples/accounts_facade/accounts_facade.hpp"
 #include "examples/transfer_funds/transfer_funds.hpp"
 #include "modb/ops/facade_catalog.hpp"
@@ -40,6 +41,7 @@
 // Disponibiliza std::exit, usado por `tx crash` para simular uma queda real
 // (pula os destrutores locais, ao contrário de um retorno normal de main).
 #include <cstdlib>
+#include <csignal>
 #include <exception>
 #include <filesystem>
 #include <iomanip>
@@ -1893,14 +1895,54 @@ int command_serve_loop(const std::filesystem::path& path, std::string_view host,
     if (!server) {
         return print_error(server.error());
     }
+
+    // Readiness só após open+recovery+listen (cold start completo).
+    const char* ready_env = std::getenv("MODB_READY_FILE");
+    const char* live_env = std::getenv("MODB_LIVE_FILE");
+    const std::filesystem::path ready_file =
+        ready_env && *ready_env != '\0' ? ready_env : std::filesystem::path{};
+    const std::filesystem::path live_file =
+        live_env && *live_env != '\0' ? live_env : std::filesystem::path{};
+    if (!ready_file.empty()) {
+        if (auto status = modb::net::write_probe_file(ready_file); !status) {
+            return print_error(status.error());
+        }
+    }
+    if (!live_file.empty()) {
+        if (auto status = modb::net::write_probe_file(live_file, "live\n"); !status) {
+            return print_error(status.error());
+        }
+    }
+
+    static modb::net::Server* signal_server = nullptr;
+    signal_server = &*server;
+    const auto on_stop = [](int) {
+        if (signal_server != nullptr) {
+            signal_server->request_stop();
+        }
+    };
+    std::signal(SIGINT, on_stop);
+#ifndef _WIN32
+    std::signal(SIGTERM, on_stop);
+#endif
+
     std::cout << "READY " << server->port() << '\n';
     std::cout.flush();
     std::cout << "Serving " << path.string() << " on " << host << ':' << server->port()
-              << " (loop until listener fails)\n";
+              << " (loop until SIGTERM/SIGINT)\n";
     std::cout.flush();
-    if (auto status = server->serve_forever(); !status) {
+    const auto status = server->serve_forever();
+    signal_server = nullptr;
+    if (!ready_file.empty()) {
+        static_cast<void>(modb::net::remove_probe_file(ready_file));
+    }
+    if (!live_file.empty()) {
+        static_cast<void>(modb::net::remove_probe_file(live_file));
+    }
+    if (!status) {
         return print_error(status.error());
     }
+    std::cout << "Graceful shutdown complete.\n";
     return 0;
 }
 
