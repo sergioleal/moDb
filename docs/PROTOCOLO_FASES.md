@@ -1851,11 +1851,14 @@ Critério: associação/ownership, reabertura, órfã, `invalid_edge`. Tag:
 
 ## Fase 12B — Adjacência e arestas de entrada
 
+Status: ✅ Concluída — tag `0.0.12b` (2026-07-19).
+
 Artefatos:
 
 ```text
 include/modb/graph/graph_view.hpp
 src/graph/graph_view.cpp
+tests/graph_view_test.cpp
 ```
 
 Adjacência em `PersistentVector<Ref<T>>`; incoming somente via índice de

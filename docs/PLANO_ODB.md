@@ -767,9 +767,9 @@ Critério de aceite: `modb.edge_handle` — associação/ownership, reabertura,
 
 #### Fase 12B — Adjacência e arestas de entrada
 
-- [ ] Expor adjacência para coleções `PersistentVector<Ref<T>>`, preservando
+- [x] Expor adjacência para coleções `PersistentVector<Ref<T>>`, preservando
       tipo e semântica das arestas.
-- [ ] Suportar arestas de entrada por índice de campo `Ref`; sem scan reverso
+- [x] Suportar arestas de entrada por índice de campo `Ref`; sem scan reverso
       ilimitado implícito.
 
 Critério de aceite: enumera handles em coleção; incoming exige índice e falha

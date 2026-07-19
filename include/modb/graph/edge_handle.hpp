@@ -72,6 +72,11 @@ private:
         object::Database& database, const object::Handle<F>& source, object::FieldId field,
         object::OwnedRef<T> F::* member);
 
+    template <class F, class T, EdgeKind K>
+    friend EdgeHandle<F, T, K> make_edge_handle(object::DatabaseId database,
+                                                object::ObjectId source, object::ObjectId target,
+                                                object::FieldId field) noexcept;
+
     EdgeHandle(object::DatabaseId database, object::ObjectId source, object::ObjectId target,
                object::FieldId field) noexcept
         : database_{database}, source_id_{source}, target_id_{target}, field_{field} {}
@@ -81,6 +86,13 @@ private:
     object::ObjectId target_id_{};
     object::FieldId field_{};
 };
+
+template <class From, class To, EdgeKind Kind>
+[[nodiscard]] inline EdgeHandle<From, To, Kind> make_edge_handle(
+    object::DatabaseId database, object::ObjectId source, object::ObjectId target,
+    object::FieldId field) noexcept {
+    return EdgeHandle<From, To, Kind>{database, source, target, field};
+}
 
 namespace detail {
 
