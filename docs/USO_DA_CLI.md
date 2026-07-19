@@ -710,9 +710,21 @@ Phase 4 graph demo: OK
 ```
 
 Esta demo da Fase 4 comprova a estrutura persistente e percorre relações
-manualmente. A Fase 12 planeja comandos separados para algoritmos:
-`graph bfs`, `graph dfs`, `graph shortest-path` e `graph toposort`, baseados em
-`EdgeHandle` e snapshot único. Eles ainda não fazem parte da CLI atual.
+manualmente. A Fase 12 acrescenta comandos de algoritmos que semeiam uma árvore
+`AlgoNode`, reabrem o arquivo e executam sob um único Snapshot:
+
+```text
+modb graph bfs <file> [--force]
+modb graph dfs <file> [--force]
+modb graph shortest-path <file> [--force]
+modb graph toposort <file> [--force]
+```
+
+```text
+$ modb graph bfs grafo-algo.modb --force
+BFS after reopen: R A B C D
+Phase 12 graph bfs: OK
+```
 
 A Fase 14 planeja comandos de replicação: `replicate serve` (primary expõe o
 stream do WAL), `replicate follow` (follower faz bootstrap e acompanha o WAL) e

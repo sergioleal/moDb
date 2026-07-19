@@ -6,6 +6,8 @@
 #include "modb/object/ref.hpp"
 #include "modb/object/type_definition.hpp"
 #include "modb/object/type_registry.hpp"
+#include "modb/graph/algorithms.hpp"
+#include "modb/graph/traversal.hpp"
 #include "modb/tx/wal.hpp"
 #include "modb/row.hpp"
 #include "modb/text_escape.hpp"
@@ -171,6 +173,10 @@ int command_blob_put(const std::filesystem::path& path, std::string_view text);
 int command_blob_get(const std::filesystem::path& path, std::uint64_t blob_id);
 int command_blob_info(const std::filesystem::path& path, std::uint64_t blob_id);
 int command_graph_demo(const std::filesystem::path& path, bool force);
+int command_graph_bfs(const std::filesystem::path& path, bool force);
+int command_graph_dfs(const std::filesystem::path& path, bool force);
+int command_graph_shortest_path(const std::filesystem::path& path, bool force);
+int command_graph_toposort(const std::filesystem::path& path, bool force);
 int command_coll_demo(const std::filesystem::path& path, bool force);
 int command_tx_demo(const std::filesystem::path& path, bool force);
 int command_tx_crash(const std::filesystem::path& path, std::string_view phase, bool force);
@@ -432,11 +438,18 @@ void print_blob_help() {
 void print_graph_help() {
     std::cout << "Usage:\n"
                  "  modb graph demo <file> [--force]\n"
+                 "  modb graph bfs <file> [--force]\n"
+                 "  modb graph dfs <file> [--force]\n"
+                 "  modb graph shortest-path <file> [--force]\n"
+                 "  modb graph toposort <file> [--force]\n"
                  "\n"
                  "End-to-end object graph (Fase 4): association (Ref), embedded value,\n"
                  "composition (OwnedRef) and a PersistentVector<Ref>. Writes the graph,\n"
                  "reopens the file, resolves every edge, then removes the parent to show\n"
-                 "the owned child cascading while associated objects survive.\n";
+                 "the owned child cascading while associated objects survive.\n"
+                 "\n"
+                 "Fase 12 algorithms (bfs/dfs/shortest-path/toposort): seed a Node tree,\n"
+                 "reopen the database, then run the algorithm under a single Snapshot.\n";
 }
 
 void print_coll_help() {
@@ -3932,6 +3945,272 @@ int command_graph_demo(const std::filesystem::path& path, bool force) {
     return 0;
 }
 
+namespace {
+
+struct AlgoNode {
+    std::string label;
+    modb::object::BlobId children{};
+};
+
+modb::object::BindingBuilder<AlgoNode> algo_node_binding() {
+    modb::object::BindingBuilder<AlgoNode> builder{"AlgoNode"};
+    builder.field<1>("label", &AlgoNode::label).field<2>("children", &AlgoNode::children);
+    return builder;
+}
+
+modb::Result<modb::object::ObjectId> algo_create_node(modb::object::Database& database,
+                                                      modb::object::Transaction& tx,
+                                                      std::string label,
+                                                      const std::vector<modb::object::ObjectId>& kids) {
+    modb::object::BlobId children{};
+    if (!kids.empty()) {
+        auto blobs = database.blobs();
+        auto vector = modb::object::PersistentVector<modb::object::Ref<AlgoNode>>::create(blobs, tx);
+        if (!vector) {
+            return std::unexpected(vector.error());
+        }
+        for (const auto id : kids) {
+            if (auto status = vector->push_back(tx, modb::object::Ref<AlgoNode>{id}); !status) {
+                return std::unexpected(status.error());
+            }
+        }
+        children = vector->id();
+    }
+    auto created = database.create(tx, AlgoNode{.label = std::move(label), .children = children});
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+    return created->id();
+}
+
+struct AlgoGraphIds {
+    modb::object::ObjectId root{};
+    modb::object::ObjectId a{};
+    modb::object::ObjectId b{};
+    modb::object::ObjectId c{};
+    modb::object::ObjectId d{};
+};
+
+modb::Result<AlgoGraphIds> seed_algo_graph(const std::filesystem::path& path, bool force) {
+    std::error_code filesystem_error;
+    if (std::filesystem::exists(path, filesystem_error)) {
+        if (!force) {
+            return std::unexpected(modb::Error{modb::ErrorCode::file_already_exists,
+                                               "graph algo file exists; use --force to replace it"});
+        }
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            return std::unexpected(
+                modb::Error{modb::ErrorCode::io_error, "cannot replace graph algo database"});
+        }
+        const auto wal = path.string() + ".wal";
+        std::filesystem::remove(wal, filesystem_error);
+    }
+
+    auto session = DatabaseSession::create(path);
+    if (!session) {
+        return std::unexpected(session.error());
+    }
+    auto& database = session->database();
+    if (auto bound = database.bind(algo_node_binding()); !bound) {
+        return std::unexpected(bound.error());
+    }
+    auto tx = database.begin();
+    if (!tx) {
+        return std::unexpected(tx.error());
+    }
+    AlgoGraphIds ids;
+    auto leaf_c = algo_create_node(database, *tx, "C", {});
+    auto leaf_d = algo_create_node(database, *tx, "D", {});
+    if (!leaf_c || !leaf_d) {
+        return std::unexpected(leaf_c ? leaf_d.error() : leaf_c.error());
+    }
+    ids.c = *leaf_c;
+    ids.d = *leaf_d;
+    auto node_a = algo_create_node(database, *tx, "A", {ids.c});
+    auto node_b = algo_create_node(database, *tx, "B", {ids.d});
+    if (!node_a || !node_b) {
+        return std::unexpected(node_a ? node_b.error() : node_a.error());
+    }
+    ids.a = *node_a;
+    ids.b = *node_b;
+    auto root = algo_create_node(database, *tx, "R", {ids.a, ids.b});
+    if (!root) {
+        return std::unexpected(root.error());
+    }
+    ids.root = *root;
+    if (auto committed = tx->commit(); !committed) {
+        return std::unexpected(committed.error());
+    }
+    return ids;
+}
+
+modb::graph::AdjacencyFn make_algo_adjacency(modb::object::Database& database,
+                                             const modb::object::Snapshot& snapshot) {
+    return [&database, &snapshot](modb::object::ObjectId from)
+               -> modb::Result<std::vector<modb::object::ObjectId>> {
+        auto node = database.get<AlgoNode>(from, snapshot);
+        if (!node) {
+            return std::unexpected(node.error());
+        }
+        if (node->children.value == 0) {
+            return std::vector<modb::object::ObjectId>{};
+        }
+        auto blobs = database.blobs();
+        modb::object::PersistentVector<modb::object::Ref<AlgoNode>> vector{blobs, node->children};
+        std::vector<modb::object::ObjectId> neighbors;
+        auto status = vector.for_each([&](const modb::object::Ref<AlgoNode>& ref) -> modb::Result<void> {
+            neighbors.push_back(ref.target);
+            return {};
+        });
+        if (!status) {
+            return std::unexpected(status.error());
+        }
+        return neighbors;
+    };
+}
+
+int reopen_algo_session(const std::filesystem::path& path,
+                        std::optional<DatabaseSession>& session) {
+    auto opened = DatabaseSession::open(path);
+    if (!opened) {
+        return print_error(opened.error());
+    }
+    session.emplace(std::move(*opened));
+    if (auto bound = session->database().bind(algo_node_binding()); !bound) {
+        return print_error(bound.error());
+    }
+    return 0;
+}
+
+} // namespace
+
+int command_graph_bfs(const std::filesystem::path& path, bool force) {
+    auto seeded = seed_algo_graph(path, force);
+    if (!seeded) {
+        return print_error(seeded.error());
+    }
+    const auto ids = *seeded;
+    std::optional<DatabaseSession> session;
+    if (const int status = reopen_algo_session(path, session); status != 0) {
+        return status;
+    }
+    auto& database = session->database();
+    auto snap = database.snapshot();
+    if (!snap) {
+        return print_error(snap.error());
+    }
+    auto adjacency = make_algo_adjacency(database, *snap);
+    std::cout << "BFS after reopen:";
+    for (auto& visit : modb::graph::bfs(ids.root, adjacency)) {
+        if (!visit) {
+            return print_error(visit.error());
+        }
+        auto node = database.get<AlgoNode>(visit->id, *snap);
+        if (!node) {
+            return print_error(node.error());
+        }
+        std::cout << ' ' << node->label;
+    }
+    std::cout << "\nPhase 12 graph bfs: OK\n";
+    return 0;
+}
+
+int command_graph_dfs(const std::filesystem::path& path, bool force) {
+    auto seeded = seed_algo_graph(path, force);
+    if (!seeded) {
+        return print_error(seeded.error());
+    }
+    const auto ids = *seeded;
+    std::optional<DatabaseSession> session;
+    if (const int status = reopen_algo_session(path, session); status != 0) {
+        return status;
+    }
+    auto& database = session->database();
+    auto snap = database.snapshot();
+    if (!snap) {
+        return print_error(snap.error());
+    }
+    auto adjacency = make_algo_adjacency(database, *snap);
+    std::cout << "DFS after reopen:";
+    for (auto& visit : modb::graph::dfs(ids.root, adjacency)) {
+        if (!visit) {
+            return print_error(visit.error());
+        }
+        auto node = database.get<AlgoNode>(visit->id, *snap);
+        if (!node) {
+            return print_error(node.error());
+        }
+        std::cout << ' ' << node->label;
+    }
+    std::cout << "\nPhase 12 graph dfs: OK\n";
+    return 0;
+}
+
+int command_graph_shortest_path(const std::filesystem::path& path, bool force) {
+    auto seeded = seed_algo_graph(path, force);
+    if (!seeded) {
+        return print_error(seeded.error());
+    }
+    const auto ids = *seeded;
+    std::optional<DatabaseSession> session;
+    if (const int status = reopen_algo_session(path, session); status != 0) {
+        return status;
+    }
+    auto& database = session->database();
+    auto snap = database.snapshot();
+    if (!snap) {
+        return print_error(snap.error());
+    }
+    auto adjacency = make_algo_adjacency(database, *snap);
+    auto path_ids = modb::graph::shortest_path(ids.root, ids.d, adjacency);
+    if (!path_ids) {
+        return print_error(path_ids.error());
+    }
+    std::cout << "shortest-path R -> D after reopen:";
+    for (const auto id : *path_ids) {
+        auto node = database.get<AlgoNode>(id, *snap);
+        if (!node) {
+            return print_error(node.error());
+        }
+        std::cout << ' ' << node->label;
+    }
+    std::cout << "\nPhase 12 graph shortest-path: OK\n";
+    return 0;
+}
+
+int command_graph_toposort(const std::filesystem::path& path, bool force) {
+    auto seeded = seed_algo_graph(path, force);
+    if (!seeded) {
+        return print_error(seeded.error());
+    }
+    const auto ids = *seeded;
+    std::optional<DatabaseSession> session;
+    if (const int status = reopen_algo_session(path, session); status != 0) {
+        return status;
+    }
+    auto& database = session->database();
+    auto snap = database.snapshot();
+    if (!snap) {
+        return print_error(snap.error());
+    }
+    auto adjacency = make_algo_adjacency(database, *snap);
+    std::vector<modb::object::ObjectId> vertices{ids.root, ids.a, ids.b, ids.c, ids.d};
+    auto order = modb::graph::topological_sort(vertices, adjacency);
+    if (!order) {
+        return print_error(order.error());
+    }
+    std::cout << "toposort after reopen:";
+    for (const auto id : *order) {
+        auto node = database.get<AlgoNode>(id, *snap);
+        if (!node) {
+            return print_error(node.error());
+        }
+        std::cout << ' ' << node->label;
+    }
+    std::cout << "\nPhase 12 graph toposort: OK\n";
+    return 0;
+}
+
 int command_coll_demo(const std::filesystem::path& path, bool force) {
     std::error_code filesystem_error;
     if (std::filesystem::exists(path, filesystem_error)) {
@@ -4794,11 +5073,36 @@ int run_graph_command(int argc, char* argv[]) {
         return 0;
     }
     const std::string_view subcommand{argv[2]};
+    const auto force = argc == 5 && std::string_view{argv[4]} == "--force";
     if (subcommand == "demo") {
-        if (argc != 4 && !(argc == 5 && std::string_view{argv[4]} == "--force")) {
+        if (argc != 4 && !force) {
             return print_usage_error("modb graph demo <file> [--force]");
         }
-        return command_graph_demo(argv[3], argc == 5);
+        return command_graph_demo(argv[3], force);
+    }
+    if (subcommand == "bfs") {
+        if (argc != 4 && !force) {
+            return print_usage_error("modb graph bfs <file> [--force]");
+        }
+        return command_graph_bfs(argv[3], force);
+    }
+    if (subcommand == "dfs") {
+        if (argc != 4 && !force) {
+            return print_usage_error("modb graph dfs <file> [--force]");
+        }
+        return command_graph_dfs(argv[3], force);
+    }
+    if (subcommand == "shortest-path") {
+        if (argc != 4 && !force) {
+            return print_usage_error("modb graph shortest-path <file> [--force]");
+        }
+        return command_graph_shortest_path(argv[3], force);
+    }
+    if (subcommand == "toposort") {
+        if (argc != 4 && !force) {
+            return print_usage_error("modb graph toposort <file> [--force]");
+        }
+        return command_graph_toposort(argv[3], force);
     }
     std::cerr << "Unknown graph command: " << subcommand << '\n';
     return 2;

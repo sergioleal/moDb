@@ -5,6 +5,7 @@
 #include "runner/jsonl_writer.hpp"
 #include "runner/profile.hpp"
 #include "scenarios/buffer_pool_oversubscribed.hpp"
+#include "scenarios/graph_traversal.hpp"
 #include "scenarios/object_store_lifecycle.hpp"
 #include "scenarios/object_store_read_hotpath.hpp"
 
@@ -316,6 +317,20 @@ CampaignResult run_campaign(const CampaignOptions& options) {
                 params.read_rounds = scenario.read_rounds == 0 ? 1 : scenario.read_rounds;
                 params.work_dir = work_dir.string();
                 return run_object_store_read_hotpath(params);
+            }
+            if (scenario.scenario_id == "graph.traversal.warm" ||
+                scenario.scenario_id == "graph.traversal.cold") {
+                GraphTraversalParams params;
+                params.scenario_id = scenario.scenario_id;
+                params.seed = options.seed;
+                params.branching =
+                    static_cast<std::uint32_t>(scenario.stride == 0 ? 2 : scenario.stride);
+                params.depth = static_cast<std::uint32_t>(
+                    scenario.object_count == 0 ? 3 : scenario.object_count);
+                params.cache_state =
+                    scenario.scenario_id == "graph.traversal.cold" ? "cold" : "warm";
+                params.work_dir = work_dir.string();
+                return run_graph_traversal(params);
             }
             ScenarioParams params;
             params.scenario_id = scenario.scenario_id;

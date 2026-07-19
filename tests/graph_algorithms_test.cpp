@@ -431,6 +431,24 @@ int main() {
         }
     }
 
-    registry.detach(*database_id);
-    return suite.finish();
+    // 12E: reabertura preserva caminho mínimo
+    {
+        registry.detach(*database_id);
+        database.reset();
+        auto reopened = Database::open(temp.path());
+        suite.check(reopened.has_value(), "reopen");
+        if (reopened) {
+            auto db2 = share_database(reopened);
+            auto id2 = registry.attach(db2);
+            suite.check(id2 && db2->bind(node_builder()).has_value(), "rebind");
+            auto snap5 = db2->snapshot();
+            auto adj5 = make_adjacency(*db2, *snap5);
+            auto path = shortest_path(root, d, adj5);
+            suite.check(path && path->size() == 3, "shortest_path after reopen");
+            if (id2) {
+                registry.detach(*id2);
+            }
+        }
+        return suite.finish();
+    }
 }

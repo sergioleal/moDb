@@ -797,11 +797,11 @@ componentes na view não direcionada. Tag: `0.0.12d`.
 
 #### Fase 12E — CLI, benchmarks e fechamento
 
-- [ ] Estender a CLI com `graph bfs`, `dfs`, `shortest-path` e `toposort`,
+- [x] Estender a CLI com `graph bfs`, `dfs`, `shortest-path` e `toposort`,
       mantendo `graph demo` da Fase 4 como demonstração estrutural.
-- [ ] Adicionar cenários de benchmark por largura, profundidade, densidade,
+- [x] Adicionar cenários de benchmark por largura, profundidade, densidade,
       cache cold/warm e pico do conjunto de visitados.
-- [ ] Fechar a suíte de snapshot, reabertura, ownership e grafos heterogêneos.
+- [x] Fechar a suíte de snapshot, reabertura, ownership e grafos heterogêneos.
 
 Critério de aceite: após reabrir o banco, CLI e algoritmos cobertos; benchmarks
 registrados no runner. Tag: `0.0.12e`.
