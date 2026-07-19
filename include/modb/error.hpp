@@ -120,6 +120,12 @@ enum class ErrorCode {
     incompatible_module,
     // Major de protocolo incompatível na negociação Hello (Fase 10E).
     incompatible_protocol_version,
+    // Facade ausente no catálogo (Fase 11).
+    facade_not_found,
+    // Método invocado não pertence à facade do handle (Fase 11).
+    facade_method_not_found,
+    // Versão de facade incompatível na negociação/lookup (Fase 11).
+    incompatible_facade_version,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

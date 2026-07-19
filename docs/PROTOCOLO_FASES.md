@@ -1758,7 +1758,9 @@ listagem, lookup por `FacadeId`+versão) e ErrorCodes de lookup. O catálogo é
 `vector<FacadeDescriptor>`; posição ≠ identidade.
 
 Critério: `modb.facade_catalog` — registro/list/lookup; versão/id ausentes;
-reordenar o vetor não altera lookup. Tag: `0.0.11a`.
+reordenar o vetor não altera lookup. Tag: `0.0.11a`. Entregue —
+`modb.facade_catalog`; ErrorCodes `facade_not_found`,
+`facade_method_not_found`, `incompatible_facade_version`.
 
 ## Fase 11B — FacadeHandle e invoke embedded
 
