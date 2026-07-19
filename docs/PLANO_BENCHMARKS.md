@@ -359,6 +359,20 @@ RSS, tamanho final e amplificação.
 Registrar complexidade observada, bytes reescritos por mutação, páginas órfãs,
 TTFR de leitura e pico de memória.
 
+#### 8.5.1 Algoritmos de grafos (Fase 12)
+
+- BFS e DFS em grafos estreitos/profundos, largos/rasos e por densidade.
+- Caminho mínimo sem peso com alvos próximos, distantes e inalcançáveis.
+- Detecção de ciclo e ordenação topológica em DAGs e grafos cíclicos.
+- Componentes conexos por quantidade e distribuição de tamanhos.
+- Adjacência outgoing direta, incoming indexada e
+  `PersistentVector<Ref<T>>`.
+- Cache cold/warm, snapshots concorrentes, refs órfãs e cancelamento/limites.
+
+Registrar vértices/arestas por segundo, TTFR, p50/p99 de expansão, páginas
+lidas, RSS e pico do conjunto de visitados. Dataset, seed, direção, política
+de órfãs e inclusão de `OwnedRef` acompanham cada amostra.
+
 ### 8.6 Transações, WAL e recuperação
 
 | Grupo | Casos | Métricas principais |

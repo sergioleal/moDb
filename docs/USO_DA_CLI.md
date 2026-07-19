@@ -709,6 +709,11 @@ removed Staff 28:
 Phase 4 graph demo: OK
 ```
 
+Esta demo da Fase 4 comprova a estrutura persistente e percorre relações
+manualmente. A Fase 12 planeja comandos separados para algoritmos:
+`graph bfs`, `graph dfs`, `graph shortest-path` e `graph toposort`, baseados em
+`EdgeHandle` e snapshot único. Eles ainda não fazem parte da CLI atual.
+
 ## `modb coll demo` — coleções persistentes (ODB++ Fase 4)
 
 Exercita `PersistentVector`, `PersistentSet` (deduplicação e ordem) e

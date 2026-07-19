@@ -399,6 +399,24 @@ A semântica OO deve ser preservada.
 
 ---
 
+## Visão de aresta em runtime
+
+As três categorias acima continuam sendo a semântica persistente. A Fase 12
+adiciona `EdgeHandle<From, To, Kind>` como visão tipada de uma associação ou
+composição para travessias e algoritmos de grafos:
+
+```cpp
+auto edge = db.edge<&Employee::department>(employee, snapshot);
+auto department = edge.target(snapshot);
+```
+
+O handle carrega `DatabaseId`, origem, alvo e `FieldId`; não é persistido.
+`Ref<T>`/`OwnedRef<T>` permanecem no objeto. `Embedded<T>` não forma aresta
+porque não possui identidade. A decisão completa está na
+[ADR-015](docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md).
+
+---
+
 # 12. Coleções Persistentes
 
 Coleções possuem identidade própria.

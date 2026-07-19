@@ -1868,16 +1868,205 @@ estão cobertas pelos testes.
 
 ---
 
-# Fase 12 — Container serverless
+# Fase 12 — Handles de arestas e algoritmos de grafos
 
 ## Objetivo
 
-Empacotar o servidor moDb (Fases 8–9 e 11) como imagem OCI reproduzível,
+Transformar os relacionamentos persistentes da Fase 4 em uma API de arestas
+tipadas e executar algoritmos básicos sob um único snapshot. A fase reutiliza
+streaming, cancelamento e índices das Fases 6–7 e começa após a estabilização
+da Fase 10.
+
+Decisão: [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md).
+
+## Artefatos novos
+
+```text
+include/modb/graph/edge_handle.hpp
+include/modb/graph/graph_view.hpp
+include/modb/graph/traversal.hpp
+include/modb/graph/algorithms.hpp
+src/graph/graph_view.cpp
+tests/edge_handle_test.cpp
+tests/graph_algorithms_test.cpp
+docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md
+```
+
+Atualizações:
+
+```text
+apps/modb_cli/main.cpp
+docs/USO_DA_CLI.md
+docs/PLANO_BENCHMARKS.md
+CMakeLists.txt
+```
+
+## Design
+
+```cpp
+enum class EdgeKind : std::uint8_t {
+    association,
+    ownership
+};
+
+enum class EdgeDirection : std::uint8_t {
+    outgoing,
+    incoming,
+    both
+};
+
+enum class DanglingPolicy : std::uint8_t {
+    fail,
+    skip,
+    yield_error
+};
+
+template <class From, class To,
+          EdgeKind Kind = EdgeKind::association>
+class EdgeHandle {
+public:
+    DatabaseId database() const noexcept;
+    ObjectId source_id() const noexcept;
+    ObjectId target_id() const noexcept;
+    FieldId field() const noexcept;
+
+    Result<From> source(const Snapshot&) const;
+    Result<To> target(const Snapshot&) const;
+    Result<bool> dangling(const Snapshot&) const;
+
+    friend bool operator==(const EdgeHandle&, const EdgeHandle&) = default;
+
+private:
+    friend class Database;
+    DatabaseId database_{};
+    ObjectId source_{};
+    ObjectId target_{};
+    FieldId field_{};
+};
+
+struct GraphOptions {
+    CancellationToken cancel;
+    std::size_t max_depth;
+    std::size_t max_vertices;
+    DanglingPolicy dangling;
+    EdgeDirection direction;
+    bool include_owned;
+};
+```
+
+Factories conceituais:
+
+```cpp
+auto edge = db.edge<&Employee::department>(employee, snapshot);
+auto edges = db.edges<&Employee::projects>(employee, snapshot);
+
+auto visits = breadth_first(root, expand, options);
+auto visits = depth_first(root, expand, options);
+auto path = shortest_path(root, goal, expand, options);
+auto cyclic = has_cycle(root, expand, options);
+auto order = topological_sort(vertices, expand, options);
+auto components = connected_components(vertices, undirected_expand, options);
+```
+
+### Invariantes
+
+1. `Ref<T>` e `OwnedRef<T>` são a representação persistente. `EdgeHandle`
+   é runtime-only e não recebe tag no codec.
+2. `Embedded<T>` não produz aresta porque não possui identidade.
+3. Todo handle carrega origem, alvo e `FieldId`; a posição em coleção não é
+   identidade de aresta.
+4. Aresta com propriedades é modelada como objeto persistente próprio com
+   refs para as extremidades.
+5. Uma travessia abre/recebe exatamente um `Snapshot` e não mistura épocas.
+6. BFS/DFS têm saída lazy, mas o conjunto de visitados é O(V) e respeita
+   `max_vertices`; ultrapassar o limite retorna `graph_limit_exceeded`.
+7. `DanglingPolicy` define como `Ref` órfã é tratada. `OwnedRef` só entra
+   quando `include_owned=true` e continua sujeita à topologia de árvore.
+8. Arestas de entrada exigem índice no campo `Ref`; ausência de índice retorna
+   erro explícito em vez de iniciar scan reverso ilimitado.
+9. Ordenação topológica em grafo cíclico retorna `graph_cycle`.
+
+## Algoritmos e complexidade
+
+| Algoritmo | Saída | Complexidade esperada |
+|---|---|---|
+| BFS | `Generator<Result<GraphVisit<Node>>>` | O(V+E), memória O(V) |
+| DFS | `Generator<Result<GraphVisit<Node>>>` | O(V+E), memória O(V) |
+| caminho mínimo sem peso | `Result<vector<Node>>` | O(V+E), memória O(V) |
+| detecção de ciclo | `Result<bool>` | O(V+E), memória O(V) |
+| ordenação topológica | `Result<vector<Node>>` | O(V+E), memória O(V) |
+| componentes conexos | `Result<vector<vector<Node>>>` | O(V+E), memória O(V) |
+
+Todos os loops verificam cancelamento e limites em frequência documentada.
+Resultados parciais não alteram o banco.
+
+## CLI
+
+```text
+modb graph bfs <file> <root-id> [--max-depth N] [--max-vertices N]
+modb graph dfs <file> <root-id> [--max-depth N] [--max-vertices N]
+modb graph shortest-path <file> <source-id> <target-id>
+modb graph toposort <file>
+```
+
+`modb graph demo` continua sendo a demo estrutural da Fase 4. Os novos
+comandos criam/abrem dataset determinístico e exibem ids, profundidade,
+caminho e erros de limite/ciclo.
+
+## Testes automatizados
+
+**`tests/edge_handle_test.cpp`** (`modb.edge_handle`)
+
+| Caso | Verificação |
+|---|---|
+| associação escalar | origem/alvo/campo corretos; resolve sob snapshot |
+| ownership | `EdgeKind::ownership`; opt-in em travessia |
+| reabertura | novo handle usa novo `DatabaseId`, mesmos ObjectIds |
+| ref órfã | `dangling()` e política configurada |
+| campo inválido/embedded | factory rejeita com `invalid_edge` |
+| coleção de refs | enumera handles tipados preservando ordem |
+
+**`tests/graph_algorithms_test.cpp`** (`modb.graph_algorithms`)
+
+| Caso | Verificação |
+|---|---|
+| BFS/DFS | ordem determinística no grafo fixture |
+| caminho mínimo | retorna menor número de arestas e reconstrói caminho |
+| ciclo | detecta; toposort retorna `graph_cycle` |
+| DAG | toposort respeita todas as arestas |
+| componentes | separa componentes na view não direcionada |
+| cancelamento | termina sem continuar a expandir |
+| limites | profundidade/máximo de vértices respeitados |
+| snapshot | commit concorrente não aparece no percurso aberto |
+| incoming | usa índice de `Ref`; ausência de índice falha explicitamente |
+| reabertura | mesmos resultados sobre grafo persistido |
+
+## Benchmarks
+
+Datasets determinísticos variam vértices, largura, profundidade, densidade,
+direção e cache cold/warm. Registrar TTFR, vértices/arestas por segundo,
+p50/p99 de expansão, páginas lidas, RSS e pico do conjunto de visitados.
+Comparar outgoing direto, incoming indexado e coleção de refs.
+
+## Critério de conclusão
+
+Após reabrir um grafo persistido, `EdgeHandle` resolve arestas tipadas e a CLI
+executa BFS, DFS, caminho mínimo e toposort sob snapshot. A suíte comprova
+ciclo, componentes, órfãs, ownership, incoming indexado, cancelamento,
+limites e estabilidade após reabertura.
+
+---
+
+# Fase 13 — Container serverless
+
+## Objetivo
+
+Empacotar o servidor moDb (Fases 8–9, 11 e 12) como imagem OCI reproduzível,
 adequada a plataformas de containers com escala a zero, inicialização sob
 demanda e persistência externa do arquivo do banco e do WAL. Esta fase
-começa somente depois das Fases 8, 9, 10 e 11: rede, runtime de domínio,
-estabilização e catálogo de facades precisam existir antes da superfície
-operacional.
+começa somente depois das Fases 8, 9, 10, 11 e 12: rede, runtime de domínio,
+estabilização, catálogo de facades e grafos precisam existir antes da
+superfície operacional.
 
 ## Decisões fixadas (conteúdo da ADR-013)
 
@@ -1962,7 +2151,7 @@ tests/async_file_test.cpp
    - sobe com volume vazio → cria banco → escreve objeto/operação → derruba
      container com `kill -9` → sobe de novo no mesmo volume → estado
      commitado presente, incompleto ausente;
-   - cold start a partir de escala zero atende um cliente das Fases 8/9/11;
+   - cold start a partir de escala zero atende um cliente das Fases 8/9/11/12;
    - segunda réplica writer tentando o mesmo volume é rejeitada (lock) ou
      documentada como configuração proibida na plataforma.
 7. Pipeline: build → SBOM → scan → publish com tag igual ao versionamento
@@ -1994,6 +2183,7 @@ observável, testado e não altera ordering, atomicidade ou durabilidade.
 | 8 | `protocol_error`, `frame_too_large`, `connection_closed` |
 | 9 | `operation_not_found`, `incompatible_module` |
 | 11 | `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
+| 12 | `invalid_edge`, `graph_limit_exceeded`, `graph_cycle`, `edge_target_not_found` |
 
 # Apêndice B — Mapa de páginas do formato
 
