@@ -757,7 +757,7 @@ Definição completa:
 |---|---|---|---|
 | 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · merge `9b0cfba`, tag `0.0.10a`; [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
 | 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ✅ | 10B · merge `2a45e39`, tag `0.0.10b` |
-| 10.3 | Profiling antes de cada otimização | ✅ | 10C · [OTIMIZACOES_10C.md](OTIMIZACOES_10C.md) |
+| 10.3 | Profiling antes de cada otimização | ✅ | 10C · merge `2438c1b`, tag `0.0.10c`; [OTIMIZACOES_10C.md](OTIMIZACOES_10C.md) |
 | 10.4 | Fuzzing dos decoders | ⬜ | 10D |
 | 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
 | 10.6 | Política de compatibilidade (formato + protocolo) | ⬜ | 10E |
@@ -785,7 +785,7 @@ Status: ✅ Concluída — merge `2a45e39`, tag `0.0.10b` (2026-07-19).
 
 ### Fase 10C — Profiling e otimizações medidas
 
-Status: ✅ Concluída — tag `0.0.10c` (2026-07-19).
+Status: ✅ Concluída — merge `2438c1b`, tag `0.0.10c` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
