@@ -1,5 +1,6 @@
 #include "modb/net/server.hpp"
 
+#include "modb/compatibility.hpp"
 #include "modb/object/object_codec.hpp"
 #include "modb/storage/endian.hpp"
 
@@ -329,8 +330,15 @@ Result<void> Server::handle_connection(NativeSocket peer) {
     if (hello == nullptr) {
         return std::unexpected(make_protocol("expected Hello as first message"));
     }
-    if (hello->version != protocol_version) {
-        return std::unexpected(make_protocol("unsupported protocol version"));
+    if (hello->version == 0) {
+        return std::unexpected(Error{ErrorCode::incompatible_protocol_version,
+                                     "protocol major must not be zero"});
+    }
+    auto negotiated = modb::negotiate_protocol_version(
+        modb::CompatibilityVersion{hello->version, hello->minor},
+        modb::CompatibilityVersion{protocol_major, protocol_minor});
+    if (!negotiated) {
+        return std::unexpected(negotiated.error());
     }
     const bool accepts_none =
         std::find(hello->accepted_codecs.begin(), hello->accepted_codecs.end(),
@@ -348,7 +356,8 @@ Result<void> Server::handle_connection(NativeSocket peer) {
     selected_codec_ = selected;
     (void)database_name_;
 
-    HelloOk ok{.version = protocol_version,
+    HelloOk ok{.version = negotiated->major,
+               .minor = negotiated->minor,
                .baseline = baseline_,
                .selected_codec = selected,
                .max_frame_bytes = max_frame_bytes,

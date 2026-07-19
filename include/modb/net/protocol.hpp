@@ -18,7 +18,12 @@
 
 namespace modb::net {
 
-inline constexpr std::uint16_t protocol_version = 1;
+// Major do protocolo no fio (`Hello.version` / `HelloOk.version`).
+inline constexpr std::uint16_t protocol_major = 1;
+// Minor aditivo (Fase 10E); extensões desconhecidas no Hello/HelloOk são ignoráveis.
+inline constexpr std::uint16_t protocol_minor = 0;
+// Alias legado (= major).
+inline constexpr std::uint16_t protocol_version = protocol_major;
 // length cobre type+payload; frames maiores → frame_too_large.
 inline constexpr std::uint32_t max_frame_bytes = 16u * 1024u * 1024u;
 // Limite defensivo para strings do protocolo (nome do banco, mensagem de erro).
@@ -55,7 +60,10 @@ enum class Compression : std::uint8_t {
 }
 
 struct Hello {
-    std::uint16_t version{protocol_version};
+    // Major do protocolo (campo histórico `version` no fio).
+    std::uint16_t version{protocol_major};
+    // Minor aditivo gravado após os codecs (ausente em peers antigos → 0).
+    std::uint16_t minor{protocol_minor};
     std::string database_name{};
     std::vector<Compression> accepted_codecs{Compression::none};
 
@@ -63,7 +71,8 @@ struct Hello {
 };
 
 struct HelloOk {
-    std::uint16_t version{protocol_version};
+    std::uint16_t version{protocol_major};
+    std::uint16_t minor{protocol_minor};
     object::BaselineId baseline{};
     Compression selected_codec{Compression::none};
     std::uint32_t max_frame_bytes{modb::net::max_frame_bytes};

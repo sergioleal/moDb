@@ -118,6 +118,8 @@ enum class ErrorCode {
     operation_not_found,
     // Manifesto/módulo incompatível com o runtime ou a allowlist (Fase 9).
     incompatible_module,
+    // Major de protocolo incompatível na negociação Hello (Fase 10E).
+    incompatible_protocol_version,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

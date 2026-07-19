@@ -72,6 +72,49 @@ add_library(modb
     src/version.cpp
 )
 add_library(modb::modb ALIAS modb)
+
+# --- Fase 10E: instalação da API pública + pacote CMake ---
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(TARGETS modb
+    EXPORT moDbTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+# Árvore completa de headers (contrato documentado em docs/API_PUBLICA.md).
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/modb"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+set(MODB_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/moDb")
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/moDbConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/moDbConfig.cmake"
+    INSTALL_DESTINATION ${MODB_INSTALL_CMAKEDIR}
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/moDbConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(EXPORT moDbTargets
+    FILE moDbTargets.cmake
+    NAMESPACE modb::
+    DESTINATION ${MODB_INSTALL_CMAKEDIR}
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/moDbConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/moDbConfigVersion.cmake"
+    DESTINATION ${MODB_INSTALL_CMAKEDIR}
+)
 target_compile_definitions(modb PUBLIC MODB_PAGE_SIZE=${MODB_PAGE_SIZE})
 if(WIN32)
     target_link_libraries(modb PUBLIC ws2_32)
@@ -292,6 +335,9 @@ if(BUILD_TESTING)
     add_executable(modb_buffer_pool_tests tests/buffer_pool_test.cpp)
     target_link_libraries(modb_buffer_pool_tests PRIVATE modb::modb)
 
+    add_executable(modb_compatibility_tests tests/compatibility_test.cpp)
+    target_link_libraries(modb_compatibility_tests PRIVATE modb::modb)
+
     add_executable(modb_codec_tests tests/codec_test.cpp)
     target_link_libraries(modb_codec_tests PRIVATE modb::modb)
 
@@ -363,6 +409,7 @@ if(BUILD_TESTING)
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_buffer_pool_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_compatibility_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_codec_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_text_escape_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_slotted_page_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -408,6 +455,17 @@ if(BUILD_TESTING)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)
     add_test(NAME modb.buffer_pool COMMAND modb_buffer_pool_tests)
+    add_test(NAME modb.compatibility COMMAND modb_compatibility_tests)
+    add_test(NAME modb.consumer
+        COMMAND ${CMAKE_COMMAND}
+                -DMODB_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+                -DMODB_BINARY_DIR=${CMAKE_BINARY_DIR}
+                -DMODB_GENERATOR=${CMAKE_GENERATOR}
+                -DMODB_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                -DMODB_C_COMPILER=${CMAKE_C_COMPILER}
+                -DMODB_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                -P ${CMAKE_SOURCE_DIR}/tests/consumer/run_consumer_check.cmake)
+    set_tests_properties(modb.consumer PROPERTIES LABELS consumer TIMEOUT 300)
     add_test(NAME modb.codec COMMAND modb_codec_tests)
     add_test(NAME modb.text_escape COMMAND modb_text_escape_tests)
     add_test(NAME modb.slotted_page COMMAND modb_slotted_page_tests)

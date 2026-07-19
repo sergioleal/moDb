@@ -1,5 +1,6 @@
 #include "modb/net/client.hpp"
 
+#include "modb/compatibility.hpp"
 #include "modb/net/server.hpp"
 #include "modb/object/object_codec.hpp"
 
@@ -222,7 +223,8 @@ Result<Client> Client::connect(std::string_view host, std::uint16_t port,
         return std::unexpected(socket.error());
     }
 
-    Hello hello{.version = protocol_version,
+    Hello hello{.version = protocol_major,
+                .minor = protocol_minor,
                 .database_name = std::string{database_name},
                 .accepted_codecs = {Compression::none, Compression::rle}};
     if (auto status = send_message(*socket, hello); !status) {
@@ -237,8 +239,18 @@ Result<Client> Client::connect(std::string_view host, std::uint16_t port,
     if (ok == nullptr) {
         return std::unexpected(make_protocol("expected HelloOk from server"));
     }
-    if (ok->version != protocol_version) {
-        return std::unexpected(make_protocol("server selected unsupported protocol version"));
+    auto negotiated = modb::negotiate_protocol_version(
+        modb::CompatibilityVersion{protocol_major, protocol_minor},
+        modb::CompatibilityVersion{ok->version, ok->minor});
+    if (!negotiated) {
+        return std::unexpected(negotiated.error());
+    }
+    if (ok->minor > protocol_minor) {
+        return std::unexpected(Error{
+            ErrorCode::incompatible_protocol_version,
+            "server selected protocol minor " + std::to_string(ok->minor) +
+                " above client minor " + std::to_string(protocol_minor),
+        });
     }
     if (!is_known_compression(ok->selected_codec)) {
         return std::unexpected(make_protocol("server selected unknown compression codec"));

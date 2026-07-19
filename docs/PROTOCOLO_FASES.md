@@ -1709,7 +1709,9 @@ Definir matriz para:
 Artefatos incluem testes com fixtures de versões anteriores, teste de handshake
 incompatível e projeto consumidor que compila apenas contra a API instalada.
 Critério: recusas retornam erro específico e mensagem clara; matriz automatizada
-e exemplos externos compilam. Tag: `0.0.10e`.
+e exemplos externos compilam. Tag: `0.0.10e`. Entregue — ver
+[COMPATIBILIDADE.md](COMPATIBILIDADE.md), [API_PUBLICA.md](API_PUBLICA.md) e
+[ADR-015](decisions/ADR-015-compatibilidade.md).
 
 ## Fase 10F — Documentação, operação e fechamento
 

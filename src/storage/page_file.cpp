@@ -2,6 +2,8 @@
 #include "modb/storage/page_file.hpp"
 // Importa store_le/load_le, a implementação única de little-endian.
 #include "modb/storage/endian.hpp"
+// Política major/minor do superbloco (Fase 10E).
+#include "modb/compatibility.hpp"
 
 // Disponibiliza algoritmos como copy e equal.
 #include <algorithm>
@@ -93,8 +95,10 @@ Page make_superblock(std::uint64_t page_count, std::optional<PageId> catalog_roo
     Page page;
     // Copia a assinatura MODB para os quatro primeiros bytes.
     std::copy(magic.begin(), magic.end(), page.bytes().begin());
-    // Grava a versão do formato no offset definido.
-    encode_u16(page.bytes(), version_offset, current_format_version);
+    // Grava a versão do formato no offset definido (legado: major quando minor=0).
+    encode_u16(page.bytes(), version_offset,
+               modb::to_wire_u16(
+                   modb::CompatibilityVersion{current_format_major, current_format_minor}));
     // Grava o tamanho fixo das páginas.
     encode_u32(page.bytes(), page_size_offset, static_cast<std::uint32_t>(page_size));
     // Grava quantas páginas o arquivo possui.
@@ -132,12 +136,13 @@ Result<std::uint64_t> validate_superblock(const Page& superblock, std::uintmax_t
 
     // Reconstrói a versão armazenada nos bytes 4 e 5.
     const auto version = decode_u16(superblock.bytes(), version_offset);
-    // Impede que esta implementação interprete outro formato por engano.
-    if (version != current_format_version) {
-        return std::unexpected(Error{
-            ErrorCode::incompatible_format_version,
-            "unsupported moDb format version: " + std::to_string(version),
-        });
+    // Major deve coincidir; minor do arquivo ≤ minor deste leitor (ADR-015).
+    if (auto status = modb::ensure_readable(
+            modb::from_wire_u16(version),
+            modb::CompatibilityVersion{current_format_major, current_format_minor},
+            ErrorCode::incompatible_format_version, "moDb format");
+        !status) {
+        return std::unexpected(status.error());
     }
 
     // Reconstrói o tamanho de página gravado no arquivo.
