@@ -69,7 +69,8 @@ Mantida do plano anterior. Uma tarefa só está concluída quando:
 | 9 | Runtime de módulos de domínio | `client.call<TransferFunds>(...)` | 5, 8 |
 | 10 | Desempenho e estabilização | benchmarks, buffer pool, fuzzing | todas |
 | 11 | Catálogo de facades e handles | `FacadeHandle` tipado sobre operações | 9, 10 |
-| 12 | Container serverless | imagem OCI com escala a zero e dados duráveis | 8, 9, 10, 11 |
+| 12 | Handles de arestas e algoritmos de grafos | BFS/DFS e caminhos sobre relacionamentos tipados | 4, 6, 7, 10 |
+| 13 | Container serverless | imagem OCI com escala a zero e dados duráveis | 8, 9, 10, 11, 12 |
 
 O **MVP OO** compreende as fases 0 a 3. Critério, análogo ao MVP relacional:
 criar um tipo `Employee`, persistir um objeto, fechar completamente a
@@ -716,7 +717,54 @@ mesmo contrato transacional da Fase 9; descoberta lista facades/métodos;
 versão incompatível e método alheio à facade são rejeitados com ErrorCode
 adequado.
 
-### Fase 12 — Container serverless
+### Fase 12 — Handles de arestas e algoritmos de grafos
+
+Objetivo: tratar relacionamentos entre classes como arestas tipadas e oferecer
+algoritmos básicos de grafos sob snapshot, reutilizando `Ref<T>`,
+`OwnedRef<T>`, índices e streaming existentes.
+
+`EdgeHandle<From, To, Kind>` é uma visão runtime da aresta: guarda
+`DatabaseId`, origem, alvo e `FieldId`, mas não é persistido. `Ref<T>` e
+`OwnedRef<T>` continuam sendo a representação no arquivo; `Embedded<T>` não é
+vértice. ([ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md)).
+
+Tarefas:
+
+- [ ] Registrar em ADR identidade, persistência, direção, ownership e política
+      de referências órfãs para arestas
+      ([ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md)).
+- [ ] Implementar `EdgeHandle<From, To, EdgeKind>` runtime-only, com origem,
+      alvo, `FieldId` e resolução sob `Snapshot`.
+- [ ] Implementar factories tipadas para campos escalares `Ref<T>` e
+      `OwnedRef<T>`, rejeitando `Embedded<T>` e campos não relacionais.
+- [ ] Expor adjacência para coleções `PersistentVector<Ref<T>>`, preservando
+      tipo e semântica das arestas.
+- [ ] Implementar BFS e DFS canceláveis/lazy, com limite de profundidade,
+      máximo de vértices e política explícita para refs órfãs.
+- [ ] Implementar caminho mínimo sem peso com reconstrução do caminho.
+- [ ] Implementar detecção de ciclo e ordenação topológica (erro explícito
+      para grafo cíclico).
+- [ ] Implementar componentes conexos para uma view explicitamente não
+      direcionada.
+- [ ] Suportar arestas de entrada por índice de campo `Ref`; sem scan reverso
+      ilimitado implícito.
+- [ ] Cobrir snapshot único, reabertura, cancelamento, limites, órfãs,
+      ownership e grafos heterogêneos nos testes.
+- [ ] Estender a CLI com `graph bfs`, `dfs`, `shortest-path` e `toposort`,
+      mantendo `graph demo` da Fase 4 como demonstração estrutural.
+- [ ] Adicionar cenários de benchmark por largura, profundidade, densidade,
+      cache cold/warm e pico do conjunto de visitados.
+
+Entregáveis: `EdgeHandle` tipado; `GraphView`/provedor de adjacência; BFS,
+DFS, caminho mínimo, ciclo, ordenação topológica e componentes; CLI, testes,
+benchmarks e ADR-015.
+
+Critério de aceite: após reabrir o banco, o consumidor cria handles de aresta
+a partir de relacionamentos entre classes e executa BFS/DFS/caminho mínimo sob
+um único snapshot; cancelamento, limites, refs órfãs, ciclos e direção são
+determinísticos e cobertos; a CLI demonstra os algoritmos em grafo persistido.
+
+### Fase 13 — Container serverless
 
 Objetivo: empacotar e operar o servidor moDb em uma plataforma de containers
 serverless, preservando as garantias de durabilidade e recuperação do banco.
@@ -764,7 +812,7 @@ container, cold start e recovery.
 
 Critério de aceite: a imagem sobe a partir de zero, monta armazenamento
 durável, recupera o banco quando necessário e atende um cliente das fases
-8/9/11; após término completo e nova inicialização, os objetos commitados
+8/9/11/12; após término completo e nova inicialização, os objetos commitados
 permanecem e transações incompletas não aparecem. A validação deve comprovar
 uso de uma única instância ativa, memória limitada, backpressure e execução
 sem privilégios. Nos ambientes compatíveis, métricas e testes devem comprovar
@@ -812,6 +860,8 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
 - streaming: TTFR, memória O(1), backpressure, cancelamento, Stream Error;
 - facades/handles: descoberta, negociação de versão, invoke tipado e
   rejeição de método alheio à facade;
+- grafos: handles de aresta, BFS/DFS, caminho mínimo, ciclo, direção,
+  cancelamento, limites e snapshots;
 - container serverless: build da imagem, cold start, término gracioso,
   persistência em volume e recovery após término forçado;
 - sanitizers nos toolchains que os suportam (preset já configurado);
@@ -844,7 +894,8 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
 4. Fases 8–9 introduzem rede, concorrência e módulos somente sobre um núcleo
    com garantias comprovadas.
 5. A Fase 10 estabiliza o produto; a Fase 11 organiza a superfície de
-   domínio em facades/handles; a Fase 12 adiciona os riscos operacionais de
+   domínio em facades/handles; a Fase 12 acrescenta algoritmos de grafos
+   sobre relacionamentos; a Fase 13 adiciona os riscos operacionais de
    container, cold start e armazenamento remoto persistente.
 
 Não iniciar índices, streaming ou servidor antes de existir um teste confiável

@@ -46,6 +46,14 @@
 - **FacadeHandle**: handle tipado do consumidor (sessão + `FacadeId` + versão
   negociada) que invoca métodos daquela facade via `invoke<Method>(...)`,
   delegando ao `OperationRegistry`.
+- **Aresta**: relacionamento direcionado entre dois objetos com identidade;
+  persiste como `Ref<T>` ou `OwnedRef<T>`.
+- **EdgeHandle**: visão runtime tipada de uma aresta (`DatabaseId`, origem,
+  alvo e `FieldId`); não é persistida e resolve extremidades sob `Snapshot`.
+- **GraphView**: provedor de adjacência que fixa snapshot, direção, política
+  para refs órfãs, inclusão de ownership e limites da travessia.
+- **Grafo não direcionado**: view que interpreta cada relacionamento nos dois
+  sentidos; não altera a direção persistida da `Ref`.
 - **TTFR**: *Time To First Result* — tempo até o primeiro objeto de uma
   consulta; principal métrica de desempenho do streaming.
 - **Streaming**: modelo nativo de execução de consultas; resultados fluem assim

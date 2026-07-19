@@ -52,8 +52,9 @@
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | 🔄 Em andamento | 3/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 |
-| [12](#fase-12--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11 |
-| **Total** | | | **107/134 (~80%)** | |
+| [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ⬜ Não iniciada | 0/12 | Fases 4, 6, 7, 10 |
+| [13](#fase-13--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11, 12 |
+| **Total** | | | **107/146 (~73%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -907,25 +908,62 @@ incompatível e método alheio são rejeitados.
 
 ---
 
-## Fase 12 — Container serverless
+## Fase 12 — Handles de arestas e algoritmos de grafos
 
-Status: ⬜ Não iniciada (0/11) — Definição completa:
-[PLANO_ODB.md §Fase 12](PLANO_ODB.md#fase-12--container-serverless) ·
-[PROTOCOLO_FASES.md §Fase 12](PROTOCOLO_FASES.md#fase-12--container-serverless)
+Status: ⬜ Não iniciada (0/12) — Definição completa:
+[PLANO_ODB.md §Fase 12](PLANO_ODB.md#fase-12--handles-de-arestas-e-algoritmos-de-grafos) ·
+[PROTOCOLO_FASES.md §Fase 12](PROTOCOLO_FASES.md#fase-12--handles-de-arestas-e-algoritmos-de-grafos)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 12.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ⬜ | [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
-| 12.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ⬜ | `deploy/Dockerfile` |
-| 12.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | Sem expor formato físico; backpressure preservado |
-| 12.4 | Configuração só por env/secrets | ⬜ | Sem dados nem credenciais na imagem |
-| 12.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | Disco efêmero proibido como fonte de verdade |
-| 12.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ⬜ | Completion/`co_await`, cancelamento, fila limitada, ordering WAL explícito |
-| 12.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
-| 12.8 | Recovery em cold start e após término forçado | ⬜ | Inclui WAL pendente |
-| 12.9 | Logs estruturados e métricas operacionais | ⬜ | Inclui backend de I/O, queue depth, completions e fallbacks |
-| 12.10 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | |
-| 12.11 | Guia de operação local e implantação de referência | ⬜ | `docs/OPERACAO_SERVERLESS.md` |
+| 12.1 | ADR de handles de arestas e algoritmos de grafos | ⬜ | [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md) — texto aceito no planejamento; implementação não iniciada |
+| 12.2 | `EdgeHandle<From, To, EdgeKind>` runtime-only | ⬜ | Origem, alvo, FieldId e DatabaseId |
+| 12.3 | Factories tipadas para `Ref` / `OwnedRef` | ⬜ | `Embedded` e campo inválido rejeitados |
+| 12.4 | Adjacência em `PersistentVector<Ref<T>>` | ⬜ | Preservar tipo e ordem |
+| 12.5 | BFS e DFS lazy/canceláveis sob snapshot | ⬜ | Limites de profundidade/vértices; refs órfãs |
+| 12.6 | Caminho mínimo sem peso | ⬜ | Reconstrução do caminho |
+| 12.7 | Detecção de ciclo + ordenação topológica | ⬜ | `graph_cycle` em ciclo |
+| 12.8 | Componentes conexos | ⬜ | Somente view não direcionada explícita |
+| 12.9 | Arestas de entrada por índice de `Ref` | ⬜ | Sem scan reverso ilimitado implícito |
+| 12.10 | Testes de snapshot, reabertura, cancelamento, limites, órfãs e ownership | ⬜ | |
+| 12.11 | CLI `graph bfs/dfs/shortest-path/toposort` | ⬜ | `graph demo` permanece Fase 4 |
+| 12.12 | Benchmarks de topologia e cache | ⬜ | Largura, profundidade, densidade, cold/warm, visited-set |
+
+### Testes/artefatos desta fase
+
+| Item | Local | Status |
+|---|---|---|
+| Contrato de `EdgeHandle` | `tests/edge_handle_test.cpp` | ⬜ |
+| Algoritmos e limites | `tests/graph_algorithms_test.cpp` | ⬜ |
+| CLI de travessia/caminho/toposort | `apps/modb_cli/main.cpp` | ⬜ |
+| Benchmarks de grafos | `benchmarks/` | ⬜ |
+| ADR de grafos | `docs/decisions/ADR-015-*.md` | ⬜ |
+
+Critério de aceite: ⬜ após reabertura, handles tipados representam arestas
+entre classes e BFS/DFS/caminho mínimo/toposort executam sob snapshot; ciclo,
+direção, refs órfãs, ownership, cancelamento e limites são determinísticos.
+
+---
+
+## Fase 13 — Container serverless
+
+Status: ⬜ Não iniciada (0/11) — Definição completa:
+[PLANO_ODB.md §Fase 13](PLANO_ODB.md#fase-13--container-serverless) ·
+[PROTOCOLO_FASES.md §Fase 13](PROTOCOLO_FASES.md#fase-13--container-serverless)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 13.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ⬜ | [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
+| 13.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ⬜ | `deploy/Dockerfile` |
+| 13.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | Sem expor formato físico; backpressure preservado |
+| 13.4 | Configuração só por env/secrets | ⬜ | Sem dados nem credenciais na imagem |
+| 13.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | Disco efêmero proibido como fonte de verdade |
+| 13.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ⬜ | Completion/`co_await`, cancelamento, fila limitada, ordering WAL explícito |
+| 13.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
+| 13.8 | Recovery em cold start e após término forçado | ⬜ | Inclui WAL pendente |
+| 13.9 | Logs estruturados e métricas operacionais | ⬜ | Inclui backend de I/O, queue depth, completions e fallbacks |
+| 13.10 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | |
+| 13.11 | Guia de operação local e implantação de referência | ⬜ | `docs/OPERACAO_SERVERLESS.md` |
 
 ### Testes/artefatos desta fase
 
@@ -938,7 +976,7 @@ Status: ⬜ Não iniciada (0/11) — Definição completa:
 | Manifesto de referência | `deploy/` | ⬜ |
 
 Critério de aceite: ⬜ imagem sobe do zero com volume durável, recupera WAL,
-atende cliente 8/9/11, preserva commits após término forçado, uma instância
+atende cliente 8/9/11/12, preserva commits após término forçado, uma instância
 ativa, sem privilégios, com backpressure. Em ambientes compatíveis, testes e
 métricas comprovam completions reais por `io_uring`/IOCP; fallback explícito
 mantém a mesma durabilidade.
