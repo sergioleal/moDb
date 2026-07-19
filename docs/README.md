@@ -22,6 +22,9 @@ automatizado de cada fase e o painel geral de progresso. É o único documento
 desta pasta que reflete estado vivo; os demais (Plano, Protocolo, ADRs)
 definem escopo e não mudam a cada tarefa concluída.
 
+Operação do arquivo (backup/restore/`db check`): **[OPERACAO.md](OPERACAO.md)**.
+Fechamento da Fase 10: **[FECHAMENTO_10F.md](FECHAMENTO_10F.md)**.
+
 ## 1. Documentos de visão (na raiz do repositório, não em `docs/`)
 
 Não fazem parte desta pasta, mas são o ponto de partida de tudo que está aqui:

@@ -36,6 +36,12 @@ enum class PageKind {
     identity_entries,
     // Página de blob encadeado com assinatura BLBP (Fase 4).
     blob,
+    // Diretório de índices com assinatura IXDR (Fase 7B).
+    index_directory,
+    // Folha de B-tree com assinatura BTLF (Fase 7B).
+    btree_leaf,
+    // Nó interno de B-tree com assinatura BTIN (Fase 7B).
+    btree_internal,
     // Assinatura não reconhecida.
     unknown,
 };

@@ -50,12 +50,12 @@
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
-| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | 🔄 Em andamento | 3/9 | Todas |
-| [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 |
-| [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ⬜ Não iniciada | 0/12 | Fases 4, 6, 7, 10 |
-| [13](#fase-13--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11, 12 |
+| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ✅ Concluída | 9/9 | Todas |
+| [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 · 11A–11D |
+| [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ⬜ Não iniciada | 0/12 | Fases 4, 6, 7, 10 · 12A–12E |
+| [13](#fase-13--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11, 12 · 13A–13E |
 | [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ⬜ Não iniciada | 0/12 | Fases 5, 6, 8 |
-| **Total** | | | **107/158 (~68%)** | |
+| **Total** | | | **109/158 (~69%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -750,7 +750,7 @@ exceção/saldo insuficiente, consistente após reopen + recovery.
 
 ## Fase 10 — Desempenho e estabilização
 
-Status: 🔄 Em andamento (3/9) — seis entregas verticais 10A–10F.
+Status: ✅ Concluída (9/9) — entregas verticais 10A–10F (`0.0.10a`…`0.0.10f`).
 Definição completa:
 [PLANO_ODB.md §Fase 10](PLANO_ODB.md#fase-10--desempenho-e-estabilização) ·
 [PROTOCOLO_FASES.md §Fase 10](PROTOCOLO_FASES.md#fase-10--desempenho-e-estabilização)
@@ -764,8 +764,8 @@ Definição completa:
 | 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
 | 10.6 | Política de compatibilidade (formato + protocolo) | ✅ | 10E · merge `dc33551`, tag `0.0.10e`; [COMPATIBILIDADE.md](COMPATIBILIDADE.md) |
 | 10.7 | Estabilizar e documentar a API pública | ✅ | 10E · merge `dc33551`; [API_PUBLICA.md](API_PUBLICA.md); `modb.consumer` |
-| 10.8 | Reescrever `README.md`/formato de arquivo | ⬜ | 10F |
-| 10.9 | Guia de backup/restauração/diagnóstico | ⬜ | 10F |
+| 10.8 | Reescrever `README.md`/formato de arquivo | ✅ | 10F · merge `8d6a7a5`, tag `0.0.10f`; [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) |
+| 10.9 | Guia de backup/restauração/diagnóstico | ✅ | 10F · merge `8d6a7a5`; [OPERACAO.md](OPERACAO.md) |
 
 ### Fase 10A — Runner e baseline de benchmarks
 
@@ -814,13 +814,13 @@ Status: ✅ Concluída — merge `dc33551`, tag `0.0.10e` (2026-07-19).
 
 ### Fase 10F — Documentação, operação e fechamento
 
-Status: ⬜ Não iniciada — depende de 10A–10E; tag prevista `0.0.10f`.
+Status: ✅ Concluída — merge `8d6a7a5`, tag `0.0.10f` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| README OO + formato + API | ⬜ | Fluxo do zero validado |
-| Backup/restauração/diagnóstico/supervisor | ⬜ | Backup restaurado e `db check` verde |
-| Matriz final e baseline consolidada | ⬜ | Presets suportados verdes e comparação com 10A |
+| README OO + formato + API | ✅ | [README.md](../README.md); [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) |
+| Backup/restauração/diagnóstico/supervisor | ✅ | [OPERACAO.md](OPERACAO.md); `db check` reconhece IXDR/BTLF/BTIN |
+| Matriz final e baseline consolidada | ✅ | [FECHAMENTO_10F.md](FECHAMENTO_10F.md) |
 
 **Dívidas de performance herdadas da Fase 3** (nenhuma bloqueou o critério de
 aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
@@ -878,30 +878,63 @@ automaticamente, interfaces públicas documentadas.
 
 ## Fase 11 — Catálogo de facades e handles
 
-Status: ⬜ Não iniciada (0/10) — Definição completa:
+Status: ⬜ Não iniciada (0/10) — quatro entregas verticais 11A–11D.
+Definição completa:
 [PLANO_ODB.md §Fase 11](PLANO_ODB.md#fase-11--catálogo-de-facades-e-handles) ·
 [PROTOCOLO_FASES.md §Fase 11](PROTOCOLO_FASES.md#fase-11--catálogo-de-facades-e-handles)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 11.1 | ADR do modelo de facades/handles e separação com a Fase 9 | ⬜ | [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md) — texto aceito no planejamento; implementação da fase ainda não iniciada |
-| 11.2 | `FacadeDescriptor` / `MethodDescriptor` + catálogo `vector<>` | ⬜ | Posição no vetor ≠ identidade |
-| 11.3 | `FacadeCatalog` (registro, listagem, lookup) | ⬜ | |
-| 11.4 | `FacadeHandle<TFacade>` no cliente (`invoke<Method>`) | ⬜ | Sessão + FacadeId + versão |
-| 11.5 | Descoberta e negociação de versão no protocolo | ⬜ | `FacadeList` / `FacadeOpen` |
-| 11.6 | Validação método∈facade + ErrorCodes | ⬜ | `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
-| 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ⬜ | Mesmo commit/rollback/cancel da Fase 9 |
-| 11.8 | Facades a partir de módulos carregados (manifesto) | ⬜ | Cliente não envia binários |
-| 11.9 | Exemplo `Accounts`/`transfer` ponta a ponta | ⬜ | |
-| 11.10 | Documentar contrato consumidor → handle → facade → registry | ⬜ | |
+| 11.1 | ADR do modelo de facades/handles e separação com a Fase 9 | ⬜ | 11A · [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md) |
+| 11.2 | `FacadeDescriptor` / `MethodDescriptor` + catálogo `vector<>` | ⬜ | 11A · Posição no vetor ≠ identidade |
+| 11.3 | `FacadeCatalog` (registro, listagem, lookup) | ⬜ | 11A |
+| 11.4 | `FacadeHandle<TFacade>` no cliente (`invoke<Method>`) | ⬜ | 11B · Sessão + FacadeId + versão |
+| 11.5 | Descoberta e negociação de versão no protocolo | ⬜ | 11C · `FacadeList` / `FacadeOpen` |
+| 11.6 | Validação método∈facade + ErrorCodes | ⬜ | 11B · `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
+| 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ⬜ | 11B · Mesmo commit/rollback/cancel da Fase 9 |
+| 11.8 | Facades a partir de módulos carregados (manifesto) | ⬜ | 11D · Cliente não envia binários |
+| 11.9 | Exemplo `Accounts`/`transfer` ponta a ponta | ⬜ | 11D |
+| 11.10 | Documentar contrato consumidor → handle → facade → registry | ⬜ | 11D |
+
+### Fase 11A — Contratos e FacadeCatalog
+
+Status: ⬜ Não iniciada — tag prevista `0.0.11a`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| ADR-014 + descriptors + `FacadeCatalog` | ⬜ | `modb.facade_catalog` |
+
+### Fase 11B — FacadeHandle e invoke embedded
+
+Status: ⬜ Não iniciada — tag prevista `0.0.11b`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Handle tipado + validação + delegação ao registry | ⬜ | `modb.facade_handle` |
+
+### Fase 11C — Descoberta e negociação no protocolo
+
+Status: ⬜ Não iniciada — tag prevista `0.0.11c`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| `FacadeList` / `FacadeOpen` pela rede | ⬜ | `modb.facade_server` (list/open) |
+
+### Fase 11D — Módulos, Accounts e documentação
+
+Status: ⬜ Não iniciada — tag prevista `0.0.11d`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Manifesto → facades + exemplo Accounts + docs | ⬜ | Invoke pela rede + docs |
 
 ### Testes automatizados desta fase
 
 | Teste (CTest) | Arquivo | Status |
 |---|---|---|
-| `modb.facade_catalog` | `tests/facade_catalog_test.cpp` | ⬜ |
-| `modb.facade_handle` | `tests/facade_handle_test.cpp` | ⬜ |
-| `modb.facade_server` | `tests/facade_server_test.cpp` | ⬜ |
+| `modb.facade_catalog` | `tests/facade_catalog_test.cpp` | ⬜ 11A |
+| `modb.facade_handle` | `tests/facade_handle_test.cpp` | ⬜ 11B |
+| `modb.facade_server` | `tests/facade_server_test.cpp` | ⬜ 11C/11D |
 
 Critério de aceite: ⬜ consumidor obtém `FacadeHandle`, invoca método tipado
 pela rede com contrato da Fase 9; descoberta lista facades/métodos; versão
@@ -911,34 +944,75 @@ incompatível e método alheio são rejeitados.
 
 ## Fase 12 — Handles de arestas e algoritmos de grafos
 
-Status: ⬜ Não iniciada (0/12) — Definição completa:
+Status: ⬜ Não iniciada (0/12) — cinco entregas verticais 12A–12E.
+Definição completa:
 [PLANO_ODB.md §Fase 12](PLANO_ODB.md#fase-12--handles-de-arestas-e-algoritmos-de-grafos) ·
 [PROTOCOLO_FASES.md §Fase 12](PROTOCOLO_FASES.md#fase-12--handles-de-arestas-e-algoritmos-de-grafos)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 12.1 | ADR de handles de arestas e algoritmos de grafos | ⬜ | [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md) — texto aceito no planejamento; implementação não iniciada |
-| 12.2 | `EdgeHandle<From, To, EdgeKind>` runtime-only | ⬜ | Origem, alvo, FieldId e DatabaseId |
-| 12.3 | Factories tipadas para `Ref` / `OwnedRef` | ⬜ | `Embedded` e campo inválido rejeitados |
-| 12.4 | Adjacência em `PersistentVector<Ref<T>>` | ⬜ | Preservar tipo e ordem |
-| 12.5 | BFS e DFS lazy/canceláveis sob snapshot | ⬜ | Limites de profundidade/vértices; refs órfãs |
-| 12.6 | Caminho mínimo sem peso | ⬜ | Reconstrução do caminho |
-| 12.7 | Detecção de ciclo + ordenação topológica | ⬜ | `graph_cycle` em ciclo |
-| 12.8 | Componentes conexos | ⬜ | Somente view não direcionada explícita |
-| 12.9 | Arestas de entrada por índice de `Ref` | ⬜ | Sem scan reverso ilimitado implícito |
-| 12.10 | Testes de snapshot, reabertura, cancelamento, limites, órfãs e ownership | ⬜ | |
-| 12.11 | CLI `graph bfs/dfs/shortest-path/toposort` | ⬜ | `graph demo` permanece Fase 4 |
-| 12.12 | Benchmarks de topologia e cache | ⬜ | Largura, profundidade, densidade, cold/warm, visited-set |
+| 12.1 | ADR de handles de arestas e algoritmos de grafos | ⬜ | 12A · [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md) |
+| 12.2 | `EdgeHandle<From, To, EdgeKind>` runtime-only | ⬜ | 12A · Origem, alvo, FieldId e DatabaseId |
+| 12.3 | Factories tipadas para `Ref` / `OwnedRef` | ⬜ | 12A · `Embedded` e campo inválido rejeitados |
+| 12.4 | Adjacência em `PersistentVector<Ref<T>>` | ⬜ | 12B · Preservar tipo e ordem |
+| 12.5 | BFS e DFS lazy/canceláveis sob snapshot | ⬜ | 12C · Limites de profundidade/vértices; refs órfãs |
+| 12.6 | Caminho mínimo sem peso | ⬜ | 12D · Reconstrução do caminho |
+| 12.7 | Detecção de ciclo + ordenação topológica | ⬜ | 12D · `graph_cycle` em ciclo |
+| 12.8 | Componentes conexos | ⬜ | 12D · Somente view não direcionada explícita |
+| 12.9 | Arestas de entrada por índice de `Ref` | ⬜ | 12B · Sem scan reverso ilimitado implícito |
+| 12.10 | Testes de snapshot, reabertura, cancelamento, limites, órfãs e ownership | ⬜ | 12E |
+| 12.11 | CLI `graph bfs/dfs/shortest-path/toposort` | ⬜ | 12E · `graph demo` permanece Fase 4 |
+| 12.12 | Benchmarks de topologia e cache | ⬜ | 12E · Largura, profundidade, densidade, cold/warm, visited-set |
+
+### Fase 12A — EdgeHandle e factories
+
+Status: ⬜ Não iniciada — tag prevista `0.0.12a`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| ADR-015 + `EdgeHandle` + factories | ⬜ | `modb.edge_handle` |
+
+### Fase 12B — Adjacência e arestas de entrada
+
+Status: ⬜ Não iniciada — tag prevista `0.0.12b`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Coleção de refs + incoming indexado | ⬜ | Enumeração + falha sem índice |
+
+### Fase 12C — BFS e DFS
+
+Status: ⬜ Não iniciada — tag prevista `0.0.12c`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Travessias lazy com limites/cancel | ⬜ | `modb.graph_algorithms` (BFS/DFS) |
+
+### Fase 12D — Caminho, ciclo, toposort e componentes
+
+Status: ⬜ Não iniciada — tag prevista `0.0.12d`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Shortest-path + ciclo + toposort + componentes | ⬜ | `modb.graph_algorithms` |
+
+### Fase 12E — CLI, benchmarks e fechamento
+
+Status: ⬜ Não iniciada — tag prevista `0.0.12e`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| CLI + benchmarks + suíte de reabertura | ⬜ | Comandos `graph *` + runner |
 
 ### Testes/artefatos desta fase
 
 | Item | Local | Status |
 |---|---|---|
-| Contrato de `EdgeHandle` | `tests/edge_handle_test.cpp` | ⬜ |
-| Algoritmos e limites | `tests/graph_algorithms_test.cpp` | ⬜ |
-| CLI de travessia/caminho/toposort | `apps/modb_cli/main.cpp` | ⬜ |
-| Benchmarks de grafos | `benchmarks/` | ⬜ |
-| ADR de grafos | `docs/decisions/ADR-015-*.md` | ⬜ |
+| Contrato de `EdgeHandle` | `tests/edge_handle_test.cpp` | ⬜ 12A |
+| Algoritmos e limites | `tests/graph_algorithms_test.cpp` | ⬜ 12C/12D |
+| CLI de travessia/caminho/toposort | `apps/modb_cli/main.cpp` | ⬜ 12E |
+| Benchmarks de grafos | `benchmarks/` | ⬜ 12E |
+| ADR de grafos | `docs/decisions/ADR-015-*.md` | ⬜ 12A |
 
 Critério de aceite: ⬜ após reabertura, handles tipados representam arestas
 entre classes e BFS/DFS/caminho mínimo/toposort executam sob snapshot; ciclo,
@@ -948,33 +1022,74 @@ direção, refs órfãs, ownership, cancelamento e limites são determinísticos
 
 ## Fase 13 — Container serverless
 
-Status: ⬜ Não iniciada (0/11) — Definição completa:
+Status: ⬜ Não iniciada (0/11) — cinco entregas verticais 13A–13E.
+Definição completa:
 [PLANO_ODB.md §Fase 13](PLANO_ODB.md#fase-13--container-serverless) ·
 [PROTOCOLO_FASES.md §Fase 13](PROTOCOLO_FASES.md#fase-13--container-serverless)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 13.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ⬜ | [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
-| 13.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ⬜ | `deploy/Dockerfile` |
-| 13.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | Sem expor formato físico; backpressure preservado |
-| 13.4 | Configuração só por env/secrets | ⬜ | Sem dados nem credenciais na imagem |
-| 13.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | Disco efêmero proibido como fonte de verdade |
-| 13.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ⬜ | Completion/`co_await`, cancelamento, fila limitada, ordering WAL explícito |
-| 13.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
-| 13.8 | Recovery em cold start e após término forçado | ⬜ | Inclui WAL pendente |
-| 13.9 | Logs estruturados e métricas operacionais | ⬜ | Inclui backend de I/O, queue depth, completions e fallbacks |
-| 13.10 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | |
-| 13.11 | Guia de operação local e implantação de referência | ⬜ | `docs/OPERACAO_SERVERLESS.md` |
+| 13.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ⬜ | 13A · [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
+| 13.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ⬜ | 13C · `deploy/Dockerfile` |
+| 13.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | 13C · Sem expor formato físico; backpressure preservado |
+| 13.4 | Configuração só por env/secrets | ⬜ | 13C · Sem dados nem credenciais na imagem |
+| 13.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | 13C · Disco efêmero proibido como fonte de verdade |
+| 13.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ⬜ | 13B · Completion/`co_await`, cancelamento, fila limitada, ordering WAL explícito |
+| 13.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | 13D · `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
+| 13.8 | Recovery em cold start e após término forçado | ⬜ | 13D · Inclui WAL pendente |
+| 13.9 | Logs estruturados e métricas operacionais | ⬜ | 13E · Inclui backend de I/O, queue depth, completions e fallbacks |
+| 13.10 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | 13E |
+| 13.11 | Guia de operação local e implantação de referência | ⬜ | 13E · `docs/OPERACAO_SERVERLESS.md` |
+
+### Fase 13A — ADR e modelo de implantação
+
+Status: ⬜ Não iniciada — tag prevista `0.0.13a`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| ADR-013 (volume, writer único, cold start, scale-to-zero) | ⬜ | ADR aceita |
+
+### Fase 13B — I/O assíncrono real
+
+Status: ⬜ Não iniciada — tag prevista `0.0.13b`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| `AsyncFile` io_uring/IOCP + fallback | ⬜ | `modb.async_file` |
+
+### Fase 13C — Imagem OCI, config e volume
+
+Status: ⬜ Não iniciada — tag prevista `0.0.13c`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Dockerfile + env/secrets + volume + ingresso | ⬜ | Compose local + handshake |
+
+### Fase 13D — Probes, shutdown e recovery
+
+Status: ⬜ Não iniciada — tag prevista `0.0.13d`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Health + SIGTERM + cold start / kill -9 | ⬜ | Commits preservados |
+
+### Fase 13E — Observabilidade, CI e guia
+
+Status: ⬜ Não iniciada — tag prevista `0.0.13e`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Métricas/logs + publish + `OPERACAO_SERVERLESS.md` | ⬜ | Pipeline + guia |
 
 ### Testes/artefatos desta fase
 
 | Item | Local | Status |
 |---|---|---|
-| Build da imagem OCI | `deploy/Dockerfile` | ⬜ |
-| Smoke container + volume | `tests/container_smoke_test` ou script CI | ⬜ |
-| Contrato de I/O assíncrono real | `tests/async_file_test.cpp` em Linux/Windows | ⬜ |
-| Kill -9 + reabertura no mesmo volume | prova de recovery | ⬜ |
-| Manifesto de referência | `deploy/` | ⬜ |
+| Build da imagem OCI | `deploy/Dockerfile` | ⬜ 13C |
+| Smoke container + volume | `tests/container_smoke_test` ou script CI | ⬜ 13C/13D |
+| Contrato de I/O assíncrono real | `tests/async_file_test.cpp` em Linux/Windows | ⬜ 13B |
+| Kill -9 + reabertura no mesmo volume | prova de recovery | ⬜ 13D |
+| Manifesto de referência | `deploy/` | ⬜ 13C |
 
 Critério de aceite: ⬜ imagem sobe do zero com volume durável, recupera WAL,
 atende cliente 8/9/11/12, preserva commits após término forçado, uma instância

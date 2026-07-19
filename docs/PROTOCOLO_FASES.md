@@ -1723,7 +1723,8 @@ restauração e diagnóstico com `modb db check`.
 Executar matriz final de build/teste/benchmark, registrar baseline final e
 compará-la à 10A. Critério: fluxo documental validado do zero; backup restaurado
 e verificado; documentação sem referências obsoletas; suíte inteira verde nos
-presets suportados. Tag: `0.0.10f`.
+presets suportados. Tag: `0.0.10f`. Entregue — ver [OPERACAO.md](OPERACAO.md) e
+[FECHAMENTO_10F.md](FECHAMENTO_10F.md).
 
 ## Critério de conclusão
 
@@ -1735,446 +1736,250 @@ três presets.
 
 # Fase 11 — Catálogo de facades e handles
 
-## Objetivo
+## Sequência de entregas verticais
 
-Agrupar as operações da Fase 9 em facades descobríveis e oferecer ao
-consumidor um `FacadeHandle` tipado que invoca métodos daquela facade.
-Esta fase começa depois das Fases 9 e 10: o runtime de operações e a
-estabilização da API precisam existir antes da superfície de catálogo.
+A Fase 11 começa depois das Fases 9 e 10. Cada subfase termina com capacidade
+consumível e prova automatizada. Decisão:
+[ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md).
 
-Decisão: [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md).
+## Fase 11A — Contratos e FacadeCatalog
 
-## Artefatos novos
+Artefatos:
 
 ```text
 include/modb/ops/facade_descriptor.hpp
 include/modb/ops/facade_catalog.hpp       src/ops/facade_catalog.cpp
-include/modb/ops/facade_handle.hpp
-include/modb/net/facade_protocol.hpp      (ou extensão em protocol.hpp)
 docs/decisions/ADR-014-catalogo-de-facades-e-handles.md
 tests/facade_catalog_test.cpp
+```
+
+Definir `MethodDescriptor` / `FacadeDescriptor`, `FacadeCatalog` (registro,
+listagem, lookup por `FacadeId`+versão) e ErrorCodes de lookup. O catálogo é
+`vector<FacadeDescriptor>`; posição ≠ identidade.
+
+Critério: `modb.facade_catalog` — registro/list/lookup; versão/id ausentes;
+reordenar o vetor não altera lookup. Tag: `0.0.11a`.
+
+## Fase 11B — FacadeHandle e invoke embedded
+
+Artefatos:
+
+```text
+include/modb/ops/facade_handle.hpp
 tests/facade_handle_test.cpp
-tests/facade_server_test.cpp
-examples/accounts_facade/                 (facade exemplo sobre TransferFunds)
 ```
 
-## Design
+`FacadeHandle<TFacade>` tipado; `invoke<Method>` valida método∈facade e
+delega ao `OperationRegistry` no caminho embedded (mesmo commit/rollback/
+cancel da Fase 9).
 
-```cpp
-struct MethodDescriptor {
-    std::string operation_id;   // id no OperationRegistry, ex.: "account.transfer"
-    std::uint32_t method_version;
-    enum class Mode { read_only, read_write } mode;
-};
+Critério: `modb.facade_handle` — TransferFunds via handle; rollback em erro de
+domínio; método alheio → `facade_method_not_found`. Tag: `0.0.11b`.
 
-struct FacadeDescriptor {
-    std::string facade_id;      // identidade estável — NÃO o índice no vetor
-    std::uint32_t facade_version;
-    std::vector<MethodDescriptor> methods;
-};
+## Fase 11C — Descoberta e negociação no protocolo
 
-class FacadeCatalog {
-public:
-    Result<void> register_facade(FacadeDescriptor desc);
-    Result<FacadeDescriptor> find(std::string_view facade_id,
-                                  std::uint32_t version) const;
-    std::span<const FacadeDescriptor> list() const; // backing: vector<>
-};
+Artefatos:
 
-// Cliente — handle tipado por facade
-template <typename TFacade>
-class FacadeHandle {
-public:
-    // Sessão/conexão + FacadeId + versão negociada
-    template <typename Method, typename... Args>
-    Result<typename Method::Result> invoke(Args&&... args);
-};
+```text
+include/modb/net/facade_protocol.hpp   (ou extensão em protocol.hpp)
+tests/facade_server_test.cpp           (casos de list/open)
 ```
 
-### Invariantes
+Mensagens `FacadeList`/`FacadeListOk`, `FacadeOpen`/`FacadeOpenOk`. Handle
+remoto só após versão compatível.
 
-1. O catálogo é um `vector<FacadeDescriptor>` heterogêneo; a posição no
-   vetor é só ordem de enumeração. Lookup e protocolo usam `FacadeId` +
-   versão.
-2. Cada método aponta para um `operation_id` já registrado (Fase 9). A
-   facade não reimplementa o despacho: resolve o método e delega ao
-   `OperationRegistry` / `OpCall`.
-3. `FacadeHandle` valida que o método invocado pertence à facade; caso
-   contrário `facade_method_not_found`. Facade ausente →
-   `facade_not_found`; versão incompatível na negociação →
-   `incompatible_facade_version`.
-4. Argumentos/resultados usam o codec versionado; nenhum ponteiro ou ABI
-   C++ na rede (ADR-012 / ADR-014).
-5. Cancelamento e deadline seguem o modelo da Fase 8; commit/rollback o da
-   Fase 9.
+Critério: `modb.facade_server` lista `accounts`/métodos e rejeita versão
+incompatível pela rede. Tag: `0.0.11c`.
 
-### Protocolo (extensão da Fase 8)
+## Fase 11D — Módulos, Accounts e documentação
 
-Mensagens lógicas (podem reutilizar envelope existente ou adicionar kinds):
+Artefatos:
 
-- `FacadeList` / `FacadeListOk` — enumerar facades e métodos.
-- `FacadeOpen` / `FacadeOpenOk` — negociar versão e obter handle lógico
-  (sessão + `FacadeId` + versão).
-- Invocação: `handle.invoke` serializa como `OpCall` com o `operation_id`
-  do método (ou kind dedicado que carrega facade+método e o servidor
-  resolve). Resultado continua `OpResult`.
-
-### Exemplo obrigatório: facade `Accounts`
-
-```cpp
-// Servidor (após carregar módulo TransferFunds)
-catalog.register_facade({
-    .facade_id = "accounts",
-    .facade_version = 1,
-    .methods = {{"account.transfer", 1, MethodDescriptor::Mode::read_write}},
-});
-
-// Cliente
-auto handle = client.open_facade<Accounts>("accounts", /*version=*/1);
-auto r = handle.invoke<TransferFunds>(source, destination, amount);
+```text
+examples/accounts_facade/
+docs/ (contrato consumidor → handle → facade → registry)
 ```
 
-Saldo insuficiente → erro + rollback (mesmo contrato da Fase 9). Método
-`"finance.close-month"` via handle de `accounts` →
-`facade_method_not_found`.
+Facades a partir do manifesto dos módulos; exemplo ponta a ponta pela rede;
+documentação de evolução de versão.
 
-## Testes automatizados
+Critério: `open_facade` + `invoke<TransferFunds>` pela rede atômico; docs e
+exemplo verdes. Tag: `0.0.11d`.
 
-**`tests/facade_catalog_test.cpp`** (`modb.facade_catalog`) — sem rede
-
-| Caso | Verificação |
-|---|---|
-| registro + list | vetor contém descriptor; `list().size()` correto |
-| lookup por id/versão | encontra; versão errada → `incompatible_facade_version` |
-| id ausente | `facade_not_found` |
-| método alheio | invoke/resolução rejeita com `facade_method_not_found` |
-| posição ≠ identidade | reordenar o vetor não altera lookup por `FacadeId` |
-
-**`tests/facade_handle_test.cpp`** (`modb.facade_handle`) — embedded
-
-| Caso | Verificação |
-|---|---|
-| invoke feliz | delega ao registry; TransferFunds commitado |
-| erro de domínio | rollback; saldos intactos |
-| handle com versão errada | falha na abertura/negociação |
-
-**`tests/facade_server_test.cpp`** (`modb.facade_server`)
-
-| Caso | Verificação |
-|---|---|
-| **critério da fase** | `open_facade` + `invoke<TransferFunds>` pela rede; atômico |
-| descoberta | `FacadeList` retorna `accounts` e método `account.transfer` |
-| método errado | invoke de operação de outra facade → erro no cliente |
-
-## Critério de conclusão
+## Critério de conclusão (fase)
 
 Consumidor obtém handle tipado, invoca método da facade pela rede com o
 contrato transacional da Fase 9; descoberta e rejeições de versão/método
-estão cobertas pelos testes.
+cobertas.
 
 ---
 
 # Fase 12 — Handles de arestas e algoritmos de grafos
 
-## Objetivo
+## Sequência de entregas verticais
 
-Transformar os relacionamentos persistentes da Fase 4 em uma API de arestas
-tipadas e executar algoritmos básicos sob um único snapshot. A fase reutiliza
-streaming, cancelamento e índices das Fases 6–7 e começa após a estabilização
-da Fase 10.
+A fase reutiliza streaming, cancelamento e índices das Fases 6–7 e começa após
+a estabilização da Fase 10. Decisão:
+[ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md).
 
-Decisão: [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md).
+## Fase 12A — EdgeHandle e factories
 
-## Artefatos novos
+Artefatos:
 
 ```text
 include/modb/graph/edge_handle.hpp
-include/modb/graph/graph_view.hpp
-include/modb/graph/traversal.hpp
-include/modb/graph/algorithms.hpp
-src/graph/graph_view.cpp
 tests/edge_handle_test.cpp
-tests/graph_algorithms_test.cpp
 docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md
 ```
 
-Atualizações:
+`EdgeHandle` runtime-only; factories tipadas para `Ref`/`OwnedRef`; rejeitar
+`Embedded` e campo inválido.
+
+Critério: associação/ownership, reabertura, órfã, `invalid_edge`. Tag:
+`0.0.12a`.
+
+## Fase 12B — Adjacência e arestas de entrada
+
+Artefatos:
+
+```text
+include/modb/graph/graph_view.hpp
+src/graph/graph_view.cpp
+```
+
+Adjacência em `PersistentVector<Ref<T>>`; incoming somente via índice de
+campo `Ref` (sem scan reverso ilimitado).
+
+Critério: enumera handles preservando ordem; ausência de índice falha
+explicitamente. Tag: `0.0.12b`.
+
+## Fase 12C — BFS e DFS
+
+Artefatos:
+
+```text
+include/modb/graph/traversal.hpp
+tests/graph_algorithms_test.cpp   (casos BFS/DFS)
+```
+
+BFS/DFS lazy/canceláveis sob um único `Snapshot`, com `max_depth`,
+`max_vertices` e `DanglingPolicy`.
+
+Critério: ordem determinística; limites → `graph_limit_exceeded`; cancelamento
+interrompe. Tag: `0.0.12c`.
+
+## Fase 12D — Caminho, ciclo, toposort e componentes
+
+Artefatos:
+
+```text
+include/modb/graph/algorithms.hpp
+```
+
+Caminho mínimo sem peso; detecção de ciclo; ordenação topológica
+(`graph_cycle` se cíclico); componentes conexos em view não direcionada
+explícita.
+
+Critério: caminho reconstrói; toposort em DAG; ciclo e componentes cobertos.
+Tag: `0.0.12d`.
+
+## Fase 12E — CLI, benchmarks e fechamento
+
+Artefatos:
 
 ```text
 apps/modb_cli/main.cpp
 docs/USO_DA_CLI.md
-docs/PLANO_BENCHMARKS.md
-CMakeLists.txt
+benchmarks/scenarios/graph_*
 ```
 
-## Design
+CLI `graph bfs|dfs|shortest-path|toposort`; benchmarks de topologia/cache;
+suíte completa de reabertura/ownership/heterogêneos.
 
-```cpp
-enum class EdgeKind : std::uint8_t {
-    association,
-    ownership
-};
+Critério: após reopen, CLI e algoritmos cobertos; cenários no runner. Tag:
+`0.0.12e`.
 
-enum class EdgeDirection : std::uint8_t {
-    outgoing,
-    incoming,
-    both
-};
-
-enum class DanglingPolicy : std::uint8_t {
-    fail,
-    skip,
-    yield_error
-};
-
-template <class From, class To,
-          EdgeKind Kind = EdgeKind::association>
-class EdgeHandle {
-public:
-    DatabaseId database() const noexcept;
-    ObjectId source_id() const noexcept;
-    ObjectId target_id() const noexcept;
-    FieldId field() const noexcept;
-
-    Result<From> source(const Snapshot&) const;
-    Result<To> target(const Snapshot&) const;
-    Result<bool> dangling(const Snapshot&) const;
-
-    friend bool operator==(const EdgeHandle&, const EdgeHandle&) = default;
-
-private:
-    friend class Database;
-    DatabaseId database_{};
-    ObjectId source_{};
-    ObjectId target_{};
-    FieldId field_{};
-};
-
-struct GraphOptions {
-    CancellationToken cancel;
-    std::size_t max_depth;
-    std::size_t max_vertices;
-    DanglingPolicy dangling;
-    EdgeDirection direction;
-    bool include_owned;
-};
-```
-
-Factories conceituais:
-
-```cpp
-auto edge = db.edge<&Employee::department>(employee, snapshot);
-auto edges = db.edges<&Employee::projects>(employee, snapshot);
-
-auto visits = breadth_first(root, expand, options);
-auto visits = depth_first(root, expand, options);
-auto path = shortest_path(root, goal, expand, options);
-auto cyclic = has_cycle(root, expand, options);
-auto order = topological_sort(vertices, expand, options);
-auto components = connected_components(vertices, undirected_expand, options);
-```
-
-### Invariantes
-
-1. `Ref<T>` e `OwnedRef<T>` são a representação persistente. `EdgeHandle`
-   é runtime-only e não recebe tag no codec.
-2. `Embedded<T>` não produz aresta porque não possui identidade.
-3. Todo handle carrega origem, alvo e `FieldId`; a posição em coleção não é
-   identidade de aresta.
-4. Aresta com propriedades é modelada como objeto persistente próprio com
-   refs para as extremidades.
-5. Uma travessia abre/recebe exatamente um `Snapshot` e não mistura épocas.
-6. BFS/DFS têm saída lazy, mas o conjunto de visitados é O(V) e respeita
-   `max_vertices`; ultrapassar o limite retorna `graph_limit_exceeded`.
-7. `DanglingPolicy` define como `Ref` órfã é tratada. `OwnedRef` só entra
-   quando `include_owned=true` e continua sujeita à topologia de árvore.
-8. Arestas de entrada exigem índice no campo `Ref`; ausência de índice retorna
-   erro explícito em vez de iniciar scan reverso ilimitado.
-9. Ordenação topológica em grafo cíclico retorna `graph_cycle`.
-
-## Algoritmos e complexidade
-
-| Algoritmo | Saída | Complexidade esperada |
-|---|---|---|
-| BFS | `Generator<Result<GraphVisit<Node>>>` | O(V+E), memória O(V) |
-| DFS | `Generator<Result<GraphVisit<Node>>>` | O(V+E), memória O(V) |
-| caminho mínimo sem peso | `Result<vector<Node>>` | O(V+E), memória O(V) |
-| detecção de ciclo | `Result<bool>` | O(V+E), memória O(V) |
-| ordenação topológica | `Result<vector<Node>>` | O(V+E), memória O(V) |
-| componentes conexos | `Result<vector<vector<Node>>>` | O(V+E), memória O(V) |
-
-Todos os loops verificam cancelamento e limites em frequência documentada.
-Resultados parciais não alteram o banco.
-
-## CLI
-
-```text
-modb graph bfs <file> <root-id> [--max-depth N] [--max-vertices N]
-modb graph dfs <file> <root-id> [--max-depth N] [--max-vertices N]
-modb graph shortest-path <file> <source-id> <target-id>
-modb graph toposort <file>
-```
-
-`modb graph demo` continua sendo a demo estrutural da Fase 4. Os novos
-comandos criam/abrem dataset determinístico e exibem ids, profundidade,
-caminho e erros de limite/ciclo.
-
-## Testes automatizados
-
-**`tests/edge_handle_test.cpp`** (`modb.edge_handle`)
-
-| Caso | Verificação |
-|---|---|
-| associação escalar | origem/alvo/campo corretos; resolve sob snapshot |
-| ownership | `EdgeKind::ownership`; opt-in em travessia |
-| reabertura | novo handle usa novo `DatabaseId`, mesmos ObjectIds |
-| ref órfã | `dangling()` e política configurada |
-| campo inválido/embedded | factory rejeita com `invalid_edge` |
-| coleção de refs | enumera handles tipados preservando ordem |
-
-**`tests/graph_algorithms_test.cpp`** (`modb.graph_algorithms`)
-
-| Caso | Verificação |
-|---|---|
-| BFS/DFS | ordem determinística no grafo fixture |
-| caminho mínimo | retorna menor número de arestas e reconstrói caminho |
-| ciclo | detecta; toposort retorna `graph_cycle` |
-| DAG | toposort respeita todas as arestas |
-| componentes | separa componentes na view não direcionada |
-| cancelamento | termina sem continuar a expandir |
-| limites | profundidade/máximo de vértices respeitados |
-| snapshot | commit concorrente não aparece no percurso aberto |
-| incoming | usa índice de `Ref`; ausência de índice falha explicitamente |
-| reabertura | mesmos resultados sobre grafo persistido |
-
-## Benchmarks
-
-Datasets determinísticos variam vértices, largura, profundidade, densidade,
-direção e cache cold/warm. Registrar TTFR, vértices/arestas por segundo,
-p50/p99 de expansão, páginas lidas, RSS e pico do conjunto de visitados.
-Comparar outgoing direto, incoming indexado e coleção de refs.
-
-## Critério de conclusão
+## Critério de conclusão (fase)
 
 Após reabrir um grafo persistido, `EdgeHandle` resolve arestas tipadas e a CLI
-executa BFS, DFS, caminho mínimo e toposort sob snapshot. A suíte comprova
-ciclo, componentes, órfãs, ownership, incoming indexado, cancelamento,
-limites e estabilidade após reabertura.
+executa BFS, DFS, caminho mínimo e toposort sob snapshot.
 
 ---
 
 # Fase 13 — Container serverless
 
-## Objetivo
+## Sequência de entregas verticais
 
-Empacotar o servidor moDb (Fases 8–9, 11 e 12) como imagem OCI reproduzível,
-adequada a plataformas de containers com escala a zero, inicialização sob
-demanda e persistência externa do arquivo do banco e do WAL. Esta fase
-começa somente depois das Fases 8, 9, 10, 11 e 12: rede, runtime de domínio,
-estabilização, catálogo de facades e grafos precisam existir antes da
-superfície operacional.
+Começa somente depois das Fases 8, 9, 10, 11 e 12. Decisão:
+[ADR-013](decisions/ADR-013-execucao-serverless-em-container.md).
 
-## Decisões fixadas (conteúdo da ADR-013)
+## Fase 13A — ADR e modelo de implantação
 
-1. **Stateful com volume persistente.** Disco efêmero do container não é
-   fonte de verdade. Banco e WAL vivem em volume compatível com escrita
-   posicional e `fsync`/`FlushFileBuffers`.
-2. **Uma instância ativa por banco.** Sem escala horizontal de escrita, sem
-   várias réplicas writers e sem HA distribuída nesta fase.
-3. **Escala a zero permitida.** Cold start executa abertura + WAL recovery
-   antes de aceitar tráfego (startup/readiness).
-4. **Configuração por ambiente.** Caminhos, porta, limites e secrets vêm de
-   variáveis/secrets; a imagem não contém dados nem credenciais.
-5. **Processo não privilegiado**, filesystem raiz somente leitura, volume
-   montado com permissão de escrita só no diretório de dados.
-6. **I/O assíncrono real quando suportado.** Linux usa `io_uring`; Windows usa
-   IOCP com handles abertos por `FILE_FLAG_OVERLAPPED`. Um fallback síncrono
-   explícito preserva portabilidade para kernels, políticas seccomp e volumes
-   que não ofereçam as operações necessárias.
+Registrar volume persistente, writer único, cold start, escala a zero e
+plataforma de referência. Tag: `0.0.13a`.
 
-## Artefatos novos
+## Fase 13B — I/O assíncrono real
+
+Artefatos:
 
 ```text
-deploy/Dockerfile
-deploy/.dockerignore
-deploy/compose.yaml                    (execução local de referência)
-deploy/k8s/                           (ou manifesto da plataforma escolhida)
-docs/decisions/ADR-013-execucao-serverless-em-container.md
-docs/OPERACAO_SERVERLESS.md
-tests/container_smoke_test.*          (ou script CI que sobe a imagem)
 include/modb/storage/async_file.hpp
 src/storage/async_file_linux.cpp       (`io_uring`)
 src/storage/async_file_windows.cpp     (IOCP)
 tests/async_file_test.cpp
 ```
 
-## Protocolo do I/O assíncrono
+API única `read_at`/`write_at`/`sync`/cancel com completion real; fallback
+síncrono explícito; ordering WAL → flush → páginas por barreiras, não por
+ordem de submissão.
 
-- Expor uma API única baseada em completion/`co_await` para `read_at`,
-  `write_at`, `sync` e cancelamento. A coroutine só retoma após a conclusão
-  real do kernel; delegar `pread`/`pwrite` bloqueante a `std::async` não atende
-  este requisito.
-- Linux: detectar `io_uring` em runtime e usar operações de leitura, escrita e
-  `IORING_OP_FSYNC`; registrar a razão do fallback quando syscall, opcode,
-  política seccomp ou filesystem não forem compatíveis.
-- Windows: abrir o arquivo com `FILE_FLAG_OVERLAPPED`, associá-lo a uma
-  completion port e consumir completions via `GetQueuedCompletionStatus`;
-  usar `CancelIoEx` no cancelamento.
-- Manter buffers vivos e imóveis até a completion; validar alinhamento e
-  tamanho; tratar completions parciais, `EINTR`, cancelamento e fechamento com
-  operações ainda em voo.
-- Limitar a profundidade da fila e os bytes em voo. Saturação suspende o
-  produtor e propaga backpressure até consulta/rede, sem fila ilimitada.
-- Durabilidade não decorre da ordem de submissão. O commit espera
-  explicitamente a completion do WAL e de seu flush antes de liberar páginas
-  de dados; shutdown drena ou cancela e aguarda todas as completions.
-- Expor métricas `io_backend`, operações/bytes em voo, latência de submission e
-  completion, queue depth, cancelamentos e fallbacks.
-- Testar o backend real em Linux e Windows, o fallback forçado, saturação,
-  cancelamento, fechamento com I/O pendente, erro parcial, ordering do WAL e
-  volumes suportados pela plataforma serverless. Benchmarks comparam backend
-  assíncrono e síncrono sob a mesma carga.
+Critério: `modb.async_file` + métricas `io_backend`; fallback observável. Tag:
+`0.0.13b`.
 
-## Passo a passo
+## Fase 13C — Imagem OCI, config e volume
 
-1. Escrever a [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md)
-   com o modelo acima e a plataforma de referência (ex.: Kubernetes + scale
-   to zero, Cloud Run, ou equivalente com volume persistente).
-2. Implementar e validar a abstração de I/O assíncrono conforme o protocolo
-   acima, sem trocar o backend de produção até que testes de WAL/recovery
-   comprovem equivalência de durabilidade.
-3. `Dockerfile` multi-stage: build com o toolchain do projeto; runtime mínimo
-   (distroless/alpine) contendo só o binário do servidor e dependências
-   dinâmicas inevitáveis; `USER` não-root; `ENTRYPOINT` do servidor.
-4. Expor apenas a porta do protocolo da Fase 8. Health: endpoint ou comando
-   de readiness que só fica verde após `Database` aberto e recovery concluído;
-   liveness separado do readiness.
-5. Tratar `SIGTERM`/`SIGINT`: parar de aceitar conexões, drenar streams
-   ativos dentro do grace period da plataforma, commit/rollback de
-   transações em voo, `sync` e saída limpa.
-6. Prova automatizada:
-   - build da imagem;
-   - sobe com volume vazio → cria banco → escreve objeto/operação → derruba
-     container com `kill -9` → sobe de novo no mesmo volume → estado
-     commitado presente, incompleto ausente;
-   - cold start a partir de escala zero atende um cliente das Fases 8/9/11/12;
-   - segunda réplica writer tentando o mesmo volume é rejeitada (lock) ou
-     documentada como configuração proibida na plataforma.
-7. Pipeline: build → SBOM → scan → publish com tag igual ao versionamento
-   do repositório (`0.0.#`).
-8. Documentar em `OPERACAO_SERVERLESS.md`: variáveis, volume, limites de
-   memória/CPU, backup (cópia quiescente de `<db>` + `<db>.wal`), restore e
-   restrições (sem multi-writer).
+Artefatos:
 
-## Critério de conclusão
+```text
+deploy/Dockerfile
+deploy/.dockerignore
+deploy/compose.yaml
+deploy/k8s/                            (ou manifesto da plataforma)
+```
 
-Imagem inicia sem estado local prévio, monta volume durável, recupera WAL
-quando necessário, atende cliente remoto, sobrevive a término forçado sem
-corrupção e encerra graciosamente sob sinal de parada. Uma única instância
-ativa, sem privilégios, com memória limitada e backpressure preservado.
-Em Linux e Windows compatíveis, a suíte também comprova completions reais por
-`io_uring` e IOCP, respectivamente, sem bloquear o executor. O fallback é
-observável, testado e não altera ordering, atomicidade ou durabilidade.
+Imagem multi-stage mínima, não privilegiada, rootfs read-only; config só por
+env/secrets; volume para `<db>`+`<db>.wal`; ingresso do protocolo da Fase 8.
+
+Critério: compose local sobe, monta volume e completa handshake/cliente. Tag:
+`0.0.13c`.
+
+## Fase 13D — Probes, shutdown e recovery
+
+Readiness/liveness/startup; `SIGTERM` drena e sincroniza; prova cold start e
+kill -9 + reabertura no mesmo volume.
+
+Critério: commits preservados, incompletos ausentes; readiness pós-recovery.
+Tag: `0.0.13d`.
+
+## Fase 13E — Observabilidade, CI e guia
+
+Artefatos:
+
+```text
+docs/OPERACAO_SERVERLESS.md
+(pipeline CI: build → SBOM → scan → publish)
+```
+
+Logs/métricas (cold start, recovery, I/O, conexões); publish versionado;
+guia operacional com backup/restore e restrição multi-writer.
+
+Critério: pipeline publica; guia opera do zero; métricas observáveis. Tag:
+`0.0.13e`.
+
+## Critério de conclusão (fase)
+
+Imagem inicia sem estado local prévio, monta volume durável, recupera WAL,
+atende cliente remoto, sobrevive a término forçado e encerra graciosamente.
 
 ---
 
