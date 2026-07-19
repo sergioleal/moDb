@@ -59,6 +59,7 @@ add_library(modb
     src/ops/facade_catalog.cpp
     examples/transfer_funds/transfer_funds.cpp
     examples/accounts_facade/accounts_facade.cpp
+    src/graph/graph_view.cpp
     src/storage/binary.cpp
     src/storage/codec.cpp
     src/storage/page_file.cpp
@@ -334,6 +335,9 @@ if(BUILD_TESTING)
     add_executable(modb_edge_handle_tests tests/edge_handle_test.cpp)
     target_link_libraries(modb_edge_handle_tests PRIVATE modb::modb)
 
+    add_executable(modb_graph_view_tests tests/graph_view_test.cpp)
+    target_link_libraries(modb_graph_view_tests PRIVATE modb::modb)
+
     add_executable(modb_benchmark_runner_tests tests/benchmark_runner_test.cpp)
     target_link_libraries(modb_benchmark_runner_tests PRIVATE modb_bench_core)
 
@@ -422,6 +426,7 @@ if(BUILD_TESTING)
         target_link_options(modb_facade_handle_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_facade_server_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_edge_handle_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_graph_view_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -472,6 +477,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.facade_handle COMMAND modb_facade_handle_tests)
     add_test(NAME modb.facade_server COMMAND modb_facade_server_tests)
     add_test(NAME modb.edge_handle COMMAND modb_edge_handle_tests)
+    add_test(NAME modb.graph_view COMMAND modb_graph_view_tests)
     add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)

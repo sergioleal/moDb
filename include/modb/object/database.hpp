@@ -768,6 +768,26 @@ public:
             Error{ErrorCode::invalid_edge, "field is not part of the bound type"});
     }
 
+    // Lookup por igualdade no índice B+ do campo (Fase 12B — arestas de entrada).
+    // Exige índice; não faz fallback para scan.
+    template <typename T>
+    [[nodiscard]] Result<std::vector<ObjectId>> indexed_object_ids(
+        FieldId field, const AttributeValue& key) const {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
+        }
+        if (!store_.has_index(bound->binding.type_name(), field.value)) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_edge,
+                      "incoming edges require an index on the Ref field"});
+        }
+        return store_.index_equal(bound->binding.type_name(), field.value, key);
+    }
+
     [[nodiscard]] Result<TypeDefinitionId> define_type(Transaction& tx,
                                                         TypeDefinition definition);
 
@@ -880,7 +900,7 @@ public:
 
     // Devolve um BlobStore sobre o mesmo arquivo, base das coleções e binários
     // grandes. É leve (só referencia o PageFile) e pode ser criado sob demanda.
-    [[nodiscard]] BlobStore blobs() noexcept { return BlobStore{*file_, database_id_, true}; }
+    [[nodiscard]] BlobStore blobs() const noexcept { return BlobStore{*file_, database_id_, true}; }
 
 private:
     // Um tipo C++ ligado ao seu binding e ao id de tipo persistido.
