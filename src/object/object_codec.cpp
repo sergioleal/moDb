@@ -212,9 +212,14 @@ Result<FieldValues> decode_object_payload(std::span<const std::byte> payload) {
     if (!field_count) {
         return std::unexpected(field_count.error());
     }
+    // Contagem acima do teto ADR-007: erro antes de alocar/iterar (Fase 10D).
+    if (*field_count > modb::max_columns_per_table) {
+        return std::unexpected(
+            Error{ErrorCode::too_many_columns, "object has more fields than the type limit"});
+    }
 
     FieldValues fields;
-    fields.reserve(std::min<std::size_t>(*field_count, modb::max_columns_per_table));
+    fields.reserve(*field_count);
     for (std::uint16_t index = 0; index < *field_count; ++index) {
         auto field_id = reader.read_u16();
         if (!field_id) {

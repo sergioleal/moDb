@@ -27,6 +27,15 @@ inline constexpr std::uint16_t blob_page_version = 1;
 // Dados úteis que cabem numa única página de blob.
 inline constexpr std::size_t blob_page_capacity = storage::page_size - blob_header_size;
 
+// Cabeçalho validado de uma página BLBP (entrada não confiável / fuzz 10D).
+struct BlobPageHeader {
+    storage::PageId next{};
+    std::uint32_t length{0};
+};
+
+// Valida magic, versão e length ≤ capacidade sem seguir a cadeia.
+[[nodiscard]] Result<BlobPageHeader> parse_blob_page(const storage::Page& page);
+
 // Armazena binários maiores que uma página em uma cadeia de páginas BLBP. O
 // objeto pai guarda apenas o BlobId (a primeira página); PersistentVector e
 // afins constroem seus conteúdos por cima daqui (doc §12).

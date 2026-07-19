@@ -74,8 +74,8 @@ void test_lying_field_count(TestSuite& suite) {
     record.push_back(std::byte{0x00});  // um byte solto qualquer
 
     auto decoded = decode_object(record);
-    suite.check_error(decoded, ErrorCode::unexpected_end_of_input,
-                      "a lying field_count runs out of input instead of allocating");
+    suite.check_error(decoded, ErrorCode::too_many_columns,
+                      "a lying field_count above the ADR-007 cap is rejected before allocating");
 }
 
 // Uma tag de tipo desconhecida é rejeitada.

@@ -67,6 +67,16 @@
       "cacheVariables": {
         "MODB_ENABLE_SANITIZERS": "ON"
       }
+    },
+    {
+      "name": "fuzz",
+      "displayName": "Fuzzing (libFuzzer when Clang; else corpus replay)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "MODB_ENABLE_LIBFUZZER": "ON",
+        "MODB_ENABLE_SANITIZERS": "ON",
+        "BUILD_TESTING": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -93,6 +103,10 @@
     {
       "name": "sanitizers",
       "configurePreset": "sanitizers"
+    },
+    {
+      "name": "fuzz",
+      "configurePreset": "fuzz"
     }
   ],
   "testPresets": [
@@ -129,6 +143,18 @@
       "configurePreset": "local-gcc13",
       "output": {
         "outputOnFailure": true
+      }
+    },
+    {
+      "name": "fuzz",
+      "configurePreset": "fuzz",
+      "output": {
+        "outputOnFailure": true
+      },
+      "filter": {
+        "include": {
+          "label": "fuzz"
+        }
       }
     }
   ]

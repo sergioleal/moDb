@@ -11,6 +11,7 @@ include(CTest)
 
 option(MODB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(MODB_ENABLE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
+option(MODB_ENABLE_LIBFUZZER "Build fuzz targets with Clang libFuzzer (requires Clang)" OFF)
 option(MODB_ALLOW_CXX23_FALLBACK "Allow a local C++23 build when C++26 is unavailable" ON)
 # Link estático do runtime MinGW gera binários portáteis (sem DLLs), mas a
 # toolchain do CLion migrou de GCC 13 para GCC 15.2, cujo libwinpthread.a
@@ -565,4 +566,50 @@ if(BUILD_TESTING)
     set_tests_properties(modb.cli.tx_wal_info PROPERTIES
         DEPENDS modb.cli.tx_crash_after_commit)
     set_tests_properties(modb.cli.tx_get PROPERTIES DEPENDS modb.cli.tx_wal_info)
+
+    # --- Fase 10D: alvos de fuzz (replay de corpus no ctest; libFuzzer no preset fuzz) ---
+    set(MODB_FUZZ_CORPUS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus")
+    set(MODB_FUZZ_TARGETS
+        fuzz_object_codec
+        fuzz_type_definition
+        fuzz_blob_chain
+        fuzz_protocol
+        fuzz_wal
+    )
+    if(MODB_ENABLE_LIBFUZZER)
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            message(WARNING
+                "moDb: MODB_ENABLE_LIBFUZZER ignorado — toolchain "
+                "'${CMAKE_CXX_COMPILER_ID}' sem libFuzzer. "
+                "Usando replay de corpus (docs/FUZZING.md). Em Linux/macOS ou "
+                "Clang no Windows, reconfigure com Clang.")
+            set(MODB_ENABLE_LIBFUZZER OFF)
+        else()
+            message(STATUS "moDb: libFuzzer ativado nos alvos tests/fuzz/")
+        endif()
+    endif()
+    foreach(fuzz_name IN LISTS MODB_FUZZ_TARGETS)
+        add_executable(${fuzz_name} tests/fuzz/${fuzz_name}.cpp)
+        target_include_directories(${fuzz_name} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz)
+        target_link_libraries(${fuzz_name} PRIVATE modb::modb)
+        if(MINGW)
+            target_link_options(${fuzz_name} PRIVATE ${MODB_MINGW_LINK_OPTS})
+        endif()
+        if(MODB_ENABLE_LIBFUZZER)
+            target_compile_definitions(${fuzz_name} PRIVATE MODB_FUZZER_LIBFUZZER=1)
+            target_compile_options(${fuzz_name} PRIVATE -fsanitize=fuzzer,address,undefined
+                                                       -fno-omit-frame-pointer)
+            target_link_options(${fuzz_name} PRIVATE -fsanitize=fuzzer,address,undefined)
+        endif()
+        # Corpus versionado: sempre registado no ctest quando não há libFuzzer
+        # (com libFuzzer o entrypoint é LLVMFuzzerTestOneInput, sem main de replay).
+        if(NOT MODB_ENABLE_LIBFUZZER)
+            string(REPLACE "fuzz_" "" fuzz_corpus_subdir "${fuzz_name}")
+            add_test(NAME modb.fuzz.${fuzz_corpus_subdir}.corpus
+                COMMAND ${fuzz_name} "${MODB_FUZZ_CORPUS_DIR}/${fuzz_corpus_subdir}")
+            set_tests_properties(modb.fuzz.${fuzz_corpus_subdir}.corpus PROPERTIES
+                LABELS fuzz TIMEOUT 60)
+        endif()
+    endforeach()
 endif()

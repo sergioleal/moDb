@@ -1696,7 +1696,7 @@ Usar Clang/libFuzzer quando disponível e manter fallback documentado. Cada alvo
 deve impor limites antes de alocar, transformar todo crash corrigido em corpus
 de regressão e rodar com ASan/UBSan. Critério: campanha mínima de 1 h por alvo
 sem crash/OOM/UB, corpus versionado e suítes debug/sanitizers verdes. Tag:
-`0.0.10d`.
+`0.0.10d`. Entregue — ver [FUZZING.md](FUZZING.md).
 
 ## Fase 10E — Compatibilidade e API pública
 

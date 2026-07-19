@@ -10,10 +10,19 @@
 #include "modb/storage/page_file.hpp"
 #include "modb/storage/table_heap.hpp"
 
+// Disponibiliza visão de bytes para o decoder de atributos do catálogo.
+#include <span>
 // Disponibiliza os vetores do conteúdo lido.
 #include <vector>
 
 namespace modb::object {
+
+// Reconstrói a lista de AttributeDefinition a partir do sub-formato do catálogo
+// (entrada não confiável). Rejeita contagens acima de max_columns_per_table
+// antes de alocar; usado pelo CatalogStore e pelos alvos de fuzz (Fase 10D).
+[[nodiscard]] Result<std::vector<AttributeDefinition>> decode_type_attributes(
+    std::span<const std::byte> bytes);
+
 
 // Um TypeDefinition lido do catálogo, com o id persistido separado. A definição
 // vem sem id estampado (id() == 0); quem carrega decide como registrá-la.
