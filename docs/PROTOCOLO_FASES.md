@@ -1780,7 +1780,7 @@ domínio; método alheio → `facade_method_not_found`. Tag: `0.0.11b`. Entregue
 
 ## Fase 11C — Descoberta e negociação no protocolo
 
-Status: ✅ Concluída — tag `0.0.11c` (2026-07-19).
+Status: ✅ Concluída — merge `225d6e7`, tag `0.0.11c` (2026-07-19).
 
 Artefatos:
 
