@@ -1963,17 +1963,21 @@ Critério: `modb.async_file` + métricas `io_backend`; fallback observável. Tag
 
 ## Fase 13C — Imagem OCI, config e volume
 
+Status: ✅ Concluída — tag `0.0.13c` (2026-07-19).
+
 Artefatos:
 
 ```text
 deploy/Dockerfile
 deploy/.dockerignore
 deploy/compose.yaml
-deploy/k8s/                            (ou manifesto da plataforma)
+deploy/k8s/modb.yaml
+deploy/entrypoint.sh
 ```
 
 Imagem multi-stage mínima, não privilegiada, rootfs read-only; config só por
-env/secrets; volume para `<db>`+`<db>.wal`; ingresso do protocolo da Fase 8.
+env/secrets; volume para `<db>`+`<db>.wal`; ingresso do protocolo da Fase 8
+via `modb serve --from-env` / `serve_forever`.
 
 Critério: compose local sobe, monta volume e completa handshake/cliente. Tag:
 `0.0.13c`.

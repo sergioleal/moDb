@@ -845,13 +845,13 @@ explícito) e ordering de durabilidade. Tag: `0.0.13b`.
 
 #### Fase 13C — Imagem OCI, config e volume
 
-- [ ] Criar imagem OCI reproduzível em build multi-stage, mínima, executada por
+- [x] Criar imagem OCI reproduzível em build multi-stage, mínima, executada por
       usuário não privilegiado e com filesystem raiz somente leitura.
-- [ ] Configurar banco, porta, credenciais e limites somente por variáveis de
+- [x] Configurar banco, porta, credenciais e limites somente por variáveis de
       ambiente e secrets; nunca incluir segredos ou dados na imagem.
-- [ ] Montar os arquivos do banco e WAL em armazenamento persistente com as
+- [x] Montar os arquivos do banco e WAL em armazenamento persistente com as
       garantias de locking, flush e atomicidade exigidas pelo motor.
-- [ ] Adaptar o protocolo da fase 8 ao ingresso suportado pela plataforma
+- [x] Adaptar o protocolo da fase 8 ao ingresso suportado pela plataforma
       escolhida, sem expor o formato físico nem enfraquecer backpressure.
 
 Critério de aceite: imagem sobe localmente (compose) com volume montado e

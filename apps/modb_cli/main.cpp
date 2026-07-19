@@ -156,7 +156,10 @@ int command_serve_process_demo(const std::filesystem::path& path, bool force,
 int command_ops_transfer_demo(const std::filesystem::path& path, bool force);
 int command_ops_facade_demo(const std::filesystem::path& path, bool force);
 int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
-                       std::optional<std::size_t> fail_after, bool small_buffers);
+                       std::optional<std::size_t> fail_after, bool small_buffers,
+                       std::string_view host = "127.0.0.1");
+int command_serve_loop(const std::filesystem::path& path, std::string_view host,
+                       std::uint16_t port);
 int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name);
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
@@ -334,7 +337,8 @@ void print_serve_help() {
                  "  modb serve backpressure-demo <file> [--force]\n"
                  "  modb serve cancel-demo <file> [--force]\n"
                  "  modb serve process-demo <file> [--force]\n"
-                 "  modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]\n"
+                 "  modb serve <file> [--host H] [--port N] [--once]\n"
+                 "  modb serve --from-env [--once]\n"
                  "\n"
                  "demo               Listen, complete Hello/HelloOk with a local client and exit.\n"
                  "query-demo         Seed objects, stream a remote Query end-to-end and exit.\n"
@@ -1849,8 +1853,9 @@ int command_serve_cancel_demo(const std::filesystem::path& path, bool force) {
 }
 
 int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
-                       std::optional<std::size_t> fail_after, bool small_buffers) {
-    auto server = modb::net::Server::listen(path, "127.0.0.1", port);
+                       std::optional<std::size_t> fail_after, bool small_buffers,
+                       std::string_view host) {
+    auto server = modb::net::Server::listen(path, host, port);
     if (!server) {
         return print_error(server.error());
     }
@@ -1862,7 +1867,7 @@ int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
     }
     std::cout << "READY " << server->port() << '\n';
     std::cout.flush();
-    std::cout << "Serving " << path.filename().string() << " on 127.0.0.1:" << server->port()
+    std::cout << "Serving " << path.filename().string() << " on " << host << ':' << server->port()
               << " (one session)\n";
     std::cout.flush();
     if (auto status = server->serve_one(); !status) {
@@ -1879,6 +1884,23 @@ int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
         return 1;
     }
     std::cout << "Session completed; exiting.\n";
+    return 0;
+}
+
+int command_serve_loop(const std::filesystem::path& path, std::string_view host,
+                       std::uint16_t port) {
+    auto server = modb::net::Server::listen(path, host, port);
+    if (!server) {
+        return print_error(server.error());
+    }
+    std::cout << "READY " << server->port() << '\n';
+    std::cout.flush();
+    std::cout << "Serving " << path.string() << " on " << host << ':' << server->port()
+              << " (loop until listener fails)\n";
+    std::cout.flush();
+    if (auto status = server->serve_forever(); !status) {
+        return print_error(status.error());
+    }
     return 0;
 }
 
@@ -5779,12 +5801,45 @@ int run(int argc, char* argv[]) {
             }
             return command_serve_process_demo(argv[3], force, argv[0]);
         }
-        // modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]
-        if (argc < 4) {
+        // modb serve --from-env [--once]
+        // modb serve <file> [--host H] [--port N] [--once] [--fail-after N] [--small-buffers]
+        if (argc >= 3 && std::string_view{argv[2]} == "--from-env") {
+            const char* db = std::getenv("MODB_DB_PATH");
+            const char* host_env = std::getenv("MODB_HOST");
+            const char* port_env = std::getenv("MODB_PORT");
+            if (db == nullptr || *db == '\0') {
+                return print_error(modb::Error{modb::ErrorCode::invalid_argument,
+                                               "MODB_DB_PATH is required for --from-env"});
+            }
+            std::string host = host_env && *host_env != '\0' ? host_env : "0.0.0.0";
+            std::uint16_t port = 7400;
+            if (port_env && *port_env != '\0') {
+                auto parsed = parse_integer(port_env);
+                if (!parsed || *parsed < 0 || *parsed > 65535) {
+                    return print_error(modb::Error{modb::ErrorCode::invalid_argument,
+                                                   "MODB_PORT must be 0..65535"});
+                }
+                port = static_cast<std::uint16_t>(*parsed);
+            }
+            bool once = false;
+            for (int i = 3; i < argc; ++i) {
+                if (std::string_view{argv[i]} == "--once") {
+                    once = true;
+                } else {
+                    return print_usage_error("modb serve --from-env [--once]");
+                }
+            }
+            if (once) {
+                return command_serve_once(db, port, std::nullopt, false, host);
+            }
+            return command_serve_loop(db, host, port);
+        }
+        if (argc < 3) {
             return print_usage_error(
-                "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+                "modb serve <file> [--host H] [--port N] [--once] | modb serve --from-env");
         }
         const std::filesystem::path file = argv[2];
+        std::string host = "127.0.0.1";
         std::uint16_t port = 0;
         bool once = false;
         std::optional<std::size_t> fail_after;
@@ -5795,38 +5850,43 @@ int run(int argc, char* argv[]) {
                 once = true;
             } else if (arg == "--small-buffers") {
                 small_buffers = true;
+            } else if (arg == "--host") {
+                if (i + 1 >= argc) {
+                    return print_usage_error(
+                        "modb serve <file> [--host H] [--port N] [--once]");
+                }
+                host = argv[++i];
             } else if (arg == "--port") {
                 if (i + 1 >= argc) {
                     return print_usage_error(
-                        "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+                        "modb serve <file> [--host H] [--port N] [--once]");
                 }
                 auto parsed = parse_integer(argv[++i]);
                 if (!parsed || *parsed < 0 || *parsed > 65535) {
                     return print_usage_error(
-                        "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+                        "modb serve <file> [--host H] [--port N] [--once]");
                 }
                 port = static_cast<std::uint16_t>(*parsed);
             } else if (arg == "--fail-after") {
                 if (i + 1 >= argc) {
                     return print_usage_error(
-                        "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+                        "modb serve <file> [--port N] --once [--fail-after N]");
                 }
                 auto parsed = parse_integer(argv[++i]);
                 if (!parsed || *parsed < 0) {
                     return print_usage_error(
-                        "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+                        "modb serve <file> [--port N] --once [--fail-after N]");
                 }
                 fail_after = static_cast<std::size_t>(*parsed);
             } else {
                 return print_usage_error(
-                    "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+                    "modb serve <file> [--host H] [--port N] [--once]");
             }
         }
-        if (!once) {
-            return print_usage_error(
-                "modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]");
+        if (once) {
+            return command_serve_once(file, port, fail_after, small_buffers);
         }
-        return command_serve_once(file, port, fail_after, small_buffers);
+        return command_serve_loop(file, host, port);
     }
     if (command == "ping") {
         if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {

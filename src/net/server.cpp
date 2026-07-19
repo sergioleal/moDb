@@ -531,4 +531,13 @@ Result<void> Server::serve_one() {
     return handle_connection(std::move(*peer));
 }
 
+Result<void> Server::serve_forever() {
+    while (true) {
+        auto status = serve_one();
+        if (!status) {
+            return status;
+        }
+    }
+}
+
 } // namespace modb::net

@@ -1,0 +1,24 @@
+# Compose de referência — volume persistente + uma réplica writer (Fase 13C).
+services:
+  modb:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: modb:0.0.13c
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      MODB_DB_PATH: /data/db.modb
+      MODB_HOST: "0.0.0.0"
+      MODB_PORT: "7400"
+      # Sem segredos na imagem — apenas variáveis/secrets da plataforma.
+    ports:
+      - "7400:7400"
+    volumes:
+      - modb-data:/data
+    user: "10001:10001"
+    restart: unless-stopped
+
+volumes:
+  modb-data:

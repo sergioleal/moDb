@@ -77,6 +77,9 @@ public:
     // Aceita uma conexão e mantém a sessão até o peer fechar (Hello + Queries/OpCalls).
     [[nodiscard]] Result<void> serve_one();
 
+    // Aceita sessões em loop até o listener falhar (ex.: fechado no shutdown).
+    [[nodiscard]] Result<void> serve_forever();
+
 private:
     Server(std::shared_ptr<object::Database> database, object::DatabaseId database_id,
            NativeSocket listener, std::uint16_t port, std::string database_name,

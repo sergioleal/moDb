@@ -53,7 +53,7 @@
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ✅ Concluída | 9/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | 🔄 Em andamento | 6/10 | Fases 9, 10 · 11A–11D |
 | [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ✅ Concluída | 12/12 | Fases 4, 6, 7, 10 · 12A–12E |
-| [13](#fase-13--container-serverless) | Container serverless | 🔄 Em andamento | 2/11 | Fases 8, 9, 10, 11, 12 · 13A–13E |
+| [13](#fase-13--container-serverless) | Container serverless | 🔄 Em andamento | 5/11 | Fases 8, 9, 10, 11, 12 · 13A–13E |
 | [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ⬜ Não iniciada | 0/12 | Fases 5, 6, 8 |
 | **Total** | | | **115/158 (~73%)** | |
 
@@ -1024,7 +1024,7 @@ direção, refs órfãs, ownership, cancelamento e limites são determinísticos
 
 ## Fase 13 — Container serverless
 
-Status: 🔄 Em andamento (2/11) — cinco entregas verticais 13A–13E.
+Status: 🔄 Em andamento (5/11) — cinco entregas verticais 13A–13E.
 Definição completa:
 [PLANO_ODB.md §Fase 13](PLANO_ODB.md#fase-13--container-serverless) ·
 [PROTOCOLO_FASES.md §Fase 13](PROTOCOLO_FASES.md#fase-13--container-serverless)
@@ -1032,10 +1032,10 @@ Definição completa:
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
 | 13.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ✅ | 13A · merge tag `0.0.13a` · [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
-| 13.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ⬜ | 13C · `deploy/Dockerfile` |
-| 13.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ⬜ | 13C · Sem expor formato físico; backpressure preservado |
-| 13.4 | Configuração só por env/secrets | ⬜ | 13C · Sem dados nem credenciais na imagem |
-| 13.5 | Volume persistente para banco + WAL com `fsync` confiável | ⬜ | 13C · Disco efêmero proibido como fonte de verdade |
+| 13.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ✅ | 13C · `deploy/Dockerfile` |
+| 13.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ✅ | 13C · `serve --from-env` / `0.0.0.0` |
+| 13.4 | Configuração só por env/secrets | ✅ | 13C · `MODB_DB_PATH`/`HOST`/`PORT` |
+| 13.5 | Volume persistente para banco + WAL com `fsync` confiável | ✅ | 13C · compose volume `/data` |
 | 13.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ✅ | 13B · tag `0.0.13b` · `modb.async_file` |
 | 13.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | 13D · `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
 | 13.8 | Recovery em cold start e após término forçado | ⬜ | 13D · Inclui WAL pendente |
@@ -1061,11 +1061,11 @@ Status: ✅ Concluída — tag `0.0.13b` (2026-07-19).
 
 ### Fase 13C — Imagem OCI, config e volume
 
-Status: ⬜ Não iniciada — tag prevista `0.0.13c`.
+Status: ✅ Concluída — tag `0.0.13c` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Dockerfile + env/secrets + volume + ingresso | ⬜ | Compose local + handshake |
+| Dockerfile + env/secrets + volume + ingresso | ✅ | `deploy/compose.yaml` + `serve --from-env` |
 
 ### Fase 13D — Probes, shutdown e recovery
 

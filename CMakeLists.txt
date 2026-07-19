@@ -536,6 +536,8 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.protocol_demo COMMAND modb_cli protocol demo)
     add_test(NAME modb.cli.protocol_help COMMAND modb_cli protocol --help)
     add_test(NAME modb.cli.serve_help COMMAND modb_cli serve --help)
+    add_test(NAME modb.cli.serve_from_env_requires_path COMMAND modb_cli serve --from-env)
+    set_tests_properties(modb.cli.serve_from_env_requires_path PROPERTIES WILL_FAIL TRUE)
     add_test(NAME modb.cli.serve_demo
         COMMAND modb_cli serve demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-demo.modb --force)
