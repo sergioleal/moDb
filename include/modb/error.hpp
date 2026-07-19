@@ -134,6 +134,8 @@ enum class ErrorCode {
     graph_limit_exceeded,
     // Ciclo detectado onde a topologia não permite (Fase 12).
     graph_cycle,
+    // Escrita/begin/GC em follower read-only (Fase 14).
+    replica_read_only,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

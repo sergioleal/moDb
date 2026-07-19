@@ -108,6 +108,9 @@ public:
         return current_baseline_;
     }
     [[nodiscard]] std::uint64_t epoch() const noexcept { return root_.epoch(); }
+    [[nodiscard]] DatabaseUuid database_uuid() const noexcept { return root_.database_uuid(); }
+    [[nodiscard]] TimelineId timeline_id() const noexcept { return root_.timeline_id(); }
+    [[nodiscard]] std::uint64_t next_lsn() const noexcept { return root_.next_lsn(); }
     // Total de registros físicos vivos no heap de dados (Fase 6C): inclui as
     // versões `previous` ainda preservadas e cópias órfãs ainda não coletadas.
     // Diagnóstico read-only, usado por testes e pela CLI para observar o efeito

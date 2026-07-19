@@ -46,6 +46,12 @@ public:
     // Época MVCC global, incrementada uma vez por commit durável (Fase 6A).
     [[nodiscard]] std::uint64_t epoch() const noexcept { return epoch_; }
 
+    // Identidade persistente e timeline (Fase 14 / ADR-016).
+    [[nodiscard]] DatabaseUuid database_uuid() const noexcept { return database_uuid_; }
+    [[nodiscard]] TimelineId timeline_id() const noexcept { return TimelineId{timeline_id_}; }
+    // Próximo LSN global a emitir no WAL v2 (nunca reinicia por sessão).
+    [[nodiscard]] std::uint64_t next_lsn() const noexcept { return next_lsn_; }
+
     // Cada setter atualiza o espelho e regrava a página imediatamente, para que
     // a raiz em disco nunca fique atrás do estado observável.
     [[nodiscard]] Result<void> set_identity_dir(storage::PageId id);
@@ -55,6 +61,9 @@ public:
     [[nodiscard]] Result<void> set_current_baseline(BaselineId baseline);
     [[nodiscard]] Result<void> advance_epoch();
     [[nodiscard]] Result<void> set_index_dir(storage::PageId id);
+    [[nodiscard]] Result<void> set_database_uuid(DatabaseUuid uuid);
+    [[nodiscard]] Result<void> set_timeline_id(TimelineId timeline);
+    [[nodiscard]] Result<void> set_next_lsn(std::uint64_t next);
 
 private:
     DatabaseRoot(storage::PageFile& file, storage::PageId page) noexcept
@@ -75,6 +84,9 @@ private:
     std::uint64_t current_baseline_{};
     std::uint64_t epoch_{};
     std::uint64_t index_dir_{};
+    DatabaseUuid database_uuid_{};
+    std::uint64_t timeline_id_{1};
+    std::uint64_t next_lsn_{1};
 };
 
 } // namespace modb::object

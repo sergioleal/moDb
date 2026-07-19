@@ -840,6 +840,9 @@ public:
         return store_.current_baseline();
     }
     [[nodiscard]] std::uint64_t epoch() const noexcept { return store_.epoch(); }
+    [[nodiscard]] DatabaseUuid database_uuid() const noexcept { return store_.database_uuid(); }
+    [[nodiscard]] TimelineId timeline_id() const noexcept { return store_.timeline_id(); }
+    [[nodiscard]] std::uint64_t next_lsn() const noexcept { return store_.next_lsn(); }
     [[nodiscard]] Result<std::reference_wrapper<const Baseline>> find_baseline(
         BaselineId id) const {
         return store_.find_baseline(id);
