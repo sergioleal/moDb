@@ -755,7 +755,7 @@ Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · `modb_bench` + JSONL; ver [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
+| 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · merge `9b0cfba`, tag `0.0.10a`; [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
 | 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ⬜ | 10B |
 | 10.3 | Profiling antes de cada otimização | ⬜ | 10C |
 | 10.4 | Fuzzing dos decoders | ⬜ | 10D |
@@ -767,7 +767,7 @@ Definição completa:
 
 ### Fase 10A — Runner e baseline de benchmarks
 
-Status: ✅ Concluída — tag `0.0.10a` (2026-07-19).
+Status: ✅ Concluída — merge `9b0cfba`, tag `0.0.10a` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
