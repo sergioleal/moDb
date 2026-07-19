@@ -23,8 +23,11 @@
 
 namespace modb::storage {
 
-// Define a versão binária que esta implementação consegue abrir.
-inline constexpr std::uint16_t current_format_version = 1;
+// Versão do superbloco MODB (Fase 10E: major.minor; fio legado = major quando minor=0).
+inline constexpr std::uint16_t current_format_major = 1;
+inline constexpr std::uint16_t current_format_minor = 0;
+// Alias legado: u16 gravado quando minor == 0.
+inline constexpr std::uint16_t current_format_version = current_format_major;
 // Reserva a página zero para os metadados gerais do banco.
 inline constexpr PageId superblock_page_id{0};
 

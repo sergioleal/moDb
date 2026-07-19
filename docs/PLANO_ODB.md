@@ -644,14 +644,15 @@ Ver [FUZZING.md](FUZZING.md).
 
 #### Fase 10E — Compatibilidade e API pública
 
-- [ ] Definir política de compatibilidade do formato de arquivo e do protocolo
+- [x] Definir política de compatibilidade do formato de arquivo e do protocolo
       (major incompatível; minor somente aditivo).
-- [ ] Estabilizar e documentar a API pública C++, separando headers públicos de
+- [x] Estabilizar e documentar a API pública C++, separando headers públicos de
       detalhes internos e cobrindo recusas de versão com erros claros.
 
 Critério de aceite: matriz de compatibilidade automatizada cobre
 arquivo/protocolo/API; exemplos públicos compilam como consumidores externos.
-Tag: `0.0.10e`.
+Tag: `0.0.10e`. Ver [COMPATIBILIDADE.md](COMPATIBILIDADE.md) e
+[API_PUBLICA.md](API_PUBLICA.md).
 
 #### Fase 10F — Documentação, operação e fechamento
 

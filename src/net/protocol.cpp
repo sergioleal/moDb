@@ -91,7 +91,11 @@ Result<void> encode_hello(storage::BinaryWriter& writer, const Hello& message) {
     if (auto status = write_string(writer, message.database_name); !status) {
         return status;
     }
-    return write_compression_list(writer, message.accepted_codecs);
+    if (auto status = write_compression_list(writer, message.accepted_codecs); !status) {
+        return status;
+    }
+    writer.write_u16(message.minor);
+    return {};
 }
 
 Result<Hello> decode_hello(storage::BinaryReader& reader) {
@@ -111,6 +115,19 @@ Result<Hello> decode_hello(storage::BinaryReader& reader) {
         return std::unexpected(codecs.error());
     }
     message.accepted_codecs = std::move(*codecs);
+    // Minor aditivo (Fase 10E): ausente em peers antigos; bytes extras ignoráveis.
+    if (reader.remaining() >= sizeof(std::uint16_t)) {
+        const auto minor = reader.read_u16();
+        if (!minor) {
+            return std::unexpected(minor.error());
+        }
+        message.minor = *minor;
+    }
+    while (reader.remaining() > 0) {
+        if (auto skipped = reader.read_u8(); !skipped) {
+            return std::unexpected(skipped.error());
+        }
+    }
     return message;
 }
 
@@ -122,6 +139,7 @@ Result<void> encode_hello_ok(storage::BinaryWriter& writer, const HelloOk& messa
     writer.write_u16(message.max_concurrent_streams);
     writer.write_u16(message.max_expansion_ratio);
     writer.write_u32(message.idle_timeout_ms);
+    writer.write_u16(message.minor);
     return {};
 }
 
@@ -170,6 +188,18 @@ Result<HelloOk> decode_hello_ok(storage::BinaryReader& reader) {
         return std::unexpected(idle.error());
     }
     message.idle_timeout_ms = *idle;
+    if (reader.remaining() >= sizeof(std::uint16_t)) {
+        const auto minor = reader.read_u16();
+        if (!minor) {
+            return std::unexpected(minor.error());
+        }
+        message.minor = *minor;
+    }
+    while (reader.remaining() > 0) {
+        if (auto skipped = reader.read_u8(); !skipped) {
+            return std::unexpected(skipped.error());
+        }
+    }
     return message;
 }
 
