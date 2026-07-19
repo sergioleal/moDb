@@ -1,0 +1,74 @@
+# Manifesto mínimo Kubernetes / scale-to-zero compatível (Fase 13C).
+# Uma réplica writer; volume persistente obrigatório; config por env.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: modb-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modb
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: modb
+  template:
+    metadata:
+      labels:
+        app: modb
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: modb
+          image: modb:0.0.13c
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 7400
+              name: modb
+          env:
+            - name: MODB_DB_PATH
+              value: /data/db.modb
+            - name: MODB_HOST
+              value: "0.0.0.0"
+            - name: MODB_PORT
+              value: "7400"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: modb-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: modb
+spec:
+  selector:
+    app: modb
+  ports:
+    - port: 7400
+      targetPort: 7400
+      name: modb
