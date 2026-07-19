@@ -888,7 +888,7 @@ Definição completa:
 | 11.1 | ADR do modelo de facades/handles e separação com a Fase 9 | ✅ | 11A · [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md) |
 | 11.2 | `FacadeDescriptor` / `MethodDescriptor` + catálogo `vector<>` | ✅ | 11A · Posição no vetor ≠ identidade |
 | 11.3 | `FacadeCatalog` (registro, listagem, lookup) | ✅ | 11A · merge `07ab67c`, tag `0.0.11a` |
-| 11.4 | `FacadeHandle<TFacade>` no cliente (`invoke<Method>`) | ✅ | 11B · Sessão + FacadeId + versão |
+| 11.4 | `FacadeHandle<TFacade>` no cliente (`invoke<Method>`) | ✅ | 11B · merge `ed0d661`, tag `0.0.11b` |
 | 11.5 | Descoberta e negociação de versão no protocolo | ⬜ | 11C · `FacadeList` / `FacadeOpen` |
 | 11.6 | Validação método∈facade + ErrorCodes | ✅ | 11B · `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
 | 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ✅ | 11B · Mesmo commit/rollback/cancel da Fase 9 |
@@ -906,7 +906,7 @@ Status: ✅ Concluída — merge `07ab67c`, tag `0.0.11a` (2026-07-19).
 
 ### Fase 11B — FacadeHandle e invoke embedded
 
-Status: ✅ Concluída — tag `0.0.11b` (2026-07-19).
+Status: ✅ Concluída — merge `ed0d661`, tag `0.0.11b` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
