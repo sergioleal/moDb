@@ -824,7 +824,7 @@ A fase é dividida em cinco entregas verticais, cada uma com prova e tag própri
 
 #### Fase 13A — ADR e modelo de implantação
 
-- [ ] Registrar em ADR o modelo de implantação, incluindo volume persistente,
+- [x] Registrar em ADR o modelo de implantação, incluindo volume persistente,
       instância escritora única, cold start, escala a zero e plataformas
       serverless suportadas
       ([ADR-013](decisions/ADR-013-execucao-serverless-em-container.md)).
