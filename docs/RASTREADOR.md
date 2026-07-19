@@ -50,10 +50,10 @@
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
-| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ⬜ Não iniciada | 0/9 | Todas |
+| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | 🔄 Em andamento | 1/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 |
 | [12](#fase-12--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11 |
-| **Total** | | | **104/134 (~78%)** | |
+| **Total** | | | **105/134 (~78%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -748,14 +748,14 @@ exceção/saldo insuficiente, consistente após reopen + recovery.
 
 ## Fase 10 — Desempenho e estabilização
 
-Status: ⬜ Não iniciada (0/9) — seis entregas verticais 10A–10F.
+Status: 🔄 Em andamento (1/9) — seis entregas verticais 10A–10F.
 Definição completa:
 [PLANO_ODB.md §Fase 10](PLANO_ODB.md#fase-10--desempenho-e-estabilização) ·
 [PROTOCOLO_FASES.md §Fase 10](PROTOCOLO_FASES.md#fase-10--desempenho-e-estabilização)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 10.1 | Plano completo e runner de benchmarks reproduzíveis | ⬜ | 10A · [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md) |
+| 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · `modb_bench` + JSONL; ver [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
 | 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ⬜ | 10B |
 | 10.3 | Profiling antes de cada otimização | ⬜ | 10C |
 | 10.4 | Fuzzing dos decoders | ⬜ | 10D |
@@ -767,12 +767,12 @@ Definição completa:
 
 ### Fase 10A — Runner e baseline de benchmarks
 
-Status: ⬜ Não iniciada — tag prevista `0.0.10a`.
+Status: ✅ Concluída — tag `0.0.10a` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Runner, datasets/perfis determinísticos e JSONL autocontido | ⬜ | Duas campanhas comparáveis com mesmo seed |
-| Baseline pré-otimização | ⬜ | TTFR, percentis, CPU, memória, I/O, espaço, rede e correção |
+| Runner, datasets/perfis determinísticos e JSONL autocontido | ✅ | `modb_bench run/compare`; `modb.benchmark_runner` |
+| Baseline pré-otimização | ✅ | [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md); cenário `object_store.lifecycle` |
 
 ### Fase 10B — BufferPool e bancos maiores que o cache
 
@@ -864,7 +864,8 @@ aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
 | Item | Local | Status |
 |---|---|---|
 | `modb.buffer_pool` (teste) | `tests/buffer_pool_test.cpp` | ⬜ |
-| Benchmarks (alvo separado, fora do ctest) | `benchmarks/` + [plano](PLANO_BENCHMARKS.md) | ⬜ |
+| Runner `modb_bench` + JSONL | `benchmarks/` + [plano](PLANO_BENCHMARKS.md) | ✅ 10A |
+| `modb.benchmark_runner` (infra do runner) | `tests/benchmark_runner_test.cpp` | ✅ 10A |
 | Alvos de fuzzing (preset `fuzz`) | `tests/fuzz/` | ⬜ |
 
 Critério de aceite: ⬜ benchmarks reproduzíveis, regressões detectadas

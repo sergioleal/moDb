@@ -1619,9 +1619,10 @@ Artefatos:
 
 ```text
 benchmarks/runner/                    runner e perfis
+benchmarks/scenarios/                 cenários (ex.: object_store.lifecycle)
 benchmarks/datasets/                  geradores determinísticos
-benchmarks/results/                   JSONL históricos selecionados
 docs/BASELINE_DESEMPENHO.md
+scripts/run-benchmarks.ps1|.sh
 ```
 
 O runner segue integralmente
@@ -1631,9 +1632,10 @@ JSONL autocontido por campanha:
 p50/p95/p99, CPU, memória, I/O, espaço, rede e correção são métricas de primeira
 classe; datasets, seeds, ambiente e configuração acompanham os resultados.
 
-Testes/aceite: schema do JSONL validado; mesmo seed reproduz cardinalidade e
-conteúdo; campanha falha se qualquer verificação de correção falhar; duas
-execuções podem ser comparadas pelo runner. Tag: `0.0.10a`.
+Testes/aceite: schema do JSONL validado (`modb.benchmark_runner`); mesmo seed
+produz campanhas comparáveis; campanha falha se qualquer verificação de
+correção falhar; duas execuções podem ser comparadas pelo runner. Tag:
+`0.0.10a`.
 
 ## Fase 10B — BufferPool e bancos maiores que o cache
 

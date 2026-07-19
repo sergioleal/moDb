@@ -1,12 +1,15 @@
-// Benchmark de carga do ObjectStore: cria N mil objetos, apaga todos e reporta
-// o throughput (objetos por segundo) de cada fase. Mede o motor de verdade
-// (create/remove passando por codec + heap + mapa de identidade + DBRT), não é
-// um teste funcional — fica fora do ctest.
+// Benchmark de carga do ObjectStore (legado / atalho manual).
+// A campanha oficial e o JSONL autocontido ficam em `modb_bench`
+// (cenário `object_store.lifecycle`, Fase 10A).
 //
 // Uso:
-//   modb_object_bench [milhares] [arquivo]
+//   modb_object_bench [milhares] [stride] [arquivo]
 //     milhares : quantos MIL objetos criar/apagar (padrao 10 => 10.000)
+//     stride   : ordem de remocao (1 = sequencial; >1 = em passada)
 //     arquivo  : caminho do banco (padrao: temp, removido ao final)
+//
+// Preferir:
+//   modb_bench run --profile smoke --seed 1
 
 #include "modb/object/database.hpp"
 

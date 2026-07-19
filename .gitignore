@@ -20,3 +20,6 @@ Testing/
 *.db
 *.db-wal
 
+# Benchmark campaign outputs (kept local; selected baselines may be committed under docs/)
+/benchmark-results/
+

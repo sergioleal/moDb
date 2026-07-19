@@ -596,10 +596,10 @@ ou artefato reproduzível e tag própria.
 
 #### Fase 10A — Runner e baseline de benchmarks
 
-- [ ] Implementar o [plano completo de benchmarks](PLANO_BENCHMARKS.md):
+- [x] Implementar o [plano completo de benchmarks](PLANO_BENCHMARKS.md):
       runner, datasets determinísticos, perfis, coleta uniforme de todas as
       camadas e um JSONL autocontido por campanha, nomeado com data/hora UTC.
-- [ ] Registrar a baseline antes das otimizações, incluindo TTFR, throughput,
+- [x] Registrar a baseline antes das otimizações, incluindo TTFR, throughput,
       p50/p95/p99, CPU, memória, I/O, espaço e metadados do ambiente.
 
 Critério de aceite: duas campanhas com o mesmo seed são comparáveis e produzem
