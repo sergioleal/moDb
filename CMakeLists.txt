@@ -74,6 +74,11 @@ add_library(modb
     src/tx/wal.cpp
     src/version.cpp
 )
+if(WIN32)
+    target_sources(modb PRIVATE src/storage/async_file_windows.cpp)
+else()
+    target_sources(modb PRIVATE src/storage/async_file_linux.cpp)
+endif()
 add_library(modb::modb ALIAS modb)
 
 # --- Fase 10E: instalação da API pública + pacote CMake ---
@@ -341,6 +346,8 @@ if(BUILD_TESTING)
 
     add_executable(modb_graph_algorithms_tests tests/graph_algorithms_test.cpp)
     target_link_libraries(modb_graph_algorithms_tests PRIVATE modb::modb)
+    add_executable(modb_async_file_tests tests/async_file_test.cpp)
+    target_link_libraries(modb_async_file_tests PRIVATE modb::modb)
 
     add_executable(modb_benchmark_runner_tests tests/benchmark_runner_test.cpp)
     target_link_libraries(modb_benchmark_runner_tests PRIVATE modb_bench_core)
@@ -432,6 +439,7 @@ if(BUILD_TESTING)
         target_link_options(modb_edge_handle_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_graph_view_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_graph_algorithms_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_async_file_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -484,6 +492,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.edge_handle COMMAND modb_edge_handle_tests)
     add_test(NAME modb.graph_view COMMAND modb_graph_view_tests)
     add_test(NAME modb.graph_algorithms COMMAND modb_graph_algorithms_tests)
+    add_test(NAME modb.async_file COMMAND modb_async_file_tests)
     add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)

@@ -1943,12 +1943,14 @@ Tag: `0.0.13a`.
 
 ## Fase 13B — I/O assíncrono real
 
+Status: ✅ Concluída — tag `0.0.13b` (2026-07-19).
+
 Artefatos:
 
 ```text
 include/modb/storage/async_file.hpp
-src/storage/async_file_linux.cpp       (`io_uring`)
-src/storage/async_file_windows.cpp     (IOCP)
+src/storage/async_file_linux.cpp       (`io_uring` ou sync_fallback)
+src/storage/async_file_windows.cpp     (IOCP ou sync_fallback)
 tests/async_file_test.cpp
 ```
 
