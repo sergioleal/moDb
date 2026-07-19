@@ -1,7 +1,7 @@
 # Fechamento da Fase 10 — matriz final (10F)
 
 Tag: `0.0.10f`  
-Commit de entrega: (preenchido no rastreador após o merge).
+Commit de entrega: `8d6a7a5` (merge em `master`).
 
 ## Matriz de build/teste
 

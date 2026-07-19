@@ -763,8 +763,8 @@ Definição completa:
 | 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
 | 10.6 | Política de compatibilidade (formato + protocolo) | ✅ | 10E · merge `dc33551`, tag `0.0.10e`; [COMPATIBILIDADE.md](COMPATIBILIDADE.md) |
 | 10.7 | Estabilizar e documentar a API pública | ✅ | 10E · merge `dc33551`; [API_PUBLICA.md](API_PUBLICA.md); `modb.consumer` |
-| 10.8 | Reescrever `README.md`/formato de arquivo | ✅ | 10F · tag `0.0.10f`; [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) |
-| 10.9 | Guia de backup/restauração/diagnóstico | ✅ | 10F · [OPERACAO.md](OPERACAO.md) |
+| 10.8 | Reescrever `README.md`/formato de arquivo | ✅ | 10F · merge `8d6a7a5`, tag `0.0.10f`; [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) |
+| 10.9 | Guia de backup/restauração/diagnóstico | ✅ | 10F · merge `8d6a7a5`; [OPERACAO.md](OPERACAO.md) |
 
 ### Fase 10A — Runner e baseline de benchmarks
 
@@ -813,7 +813,7 @@ Status: ✅ Concluída — merge `dc33551`, tag `0.0.10e` (2026-07-19).
 
 ### Fase 10F — Documentação, operação e fechamento
 
-Status: ✅ Concluída — tag `0.0.10f` (2026-07-19).
+Status: ✅ Concluída — merge `8d6a7a5`, tag `0.0.10f` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
