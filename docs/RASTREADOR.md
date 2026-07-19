@@ -756,10 +756,10 @@ Definição completa:
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
 | 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · merge `9b0cfba`, tag `0.0.10a`; [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
-| 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ✅ | 10B · `BufferPool` + `modb.buffer_pool` |
+| 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ✅ | 10B · merge `2a45e39`, tag `0.0.10b` |
 | 10.3 | Profiling antes de cada otimização | ⬜ | 10C |
 | 10.4 | Fuzzing dos decoders | ⬜ | 10D |
-| 10.5 | Testar bancos maiores que o cache | ✅ | 10B · cache configurável; working set ≥10× |
+| 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
 | 10.6 | Política de compatibilidade (formato + protocolo) | ⬜ | 10E |
 | 10.7 | Estabilizar e documentar a API pública | ⬜ | 10E |
 | 10.8 | Reescrever `README.md`/formato de arquivo | ⬜ | 10F |
@@ -776,7 +776,7 @@ Status: ✅ Concluída — merge `9b0cfba`, tag `0.0.10a` (2026-07-19).
 
 ### Fase 10B — BufferPool e bancos maiores que o cache
 
-Status: ✅ Concluída — tag `0.0.10b` (2026-07-19).
+Status: ✅ Concluída — merge `2a45e39`, tag `0.0.10b` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
