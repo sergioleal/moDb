@@ -1886,6 +1886,8 @@ interrompe. Tag: `0.0.12c`.
 
 ## Fase 12D — Caminho, ciclo, toposort e componentes
 
+Status: ✅ Concluída — tag `0.0.12d` (2026-07-19).
+
 Artefatos:
 
 ```text
