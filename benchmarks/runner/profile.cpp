@@ -30,6 +30,13 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .warmup = 1,
             .samples = 2,
         });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "object_store.read_hotpath",
+            .object_count = 100,
+            .read_rounds = 5,
+            .warmup = 1,
+            .samples = 3,
+        });
         return profile;
     }
     if (name == "standard") {
@@ -59,6 +66,13 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .warmup = 2,
             .samples = 8,
         });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "object_store.read_hotpath",
+            .object_count = 1'000,
+            .read_rounds = 20,
+            .warmup = 2,
+            .samples = 8,
+        });
         return profile;
     }
     if (name == "diagnostic") {
@@ -78,6 +92,13 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .scenario_id = "storage.buffer_pool.oversubscribed",
             .object_count = 80,
             .cache_pages = 4,
+            .warmup = 0,
+            .samples = 1,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "object_store.read_hotpath",
+            .object_count = 40,
+            .read_rounds = 3,
             .warmup = 0,
             .samples = 1,
         });

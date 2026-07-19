@@ -161,6 +161,18 @@ void test_duplicate_field(TestSuite& suite) {
                       "a duplicate FieldId in the payload is rejected");
 }
 
+void test_decode_object_header(TestSuite& suite) {
+    const FieldValues fields{{FieldId{1}, AttributeValue{std::int64_t{7}}}};
+    auto encoded = encode_object(ObjectId{42}, TypeDefinitionId{99}, fields);
+    suite.check(encoded.has_value(), "encode for header peek");
+    if (!encoded) {
+        return;
+    }
+    auto header = decode_object_header(*encoded);
+    suite.check(header.has_value() && header->id.value == 42 && header->type.value == 99,
+                "decode_object_header reads id and type without payload fields");
+}
+
 } // namespace
 
 int main() {
@@ -172,5 +184,6 @@ int main() {
     test_string_length_past_buffer(suite);
     test_trailing_data(suite);
     test_duplicate_field(suite);
+    test_decode_object_header(suite);
     return suite.finish();
 }

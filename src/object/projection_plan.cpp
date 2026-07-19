@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace modb::object {
 namespace {
@@ -63,6 +64,46 @@ const AttributeValue* find_value(const FieldValues& fields, FieldId id) noexcept
     }
     return nullptr;
 }
+
+// Índice FieldId → valor, montado uma vez por materialize (Fase 10C).
+class FieldValueIndex {
+public:
+    explicit FieldValueIndex(const FieldValues& fields) {
+        std::uint16_t max_id = 0;
+        for (const auto& [id, value] : fields) {
+            (void)value;
+            if (id.value > max_id) {
+                max_id = id.value;
+            }
+        }
+        // FieldIds típicos são densos e pequenos (≤ max_columns). Acima disso
+        // cai no scan linear por segurança.
+        if (max_id < 1024) {
+            dense_.assign(static_cast<std::size_t>(max_id) + 1, nullptr);
+            dense_ok_ = true;
+            for (const auto& [id, value] : fields) {
+                dense_[id.value] = &value;
+            }
+        } else {
+            fields_ = &fields;
+        }
+    }
+
+    [[nodiscard]] const AttributeValue* get(FieldId id) const noexcept {
+        if (dense_ok_) {
+            if (id.value >= dense_.size()) {
+                return nullptr;
+            }
+            return dense_[id.value];
+        }
+        return find_value(*fields_, id);
+    }
+
+private:
+    bool dense_ok_{false};
+    std::vector<const AttributeValue*> dense_;
+    const FieldValues* fields_{nullptr};
+};
 
 } // namespace
 
@@ -152,6 +193,7 @@ Result<void> ProjectionPlan::materialize(const DecodedObject& object,
         return std::unexpected(
             Error{ErrorCode::invalid_argument, "projection destination cannot be null"});
     }
+    const FieldValueIndex field_index{object.fields};
     for (const auto& step : steps_) {
         if (step.op == ProjectionOp::ignore) {
             continue;
@@ -166,7 +208,7 @@ Result<void> ProjectionPlan::materialize(const DecodedObject& object,
         if (step.op == ProjectionOp::use_default) {
             value = &*step.default_value;
         } else {
-            value = find_value(object.fields, step.source);
+            value = field_index.get(step.source);
             if (value == nullptr) {
                 if (step.source_default) {
                     value = &*step.source_default;

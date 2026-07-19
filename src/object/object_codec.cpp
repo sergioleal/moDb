@@ -271,4 +271,17 @@ Result<DecodedObject> decode_object(std::span<const std::byte> record) {
     return DecodedObject{ObjectId{*id}, TypeDefinitionId{*type}, std::move(*fields)};
 }
 
+Result<ObjectHeaderView> decode_object_header(std::span<const std::byte> record) {
+    storage::BinaryReader reader{record};
+    auto id = reader.read_u64();
+    if (!id) {
+        return std::unexpected(id.error());
+    }
+    auto type = reader.read_u64();
+    if (!type) {
+        return std::unexpected(type.error());
+    }
+    return ObjectHeaderView{ObjectId{*id}, TypeDefinitionId{*type}};
+}
+
 } // namespace modb::object

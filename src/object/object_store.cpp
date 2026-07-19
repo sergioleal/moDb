@@ -321,6 +321,22 @@ Result<DecodedObject> ObjectStore::get(ObjectId id) {
     return decode_object(*record);
 }
 
+Result<TypeDefinitionId> ObjectStore::peek_type(ObjectId id) {
+    auto location = identity_.find(id);
+    if (!location) {
+        return std::unexpected(location.error());
+    }
+    auto record = data_heap_.read(*location);
+    if (!record) {
+        return std::unexpected(record.error());
+    }
+    auto header = decode_object_header(*record);
+    if (!header) {
+        return std::unexpected(header.error());
+    }
+    return header->type;
+}
+
 Result<DecodedObject> ObjectStore::get_at(ObjectId id, std::uint64_t snapshot_epoch) {
     auto location = identity_.find_at(id, snapshot_epoch);
     if (!location) {

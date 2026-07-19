@@ -170,6 +170,7 @@ add_library(modb_bench_core STATIC
     benchmarks/runner/campaign.cpp
     benchmarks/scenarios/object_store_lifecycle.cpp
     benchmarks/scenarios/buffer_pool_oversubscribed.cpp
+    benchmarks/scenarios/object_store_read_hotpath.cpp
 )
 target_include_directories(modb_bench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks)
 target_link_libraries(modb_bench_core PUBLIC modb::modb)
