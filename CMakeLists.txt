@@ -162,6 +162,20 @@ set_target_properties(modb_cli PROPERTIES OUTPUT_NAME modb)
 add_executable(modb_object_bench benchmarks/object_throughput.cpp)
 target_link_libraries(modb_object_bench PRIVATE modb::modb)
 
+add_library(modb_bench_core STATIC
+    benchmarks/runner/sha256.cpp
+    benchmarks/runner/jsonl_writer.cpp
+    benchmarks/runner/environment.cpp
+    benchmarks/runner/profile.cpp
+    benchmarks/runner/campaign.cpp
+    benchmarks/scenarios/object_store_lifecycle.cpp
+)
+target_include_directories(modb_bench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks)
+target_link_libraries(modb_bench_core PUBLIC modb::modb)
+
+add_executable(modb_bench benchmarks/modb_bench.cpp)
+target_link_libraries(modb_bench PRIVATE modb_bench_core)
+
 if(MINGW)
     # O build estático do MinGW pode emitir type_info::operator== tanto nos
     # consumidores de std::function quanto em libstdc++. O motor não depende
@@ -169,6 +183,7 @@ if(MINGW)
     target_compile_options(modb PUBLIC -fno-rtti)
     target_link_options(modb_cli PRIVATE ${MODB_MINGW_LINK_OPTS})
     target_link_options(modb_object_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
+    target_link_options(modb_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
 endif()
 
 if(BUILD_TESTING)
@@ -259,6 +274,9 @@ if(BUILD_TESTING)
     add_executable(modb_operation_server_tests tests/operation_server_test.cpp)
     target_link_libraries(modb_operation_server_tests PRIVATE modb::modb)
 
+    add_executable(modb_benchmark_runner_tests tests/benchmark_runner_test.cpp)
+    target_link_libraries(modb_benchmark_runner_tests PRIVATE modb_bench_core)
+
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
@@ -334,6 +352,7 @@ if(BUILD_TESTING)
         target_link_options(modb_server_streaming_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_operation_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_operation_server_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -377,6 +396,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.server_streaming COMMAND modb_server_streaming_tests)
     add_test(NAME modb.operation COMMAND modb_operation_tests)
     add_test(NAME modb.operation_server COMMAND modb_operation_server_tests)
+    add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)

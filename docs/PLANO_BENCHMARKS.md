@@ -1,6 +1,7 @@
 # Plano completo de benchmarks do moDb
 
-- Estado: especificação para implementação incremental
+- Estado: especificação em implementação incremental (Fase 10A: runner +
+  cenário `object_store.lifecycle` + perfis smoke/standard/diagnostic)
 - Versão: 1
 - Data: 2026-07-17
 - Responsável pela implementação: Fase 10, com instrumentação adicionada nas
