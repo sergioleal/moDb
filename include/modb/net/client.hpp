@@ -124,6 +124,11 @@ public:
     [[nodiscard]] Result<std::vector<std::byte>> call(std::string_view operation_id,
                                                       std::span<const std::byte> args);
 
+    // Fase 11C: descoberta e negociação de facades.
+    [[nodiscard]] Result<std::vector<ops::FacadeDescriptor>> list_facades();
+    [[nodiscard]] Result<FacadeOpenOk> open_facade(std::string_view facade_id,
+                                                   std::uint32_t version);
+
     [[nodiscard]] static Result<HelloOk> handshake(std::string_view host, std::uint16_t port,
                                                    std::string_view database_name);
 

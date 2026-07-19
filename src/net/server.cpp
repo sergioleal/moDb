@@ -428,9 +428,50 @@ Result<void> Server::handle_connection(NativeSocket peer) {
             continue;
         }
 
+        if (const auto* list = std::get_if<FacadeList>(&*inbound); list != nullptr) {
+            FacadeListOk reply{.request_id = list->request_id};
+            if (facades_) {
+                const auto listed = facades_->list();
+                reply.facades.assign(listed.begin(), listed.end());
+            }
+            if (auto status = send_locked(session, reply); !status) {
+                session_status = std::unexpected(status.error());
+                break;
+            }
+            continue;
+        }
+
+        if (const auto* open = std::get_if<FacadeOpen>(&*inbound); open != nullptr) {
+            FacadeOpenOk reply{.request_id = open->request_id,
+                               .facade_id = open->facade_id,
+                               .facade_version = open->facade_version};
+            if (!facades_) {
+                reply.ok = false;
+                reply.code = ErrorCode::facade_not_found;
+                reply.message = "server has no facade catalog";
+            } else {
+                auto found = facades_->find(open->facade_id, open->facade_version);
+                if (found) {
+                    reply.ok = true;
+                    reply.facade_id = found->facade_id;
+                    reply.facade_version = found->facade_version;
+                } else {
+                    reply.ok = false;
+                    reply.code = found.error().code;
+                    reply.message = found.error().message;
+                }
+            }
+            if (auto status = send_locked(session, reply); !status) {
+                session_status = std::unexpected(status.error());
+                break;
+            }
+            continue;
+        }
+
         const auto* call = std::get_if<OpCall>(&*inbound);
         if (call == nullptr) {
-            session_status = std::unexpected(make_protocol("expected Query or OpCall in session"));
+            session_status =
+                std::unexpected(make_protocol("expected Query, OpCall, or Facade* in session"));
             break;
         }
 

@@ -30,6 +30,12 @@ Error make_protocol(std::string message) {
     if (const auto* result = std::get_if<OpResult>(&message)) {
         return result->call_id;
     }
+    if (const auto* listed = std::get_if<FacadeListOk>(&message)) {
+        return listed->request_id;
+    }
+    if (const auto* opened = std::get_if<FacadeOpenOk>(&message)) {
+        return opened->request_id;
+    }
     return std::nullopt;
 }
 
@@ -318,6 +324,53 @@ Result<std::vector<std::byte>> Client::call(std::string_view operation_id,
         return std::unexpected(Error{result->code, result->message});
     }
     return result->payload;
+}
+
+Result<std::vector<ops::FacadeDescriptor>> Client::list_facades() {
+    if (!conn_) {
+        return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
+    }
+    const auto request_id = next_query_id_++;
+    if (auto status = conn_->send(FacadeList{.request_id = request_id}); !status) {
+        return std::unexpected(status.error());
+    }
+    auto reply = conn_->recv_for(request_id);
+    if (!reply) {
+        return std::unexpected(reply.error());
+    }
+    const auto* listed = std::get_if<FacadeListOk>(&*reply);
+    if (listed == nullptr) {
+        return std::unexpected(make_protocol("expected FacadeListOk from server"));
+    }
+    if (listed->request_id != request_id) {
+        return std::unexpected(make_protocol("FacadeListOk request_id mismatch"));
+    }
+    return listed->facades;
+}
+
+Result<FacadeOpenOk> Client::open_facade(std::string_view facade_id, std::uint32_t version) {
+    if (!conn_) {
+        return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
+    }
+    const auto request_id = next_query_id_++;
+    FacadeOpen request{.request_id = request_id,
+                       .facade_id = std::string{facade_id},
+                       .facade_version = version};
+    if (auto status = conn_->send(request); !status) {
+        return std::unexpected(status.error());
+    }
+    auto reply = conn_->recv_for(request_id);
+    if (!reply) {
+        return std::unexpected(reply.error());
+    }
+    const auto* opened = std::get_if<FacadeOpenOk>(&*reply);
+    if (opened == nullptr) {
+        return std::unexpected(make_protocol("expected FacadeOpenOk from server"));
+    }
+    if (opened->request_id != request_id) {
+        return std::unexpected(make_protocol("FacadeOpenOk request_id mismatch"));
+    }
+    return *opened;
 }
 
 Result<HelloOk> Client::handshake(std::string_view host, std::uint16_t port,

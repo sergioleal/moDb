@@ -6,6 +6,7 @@
 #include "modb/error.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/protocol.hpp"
+#include "modb/ops/facade_catalog.hpp"
 #include "modb/ops/operation_registry.hpp"
 #include "modb/query/operators.hpp"
 
@@ -69,6 +70,9 @@ public:
     void set_operation_registry(std::shared_ptr<ops::OperationRegistry> registry) noexcept {
         operations_ = std::move(registry);
     }
+    void set_facade_catalog(std::shared_ptr<ops::FacadeCatalog> catalog) noexcept {
+        facades_ = std::move(catalog);
+    }
 
     // Aceita uma conexão e mantém a sessão até o peer fechar (Hello + Queries/OpCalls).
     [[nodiscard]] Result<void> serve_one();
@@ -94,6 +98,7 @@ private:
     Compression selected_codec_{Compression::none};
     StreamStats last_stats_{};
     std::shared_ptr<ops::OperationRegistry> operations_{};
+    std::shared_ptr<ops::FacadeCatalog> facades_{};
 };
 
 } // namespace modb::net
