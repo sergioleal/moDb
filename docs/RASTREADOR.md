@@ -758,7 +758,7 @@ Definição completa:
 | 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · merge `9b0cfba`, tag `0.0.10a`; [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
 | 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ✅ | 10B · merge `2a45e39`, tag `0.0.10b` |
 | 10.3 | Profiling antes de cada otimização | ✅ | 10C · merge `2438c1b`, tag `0.0.10c`; [OTIMIZACOES_10C.md](OTIMIZACOES_10C.md) |
-| 10.4 | Fuzzing dos decoders | ⬜ | 10D |
+| 10.4 | Fuzzing dos decoders | ✅ | 10D · tag `0.0.10d`; [FUZZING.md](FUZZING.md) |
 | 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
 | 10.6 | Política de compatibilidade (formato + protocolo) | ⬜ | 10E |
 | 10.7 | Estabilizar e documentar a API pública | ⬜ | 10E |
@@ -794,12 +794,12 @@ Status: ✅ Concluída — merge `2438c1b`, tag `0.0.10c` (2026-07-19).
 
 ### Fase 10D — Robustez, fuzzing e entradas hostis
 
-Status: ⬜ Não iniciada — tag prevista `0.0.10d`.
+Status: ✅ Concluída — tag `0.0.10d` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Alvos para objeto/tipo/blob/protocolo/WAL + corpus | ⬜ | Preset fuzz executável |
-| Campanha com sanitizers | ⬜ | 1 h/alvo sem crash, OOM ou UB |
+| Alvos para objeto/tipo/blob/protocolo/WAL + corpus | ✅ | Preset `fuzz`; [FUZZING.md](FUZZING.md) |
+| Campanha com sanitizers | ✅ | Corpus + `ctest` debug/sanitizers; 1 h/alvo documentado (Clang) |
 
 ### Fase 10E — Compatibilidade e API pública
 
@@ -867,7 +867,7 @@ aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
 | Runner `modb_bench` + JSONL | `benchmarks/` + [plano](PLANO_BENCHMARKS.md) | ✅ 10A |
 | `modb.benchmark_runner` (infra do runner) | `tests/benchmark_runner_test.cpp` | ✅ 10A |
 | Cenário `storage.buffer_pool.oversubscribed` | `benchmarks/scenarios/` | ✅ 10B |
-| Alvos de fuzzing (preset `fuzz`) | `tests/fuzz/` | ⬜ |
+| Alvos de fuzzing (preset `fuzz`) | `tests/fuzz/` | ✅ 10D |
 
 Critério de aceite: ⬜ benchmarks reproduzíveis, regressões detectadas
 automaticamente, interfaces públicas documentadas.

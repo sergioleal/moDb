@@ -77,14 +77,22 @@ Result<std::vector<std::byte>> encode_attributes(const TypeDefinition& definitio
 }
 
 // Reconstrói os atributos a partir do sub-formato (entrada não confiável).
+// Mantida no namespace anônimo; a API pública é decode_type_attributes abaixo.
 Result<std::vector<AttributeDefinition>> decode_attributes(std::span<const std::byte> bytes) {
     storage::BinaryReader reader{bytes};
     auto count = reader.read_u16();
     if (!count) {
         return std::unexpected(count.error());
     }
+    // Rejeita contagens mentirosas antes de reservar ou iterar (Fase 10D).
+    if (*count > modb::max_columns_per_table) {
+        return std::unexpected(Error{
+            ErrorCode::too_many_columns,
+            "type attributes exceed max_columns_per_table",
+        });
+    }
     std::vector<AttributeDefinition> attributes;
-    attributes.reserve(std::min<std::size_t>(*count, modb::max_columns_per_table));
+    attributes.reserve(*count);
     for (std::uint16_t index = 0; index < *count; ++index) {
         auto field_id = reader.read_u16();
         if (!field_id) {
@@ -93,6 +101,13 @@ Result<std::vector<AttributeDefinition>> decode_attributes(std::span<const std::
         auto name_length = reader.read_u16();
         if (!name_length) {
             return std::unexpected(name_length.error());
+        }
+        // Nomes acima do teto de identificador são rejeitados sem alocar.
+        if (*name_length > modb::max_identifier_bytes) {
+            return std::unexpected(Error{
+                ErrorCode::invalid_argument,
+                "attribute name exceeds max_identifier_bytes",
+            });
         }
         auto name_bytes = reader.read_bytes(*name_length);
         if (!name_bytes) {
@@ -192,6 +207,10 @@ Result<DecodedBaseline> decode_baseline(const DecodedObject& object) {
 }
 
 } // namespace
+
+Result<std::vector<AttributeDefinition>> decode_type_attributes(std::span<const std::byte> bytes) {
+    return decode_attributes(bytes);
+}
 
 Result<CatalogStore> CatalogStore::create(storage::PageFile& file) {
     auto heap = storage::TableHeap::create(file);

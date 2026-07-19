@@ -631,14 +631,15 @@ perfil e benchmark reproduzível; nenhum ganho é aceito só por hipótese. Tag:
 
 #### Fase 10D — Robustez, fuzzing e entradas hostis
 
-- [ ] Implementar fuzzing dos decoders (codec genérico, ObjectHeader,
+- [x] Implementar fuzzing dos decoders (codec genérico, ObjectHeader,
       TypeDefinition, catálogo, blobs, protocolo e WAL), com corpus mínimo e
       preset dedicado.
-- [ ] Rodar sanitizers e campanha mínima documentada, mantendo limites de
+- [x] Rodar sanitizers e campanha mínima documentada, mantendo limites de
       alocação para entradas hostis.
 
 Critério de aceite: alvos executam por 1 h sem crash/OOM/UB; corpus de regressão
 fica versionado; suítes debug/sanitizers continuam verdes. Tag: `0.0.10d`.
+Ver [FUZZING.md](FUZZING.md).
 
 #### Fase 10E — Compatibilidade e API pública
 

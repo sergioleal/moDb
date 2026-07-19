@@ -22,14 +22,9 @@ namespace {
 constexpr std::array<std::byte, 4> blob_magic{
     std::byte{'B'}, std::byte{'L'}, std::byte{'B'}, std::byte{'P'}};
 
-// Resultado da leitura do cabeçalho de uma página de blob.
-struct BlobHeader {
-    storage::PageId next;
-    std::uint32_t length;
-};
+} // namespace
 
-// Valida a assinatura, a versão e o comprimento declarado de uma página.
-Result<BlobHeader> parse_header(const storage::Page& page) {
+Result<BlobPageHeader> parse_blob_page(const storage::Page& page) {
     if (!std::equal(blob_magic.begin(), blob_magic.end(), page.bytes().begin())) {
         return std::unexpected(
             Error{ErrorCode::invalid_page_format, "page is not a blob page (bad magic)"});
@@ -60,7 +55,14 @@ Result<BlobHeader> parse_header(const storage::Page& page) {
         return std::unexpected(Error{ErrorCode::corrupt_page,
                                      "blob page payload length exceeds page capacity"});
     }
-    return BlobHeader{storage::PageId{*next}, *length};
+    return BlobPageHeader{storage::PageId{*next}, *length};
+}
+
+namespace {
+
+// Valida a assinatura, a versão e o comprimento declarado de uma página.
+Result<BlobPageHeader> parse_header(const storage::Page& page) {
+    return parse_blob_page(page);
 }
 
 // Monta uma página de blob com o cabeçalho e a fatia de dados fornecidos.
