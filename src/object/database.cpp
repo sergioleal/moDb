@@ -43,8 +43,9 @@ bool same_structure(const TypeDefinition& stored, const TypeDefinition& canonica
 
 } // namespace
 
-Result<Database> Database::create(const std::filesystem::path& path) {
-    auto page_file = storage::PageFile::create(path);
+Result<Database> Database::create(const std::filesystem::path& path,
+                                  std::size_t cache_capacity) {
+    auto page_file = storage::PageFile::create(path, cache_capacity);
     if (!page_file) {
         return std::unexpected(page_file.error());
     }
@@ -61,8 +62,9 @@ Result<Database> Database::create(const std::filesystem::path& path) {
     return Database{std::move(file), std::move(*store), std::move(wal_path)};
 }
 
-Result<Database> Database::open(const std::filesystem::path& path) {
-    auto page_file = storage::PageFile::open(path);
+Result<Database> Database::open(const std::filesystem::path& path,
+                                std::size_t cache_capacity) {
+    auto page_file = storage::PageFile::open(path, cache_capacity);
     if (!page_file) {
         return std::unexpected(page_file.error());
     }

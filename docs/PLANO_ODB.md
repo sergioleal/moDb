@@ -608,10 +608,10 @@ JSONL válido/autocontido; falha de correção invalida a campanha. Tag:
 
 #### Fase 10B — BufferPool e bancos maiores que o cache
 
-- [ ] Completar o BufferPool (capacidade configurável, LRU, pin/unpin,
+- [x] Completar o BufferPool (capacidade configurável, LRU, pin/unpin,
       write-back integrado ao WAL e métricas de hits/misses/evictions),
       evoluindo o cache mínimo da Fase 5.
-- [ ] Testar banco pelo menos 10× maior que o cache, incluindo pressão de
+- [x] Testar banco pelo menos 10× maior que o cache, incluindo pressão de
       leitura/escrita, eviction e recovery.
 
 Critério de aceite: corretude e durabilidade preservadas sob eviction; pins não

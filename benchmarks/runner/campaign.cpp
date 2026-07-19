@@ -4,6 +4,7 @@
 #include "runner/json_util.hpp"
 #include "runner/jsonl_writer.hpp"
 #include "runner/profile.hpp"
+#include "scenarios/buffer_pool_oversubscribed.hpp"
 #include "scenarios/object_store_lifecycle.hpp"
 
 #include <algorithm>
@@ -25,14 +26,21 @@ bool match_filter(std::string_view scenario_id, std::string_view filter) {
 
 std::string parameters_json(const ScenarioProfileOverride& scenario) {
     std::ostringstream oss;
-    oss << "{\"object_count\":" << scenario.object_count << ",\"stride\":" << scenario.stride
-        << "}";
+    oss << "{\"object_count\":" << scenario.object_count << ",\"stride\":" << scenario.stride;
+    if (scenario.cache_pages > 0) {
+        oss << ",\"cache_pages\":" << scenario.cache_pages;
+    }
+    oss << "}";
     return oss.str();
 }
 
 std::string parameters_key(const ScenarioProfileOverride& scenario) {
-    return scenario.scenario_id + "|count=" + std::to_string(scenario.object_count) +
-           "|stride=" + std::to_string(scenario.stride);
+    auto key = scenario.scenario_id + "|count=" + std::to_string(scenario.object_count) +
+               "|stride=" + std::to_string(scenario.stride);
+    if (scenario.cache_pages > 0) {
+        key += "|cache=" + std::to_string(scenario.cache_pages);
+    }
+    return key;
 }
 
 std::string sample_json(std::string_view run_id, std::uint64_t sequence,
@@ -243,7 +251,8 @@ CampaignResult run_campaign(const CampaignOptions& options) {
         if (!match_filter(scenario.scenario_id, options.filter)) {
             continue;
         }
-        if (scenario.scenario_id != "object_store.lifecycle") {
+        if (scenario.scenario_id != "object_store.lifecycle" &&
+            scenario.scenario_id != "storage.buffer_pool.oversubscribed") {
             std::ostringstream note;
             note << "{\"schema\":\"modb.benchmark\",\"schema_version\":1,\"record\":\"run_note\","
                     "\"run_id\":"
@@ -267,22 +276,39 @@ CampaignResult run_campaign(const CampaignOptions& options) {
                 << ",\"scenario_id\":" << json_string(scenario.scenario_id)
                 << ",\"parameters\":" << params_json
                 << ",\"parameters_key\":" << json_string(key)
-                << ",\"cache_state\":\"warm\",\"dataset\":{\"id\":\"synthetic.item.v1\",\"seed\":"
-                << options.seed << "}}";
+                << ",\"cache_state\":"
+                << json_string(scenario.scenario_id == "storage.buffer_pool.oversubscribed"
+                                   ? "oversubscribed"
+                                   : "warm")
+                << ",\"dataset\":{\"id\":\"synthetic.item.v1\",\"seed\":" << options.seed << "}}";
             if (!write_or_fail(oss.str())) {
                 return result;
             }
         }
 
-        std::cerr << "cenario " << scenario.scenario_id << " count=" << scenario.object_count
-                  << " stride=" << scenario.stride << '\n';
+        std::cerr << "cenario " << scenario.scenario_id << " count=" << scenario.object_count;
+        if (scenario.cache_pages > 0) {
+            std::cerr << " cache_pages=" << scenario.cache_pages;
+        }
+        std::cerr << " stride=" << scenario.stride << '\n';
 
-        ScenarioParams params;
-        params.scenario_id = scenario.scenario_id;
-        params.seed = options.seed;
-        params.object_count = scenario.object_count;
-        params.stride = scenario.stride;
-        params.work_dir = work_dir.string();
+        const auto run_one = [&]() -> SampleResult {
+            if (scenario.scenario_id == "storage.buffer_pool.oversubscribed") {
+                BufferPoolParams params;
+                params.seed = options.seed;
+                params.object_count = scenario.object_count;
+                params.cache_pages = scenario.cache_pages == 0 ? 8 : scenario.cache_pages;
+                params.work_dir = work_dir.string();
+                return run_buffer_pool_oversubscribed(params);
+            }
+            ScenarioParams params;
+            params.scenario_id = scenario.scenario_id;
+            params.seed = options.seed;
+            params.object_count = scenario.object_count;
+            params.stride = scenario.stride;
+            params.work_dir = work_dir.string();
+            return run_object_store_lifecycle(params);
+        };
 
         std::vector<double> elapsed_samples;
         std::vector<double> throughput_samples;
@@ -293,7 +319,7 @@ CampaignResult run_campaign(const CampaignOptions& options) {
         const int samples = scenario.samples > 0 ? scenario.samples : profile->default_samples;
 
         for (int i = 0; i < warmup; ++i) {
-            auto warm = run_object_store_lifecycle(params);
+            auto warm = run_one();
             if (!warm.valid) {
                 scenario_error = warm.error;
                 campaign_failed = true;
@@ -313,7 +339,7 @@ CampaignResult run_campaign(const CampaignOptions& options) {
         }
 
         for (int iteration = 1; iteration <= samples; ++iteration) {
-            auto sample = run_object_store_lifecycle(params);
+            auto sample = run_one();
             if (!write_or_fail(sample_json(run_id, writer.next_sequence(), scenario.scenario_id,
                                            iteration, sample))) {
                 return result;

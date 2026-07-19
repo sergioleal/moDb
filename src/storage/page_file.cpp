@@ -171,7 +171,8 @@ Result<std::uint64_t> validate_superblock(const Page& superblock, std::uintmax_t
 } // namespace
 
 // Cria um arquivo moDb novo sem sobrescrever arquivos existentes.
-Result<PageFile> PageFile::create(const std::filesystem::path& path) {
+Result<PageFile> PageFile::create(const std::filesystem::path& path,
+                                  std::size_t cache_capacity) {
     // Recebe possíveis erros do filesystem sem lançar exceção.
     std::error_code filesystem_error;
     // Protege um arquivo que já existe no caminho solicitado.
@@ -202,11 +203,12 @@ Result<PageFile> PageFile::create(const std::filesystem::path& path) {
         return std::unexpected(synced.error());
     }
     // Transfere o descritor aberto para o PageFile retornado.
-    return PageFile{path, std::move(*file), 1};
+    return PageFile{path, std::move(*file), 1, std::nullopt, cache_capacity};
 }
 
 // Abre um arquivo existente somente depois de validar seu formato.
-Result<PageFile> PageFile::open(const std::filesystem::path& path) {
+Result<PageFile> PageFile::open(const std::filesystem::path& path,
+                                std::size_t cache_capacity) {
     // Recebe erros do filesystem sem lançar exceção.
     std::error_code filesystem_error;
     // Retorna um erro específico quando o caminho não existe.
@@ -255,7 +257,7 @@ Result<PageFile> PageFile::open(const std::filesystem::path& path) {
     // Recupera a raiz do catálogo persistida para mantê-la entre reescritas.
     const auto catalog_root = decode_catalog_root(superblock);
     // Retorna o arquivo aberto com a contagem validada e a raiz preservada.
-    return PageFile{path, std::move(*file), *page_count, catalog_root};
+    return PageFile{path, std::move(*file), *page_count, catalog_root, cache_capacity};
 }
 
 // Acrescenta uma página zerada ao final do arquivo.
@@ -360,6 +362,9 @@ Result<void> PageFile::write(PageId id, const Page& page) {
     // tocado no commit, depois que o WAL estiver durável.
     if (in_transaction_) {
         tx_pages_.insert_or_assign(id.value, page);
+        // Espelha no pool como dirty: read-your-writes também via get() e a
+        // página não é evictada até apply/discard (após o WAL no commit).
+        cache_->put_dirty(id.value, page);
         return {};
     }
     // Usa a rotina interna depois de concluir todas as validações públicas.
@@ -369,15 +374,18 @@ Result<void> PageFile::write(PageId id, const Page& page) {
 void PageFile::begin_transaction() {
     in_transaction_ = true;
     tx_pages_.clear();
+    cache_->discard_dirty();
 }
 
 void PageFile::discard_transaction() noexcept {
     in_transaction_ = false;
     tx_pages_.clear();
+    cache_->discard_dirty();
 }
 
 Result<void> PageFile::apply_transaction() {
-    // Aplica cada página suja ao disco (write-through também atualiza o cache).
+    // Aplica cada página suja ao disco somente depois que o chamador tornou o
+    // WAL durável — write-back ordenado WAL → páginas.
     std::size_t applied = 0;
     for (const auto& [id, page] : tx_pages_) {
         if (applied >= apply_failpoint_) {
@@ -392,6 +400,9 @@ Result<void> PageFile::apply_transaction() {
         }
         ++applied;
     }
+    cache_->record_dirty_flushes(applied);
+    // write_at já fez put limpo; remove qualquer residual dirty do pool.
+    cache_->discard_dirty();
     tx_pages_.clear();
     in_transaction_ = false;
     return {};

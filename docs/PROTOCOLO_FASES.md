@@ -1644,18 +1644,19 @@ Artefatos:
 ```text
 include/modb/storage/buffer_pool.hpp  src/storage/buffer_pool.cpp
 tests/buffer_pool_test.cpp
-benchmarks/buffer_pool_bench.cpp
+benchmarks/scenarios/buffer_pool_oversubscribed.*
 ```
 
-Evoluir `PageCache` para capacidade configurável, LRU, pin/unpin, dirty pages,
-write-back obedecendo ao WAL e métricas (`hits`, `misses`, `evictions`,
-`dirty_flushes`, `pinned`). O teste usa banco pelo menos 10× maior que o cache,
-força eviction em leitura/escrita e reabre após recovery.
+Evoluir `PageCache` para `BufferPool`: capacidade configurável, LRU, pin/unpin,
+dirty pages, write-back obedecendo ao WAL (`apply` só após sync do log) e
+métricas (`hits`, `misses`, `evictions`, `dirty_flushes`, `pinned`). O teste
+usa banco pelo menos 10× maior que o cache, força eviction em leitura/escrita e
+reabre após recovery.
 
 Invariantes: página pinada nunca é evictada; página dirty só chega ao arquivo
 após a ordem exigida pelo WAL; capacidade e contadores permanecem limitados e
-coerentes. Critério: `modb.buffer_pool` e benchmark antes/depois verdes. Tag:
-`0.0.10b`.
+coerentes. Critério: `modb.buffer_pool` e cenário
+`storage.buffer_pool.oversubscribed` no runner. Tag: `0.0.10b`.
 
 ## Fase 10C — Profiling e otimizações medidas
 

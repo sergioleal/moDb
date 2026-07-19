@@ -372,9 +372,13 @@ public:
     using Migration = std::function<Result<FieldValues>(const DecodedObject&)>;
 
     // Cria um banco novo; falha se o arquivo já existir.
-    [[nodiscard]] static Result<Database> create(const std::filesystem::path& path);
+    [[nodiscard]] static Result<Database> create(
+        const std::filesystem::path& path,
+        std::size_t cache_capacity = storage::page_cache_capacity);
     // Abre um banco OO existente.
-    [[nodiscard]] static Result<Database> open(const std::filesystem::path& path);
+    [[nodiscard]] static Result<Database> open(
+        const std::filesystem::path& path,
+        std::size_t cache_capacity = storage::page_cache_capacity);
 
     Database(const Database&) = delete;
     Database& operator=(const Database&) = delete;
