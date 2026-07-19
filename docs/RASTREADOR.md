@@ -51,11 +51,11 @@
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ✅ Concluída | 9/9 | Todas |
-| [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | 🔄 Em andamento | 3/10 | Fases 9, 10 · 11A–11D |
+| [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | 🔄 Em andamento | 6/10 | Fases 9, 10 · 11A–11D |
 | [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ⬜ Não iniciada | 0/12 | Fases 4, 6, 7, 10 · 12A–12E |
 | [13](#fase-13--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11, 12 · 13A–13E |
 | [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ⬜ Não iniciada | 0/12 | Fases 5, 6, 8 |
-| **Total** | | | **112/158 (~71%)** | |
+| **Total** | | | **115/158 (~73%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -878,7 +878,7 @@ automaticamente, interfaces públicas documentadas.
 
 ## Fase 11 — Catálogo de facades e handles
 
-Status: 🔄 Em andamento (3/10) — quatro entregas verticais 11A–11D.
+Status: 🔄 Em andamento (6/10) — quatro entregas verticais 11A–11D.
 Definição completa:
 [PLANO_ODB.md §Fase 11](PLANO_ODB.md#fase-11--catálogo-de-facades-e-handles) ·
 [PROTOCOLO_FASES.md §Fase 11](PROTOCOLO_FASES.md#fase-11--catálogo-de-facades-e-handles)
@@ -888,10 +888,10 @@ Definição completa:
 | 11.1 | ADR do modelo de facades/handles e separação com a Fase 9 | ✅ | 11A · [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md) |
 | 11.2 | `FacadeDescriptor` / `MethodDescriptor` + catálogo `vector<>` | ✅ | 11A · Posição no vetor ≠ identidade |
 | 11.3 | `FacadeCatalog` (registro, listagem, lookup) | ✅ | 11A · merge `07ab67c`, tag `0.0.11a` |
-| 11.4 | `FacadeHandle<TFacade>` no cliente (`invoke<Method>`) | ⬜ | 11B · Sessão + FacadeId + versão |
+| 11.4 | `FacadeHandle<TFacade>` no cliente (`invoke<Method>`) | ✅ | 11B · Sessão + FacadeId + versão |
 | 11.5 | Descoberta e negociação de versão no protocolo | ⬜ | 11C · `FacadeList` / `FacadeOpen` |
-| 11.6 | Validação método∈facade + ErrorCodes | ⬜ | 11B · `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
-| 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ⬜ | 11B · Mesmo commit/rollback/cancel da Fase 9 |
+| 11.6 | Validação método∈facade + ErrorCodes | ✅ | 11B · `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
+| 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ✅ | 11B · Mesmo commit/rollback/cancel da Fase 9 |
 | 11.8 | Facades a partir de módulos carregados (manifesto) | ⬜ | 11D · Cliente não envia binários |
 | 11.9 | Exemplo `Accounts`/`transfer` ponta a ponta | ⬜ | 11D |
 | 11.10 | Documentar contrato consumidor → handle → facade → registry | ⬜ | 11D |
@@ -906,11 +906,11 @@ Status: ✅ Concluída — merge `07ab67c`, tag `0.0.11a` (2026-07-19).
 
 ### Fase 11B — FacadeHandle e invoke embedded
 
-Status: ⬜ Não iniciada — tag prevista `0.0.11b`.
+Status: ✅ Concluída — tag `0.0.11b` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Handle tipado + validação + delegação ao registry | ⬜ | `modb.facade_handle` |
+| Handle tipado + validação + delegação ao registry | ✅ | `modb.facade_handle` |
 
 ### Fase 11C — Descoberta e negociação no protocolo
 
@@ -933,7 +933,7 @@ Status: ⬜ Não iniciada — tag prevista `0.0.11d`.
 | Teste (CTest) | Arquivo | Status |
 |---|---|---|
 | `modb.facade_catalog` | `tests/facade_catalog_test.cpp` | ✅ 11A |
-| `modb.facade_handle` | `tests/facade_handle_test.cpp` | ⬜ 11B |
+| `modb.facade_handle` | `tests/facade_handle_test.cpp` | ✅ 11B |
 | `modb.facade_server` | `tests/facade_server_test.cpp` | ⬜ 11C/11D |
 
 Critério de aceite: ⬜ consumidor obtém `FacadeHandle`, invoca método tipado

@@ -703,12 +703,12 @@ identidade e versão/id ausentes. Tag: `0.0.11a`.
 
 #### Fase 11B — FacadeHandle e invoke embedded
 
-- [ ] Implementar `FacadeHandle<TFacade>`: sessão + `FacadeId` + versão;
+- [x] Implementar `FacadeHandle<TFacade>`: sessão + `FacadeId` + versão;
       `invoke<Method>(args...)` tipado.
-- [ ] Validar que o método invocado pertence à facade do handle
+- [x] Validar que o método invocado pertence à facade do handle
       (`facade_method_not_found`, `facade_not_found`,
       `incompatible_facade_version`).
-- [ ] Delegar a invocação ao `OperationRegistry` / `OpCall` da Fase 9,
+- [x] Delegar a invocação ao `OperationRegistry` / `OpCall` da Fase 9,
       preservando commit/rollback, cancelamento e deadline (caminho embedded).
 
 Critério de aceite: `modb.facade_handle` — TransferFunds via handle com commit;

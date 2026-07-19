@@ -1776,7 +1776,7 @@ delega ao `OperationRegistry` no caminho embedded (mesmo commit/rollback/
 cancel da Fase 9).
 
 Critério: `modb.facade_handle` — TransferFunds via handle; rollback em erro de
-domínio; método alheio → `facade_method_not_found`. Tag: `0.0.11b`.
+domínio; método alheio → `facade_method_not_found`. Tag: `0.0.11b`. Entregue.
 
 ## Fase 11C — Descoberta e negociação no protocolo
 
