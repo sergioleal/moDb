@@ -1833,7 +1833,7 @@ a estabilização da Fase 10. Decisão:
 
 ## Fase 12A — EdgeHandle e factories
 
-Status: ✅ Concluída — tag `0.0.12a` (2026-07-19).
+Status: ✅ Concluída — merge `e0f32cb`, tag `0.0.12a` (2026-07-19).
 
 Artefatos:
 

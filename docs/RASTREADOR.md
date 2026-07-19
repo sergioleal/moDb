@@ -952,7 +952,7 @@ Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 12.1 | ADR de handles de arestas e algoritmos de grafos | ✅ | 12A · [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md) |
+| 12.1 | ADR de handles de arestas e algoritmos de grafos | ✅ | 12A · merge `e0f32cb`, tag `0.0.12a` |
 | 12.2 | `EdgeHandle<From, To, EdgeKind>` runtime-only | ✅ | 12A · Origem, alvo, FieldId e DatabaseId |
 | 12.3 | Factories tipadas para `Ref` / `OwnedRef` | ✅ | 12A · `Embedded` e campo inválido rejeitados |
 | 12.4 | Adjacência em `PersistentVector<Ref<T>>` | ⬜ | 12B · Preservar tipo e ordem |
@@ -967,7 +967,7 @@ Definição completa:
 
 ### Fase 12A — EdgeHandle e factories
 
-Status: ✅ Concluída — tag `0.0.12a` (2026-07-19).
+Status: ✅ Concluída — merge `e0f32cb`, tag `0.0.12a` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
