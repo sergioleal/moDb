@@ -656,15 +656,16 @@ Tag: `0.0.10e`. Ver [COMPATIBILIDADE.md](COMPATIBILIDADE.md) e
 
 #### Fase 10F — Documentação, operação e fechamento
 
-- [ ] Reescrever `README.md` e a documentação do formato para o modelo OO.
-- [ ] Publicar guia de backup, restauração, diagnóstico e operação sob
+- [x] Reescrever `README.md` e a documentação do formato para o modelo OO.
+- [x] Publicar guia de backup, restauração, diagnóstico e operação sob
       supervisor.
-- [ ] Executar a matriz final de build/teste/benchmark e consolidar os
+- [x] Executar a matriz final de build/teste/benchmark e consolidar os
       resultados da Fase 10.
 
 Critério de aceite: usuário novo percorre o exemplo OO, faz backup/restauração e
 diagnóstico somente com a documentação; suíte inteira verde nos presets
 suportados e baseline final registrada. Tag: `0.0.10f`.
+Ver [OPERACAO.md](OPERACAO.md) e [FECHAMENTO_10F.md](FECHAMENTO_10F.md).
 
 Entregáveis: runner e arquivos históricos de benchmark; API e formato
 versionados; documentação completa para usuários e contribuidores.

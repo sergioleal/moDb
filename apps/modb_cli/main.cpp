@@ -644,6 +644,10 @@ int command_db_check(const std::filesystem::path& path) {
         case modb::storage::PageKind::database_root:
         case modb::storage::PageKind::identity_directory:
         case modb::storage::PageKind::identity_entries:
+        case modb::storage::PageKind::blob:
+        case modb::storage::PageKind::index_directory:
+        case modb::storage::PageKind::btree_leaf:
+        case modb::storage::PageKind::btree_internal:
             ++object_pages;
             break;
         case modb::storage::PageKind::unknown:
@@ -660,7 +664,7 @@ int command_db_check(const std::filesystem::path& path) {
     std::cout << "Slotted pages: " << slotted << '\n';
     std::cout << "TableHeap roots: " << table_heap_roots << '\n';
     if (object_pages != 0) {
-        std::cout << "Object store pages (DBRT/IDMD/IDMP): " << object_pages << '\n';
+        std::cout << "Object/index pages (DBRT/IDMD/IDMP/BLBP/IXDR/BT*): " << object_pages << '\n';
     }
     if (report.object_format) {
         const auto& format = *report.object_format;

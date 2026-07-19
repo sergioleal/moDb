@@ -41,6 +41,12 @@ constexpr std::array<std::byte, 4> identity_entries_magic{
 // mesmos magic bytes que já usa para DBRT/IDMD/IDMP.
 constexpr std::array<std::byte, 4> blob_magic{
     std::byte{'B'}, std::byte{'L'}, std::byte{'B'}, std::byte{'P'}};
+constexpr std::array<std::byte, 4> index_directory_magic{
+    std::byte{'I'}, std::byte{'X'}, std::byte{'D'}, std::byte{'R'}};
+constexpr std::array<std::byte, 4> btree_leaf_magic{
+    std::byte{'B'}, std::byte{'T'}, std::byte{'L'}, std::byte{'F'}};
+constexpr std::array<std::byte, 4> btree_internal_magic{
+    std::byte{'B'}, std::byte{'T'}, std::byte{'I'}, std::byte{'N'}};
 
 // Campos do cabeçalho de blob validáveis sem conhecer o conteúdo.
 constexpr std::uint16_t blob_page_version = 1;
@@ -119,6 +125,15 @@ PageKind classify_page(const Page& page) noexcept {
     }
     if (starts_with_magic(page, blob_magic)) {
         return PageKind::blob;
+    }
+    if (starts_with_magic(page, index_directory_magic)) {
+        return PageKind::index_directory;
+    }
+    if (starts_with_magic(page, btree_leaf_magic)) {
+        return PageKind::btree_leaf;
+    }
+    if (starts_with_magic(page, btree_internal_magic)) {
+        return PageKind::btree_internal;
     }
     return PageKind::unknown;
 }
@@ -201,6 +216,17 @@ Result<DatabaseCheckReport> check_database(const std::filesystem::path& path) {
                 entry.error = validated.error();
             }
             break;
+        case PageKind::index_directory:
+        case PageKind::btree_leaf:
+        case PageKind::btree_internal: {
+            // Reconhecimento estrutural (Fase 10F): versão 1 no offset 4.
+            const auto version = read_u16_at(*page, 4);
+            if (version != 1) {
+                entry.error = Error{ErrorCode::incompatible_page_version,
+                                    "index/btree page has an unsupported version"};
+            }
+            break;
+        }
         case PageKind::unknown:
             entry.error = Error{
                 ErrorCode::invalid_page_format,
