@@ -1833,6 +1833,8 @@ a estabilização da Fase 10. Decisão:
 
 ## Fase 12A — EdgeHandle e factories
 
+Status: ✅ Concluída — tag `0.0.12a` (2026-07-19).
+
 Artefatos:
 
 ```text
@@ -1842,7 +1844,7 @@ docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md
 ```
 
 `EdgeHandle` runtime-only; factories tipadas para `Ref`/`OwnedRef`; rejeitar
-`Embedded` e campo inválido.
+`Embedded` e campo inválido (`invalid_edge` / `edge_target_not_found`).
 
 Critério: associação/ownership, reabertura, órfã, `invalid_edge`. Tag:
 `0.0.12a`.

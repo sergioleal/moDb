@@ -749,6 +749,25 @@ public:
         return Snapshot{database_id_, current_epoch};
     }
 
+    // Localiza o FieldBinder do tipo T (Fase 12A — factories de EdgeHandle).
+    template <typename T>
+    [[nodiscard]] Result<const FieldBinder*> find_bound_field(FieldId field) const {
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
+        }
+        for (const auto& candidate : bound->binding.fields()) {
+            if (candidate.id == field) {
+                return &candidate;
+            }
+        }
+        return std::unexpected(
+            Error{ErrorCode::invalid_edge, "field is not part of the bound type"});
+    }
+
     [[nodiscard]] Result<TypeDefinitionId> define_type(Transaction& tx,
                                                         TypeDefinition definition);
 

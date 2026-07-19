@@ -126,6 +126,14 @@ enum class ErrorCode {
     facade_method_not_found,
     // Versão de facade incompatível na negociação/lookup (Fase 11).
     incompatible_facade_version,
+    // Campo/membro não forma aresta tipada válida (Fase 12).
+    invalid_edge,
+    // Alvo da aresta ausente sob o Snapshot (ref órfã; Fase 12).
+    edge_target_not_found,
+    // Travessia excedeu profundidade/máximo de vértices (Fase 12).
+    graph_limit_exceeded,
+    // Ciclo detectado onde a topologia não permite (Fase 12).
+    graph_cycle,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.
