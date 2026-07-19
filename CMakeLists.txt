@@ -218,6 +218,7 @@ add_library(modb_bench_core STATIC
     benchmarks/scenarios/object_store_lifecycle.cpp
     benchmarks/scenarios/buffer_pool_oversubscribed.cpp
     benchmarks/scenarios/object_store_read_hotpath.cpp
+    benchmarks/scenarios/graph_traversal.cpp
 )
 target_include_directories(modb_bench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks)
 target_link_libraries(modb_bench_core PUBLIC modb::modb)
@@ -604,6 +605,18 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.graph_demo
         COMMAND modb_cli graph demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-graph.modb --force)
+    add_test(NAME modb.cli.graph_bfs
+        COMMAND modb_cli graph bfs
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase12-graph-bfs.modb --force)
+    add_test(NAME modb.cli.graph_dfs
+        COMMAND modb_cli graph dfs
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase12-graph-dfs.modb --force)
+    add_test(NAME modb.cli.graph_shortest_path
+        COMMAND modb_cli graph shortest-path
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase12-graph-sp.modb --force)
+    add_test(NAME modb.cli.graph_toposort
+        COMMAND modb_cli graph toposort
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase12-graph-topo.modb --force)
     add_test(NAME modb.cli.coll_demo
         COMMAND modb_cli coll demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-coll.modb --force)

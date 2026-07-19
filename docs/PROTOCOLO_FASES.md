@@ -1903,6 +1903,8 @@ Tag: `0.0.12d`.
 
 ## Fase 12E — CLI, benchmarks e fechamento
 
+Status: ✅ Concluída — tag `0.0.12e` (2026-07-19).
+
 Artefatos:
 
 ```text

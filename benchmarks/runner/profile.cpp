@@ -37,6 +37,20 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .warmup = 1,
             .samples = 3,
         });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "graph.traversal.warm",
+            .object_count = 3, // depth
+            .stride = 2,       // branching
+            .warmup = 1,
+            .samples = 2,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "graph.traversal.cold",
+            .object_count = 3,
+            .stride = 2,
+            .warmup = 0,
+            .samples = 2,
+        });
         return profile;
     }
     if (name == "standard") {
@@ -73,6 +87,20 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .warmup = 2,
             .samples = 8,
         });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "graph.traversal.warm",
+            .object_count = 5,
+            .stride = 3,
+            .warmup = 2,
+            .samples = 5,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "graph.traversal.cold",
+            .object_count = 5,
+            .stride = 3,
+            .warmup = 1,
+            .samples = 5,
+        });
         return profile;
     }
     if (name == "diagnostic") {
@@ -99,6 +127,13 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .scenario_id = "object_store.read_hotpath",
             .object_count = 40,
             .read_rounds = 3,
+            .warmup = 0,
+            .samples = 1,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "graph.traversal.warm",
+            .object_count = 2,
+            .stride = 2,
             .warmup = 0,
             .samples = 1,
         });
