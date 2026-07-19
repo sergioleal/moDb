@@ -1851,7 +1851,7 @@ Critério: associação/ownership, reabertura, órfã, `invalid_edge`. Tag:
 
 ## Fase 12B — Adjacência e arestas de entrada
 
-Status: ✅ Concluída — tag `0.0.12b` (2026-07-19).
+Status: ✅ Concluída — merge `dd2adb3`, tag `0.0.12b` (2026-07-19).
 
 Artefatos:
 
