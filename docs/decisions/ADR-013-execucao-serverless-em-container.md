@@ -84,4 +84,7 @@ réplica writer.
 - Operadores não devem configurar duas réplicas writers no mesmo volume.
 - Backup continua sendo cópia quiescente de `<db>` + `<db>.wal`, agora a
   partir do volume persistente.
-- Replicação, sharding e multi-tenant por instância seguem fora do escopo.
+- Multi-writer, sharding e multi-tenant por instância seguem fora do escopo.
+  A réplica **de leitura** por streaming do WAL passa a ser tratada na Fase 14
+  ([ADR-016](ADR-016-replica-de-leitura-por-streaming-do-wal.md)); alta
+  disponibilidade, promoção e failover automático continuam fora do plano.

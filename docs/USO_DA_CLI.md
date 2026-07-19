@@ -714,6 +714,11 @@ manualmente. A Fase 12 planeja comandos separados para algoritmos:
 `graph bfs`, `graph dfs`, `graph shortest-path` e `graph toposort`, baseados em
 `EdgeHandle` e snapshot único. Eles ainda não fazem parte da CLI atual.
 
+A Fase 14 planeja comandos de replicação: `replicate serve` (primary expõe o
+stream do WAL), `replicate follow` (follower faz bootstrap e acompanha o WAL) e
+`replicate status` (lag e `applied_lsn`). Também ainda não fazem parte da CLI
+atual.
+
 ## `modb coll demo` — coleções persistentes (ODB++ Fase 4)
 
 Exercita `PersistentVector`, `PersistentSet` (deduplicação e ordem) e

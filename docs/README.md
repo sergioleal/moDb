@@ -17,7 +17,7 @@ Visão (3 MDs na raiz) → Plano OO → Protocolo por fase → ADRs da Fase 0
 ## Quer saber só "onde estamos agora"?
 
 **[RASTREADOR.md](RASTREADOR.md)** — o rastreador de andamento. Lista as
-~146 tarefas das 14 fases (0 a 13) com status (`⬜`/`🔄`/`✅`/`🚫`), o teste
+~158 tarefas das 15 fases (0 a 14) com status (`⬜`/`🔄`/`✅`/`🚫`), o teste
 automatizado de cada fase e o painel geral de progresso. É o único documento
 desta pasta que reflete estado vivo; os demais (Plano, Protocolo, ADRs)
 definem escopo e não mudam a cada tarefa concluída.
@@ -40,7 +40,7 @@ descreve *como* chegar lá.
 ## 2. Plano e protocolo (vigentes) — comece por aqui
 
 - **[PLANO_ODB.md](PLANO_ODB.md)** — o plano de desenvolvimento vigente.
-  Traduz os três documentos de visão em **14 fases verticais** (0 a 13), cada
+  Traduz os três documentos de visão em **15 fases verticais** (0 a 14), cada
   uma com objetivo, tarefas, entregáveis e critério de aceite. Define o MVP OO
   (fases 0–3) e a ordem recomendada de execução.
 - **[PROTOCOLO_FASES.md](PROTOCOLO_FASES.md)** — o mesmo plano, mas no nível de
@@ -86,6 +86,7 @@ principalmente as da **Fase 0**:
 | [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) | Container serverless stateful: volume persistente, writer único, escala a zero (Fase 13) |
 | [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md) | Catálogo de facades, `FacadeHandle` tipado e descoberta/negociação (Fase 11) |
 | [ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md) | `EdgeHandle` tipado, snapshot e algoritmos básicos de grafos (Fase 12) |
+| [ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md) | Réplica de leitura read-only por streaming do WAL durável (Fase 14) |
 
 A ADR-011 foi entregue na subfase 8A. A ADR-009 (épocas / IDMP v2) já foi
 entregue com a Fase 6.

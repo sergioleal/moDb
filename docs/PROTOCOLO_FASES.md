@@ -2178,6 +2178,122 @@ observável, testado e não altera ordering, atomicidade ou durabilidade.
 
 ---
 
+# Fase 14 — Réplica de leitura por streaming do WAL
+
+## Objetivo
+
+Manter um follower read-only continuamente atualizado a partir do WAL do
+primary, escalando leitura sem violar o single-writer. Esta fase começa depois
+das Fases 5, 6 e 8: WAL/recuperação, snapshots/MVCC e rede com backpressure
+precisam existir. Ela também **transforma o WAL efêmero atual em um WAL
+durável, segmentado e retido** — pré-requisito da replicação.
+
+## Decisões fixadas (conteúdo da ADR-016)
+
+1. **Identidade persistente.** `DatabaseUuid` e `timeline_id` gravados no DBRT
+   (ou página de controle); `DatabaseId`/`BaselineId` não os substituem.
+2. **WAL v2 durável.** LSN global monotônico por banco, nunca reiniciado;
+   `commit_lsn` na fronteira de cada transação; segmentos append-only.
+3. **Checkpoint como posição.** Deixa de ser "apagar o WAL"; passa a ser uma
+   posição persistente que governa a retenção junto com o ACK do follower.
+4. **Follower read-only.** Arquivo local próprio, nunca volume compartilhado; o
+   applier é o único escritor interno; clientes só leem.
+5. **Apply idempotente.** Reescrever after-images completas é seguro sob
+   repetição; commits com `commit_lsn <= applied_lsn` são ignorados; gap nunca
+   é pulado.
+6. **Canal privilegiado.** Protocolo de replicação distinto do de consulta;
+   páginas/WAL não são expostos ao cliente comum (exceção registrada à ADR-010).
+7. **Consistência conservadora.** Query/snapshot com lock compartilhado; apply
+   com lock exclusivo; nova época só visível após apply completo; sem GC local.
+
+## Artefatos novos
+
+```text
+docs/decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md
+docs/OPERACAO_REPLICACAO.md
+include/modb/tx/wal.hpp                 (WAL v2: LSN global, commit_lsn, segmentos)
+include/modb/repl/replication.hpp       (serviço do primary + applier do follower)
+include/modb/net/replication_protocol.hpp
+src/tx/wal_v2.cpp
+src/repl/primary_stream.cpp
+src/repl/follower_apply.cpp
+src/net/replication_protocol.cpp
+tests/wal_v2_test.cpp
+tests/replication_protocol_test.cpp
+tests/replication_bootstrap_test.cpp
+tests/replication_apply_test.cpp
+tests/replication_recovery_test.cpp
+tests/replication_streaming_test.cpp
+```
+
+## Formato do canal de replicação
+
+Reutiliza o framing da Fase 8 (`length u32 | type u8 | payload`) em um espaço
+de mensagens próprio, autenticado e incompatível com o cliente de consulta:
+
+| Mensagem | Payload (conceitual) |
+|---|---|
+| `ReplicationHello` / `HelloOk` | versão do protocolo + `DatabaseUuid` + `timeline_id` |
+| `BootstrapRequest` | `known_uuid?`, `known_timeline?`, `known_lsn?` |
+| `BootstrapBegin` | manifesto: page size, `cut_lsn`, `epoch`, `baseline`, tamanho, hash |
+| `BootstrapChunk` / `BootstrapEnd` | bytes do snapshot base + CRC |
+| `WalSubscribe` | `database_uuid` + `timeline` + `from_lsn` |
+| `WalFrame` | `first_lsn` + `last_lsn` + bytes de registros + crc |
+| `WalAck` | `applied_lsn` (durável no follower) |
+| `WalGap` | `oldest_available_lsn` (pedido abaixo da retenção) |
+| `ReplicationHeartbeat` | `primary_commit_lsn` (mesmo sem tráfego) |
+| `ReplicationError` / `Cancel` | ErrorCode + mensagem |
+
+## Passo a passo
+
+1. Escrever a [ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
+2. WAL v2: adicionar LSN global persistente e `commit_lsn`; parar de reiniciar
+   `lsn`/`tx_id`; segmentar; validar continuidade, sequência begin/commit e CRC
+   no leitor de replicação (truncamento de rede é erro, não fim lógico).
+3. Identidade: gerar/gravar `DatabaseUuid` e `timeline_id`; expor no handshake.
+4. Retenção: transformar checkpoint em posição persistente; reter segmentos até
+   checkpoint + ACK; expor `oldest_available_lsn`.
+5. Bootstrap: barreira do escritor → fixar `(cut_lsn, epoch, baseline)` → copiar
+   arquivo consistente → enviar manifesto+chunks → follower grava em temporário,
+   `sync`, valida hash e renomeia atomicamente.
+6. Streaming: primary envia `WalFrame` incremental com backpressure/heartbeat;
+   cancelamento encerra o stream sem corromper o WAL.
+7. Applier: spool durável → apply de after-images sob lock exclusivo → flush →
+   persistir `applied_lsn` → ressincronizar `ObjectStore` → `WalAck`.
+8. Read-only: `begin`/bind/GC/operações de escrita retornam `replica_read_only`;
+   leitura/snapshot/operações read-only permitidas.
+9. Reconexão/gap: reabrir de `applied_lsn + 1`; UUID/timeline divergente,
+   ordem quebrada ou gap interrompem apply; abaixo da retenção → `WalGap` e novo
+   bootstrap.
+10. CLI `modb replicate serve/follow/status`; failpoints (queda no apply, no
+    bootstrap, após ACK) provando idempotência; documentar em
+    `OPERACAO_REPLICACAO.md`.
+
+## Testes
+
+- `wal_v2_test`: LSN global monotônico entre sessões, `commit_lsn`, segmentos,
+  leitura a partir de um LSN, rejeição de truncamento como fim válido.
+- `replication_protocol_test`: encode/decode e validação de todas as mensagens;
+  frames grandes; UUID/timeline mismatch; cancelamento.
+- `replication_bootstrap_test`: snapshot base consistente sob barreira; follower
+  reconstrói e assina de `cut_lsn + 1`.
+- `replication_apply_test`: apply idempotente, reaplicação de LSN duplicado,
+  recusa de gap, ACK só após durabilidade.
+- `replication_recovery_test`: queda do follower antes/depois do ACK e no meio
+  do apply; retomada correta.
+- `replication_streaming_test`: fluxo contínuo, backpressure, heartbeat,
+  reconexão de `applied_lsn + 1`, `WalGap` forçando rebootstrap.
+
+## Critério de conclusão
+
+O follower faz bootstrap consistente, acompanha commits do primary e, após
+queda/reconexão, retoma de `applied_lsn + 1` sem perder nem duplicar efeitos.
+Gap além da retenção força novo bootstrap explícito. Escritas no follower são
+rejeitadas e nenhuma leitura observa estado parcial de uma transação replicada.
+Suítes `debug` e `sanitizers` verdes em Linux e Windows.
+
+---
+
 # Apêndice A — Mapa de ErrorCodes novos por fase
 
 | Fase | ErrorCode |
@@ -2190,6 +2306,7 @@ observável, testado e não altera ordering, atomicidade ou durabilidade.
 | 9 | `operation_not_found`, `incompatible_module` |
 | 11 | `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
 | 12 | `invalid_edge`, `graph_limit_exceeded`, `graph_cycle`, `edge_target_not_found` |
+| 14 | `replica_read_only`, `replication_gap`, `timeline_mismatch`, `database_uuid_mismatch`, `bootstrap_required` |
 
 # Apêndice B — Mapa de páginas do formato
 

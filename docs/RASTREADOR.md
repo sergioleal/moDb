@@ -54,7 +54,8 @@
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 |
 | [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ⬜ Não iniciada | 0/12 | Fases 4, 6, 7, 10 |
 | [13](#fase-13--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11, 12 |
-| **Total** | | | **107/146 (~73%)** | |
+| [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ⬜ Não iniciada | 0/12 | Fases 5, 6, 8 |
+| **Total** | | | **107/158 (~68%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -980,6 +981,46 @@ atende cliente 8/9/11/12, preserva commits após término forçado, uma instânc
 ativa, sem privilégios, com backpressure. Em ambientes compatíveis, testes e
 métricas comprovam completions reais por `io_uring`/IOCP; fallback explícito
 mantém a mesma durabilidade.
+
+---
+
+## Fase 14 — Réplica de leitura por streaming do WAL
+
+Status: ⬜ Não iniciada (0/12) — Definição completa:
+[PLANO_ODB.md §Fase 14](PLANO_ODB.md#fase-14--réplica-de-leitura-por-streaming-do-wal) ·
+[PROTOCOLO_FASES.md §Fase 14](PROTOCOLO_FASES.md#fase-14--réplica-de-leitura-por-streaming-do-wal)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 14.1 | ADR de replicação física read-only, WAL durável, retenção e consistência | ⬜ | [ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md) |
+| 14.2 | Identidade persistente: `DatabaseUuid` + `timeline_id` | ⬜ | DBRT ou página de controle |
+| 14.3 | WAL v2: LSN global monotônico persistente + `commit_lsn` | ⬜ | `lsn`/`tx_id` deixam de reiniciar por sessão |
+| 14.4 | Segmentação, checkpoint como posição e política de retenção | ⬜ | Reter até checkpoint + ACK; expor `oldest_available_lsn` |
+| 14.5 | Snapshot base consistente via barreira do escritor (bootstrap) | ⬜ | Evita misturar `page_count`/DBRT/páginas |
+| 14.6 | Protocolo de replicação privilegiado | ⬜ | Hello/Bootstrap/Subscribe/Frame/Ack/Gap/Heartbeat/Cancel |
+| 14.7 | Streaming incremental por LSN com backpressure/heartbeat/cancel | ⬜ | Reutiliza framing da Fase 8 |
+| 14.8 | Applier do follower: spool durável + apply idempotente + ACK | ⬜ | ACK só após durabilidade local |
+| 14.9 | Modo read-only ao follower | ⬜ | Escrita/`begin`/GC → `replica_read_only` |
+| 14.10 | Leitura consistente na réplica | ⬜ | Lock compartilhado (query) vs. exclusivo (apply); sem GC local |
+| 14.11 | Reconexão, gap, UUID/timeline mismatch e métricas de lag | ⬜ | Retoma de `applied_lsn + 1`; `WalGap` → rebootstrap |
+| 14.12 | CLI `modb replicate serve/follow/status`, failpoints e docs | ⬜ | `docs/OPERACAO_REPLICACAO.md` |
+
+### Testes/artefatos desta fase
+
+| Item | Local | Status |
+|---|---|---|
+| WAL v2 (LSN global, segmentos, leitura por LSN) | `tests/wal_v2_test.cpp` | ⬜ |
+| Protocolo de replicação | `tests/replication_protocol_test.cpp` | ⬜ |
+| Bootstrap consistente | `tests/replication_bootstrap_test.cpp` | ⬜ |
+| Apply idempotente / gap / duplicata | `tests/replication_apply_test.cpp` | ⬜ |
+| Recovery do follower (queda antes/depois do ACK) | `tests/replication_recovery_test.cpp` | ⬜ |
+| Streaming, backpressure, reconexão, `WalGap` | `tests/replication_streaming_test.cpp` | ⬜ |
+| ADR de replicação | `docs/decisions/ADR-016-*.md` | ✅ |
+
+Critério de aceite: ⬜ o follower faz bootstrap consistente, acompanha commits
+e retoma de `applied_lsn + 1` após queda sem perder/duplicar efeitos; gap além
+da retenção força novo bootstrap; escrita no follower é rejeitada e leituras
+nunca observam transação replicada pela metade.
 
 ---
 
