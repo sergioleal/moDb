@@ -1798,11 +1798,15 @@ incompatível pela rede. Tag: `0.0.11c`.
 
 ## Fase 11D — Módulos, Accounts e documentação
 
+Status: ✅ Concluída — tag `0.0.11d` (2026-07-19).
+
 Artefatos:
 
 ```text
 examples/accounts_facade/
-docs/ (contrato consumidor → handle → facade → registry)
+docs/FACADES.md
+ModuleManifest::facades + register_facades_from_manifest
+Client::open_facade<TFacade>() / FacadeInvoker remoto
 ```
 
 Facades a partir do manifesto dos módulos; exemplo ponta a ponta pela rede;
@@ -1815,7 +1819,7 @@ exemplo verdes. Tag: `0.0.11d`.
 
 Consumidor obtém handle tipado, invoca método da facade pela rede com o
 contrato transacional da Fase 9; descoberta e rejeições de versão/método
-cobertas.
+cobertas. Status: ✅ (11A–11D).
 
 ---
 

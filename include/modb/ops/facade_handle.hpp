@@ -1,19 +1,28 @@
 #pragma once
 
-// Handle embedded tipado para invocação de métodos de uma facade (Fase 11B).
+// Handle tipado para invocação de métodos de uma facade (Fases 11B/11D).
+// Transporte: embedded (OperationRegistry) ou remoto (Client::call / OpCall).
 
 #include "modb/error.hpp"
 #include "modb/object/database.hpp"
 #include "modb/ops/facade_catalog.hpp"
+#include "modb/ops/facade_descriptor.hpp"
 #include "modb/ops/operation.hpp"
 #include "modb/ops/operation_registry.hpp"
 
 #include <cstdint>
+#include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace modb::ops {
+
+// Despacha um método já validado na facade (embedded ou rede).
+using FacadeInvoker =
+    std::function<Result<OperationResult>(std::string_view operation_id,
+                                          std::span<const std::byte> args)>;
 
 template <typename TFacade>
 class FacadeHandle {
@@ -25,16 +34,34 @@ public:
         if (!descriptor) {
             return std::unexpected(descriptor.error());
         }
-        return FacadeHandle{catalog, registry, database, descriptor->facade_id,
-                            descriptor->facade_version};
+        FacadeInvoker invoker = [&registry, &database](std::string_view operation_id,
+                                                       std::span<const std::byte> args) {
+            return registry.dispatch(operation_id, args, database);
+        };
+        return FacadeHandle{std::move(*descriptor), std::move(invoker)};
     }
 
-    [[nodiscard]] std::string_view facade_id() const noexcept { return facade_id_; }
-    [[nodiscard]] std::uint32_t version() const noexcept { return version_; }
+    [[nodiscard]] static Result<FacadeHandle> open(FacadeDescriptor descriptor,
+                                                   FacadeInvoker invoker) {
+        if (!invoker) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_argument, "facade invoker must not be empty"});
+        }
+        if (descriptor.facade_id != TFacade::k_id ||
+            descriptor.facade_version != TFacade::k_version) {
+            return std::unexpected(Error{ErrorCode::incompatible_facade_version,
+                                         "descriptor does not match facade type"});
+        }
+        return FacadeHandle{std::move(descriptor), std::move(invoker)};
+    }
+
+    [[nodiscard]] std::string_view facade_id() const noexcept { return descriptor_.facade_id; }
+    [[nodiscard]] std::uint32_t version() const noexcept { return descriptor_.facade_version; }
+    [[nodiscard]] const FacadeDescriptor& descriptor() const noexcept { return descriptor_; }
 
     template <typename Method, typename... Args>
     [[nodiscard]] Result<OperationResult> invoke(Args&&... args) {
-        auto method = catalog_->find_method(facade_id_, version_, Method::k_id);
+        auto method = find_method(descriptor_, Method::k_id);
         if (!method) {
             return std::unexpected(method.error());
         }
@@ -43,20 +70,15 @@ public:
         if (!encoded) {
             return std::unexpected(encoded.error());
         }
-        return registry_->dispatch(Method::k_id, *encoded, *database_);
+        return invoker_(Method::k_id, *encoded);
     }
 
 private:
-    FacadeHandle(const FacadeCatalog& catalog, OperationRegistry& registry,
-                 object::Database& database, std::string facade_id, std::uint32_t version)
-        : catalog_{&catalog}, registry_{&registry}, database_{&database},
-          facade_id_{std::move(facade_id)}, version_{version} {}
+    FacadeHandle(FacadeDescriptor descriptor, FacadeInvoker invoker)
+        : descriptor_{std::move(descriptor)}, invoker_{std::move(invoker)} {}
 
-    const FacadeCatalog* catalog_{};
-    OperationRegistry* registry_{};
-    object::Database* database_{};
-    std::string facade_id_{};
-    std::uint32_t version_{};
+    FacadeDescriptor descriptor_{};
+    FacadeInvoker invoker_{};
 };
 
 template <typename TFacade>

@@ -878,7 +878,7 @@ automaticamente, interfaces públicas documentadas.
 
 ## Fase 11 — Catálogo de facades e handles
 
-Status: 🔄 Em andamento (8/10) — quatro entregas verticais 11A–11D.
+Status: ✅ Concluída (10/10) — quatro entregas verticais 11A–11D.
 Definição completa:
 [PLANO_ODB.md §Fase 11](PLANO_ODB.md#fase-11--catálogo-de-facades-e-handles) ·
 [PROTOCOLO_FASES.md §Fase 11](PROTOCOLO_FASES.md#fase-11--catálogo-de-facades-e-handles)
@@ -892,9 +892,9 @@ Definição completa:
 | 11.5 | Descoberta e negociação de versão no protocolo | ✅ | 11C · merge `225d6e7`, tag `0.0.11c` |
 | 11.6 | Validação método∈facade + ErrorCodes | ✅ | 11B · `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
 | 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ✅ | 11B · Mesmo commit/rollback/cancel da Fase 9 |
-| 11.8 | Facades a partir de módulos carregados (manifesto) | ⬜ | 11D · Cliente não envia binários |
-| 11.9 | Exemplo `Accounts`/`transfer` ponta a ponta | ⬜ | 11D |
-| 11.10 | Documentar contrato consumidor → handle → facade → registry | ⬜ | 11D |
+| 11.8 | Facades a partir de módulos carregados (manifesto) | ✅ | 11D · `register_facades_from_manifest` |
+| 11.9 | Exemplo `Accounts`/`transfer` ponta a ponta | ✅ | 11D · `examples/accounts_facade` |
+| 11.10 | Documentar contrato consumidor → handle → facade → registry | ✅ | 11D · [FACADES.md](FACADES.md) |
 
 ### Fase 11A — Contratos e FacadeCatalog
 
@@ -922,11 +922,11 @@ Status: ✅ Concluída — merge `225d6e7`, tag `0.0.11c` (2026-07-19).
 
 ### Fase 11D — Módulos, Accounts e documentação
 
-Status: ⬜ Não iniciada — tag prevista `0.0.11d`.
+Status: ✅ Concluída — tag `0.0.11d` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Manifesto → facades + exemplo Accounts + docs | ⬜ | Invoke pela rede + docs |
+| Manifesto → facades + exemplo Accounts + docs | ✅ | Invoke pela rede + docs |
 
 ### Testes automatizados desta fase
 
@@ -934,9 +934,10 @@ Status: ⬜ Não iniciada — tag prevista `0.0.11d`.
 |---|---|---|
 | `modb.facade_catalog` | `tests/facade_catalog_test.cpp` | ✅ 11A |
 | `modb.facade_handle` | `tests/facade_handle_test.cpp` | ✅ 11B |
-| `modb.facade_server` | `tests/facade_server_test.cpp` | ✅ 11C (list/open; invoke → 11D) |
+| `modb.facade_server` | `tests/facade_server_test.cpp` | ✅ 11C/11D |
+| `modb.cli.ops_facade_demo` | CLI `ops facade-demo` | ✅ 11D |
 
-Critério de aceite: ⬜ consumidor obtém `FacadeHandle`, invoca método tipado
+Critério de aceite: ✅ consumidor obtém `FacadeHandle`, invoca método tipado
 pela rede com contrato da Fase 9; descoberta lista facades/métodos; versão
 incompatível e método alheio são rejeitados.
 

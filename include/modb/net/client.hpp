@@ -7,6 +7,8 @@
 #include "modb/net/native_socket.hpp"
 #include "modb/net/protocol.hpp"
 #include "modb/object/object_codec.hpp"
+#include "modb/ops/facade_handle.hpp"
+#include "modb/ops/operation.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -128,6 +130,46 @@ public:
     [[nodiscard]] Result<std::vector<ops::FacadeDescriptor>> list_facades();
     [[nodiscard]] Result<FacadeOpenOk> open_facade(std::string_view facade_id,
                                                    std::uint32_t version);
+
+    // Fase 11D: handle tipado remoto após open com versão compatível.
+    template <typename TFacade>
+    [[nodiscard]] Result<ops::FacadeHandle<TFacade>> open_facade() {
+        auto opened = open_facade(TFacade::k_id, TFacade::k_version);
+        if (!opened) {
+            return std::unexpected(opened.error());
+        }
+        if (!opened->ok) {
+            return std::unexpected(Error{opened->code, opened->message});
+        }
+
+        auto listed = list_facades();
+        if (!listed) {
+            return std::unexpected(listed.error());
+        }
+        const ops::FacadeDescriptor* descriptor = nullptr;
+        for (const auto& facade : *listed) {
+            if (facade.facade_id == TFacade::k_id &&
+                facade.facade_version == TFacade::k_version) {
+                descriptor = &facade;
+                break;
+            }
+        }
+        if (descriptor == nullptr) {
+            return std::unexpected(
+                Error{ErrorCode::facade_not_found,
+                      "facade negotiated but missing from list: " + std::string{TFacade::k_id}});
+        }
+
+        ops::FacadeInvoker invoker = [this](std::string_view operation_id,
+                                            std::span<const std::byte> args) -> Result<ops::OperationResult> {
+            auto payload = call(operation_id, args);
+            if (!payload) {
+                return std::unexpected(payload.error());
+            }
+            return ops::OperationResult{.payload = std::move(*payload)};
+        };
+        return ops::FacadeHandle<TFacade>::open(*descriptor, std::move(invoker));
+    }
 
     [[nodiscard]] static Result<HelloOk> handshake(std::string_view host, std::uint16_t port,
                                                    std::string_view database_name);

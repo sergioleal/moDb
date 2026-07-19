@@ -726,11 +726,11 @@ incompatível pela rede. Tag: `0.0.11c`.
 
 #### Fase 11D — Módulos, exemplo Accounts e documentação
 
-- [ ] Expor facades a partir dos módulos carregados (manifesto → métodos
+- [x] Expor facades a partir dos módulos carregados (manifesto → métodos
       agrupados), sem o cliente escolher caminhos ou enviar binários.
-- [ ] Exemplo ponta a ponta: facade `Accounts` com `transfer` via handle pela
+- [x] Exemplo ponta a ponta: facade `Accounts` com `transfer` via handle pela
       rede; saldo insuficiente → rollback; método inexistente rejeitado.
-- [ ] Documentar o contrato consumidor → handle → facade → registry e o
+- [x] Documentar o contrato consumidor → handle → facade → registry e o
       modelo de evolução de versão de facade.
 
 Critério de aceite: consumidor obtém `FacadeHandle` pela rede, invoca método
