@@ -68,9 +68,9 @@ Mantida do plano anterior. Uma tarefa só está concluída quando:
 | 8 | Servidor, protocolo binário e backpressure | streaming pela rede | 7 |
 | 9 | Runtime de módulos de domínio | `client.call<TransferFunds>(...)` | 5, 8 |
 | 10 | Desempenho e estabilização | benchmarks, buffer pool, fuzzing | todas |
-| 11 | Catálogo de facades e handles | `FacadeHandle` tipado sobre operações | 9, 10 |
-| 12 | Handles de arestas e algoritmos de grafos | BFS/DFS e caminhos sobre relacionamentos tipados | 4, 6, 7, 10 |
-| 13 | Container serverless | imagem OCI com escala a zero e dados duráveis | 8, 9, 10, 11, 12 |
+| 11 | Catálogo de facades e handles | `FacadeHandle` tipado sobre operações (11A–11D) | 9, 10 |
+| 12 | Handles de arestas e algoritmos de grafos | BFS/DFS e caminhos sobre relacionamentos tipados (12A–12E) | 4, 6, 7, 10 |
+| 13 | Container serverless | imagem OCI com escala a zero e dados duráveis (13A–13E) | 8, 9, 10, 11, 12 |
 
 O **MVP OO** compreende as fases 0 a 3. Critério, análogo ao MVP relacional:
 criar um tipo `Employee`, persistir um objeto, fechar completamente a
@@ -685,7 +685,9 @@ transacional). A Fase 11 acrescenta a superfície de API: catálogo heterogêneo
 `FacadeHandle<TFacade>` com `invoke<Method>(args...)`.
 ([ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md)).
 
-Tarefas:
+A fase é dividida em quatro entregas verticais, cada uma com teste e tag própria.
+
+#### Fase 11A — Contratos e FacadeCatalog
 
 - [ ] Registrar em ADR o modelo de facades, handles, identidade estável
       (`FacadeId`) e a separação com o registry da Fase 9
@@ -693,31 +695,48 @@ Tarefas:
 - [ ] Definir `FacadeDescriptor` / `MethodDescriptor` e o catálogo em memória
       como `vector<FacadeDescriptor>` (posição no vetor nunca é identidade).
 - [ ] Implementar `FacadeCatalog` (registro, listagem, lookup por `FacadeId`
-      e versão).
-- [ ] Implementar `FacadeHandle<TFacade>` no cliente: sessão + `FacadeId` +
-      versão negociada; `invoke<Method>(args...)` tipado.
-- [ ] Descoberta e negociação de versão/capacidades no protocolo (listar
-      facades/métodos; obter handle somente se compatível).
-- [ ] Validar que o método invocado pertence à facade do handle; erros
-      `facade_not_found`, `facade_method_not_found`,
-      `incompatible_facade_version`.
+      e versão) com ErrorCodes de lookup.
+
+Critério de aceite: `modb.facade_catalog` cobre registro/list/lookup, posição ≠
+identidade e versão/id ausentes. Tag: `0.0.11a`.
+
+#### Fase 11B — FacadeHandle e invoke embedded
+
+- [ ] Implementar `FacadeHandle<TFacade>`: sessão + `FacadeId` + versão;
+      `invoke<Method>(args...)` tipado.
+- [ ] Validar que o método invocado pertence à facade do handle
+      (`facade_method_not_found`, `facade_not_found`,
+      `incompatible_facade_version`).
 - [ ] Delegar a invocação ao `OperationRegistry` / `OpCall` da Fase 9,
-      preservando commit/rollback, cancelamento e deadline.
+      preservando commit/rollback, cancelamento e deadline (caminho embedded).
+
+Critério de aceite: `modb.facade_handle` — TransferFunds via handle com commit;
+erro de domínio faz rollback; método alheio rejeitado. Tag: `0.0.11b`.
+
+#### Fase 11C — Descoberta e negociação no protocolo
+
+- [ ] Descoberta e negociação de versão/capacidades no protocolo (`FacadeList` /
+      `FacadeOpen` e respostas).
+- [ ] Abrir handle remoto somente se a versão for compatível; recusas com
+      ErrorCode claro.
+
+Critério de aceite: `modb.facade_server` lista facades/métodos e rejeita versão
+incompatível pela rede. Tag: `0.0.11c`.
+
+#### Fase 11D — Módulos, exemplo Accounts e documentação
+
 - [ ] Expor facades a partir dos módulos carregados (manifesto → métodos
       agrupados), sem o cliente escolher caminhos ou enviar binários.
-- [ ] Exemplo ponta a ponta: facade `Accounts` com `transfer` via handle;
-      saldo insuficiente → rollback; método inexistente rejeitado.
+- [ ] Exemplo ponta a ponta: facade `Accounts` com `transfer` via handle pela
+      rede; saldo insuficiente → rollback; método inexistente rejeitado.
 - [ ] Documentar o contrato consumidor → handle → facade → registry e o
       modelo de evolução de versão de facade.
 
+Critério de aceite: consumidor obtém `FacadeHandle` pela rede, invoca método
+tipado com o contrato da Fase 9; documentação e exemplo verdes. Tag: `0.0.11d`.
+
 Entregáveis: catálogo e handles tipados; mensagens de descoberta/invocação;
 exemplo `Accounts`/`transfer`; testes embedded e pela rede; ADR-014.
-
-Critério de aceite: o consumidor obtém um `FacadeHandle` para uma facade
-registrada, invoca um método tipado pela rede, a operação executa com o
-mesmo contrato transacional da Fase 9; descoberta lista facades/métodos;
-versão incompatível e método alheio à facade são rejeitados com ErrorCode
-adequado.
 
 ### Fase 12 — Handles de arestas e algoritmos de grafos
 
@@ -730,7 +749,9 @@ algoritmos básicos de grafos sob snapshot, reutilizando `Ref<T>`,
 `OwnedRef<T>` continuam sendo a representação no arquivo; `Embedded<T>` não é
 vértice. ([ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md)).
 
-Tarefas:
+A fase é dividida em cinco entregas verticais, cada uma com teste e tag própria.
+
+#### Fase 12A — EdgeHandle e factories
 
 - [ ] Registrar em ADR identidade, persistência, direção, ownership e política
       de referências órfãs para arestas
@@ -739,32 +760,54 @@ Tarefas:
       alvo, `FieldId` e resolução sob `Snapshot`.
 - [ ] Implementar factories tipadas para campos escalares `Ref<T>` e
       `OwnedRef<T>`, rejeitando `Embedded<T>` e campos não relacionais.
+
+Critério de aceite: `modb.edge_handle` — associação/ownership, reabertura,
+órfã e campo inválido. Tag: `0.0.12a`.
+
+#### Fase 12B — Adjacência e arestas de entrada
+
 - [ ] Expor adjacência para coleções `PersistentVector<Ref<T>>`, preservando
       tipo e semântica das arestas.
+- [ ] Suportar arestas de entrada por índice de campo `Ref`; sem scan reverso
+      ilimitado implícito.
+
+Critério de aceite: enumera handles em coleção; incoming exige índice e falha
+explicitamente se ausente. Tag: `0.0.12b`.
+
+#### Fase 12C — BFS e DFS
+
 - [ ] Implementar BFS e DFS canceláveis/lazy, com limite de profundidade,
       máximo de vértices e política explícita para refs órfãs.
+- [ ] Cobrir snapshot único e cancelamento nos testes de travessia.
+
+Critério de aceite: ordem determinística; limites → `graph_limit_exceeded`;
+cancelamento interrompe expansão. Tag: `0.0.12c`.
+
+#### Fase 12D — Caminho, ciclo, toposort e componentes
+
 - [ ] Implementar caminho mínimo sem peso com reconstrução do caminho.
 - [ ] Implementar detecção de ciclo e ordenação topológica (erro explícito
       para grafo cíclico).
 - [ ] Implementar componentes conexos para uma view explicitamente não
       direcionada.
-- [ ] Suportar arestas de entrada por índice de campo `Ref`; sem scan reverso
-      ilimitado implícito.
-- [ ] Cobrir snapshot único, reabertura, cancelamento, limites, órfãs,
-      ownership e grafos heterogêneos nos testes.
+
+Critério de aceite: caminho mínimo, `graph_cycle` em toposort cíclico,
+componentes na view não direcionada. Tag: `0.0.12d`.
+
+#### Fase 12E — CLI, benchmarks e fechamento
+
 - [ ] Estender a CLI com `graph bfs`, `dfs`, `shortest-path` e `toposort`,
       mantendo `graph demo` da Fase 4 como demonstração estrutural.
 - [ ] Adicionar cenários de benchmark por largura, profundidade, densidade,
       cache cold/warm e pico do conjunto de visitados.
+- [ ] Fechar a suíte de snapshot, reabertura, ownership e grafos heterogêneos.
+
+Critério de aceite: após reabrir o banco, CLI e algoritmos cobertos; benchmarks
+registrados no runner. Tag: `0.0.12e`.
 
 Entregáveis: `EdgeHandle` tipado; `GraphView`/provedor de adjacência; BFS,
 DFS, caminho mínimo, ciclo, ordenação topológica e componentes; CLI, testes,
 benchmarks e ADR-015.
-
-Critério de aceite: após reabrir o banco, o consumidor cria handles de aresta
-a partir de relacionamentos entre classes e executa BFS/DFS/caminho mínimo sob
-um único snapshot; cancelamento, limites, refs órfãs, ciclos e direção são
-determinísticos e cobertos; a CLI demonstra os algoritmos em grafo persistido.
 
 ### Fase 13 — Container serverless
 
@@ -776,50 +819,74 @@ e a fase não introduz escala horizontal de escrita. A implantação inicial usa
 um volume persistente compatível com escrita posicional e `fsync`, uma única
 instância ativa por banco e escala a zero quando o serviço está ocioso.
 
-Tarefas:
+A fase é dividida em cinco entregas verticais, cada uma com prova e tag própria.
+
+#### Fase 13A — ADR e modelo de implantação
 
 - [ ] Registrar em ADR o modelo de implantação, incluindo volume persistente,
       instância escritora única, cold start, escala a zero e plataformas
-      serverless suportadas.
+      serverless suportadas
+      ([ADR-013](decisions/ADR-013-execucao-serverless-em-container.md)).
+
+Critério de aceite: ADR-013 aceita e referenciada pelo protocolo/rastreador.
+Tag: `0.0.13a`.
+
+#### Fase 13B — I/O assíncrono real
+
+- [ ] Implementar I/O assíncrono real sob uma abstração única: `io_uring` no
+      Linux e IOCP no Windows, com leitura, escrita, flush, cancelamento,
+      limites de operações em voo e fallback síncrono detectado em runtime.
+- [ ] Garantir que a ordem WAL → flush → páginas depende de completions /
+      barreiras explícitas, nunca só da ordem de submissão.
+
+Critério de aceite: `modb.async_file` comprova completions reais (ou fallback
+explícito) e ordering de durabilidade. Tag: `0.0.13b`.
+
+#### Fase 13C — Imagem OCI, config e volume
+
 - [ ] Criar imagem OCI reproduzível em build multi-stage, mínima, executada por
       usuário não privilegiado e com filesystem raiz somente leitura.
-- [ ] Adaptar o protocolo da fase 8 ao ingresso suportado pela plataforma
-      escolhida, sem expor o formato físico nem enfraquecer backpressure,
-      cancelamento ou limites de recursos.
 - [ ] Configurar banco, porta, credenciais e limites somente por variáveis de
       ambiente e secrets; nunca incluir segredos ou dados na imagem.
 - [ ] Montar os arquivos do banco e WAL em armazenamento persistente com as
       garantias de locking, flush e atomicidade exigidas pelo motor.
-- [ ] Implementar I/O assíncrono real sob uma abstração única: `io_uring` no
-      Linux e IOCP no Windows, com leitura, escrita, flush, cancelamento,
-      limites de operações em voo e fallback síncrono detectado em runtime
-      para kernels ou volumes incompatíveis. A ordem WAL → flush → páginas
-      deve depender de completions/barreiras explícitas, nunca apenas da ordem
-      de submissão.
+- [ ] Adaptar o protocolo da fase 8 ao ingresso suportado pela plataforma
+      escolhida, sem expor o formato físico nem enfraquecer backpressure.
+
+Critério de aceite: imagem sobe localmente (compose) com volume montado e
+atende handshake/cliente da Fase 8. Tag: `0.0.13c`.
+
+#### Fase 13D — Probes, shutdown e recovery
+
 - [ ] Implementar readiness, liveness, startup probe e desligamento gracioso,
       bloqueando novas operações e concluindo ou revertendo transações antes do
       prazo de término da plataforma.
 - [ ] Comprovar recovery no cold start e após término forçado do container,
       incluindo banco com WAL pendente.
+
+Critério de aceite: kill -9 + reabertura no mesmo volume preserva commits e
+descarta incompletos; readiness só após recovery. Tag: `0.0.13d`.
+
+#### Fase 13E — Observabilidade, CI e guia operacional
+
 - [ ] Adicionar logs estruturados e métricas de cold start, recovery, conexões,
       transações, memória, I/O e duração das requisições.
 - [ ] Automatizar build, SBOM, scan de vulnerabilidades e publicação versionada
       da imagem OCI.
-- [ ] Documentar execução local e implantação de referência, incluindo
-      restrições de plataforma, backup, restauração e custo operacional.
+- [ ] Documentar execução local e implantação de referência
+      (`OPERACAO_SERVERLESS.md`), incluindo backup/restauração e restrições.
+
+Critério de aceite: pipeline publica imagem versionada; guia permite operar do
+zero; métricas de I/O/backend observáveis. Tag: `0.0.13e`.
 
 Entregáveis: imagem OCI publicada; manifesto de implantação serverless de
 referência; camada de I/O assíncrono real; guia operacional; testes de
 container, cold start e recovery.
 
-Critério de aceite: a imagem sobe a partir de zero, monta armazenamento
+Critério de aceite da fase: a imagem sobe a partir de zero, monta armazenamento
 durável, recupera o banco quando necessário e atende um cliente das fases
 8/9/11/12; após término completo e nova inicialização, os objetos commitados
-permanecem e transações incompletas não aparecem. A validação deve comprovar
-uso de uma única instância ativa, memória limitada, backpressure e execução
-sem privilégios. Nos ambientes compatíveis, métricas e testes devem comprovar
-uso efetivo de `io_uring`/IOCP sem bloquear o executor; o fallback deve ser
-explícito e preservar a mesma correção e durabilidade.
+permanecem e transações incompletas não aparecem.
 
 ## 6. Itens deliberadamente fora deste plano
 
