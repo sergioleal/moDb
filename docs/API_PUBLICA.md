@@ -31,6 +31,7 @@ Alvo CMake: `modb::modb`.
 | `modb/ops/facade_handle.hpp` | handle tipado embedded/remoto (11B/11D) |
 | `modb/graph/edge_handle.hpp` | arestas tipadas runtime `Ref`/`OwnedRef` (12A) |
 | `modb/graph/graph_view.hpp` | adjacência de coleção e incoming indexado (12B) |
+| `modb/graph/traversal.hpp` | BFS/DFS lazy com limites e cancel (12C) |
 
 Contrato de facades (manifesto → catálogo → handle → registry):
 [FACADES.md](FACADES.md).

@@ -1869,6 +1869,8 @@ explicitamente. Tag: `0.0.12b`.
 
 ## Fase 12C — BFS e DFS
 
+Status: ✅ Concluída — tag `0.0.12c` (2026-07-19).
+
 Artefatos:
 
 ```text
