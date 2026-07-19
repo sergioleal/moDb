@@ -1723,7 +1723,8 @@ restauração e diagnóstico com `modb db check`.
 Executar matriz final de build/teste/benchmark, registrar baseline final e
 compará-la à 10A. Critério: fluxo documental validado do zero; backup restaurado
 e verificado; documentação sem referências obsoletas; suíte inteira verde nos
-presets suportados. Tag: `0.0.10f`.
+presets suportados. Tag: `0.0.10f`. Entregue — ver [OPERACAO.md](OPERACAO.md) e
+[FECHAMENTO_10F.md](FECHAMENTO_10F.md).
 
 ## Critério de conclusão
 

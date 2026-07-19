@@ -50,11 +50,11 @@
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
-| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | 🔄 Em andamento | 3/9 | Todas |
+| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ✅ Concluída | 9/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 |
 | [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ⬜ Não iniciada | 0/12 | Fases 4, 6, 7, 10 |
 | [13](#fase-13--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11, 12 |
-| **Total** | | | **107/146 (~73%)** | |
+| **Total** | | | **109/146 (~75%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -749,7 +749,7 @@ exceção/saldo insuficiente, consistente após reopen + recovery.
 
 ## Fase 10 — Desempenho e estabilização
 
-Status: 🔄 Em andamento (3/9) — seis entregas verticais 10A–10F.
+Status: ✅ Concluída (9/9) — entregas verticais 10A–10F (`0.0.10a`…`0.0.10f`).
 Definição completa:
 [PLANO_ODB.md §Fase 10](PLANO_ODB.md#fase-10--desempenho-e-estabilização) ·
 [PROTOCOLO_FASES.md §Fase 10](PROTOCOLO_FASES.md#fase-10--desempenho-e-estabilização)
@@ -763,8 +763,8 @@ Definição completa:
 | 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
 | 10.6 | Política de compatibilidade (formato + protocolo) | ✅ | 10E · merge `dc33551`, tag `0.0.10e`; [COMPATIBILIDADE.md](COMPATIBILIDADE.md) |
 | 10.7 | Estabilizar e documentar a API pública | ✅ | 10E · merge `dc33551`; [API_PUBLICA.md](API_PUBLICA.md); `modb.consumer` |
-| 10.8 | Reescrever `README.md`/formato de arquivo | ⬜ | 10F |
-| 10.9 | Guia de backup/restauração/diagnóstico | ⬜ | 10F |
+| 10.8 | Reescrever `README.md`/formato de arquivo | ✅ | 10F · tag `0.0.10f`; [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) |
+| 10.9 | Guia de backup/restauração/diagnóstico | ✅ | 10F · [OPERACAO.md](OPERACAO.md) |
 
 ### Fase 10A — Runner e baseline de benchmarks
 
@@ -813,13 +813,13 @@ Status: ✅ Concluída — merge `dc33551`, tag `0.0.10e` (2026-07-19).
 
 ### Fase 10F — Documentação, operação e fechamento
 
-Status: ⬜ Não iniciada — depende de 10A–10E; tag prevista `0.0.10f`.
+Status: ✅ Concluída — tag `0.0.10f` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| README OO + formato + API | ⬜ | Fluxo do zero validado |
-| Backup/restauração/diagnóstico/supervisor | ⬜ | Backup restaurado e `db check` verde |
-| Matriz final e baseline consolidada | ⬜ | Presets suportados verdes e comparação com 10A |
+| README OO + formato + API | ✅ | [README.md](../README.md); [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) |
+| Backup/restauração/diagnóstico/supervisor | ✅ | [OPERACAO.md](OPERACAO.md); `db check` reconhece IXDR/BTLF/BTIN |
+| Matriz final e baseline consolidada | ✅ | [FECHAMENTO_10F.md](FECHAMENTO_10F.md) |
 
 **Dívidas de performance herdadas da Fase 3** (nenhuma bloqueou o critério de
 aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
