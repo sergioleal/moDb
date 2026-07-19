@@ -23,6 +23,13 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .warmup = 1,
             .samples = 3,
         });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.buffer_pool.oversubscribed",
+            .object_count = 120,
+            .cache_pages = 8,
+            .warmup = 1,
+            .samples = 2,
+        });
         return profile;
     }
     if (name == "standard") {
@@ -45,6 +52,13 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .warmup = 3,
             .samples = 10,
         });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.buffer_pool.oversubscribed",
+            .object_count = 2'000,
+            .cache_pages = 16,
+            .warmup = 2,
+            .samples = 8,
+        });
         return profile;
     }
     if (name == "diagnostic") {
@@ -59,6 +73,13 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .stride = 1,
             .warmup = 0,
             .samples = 2,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.buffer_pool.oversubscribed",
+            .object_count = 80,
+            .cache_pages = 4,
+            .warmup = 0,
+            .samples = 1,
         });
         return profile;
     }

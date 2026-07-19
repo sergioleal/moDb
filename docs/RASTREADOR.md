@@ -50,10 +50,10 @@
 | [7](#fase-7--índices-e-consultas-em-streaming-embedded) | Índices e streaming (embedded) | ✅ Concluída | 14/14 | Fases 4, 6 |
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
-| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | 🔄 Em andamento | 1/9 | Todas |
+| [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | 🔄 Em andamento | 2/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ⬜ Não iniciada | 0/10 | Fases 9, 10 |
 | [12](#fase-12--container-serverless) | Container serverless | ⬜ Não iniciada | 0/11 | Fases 8, 9, 10, 11 |
-| **Total** | | | **105/134 (~78%)** | |
+| **Total** | | | **106/134 (~79%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
 tarefas (~74%).
@@ -748,7 +748,7 @@ exceção/saldo insuficiente, consistente após reopen + recovery.
 
 ## Fase 10 — Desempenho e estabilização
 
-Status: 🔄 Em andamento (1/9) — seis entregas verticais 10A–10F.
+Status: 🔄 Em andamento (2/9) — seis entregas verticais 10A–10F.
 Definição completa:
 [PLANO_ODB.md §Fase 10](PLANO_ODB.md#fase-10--desempenho-e-estabilização) ·
 [PROTOCOLO_FASES.md §Fase 10](PROTOCOLO_FASES.md#fase-10--desempenho-e-estabilização)
@@ -756,10 +756,10 @@ Definição completa:
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
 | 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · merge `9b0cfba`, tag `0.0.10a`; [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
-| 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ⬜ | 10B |
+| 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ✅ | 10B · `BufferPool` + `modb.buffer_pool` |
 | 10.3 | Profiling antes de cada otimização | ⬜ | 10C |
 | 10.4 | Fuzzing dos decoders | ⬜ | 10D |
-| 10.5 | Testar bancos maiores que o cache | ⬜ | 10B |
+| 10.5 | Testar bancos maiores que o cache | ✅ | 10B · cache configurável; working set ≥10× |
 | 10.6 | Política de compatibilidade (formato + protocolo) | ⬜ | 10E |
 | 10.7 | Estabilizar e documentar a API pública | ⬜ | 10E |
 | 10.8 | Reescrever `README.md`/formato de arquivo | ⬜ | 10F |
@@ -776,12 +776,12 @@ Status: ✅ Concluída — merge `9b0cfba`, tag `0.0.10a` (2026-07-19).
 
 ### Fase 10B — BufferPool e bancos maiores que o cache
 
-Status: ⬜ Não iniciada — depende de 10A; tag prevista `0.0.10b`.
+Status: ✅ Concluída — tag `0.0.10b` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| BufferPool com LRU, pin/unpin, dirty/write-back e métricas | ⬜ | Pins e ordering WAL preservados |
-| Banco ≥10× o cache | ⬜ | Eviction + recovery corretos; `modb.buffer_pool` verde |
+| BufferPool com LRU, pin/unpin, dirty/write-back e métricas | ✅ | Pins e ordering WAL preservados |
+| Banco ≥10× o cache | ✅ | Eviction + recovery corretos; `modb.buffer_pool` verde |
 
 ### Fase 10C — Profiling e otimizações medidas
 
@@ -863,9 +863,10 @@ aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
 
 | Item | Local | Status |
 |---|---|---|
-| `modb.buffer_pool` (teste) | `tests/buffer_pool_test.cpp` | ⬜ |
+| `modb.buffer_pool` (teste) | `tests/buffer_pool_test.cpp` | ✅ 10B |
 | Runner `modb_bench` + JSONL | `benchmarks/` + [plano](PLANO_BENCHMARKS.md) | ✅ 10A |
 | `modb.benchmark_runner` (infra do runner) | `tests/benchmark_runner_test.cpp` | ✅ 10A |
+| Cenário `storage.buffer_pool.oversubscribed` | `benchmarks/scenarios/` | ✅ 10B |
 | Alvos de fuzzing (preset `fuzz`) | `tests/fuzz/` | ⬜ |
 
 Critério de aceite: ⬜ benchmarks reproduzíveis, regressões detectadas

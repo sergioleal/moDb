@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -12,6 +13,7 @@ struct ScenarioProfileOverride {
     std::string scenario_id;
     std::uint64_t object_count{0};
     std::uint64_t stride{1};
+    std::size_t cache_pages{0}; // 0 = padrão do cenário
     int warmup{0};
     int samples{0};
 };

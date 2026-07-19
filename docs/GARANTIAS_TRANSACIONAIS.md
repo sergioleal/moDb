@@ -153,9 +153,9 @@ inválido mantém a semântica de fim lógico do formato.
   transação ativa do `PageFile` (as coleções exigem transação); usado direto
   (comando `blob` da CLI), é ferramenta de diagnóstico, como `record`/`heap`.
 - **O "PageCache embrião" do protocolo** virou o buffer de páginas sujas dentro
-  do próprio `PageFile` (mesmo papel: acumular páginas sujas e aplicá-las no
-  commit), em vez de uma classe `storage::PageCache` separada. O BufferPool
-  completo continua na Fase 10.
+  do próprio `PageFile` na Fase 5; na Fase 10B o cache de leitura evoluiu para
+  `storage::BufferPool` (LRU, pin/unpin, dirty/write-back pós-WAL e métricas),
+  com capacidade configurável em `PageFile`/`Database::create|open`.
 - **Link estático do MinGW desligado por padrão.** A toolchain do CLion migrou
   para GCC 15.2, cujo `libwinpthread.a` estático deixa símbolos indefinidos no
   link `-static` (`__intrinsic_setjmpex`/`__ms_vsnprintf`). O padrão passou a ser

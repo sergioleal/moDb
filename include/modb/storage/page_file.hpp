@@ -6,8 +6,8 @@
 #include "modb/storage/native_file.hpp"
 // Importa Page e PageId.
 #include "modb/storage/page.hpp"
-// Importa o cache de leitura de páginas.
-#include "modb/storage/page_cache.hpp"
+// Importa o buffer pool (evolução do PageCache).
+#include "modb/storage/buffer_pool.hpp"
 
 // Disponibiliza os tipos inteiros usados no formato.
 #include <cstddef>
@@ -49,9 +49,13 @@ public:
     ~PageFile() = default;
 
     // Cria um arquivo novo contendo somente o superbloco.
-    [[nodiscard]] static Result<PageFile> create(const std::filesystem::path& path);
+    [[nodiscard]] static Result<PageFile> create(
+        const std::filesystem::path& path,
+        std::size_t cache_capacity = page_cache_capacity);
     // Abre e valida um arquivo moDb existente.
-    [[nodiscard]] static Result<PageFile> open(const std::filesystem::path& path);
+    [[nodiscard]] static Result<PageFile> open(
+        const std::filesystem::path& path,
+        std::size_t cache_capacity = page_cache_capacity);
 
     // Acrescenta uma página zerada e retorna seu identificador.
     [[nodiscard]] Result<PageId> allocate_page();
@@ -105,13 +109,17 @@ public:
     // Retorna o caminho do arquivo sem copiá-lo.
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
 
+    // Acesso ao buffer pool (capacidade, pin/unpin, métricas) — Fase 10B.
+    [[nodiscard]] BufferPool& buffer_pool() noexcept { return *cache_; }
+    [[nodiscard]] const BufferPool& buffer_pool() const noexcept { return *cache_; }
+
 private:
     // Constrói um PageFile somente depois que create ou open validou o arquivo.
     PageFile(std::filesystem::path path, NativeFile file, std::uint64_t page_count,
-             std::optional<PageId> catalog_root = std::nullopt)
+             std::optional<PageId> catalog_root, std::size_t cache_capacity)
         : path_{std::move(path)},
           file_{std::move(file)},
-          cache_{std::make_unique<PageCache>(page_cache_capacity)},
+          cache_{std::make_unique<BufferPool>(cache_capacity)},
           page_count_{page_count},
           catalog_root_{catalog_root} {}
 
@@ -126,9 +134,9 @@ private:
     std::filesystem::path path_;
     // Mantém o arquivo aberto com I/O posicional e sincronização ao dispositivo.
     NativeFile file_;
-    // Cache de leitura (write-through); unique_ptr mantém o PageFile movível
-    // sem exigir que o cache seja movível.
-    std::unique_ptr<PageCache> cache_;
+    // Cache/buffer pool de páginas (LRU + pin + dirty); unique_ptr mantém o
+    // PageFile movível sem exigir que o pool seja movível.
+    std::unique_ptr<BufferPool> cache_;
     // Mantém em memória a quantidade validada de páginas.
     std::uint64_t page_count_{};
     // Espelha a raiz do catálogo persistida no superbloco.
