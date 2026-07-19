@@ -1984,8 +1984,11 @@ Critério: compose local sobe, monta volume e completa handshake/cliente. Tag:
 
 ## Fase 13D — Probes, shutdown e recovery
 
-Readiness/liveness/startup; `SIGTERM` drena e sincroniza; prova cold start e
-kill -9 + reabertura no mesmo volume.
+Status: ✅ Concluída — tag `0.0.13d` (2026-07-19).
+
+Readiness/liveness/startup via `MODB_READY_FILE`/`MODB_LIVE_FILE`;
+`Server::request_stop` + SIGTERM/SIGINT; prova cold start e stop limpo em
+`modb.server_lifecycle` (kill -9 continua coberto por `modb tx crash`).
 
 Critério: commits preservados, incompletos ausentes; readiness pós-recovery.
 Tag: `0.0.13d`.

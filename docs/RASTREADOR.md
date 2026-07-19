@@ -53,7 +53,7 @@
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ✅ Concluída | 9/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | 🔄 Em andamento | 6/10 | Fases 9, 10 · 11A–11D |
 | [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ✅ Concluída | 12/12 | Fases 4, 6, 7, 10 · 12A–12E |
-| [13](#fase-13--container-serverless) | Container serverless | 🔄 Em andamento | 5/11 | Fases 8, 9, 10, 11, 12 · 13A–13E |
+| [13](#fase-13--container-serverless) | Container serverless | 🔄 Em andamento | 7/11 | Fases 8, 9, 10, 11, 12 · 13A–13E |
 | [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ⬜ Não iniciada | 0/12 | Fases 5, 6, 8 |
 | **Total** | | | **115/158 (~73%)** | |
 
@@ -1024,7 +1024,7 @@ direção, refs órfãs, ownership, cancelamento e limites são determinísticos
 
 ## Fase 13 — Container serverless
 
-Status: 🔄 Em andamento (5/11) — cinco entregas verticais 13A–13E.
+Status: 🔄 Em andamento (7/11) — cinco entregas verticais 13A–13E.
 Definição completa:
 [PLANO_ODB.md §Fase 13](PLANO_ODB.md#fase-13--container-serverless) ·
 [PROTOCOLO_FASES.md §Fase 13](PROTOCOLO_FASES.md#fase-13--container-serverless)
@@ -1037,8 +1037,8 @@ Definição completa:
 | 13.4 | Configuração só por env/secrets | ✅ | 13C · `MODB_DB_PATH`/`HOST`/`PORT` |
 | 13.5 | Volume persistente para banco + WAL com `fsync` confiável | ✅ | 13C · compose volume `/data` |
 | 13.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ✅ | 13B · tag `0.0.13b` · `modb.async_file` |
-| 13.7 | Readiness, liveness, startup probe e desligamento gracioso | ⬜ | 13D · `SIGTERM` drena I/O/streams e sincroniza antes do prazo |
-| 13.8 | Recovery em cold start e após término forçado | ⬜ | 13D · Inclui WAL pendente |
+| 13.7 | Readiness, liveness, startup probe e desligamento gracioso | ✅ | 13D · `request_stop` + `MODB_READY_FILE` |
+| 13.8 | Recovery em cold start e após término forçado | ✅ | 13D · `modb.server_lifecycle` + tx crash |
 | 13.9 | Logs estruturados e métricas operacionais | ⬜ | 13E · Inclui backend de I/O, queue depth, completions e fallbacks |
 | 13.10 | CI: build, SBOM, scan e publish versionado da imagem | ⬜ | 13E |
 | 13.11 | Guia de operação local e implantação de referência | ⬜ | 13E · `docs/OPERACAO_SERVERLESS.md` |
@@ -1069,11 +1069,11 @@ Status: ✅ Concluída — tag `0.0.13c` (2026-07-19).
 
 ### Fase 13D — Probes, shutdown e recovery
 
-Status: ⬜ Não iniciada — tag prevista `0.0.13d`.
+Status: ✅ Concluída — tag `0.0.13d` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Health + SIGTERM + cold start / kill -9 | ⬜ | Commits preservados |
+| Health + SIGTERM + cold start / kill -9 | ✅ | `modb.server_lifecycle` |
 
 ### Fase 13E — Observabilidade, CI e guia
 

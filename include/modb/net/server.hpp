@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <atomic>
 
 namespace modb::net {
 
@@ -77,8 +78,12 @@ public:
     // Aceita uma conexão e mantém a sessão até o peer fechar (Hello + Queries/OpCalls).
     [[nodiscard]] Result<void> serve_one();
 
-    // Aceita sessões em loop até o listener falhar (ex.: fechado no shutdown).
+    // Aceita sessões em loop até `request_stop()` ou falha do listener.
     [[nodiscard]] Result<void> serve_forever();
+
+    // Fecha o listener para despertar `accept` e encerrar o loop (SIGTERM / probe).
+    void request_stop() noexcept;
+    [[nodiscard]] bool stop_requested() const noexcept { return stop_requested_.load(); }
 
 private:
     Server(std::shared_ptr<object::Database> database, object::DatabaseId database_id,
@@ -102,6 +107,7 @@ private:
     StreamStats last_stats_{};
     std::shared_ptr<ops::OperationRegistry> operations_{};
     std::shared_ptr<ops::FacadeCatalog> facades_{};
+    std::atomic<bool> stop_requested_{false};
 };
 
 } // namespace modb::net

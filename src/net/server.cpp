@@ -132,11 +132,13 @@ Server::Server(Server&& other) noexcept
       listener_{std::move(other.listener_)}, port_{other.port_},
       database_name_{std::move(other.database_name_)}, baseline_{other.baseline_},
       fail_after_{other.fail_after_}, small_buffers_{other.small_buffers_},
-      last_stats_{other.last_stats_} {
+      last_stats_{other.last_stats_},
+      stop_requested_{other.stop_requested_.load()} {
     other.database_id_ = object::DatabaseId{};
     other.fail_after_.reset();
     other.small_buffers_ = false;
     other.last_stats_ = {};
+    other.stop_requested_.store(false);
 }
 
 Server::~Server() {
@@ -531,13 +533,30 @@ Result<void> Server::serve_one() {
     return handle_connection(std::move(*peer));
 }
 
+void Server::request_stop() noexcept {
+    stop_requested_.store(true);
+    static_cast<void>(listener_.close());
+}
+
 Result<void> Server::serve_forever() {
-    while (true) {
+    while (!stop_requested_.load()) {
         auto status = serve_one();
         if (!status) {
+            if (stop_requested_.load()) {
+                return {};
+            }
+            // Listener fechado externamente conta como parada limpa.
+            if (status.error().code == ErrorCode::connection_closed ||
+                status.error().code == ErrorCode::io_error) {
+                if (!listener_.is_open()) {
+                    stop_requested_.store(true);
+                    return {};
+                }
+            }
             return status;
         }
     }
+    return {};
 }
 
 } // namespace modb::net
