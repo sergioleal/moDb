@@ -690,12 +690,12 @@ A fase é dividida em quatro entregas verticais, cada uma com teste e tag própr
 
 #### Fase 11A — Contratos e FacadeCatalog
 
-- [ ] Registrar em ADR o modelo de facades, handles, identidade estável
+- [x] Registrar em ADR o modelo de facades, handles, identidade estável
       (`FacadeId`) e a separação com o registry da Fase 9
       ([ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md)).
-- [ ] Definir `FacadeDescriptor` / `MethodDescriptor` e o catálogo em memória
+- [x] Definir `FacadeDescriptor` / `MethodDescriptor` e o catálogo em memória
       como `vector<FacadeDescriptor>` (posição no vetor nunca é identidade).
-- [ ] Implementar `FacadeCatalog` (registro, listagem, lookup por `FacadeId`
+- [x] Implementar `FacadeCatalog` (registro, listagem, lookup por `FacadeId`
       e versão) com ErrorCodes de lookup.
 
 Critério de aceite: `modb.facade_catalog` cobre registro/list/lookup, posição ≠

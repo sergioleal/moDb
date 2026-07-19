@@ -56,6 +56,7 @@ add_library(modb
     src/net/client.cpp
     src/ops/operation_registry.cpp
     src/ops/module_manifest.cpp
+    src/ops/facade_catalog.cpp
     examples/transfer_funds/transfer_funds.cpp
     src/storage/binary.cpp
     src/storage/codec.cpp
@@ -320,6 +321,9 @@ if(BUILD_TESTING)
     add_executable(modb_operation_server_tests tests/operation_server_test.cpp)
     target_link_libraries(modb_operation_server_tests PRIVATE modb::modb)
 
+    add_executable(modb_facade_catalog_tests tests/facade_catalog_test.cpp)
+    target_link_libraries(modb_facade_catalog_tests PRIVATE modb::modb)
+
     add_executable(modb_benchmark_runner_tests tests/benchmark_runner_test.cpp)
     target_link_libraries(modb_benchmark_runner_tests PRIVATE modb_bench_core)
 
@@ -404,6 +408,7 @@ if(BUILD_TESTING)
         target_link_options(modb_server_streaming_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_operation_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_operation_server_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_facade_catalog_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -450,6 +455,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.server_streaming COMMAND modb_server_streaming_tests)
     add_test(NAME modb.operation COMMAND modb_operation_tests)
     add_test(NAME modb.operation_server COMMAND modb_operation_server_tests)
+    add_test(NAME modb.facade_catalog COMMAND modb_facade_catalog_tests)
     add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)

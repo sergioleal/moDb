@@ -26,6 +26,8 @@ Alvo CMake: `modb::modb`.
 | `modb/ops/execution_context.hpp` | contexto de execução |
 | `modb/ops/operation_registry.hpp` | registro |
 | `modb/ops/module_manifest.hpp` | manifesto de módulo |
+| `modb/ops/facade_descriptor.hpp` | descritores de facade/método (11A) |
+| `modb/ops/facade_catalog.hpp` | catálogo de facades (11A) |
 
 Dependências transitivas desses headers (ex.: `storage/page.hpp` puxado por
 `database.hpp`) também são instaladas para o consumidor compilar.
