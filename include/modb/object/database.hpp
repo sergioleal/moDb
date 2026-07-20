@@ -62,10 +62,10 @@ class MappedQuery;
 // costuras de teste que congelam o WAL num ponto específico, para a matriz de
 // failpoints (Fase 5) simular uma queda em cada janela crítica.
 enum class CommitPhase {
-    full,                     // WAL(imagens+commit) → aplica → remove o WAL
+    full,                     // WAL(imagens+commit) → aplica → checkpoint LSN
     stop_after_images,        // só imagens no WAL (queda antes do registro de commit)
     stop_after_commit_record, // WAL commit durável, sem aplicar (queda pós-commit)
-    stop_before_wal_cleanup,  // páginas aplicadas, WAL mantido (queda antes do cleanup)
+    stop_before_wal_cleanup,  // páginas aplicadas, checkpoint ainda não avançado
 };
 
 // Transação de escrita (Fase 5): RAII sobre o buffer de páginas do PageFile e o
@@ -817,6 +817,7 @@ public:
     // FailpointFile para simular falhas de I/O reais no commit (Fase 5).
     void set_wal_file_factory(tx::WalFileFactory factory) {
         wal_factory_ = std::move(factory);
+        custom_wal_factory_ = true;
     }
 
     // Uso restrito a testes: faz a aplicação das páginas falhar após N páginas,
@@ -843,6 +844,21 @@ public:
     [[nodiscard]] DatabaseUuid database_uuid() const noexcept { return store_.database_uuid(); }
     [[nodiscard]] TimelineId timeline_id() const noexcept { return store_.timeline_id(); }
     [[nodiscard]] std::uint64_t next_lsn() const noexcept { return store_.next_lsn(); }
+    [[nodiscard]] std::uint64_t checkpoint_lsn() const noexcept { return store_.checkpoint_lsn(); }
+    [[nodiscard]] std::uint64_t follower_ack_lsn() const noexcept {
+        return store_.follower_ack_lsn();
+    }
+    [[nodiscard]] std::uint64_t oldest_available_lsn() const noexcept {
+        return store_.oldest_available_lsn();
+    }
+    [[nodiscard]] Result<void> set_follower_ack_lsn(std::uint64_t lsn) {
+        return store_.set_follower_ack_lsn(lsn);
+    }
+    [[nodiscard]] const std::filesystem::path& data_path() const noexcept { return file_->path(); }
+    [[nodiscard]] const std::filesystem::path& wal_path() const noexcept { return wal_path_; }
+    [[nodiscard]] bool is_read_only_replica() const noexcept { return read_only_replica_; }
+    void set_read_only_replica(bool enabled) noexcept { read_only_replica_ = enabled; }
+    [[nodiscard]] storage::PageFile& page_file() noexcept { return *file_; }
     [[nodiscard]] Result<std::reference_wrapper<const Baseline>> find_baseline(
         BaselineId id) const {
         return store_.find_baseline(id);
@@ -1356,6 +1372,9 @@ private:
     std::uint64_t next_tx_id_{1};
     // Fábrica do arquivo do WAL; produção usa NativeFile, testes injetam falhas.
     tx::WalFileFactory wal_factory_{tx::open_native_wal_sink};
+    bool custom_wal_factory_{false};
+    // Follower read-only (Fase 14D): begin/escrita retornam replica_read_only.
+    bool read_only_replica_{false};
     // Ativado após o sync do registro commit no WAL. A partir daí rollback não
     // pode apagar o log: qualquer falha posterior exige reabertura e redo.
     bool commit_durable_{false};

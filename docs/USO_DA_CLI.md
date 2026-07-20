@@ -1,8 +1,8 @@
-# Uso da CLI (`modb`)
+# Uso da CLI Ring0 (`modb`)
 
 > A CLI mistura dois grupos de comandos:
 >
-> - **Orientado a Objetos (ODB++), persistente** — `oo` usa classes C++ reais,
+> - **Ring0 Orientado a Objetos, persistente** — `oo` usa classes C++ reais,
 >   `Binding`, `Handle` e `ProjectionPlan`; `type`, `baseline` e `object`
 >   inspecionam o formato genérico persistente. É o caminho vigente do produto
 >   (Fase 3 do [PLANO_ODB.md](PLANO_ODB.md)).
@@ -726,10 +726,17 @@ BFS after reopen: R A B C D
 Phase 12 graph bfs: OK
 ```
 
-A Fase 14 planeja comandos de replicação: `replicate serve` (primary expõe o
-stream do WAL), `replicate follow` (follower faz bootstrap e acompanha o WAL) e
-`replicate status` (lag e `applied_lsn`). Também ainda não fazem parte da CLI
-atual.
+A Fase 14 entrega comandos de réplica local (MVP sem daemon de streaming):
+
+```text
+modb replicate bootstrap <primary.modb> <follower.modb>
+modb replicate apply-wal <follower.modb> <primary.wal> <from_lsn>
+modb replicate status <file.modb>
+```
+
+`bootstrap` copia o primary sob barreira do escritor; `apply-wal` aplica
+registros a partir de `from_lsn`; `status` mostra uuid/timeline/LSNs. Guia:
+[OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md).
 
 ## `modb coll demo` — coleções persistentes (ODB++ Fase 4)
 

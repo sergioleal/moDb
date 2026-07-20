@@ -23,22 +23,17 @@
 
 namespace modb::tx {
 
-// Reaproveita a implementação única de little-endian da camada de storage.
 using storage::load_le;
 using storage::store_le;
 
 namespace {
 
-// Assinatura do arquivo WAL.
 constexpr std::array<std::byte, 4> wal_magic{
     std::byte{'M'}, std::byte{'O'}, std::byte{'W'}, std::byte{'L'}};
 
-// Parte fixa de um registro antes do payload: lsn(8)+tx(8)+tipo(1)+page(8)+len(4).
 constexpr std::size_t record_fixed_size = 8 + 8 + 1 + 8 + 4;
-// Bytes do CRC ao fim de cada registro.
 constexpr std::size_t record_crc_size = 4;
 
-// CRC32 (IEEE 802.3, polinômio refletido 0xEDB88320) — tabela calculada uma vez.
 std::uint32_t crc32(std::span<const std::byte> bytes) noexcept {
     static const std::array<std::uint32_t, 256> table = [] {
         std::array<std::uint32_t, 256> result{};
@@ -59,7 +54,6 @@ std::uint32_t crc32(std::span<const std::byte> bytes) noexcept {
     return crc ^ 0xFFFFFFFFU;
 }
 
-// Monta o cabeçalho de 32 bytes do arquivo WAL.
 std::array<std::byte, wal_header_size> make_header() {
     std::array<std::byte, wal_header_size> header{};
     std::copy(wal_magic.begin(), wal_magic.end(), header.begin());
@@ -71,7 +65,6 @@ std::array<std::byte, wal_header_size> make_header() {
 
 Error io_error(std::string message) { return Error{ErrorCode::io_error, std::move(message)}; }
 
-// Sink de produção: encaminha escrita/sync para um NativeFile.
 class NativeWalSink final : public WalSink {
 public:
     explicit NativeWalSink(storage::NativeFile file) noexcept : file_{std::move(file)} {}
@@ -84,13 +77,125 @@ private:
     storage::NativeFile file_;
 };
 
+enum class ReadMode { soft_eof, strict };
+
+Result<std::vector<WalRecord>> read_wal_records(const std::filesystem::path& path,
+                                                std::uint64_t from_lsn, ReadMode mode) {
+    std::error_code size_error;
+    const auto size = std::filesystem::file_size(path, size_error);
+    if (size_error) {
+        if (size_error == std::errc::no_such_file_or_directory) {
+            return std::vector<WalRecord>{};
+        }
+        return std::unexpected(io_error("could not read WAL size: " + size_error.message()));
+    }
+    if (size == 0) {
+        return std::vector<WalRecord>{};
+    }
+    if (size < wal_header_size) {
+        return std::unexpected(Error{ErrorCode::corrupt_file, "WAL is smaller than its header"});
+    }
+
+    auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::open_existing);
+    if (!file) {
+        return std::unexpected(file.error());
+    }
+    std::vector<std::byte> bytes(static_cast<std::size_t>(size));
+    if (auto read = file->read_at(0, bytes); !read) {
+        return std::unexpected(read.error());
+    }
+
+    if (!std::equal(wal_magic.begin(), wal_magic.end(), bytes.begin())) {
+        return std::unexpected(Error{ErrorCode::invalid_file_format, "file is not a moDb WAL"});
+    }
+    const std::span<const std::byte> header{bytes.data(), wal_header_size};
+    const auto version = load_le<std::uint16_t>(header.subspan(4, 2));
+    if (version != wal_version && version != wal_version_v1) {
+        return std::unexpected(
+            Error{ErrorCode::incompatible_format_version, "unsupported WAL version"});
+    }
+    if (load_le<std::uint32_t>(header.subspan(8, 4)) != storage::page_size) {
+        return std::unexpected(Error{ErrorCode::corrupt_file, "WAL page size mismatch"});
+    }
+
+    std::vector<WalRecord> records;
+    std::size_t offset = wal_header_size;
+    const std::size_t total = bytes.size();
+    while (offset + record_fixed_size <= total) {
+        const std::span<const std::byte> fixed{bytes.data() + offset, record_fixed_size};
+        const auto length = load_le<std::uint32_t>(fixed.subspan(25, 4));
+        const std::size_t record_size = record_fixed_size + length + record_crc_size;
+        if (offset + record_size > total) {
+            if (mode == ReadMode::strict) {
+                return std::unexpected(
+                    Error{ErrorCode::wal_corrupt, "WAL truncated mid-record (replication)"});
+            }
+            break;
+        }
+        const std::span<const std::byte> full{bytes.data() + offset, record_size};
+        const auto stored_crc =
+            load_le<std::uint32_t>(full.subspan(record_fixed_size + length, 4));
+        if (crc32(full.subspan(0, record_fixed_size + length)) != stored_crc) {
+            if (mode == ReadMode::strict) {
+                return std::unexpected(
+                    Error{ErrorCode::wal_corrupt, "WAL CRC mismatch (replication)"});
+            }
+            break;
+        }
+        WalRecord record;
+        record.lsn = load_le<std::uint64_t>(full.subspan(0, 8));
+        record.tx_id = load_le<std::uint64_t>(full.subspan(8, 8));
+        record.type = static_cast<WalRecordType>(std::to_integer<std::uint8_t>(full[16]));
+        record.page_id = load_le<std::uint64_t>(full.subspan(17, 8));
+        record.payload.assign(full.begin() + record_fixed_size,
+                              full.begin() + record_fixed_size + length);
+        if (record.lsn >= from_lsn) {
+            records.push_back(std::move(record));
+        }
+        offset += record_size;
+    }
+    if (mode == ReadMode::strict && offset < total && offset + record_fixed_size > total &&
+        total > wal_header_size) {
+        // Bytes sobrando sem caber um header de registro: truncamento.
+        return std::unexpected(
+            Error{ErrorCode::wal_corrupt, "WAL has trailing truncated bytes (replication)"});
+    }
+    return records;
+}
+
 } // namespace
 
+std::uint64_t WalRecord::commit_lsn() const noexcept {
+    if (type != WalRecordType::commit || payload.size() < 8) {
+        return lsn; // v1: commit_lsn == lsn do registro
+    }
+    return load_le<std::uint64_t>(std::span<const std::byte>{payload.data(), 8});
+}
+
 Result<std::unique_ptr<WalSink>> open_native_wal_sink(const std::filesystem::path& path) {
-    // Recomeça do zero: um WAL residual de uma sessão anterior é substituído.
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
     auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::create_new);
+    if (!file) {
+        return std::unexpected(file.error());
+    }
+    return std::make_unique<NativeWalSink>(std::move(*file));
+}
+
+Result<std::unique_ptr<WalSink>> open_append_wal_sink(const std::filesystem::path& path) {
+    std::error_code exists_error;
+    const bool exists = std::filesystem::exists(path, exists_error);
+    if (exists_error) {
+        return std::unexpected(io_error("could not stat WAL: " + exists_error.message()));
+    }
+    if (!exists) {
+        auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::create_new);
+        if (!file) {
+            return std::unexpected(file.error());
+        }
+        return std::make_unique<NativeWalSink>(std::move(*file));
+    }
+    auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::open_existing);
     if (!file) {
         return std::unexpected(file.error());
     }
@@ -110,7 +215,53 @@ Result<Wal> Wal::create(const std::filesystem::path& path, const WalFileFactory&
     if (auto written = (*sink)->write_at(0, header); !written) {
         return std::unexpected(written.error());
     }
-    return Wal{std::move(*sink), wal_header_size};
+    return Wal{std::move(*sink), wal_header_size, 1};
+}
+
+Result<Wal> Wal::open_durable(const std::filesystem::path& path, std::uint64_t starting_lsn) {
+    return open_durable(path, starting_lsn, [](const std::filesystem::path& p) {
+        return open_append_wal_sink(p);
+    });
+}
+
+Result<Wal> Wal::open_durable(const std::filesystem::path& path, std::uint64_t starting_lsn,
+                              const WalFileFactory& append_factory) {
+    if (starting_lsn == 0) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "starting_lsn must be >= 1"});
+    }
+    std::error_code exists_error;
+    const bool exists = std::filesystem::exists(path, exists_error);
+    if (exists_error) {
+        return std::unexpected(io_error("could not stat WAL: " + exists_error.message()));
+    }
+
+    auto sink = append_factory(path);
+    if (!sink) {
+        return std::unexpected(sink.error());
+    }
+
+    if (!exists) {
+        const auto header = make_header();
+        if (auto written = (*sink)->write_at(0, header); !written) {
+            return std::unexpected(written.error());
+        }
+        return Wal{std::move(*sink), wal_header_size, starting_lsn};
+    }
+
+    std::error_code size_error;
+    const auto size = std::filesystem::file_size(path, size_error);
+    if (size_error) {
+        return std::unexpected(io_error("could not read WAL size: " + size_error.message()));
+    }
+    if (size < wal_header_size) {
+        // Arquivo residual inválido: reescreve cabeçalho.
+        const auto header = make_header();
+        if (auto written = (*sink)->write_at(0, header); !written) {
+            return std::unexpected(written.error());
+        }
+        return Wal{std::move(*sink), wal_header_size, starting_lsn};
+    }
+    return Wal{std::move(*sink), static_cast<std::uint64_t>(size), starting_lsn};
 }
 
 Result<void> Wal::append(WalRecordType type, std::uint64_t tx_id, std::uint64_t page_id,
@@ -123,7 +274,6 @@ Result<void> Wal::append(WalRecordType type, std::uint64_t tx_id, std::uint64_t 
     store_le(view.subspan(17, 8), page_id);
     store_le(view.subspan(25, 4), static_cast<std::uint32_t>(payload.size()));
     std::copy(payload.begin(), payload.end(), record.begin() + record_fixed_size);
-    // O CRC cobre do lsn ao fim do payload (tudo, menos os 4 bytes do próprio CRC).
     const auto crc = crc32(view.subspan(0, record_fixed_size + payload.size()));
     store_le(view.subspan(record_fixed_size + payload.size(), 4), crc);
 
@@ -149,77 +299,25 @@ Result<void> Wal::append_page_image(std::uint64_t tx_id, storage::PageId page_id
 }
 
 Result<void> Wal::append_commit(std::uint64_t tx_id) {
-    return append(WalRecordType::commit, tx_id, 0, {});
+    std::array<std::byte, 8> commit_lsn_bytes{};
+    store_le(std::span<std::byte>{commit_lsn_bytes}, next_lsn_);
+    return append(WalRecordType::commit, tx_id, 0, commit_lsn_bytes);
 }
 
 Result<void> Wal::sync() { return sink_->sync(); }
 
 Result<std::vector<WalRecord>> Wal::read_all(const std::filesystem::path& path) {
-    std::error_code size_error;
-    const auto size = std::filesystem::file_size(path, size_error);
-    if (size_error) {
-        return std::unexpected(io_error("could not read WAL size: " + size_error.message()));
-    }
-    // Um arquivo criado mas ainda sem header/registro equivale a log vazio:
-    // não há nenhuma transação que possa ser reaplicada.
-    if (size == 0) {
-        return std::vector<WalRecord>{};
-    }
-    if (size < wal_header_size) {
-        return std::unexpected(Error{ErrorCode::corrupt_file, "WAL is smaller than its header"});
-    }
+    return read_wal_records(path, 0, ReadMode::soft_eof);
+}
 
-    auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::open_existing);
-    if (!file) {
-        return std::unexpected(file.error());
-    }
-    std::vector<std::byte> bytes(static_cast<std::size_t>(size));
-    if (auto read = file->read_at(0, bytes); !read) {
-        return std::unexpected(read.error());
-    }
+Result<std::vector<WalRecord>> Wal::read_from(const std::filesystem::path& path,
+                                              std::uint64_t from_lsn) {
+    return read_wal_records(path, from_lsn, ReadMode::soft_eof);
+}
 
-    // Valida o cabeçalho (magic, versão, page_size).
-    if (!std::equal(wal_magic.begin(), wal_magic.end(), bytes.begin())) {
-        return std::unexpected(Error{ErrorCode::invalid_file_format, "file is not a moDb WAL"});
-    }
-    const std::span<const std::byte> header{bytes.data(), wal_header_size};
-    if (load_le<std::uint16_t>(header.subspan(4, 2)) != wal_version) {
-        return std::unexpected(
-            Error{ErrorCode::incompatible_format_version, "unsupported WAL version"});
-    }
-    if (load_le<std::uint32_t>(header.subspan(8, 4)) != storage::page_size) {
-        return std::unexpected(Error{ErrorCode::corrupt_file, "WAL page size mismatch"});
-    }
-
-    std::vector<WalRecord> records;
-    std::size_t offset = wal_header_size;
-    const std::size_t total = bytes.size();
-    while (offset + record_fixed_size <= total) {
-        const std::span<const std::byte> fixed{bytes.data() + offset, record_fixed_size};
-        const auto length = load_le<std::uint32_t>(fixed.subspan(25, 4));
-        const std::size_t record_size = record_fixed_size + length + record_crc_size;
-        // Registro truncado no meio: fim lógico do log.
-        if (offset + record_size > total) {
-            break;
-        }
-        const std::span<const std::byte> full{bytes.data() + offset, record_size};
-        const auto stored_crc =
-            load_le<std::uint32_t>(full.subspan(record_fixed_size + length, 4));
-        // CRC inválido: fim lógico do log (tudo depois é descartado).
-        if (crc32(full.subspan(0, record_fixed_size + length)) != stored_crc) {
-            break;
-        }
-        WalRecord record;
-        record.lsn = load_le<std::uint64_t>(full.subspan(0, 8));
-        record.tx_id = load_le<std::uint64_t>(full.subspan(8, 8));
-        record.type = static_cast<WalRecordType>(std::to_integer<std::uint8_t>(full[16]));
-        record.page_id = load_le<std::uint64_t>(full.subspan(17, 8));
-        record.payload.assign(full.begin() + record_fixed_size,
-                              full.begin() + record_fixed_size + length);
-        records.push_back(std::move(record));
-        offset += record_size;
-    }
-    return records;
+Result<std::vector<WalRecord>> Wal::read_for_replication(const std::filesystem::path& path,
+                                                         std::uint64_t from_lsn) {
+    return read_wal_records(path, from_lsn, ReadMode::strict);
 }
 
 } // namespace modb::tx

@@ -173,8 +173,8 @@ int main() {
         suite.check(committed_epoch == 3, "object commit advances the global epoch once");
         auto wal_path = database.path();
         wal_path += ".wal";
-        suite.check(!std::filesystem::exists(wal_path),
-                    "a full commit removes the closed WAL on Windows");
+        suite.check(std::filesystem::exists(wal_path),
+                    "a full commit keeps the durable WAL");
         DatabaseRegistry::instance().detach(*database_id);
     }
 

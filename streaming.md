@@ -1,4 +1,4 @@
-# Arquitetura de Streaming Assíncrono do ODB++
+# Arquitetura de Streaming Assíncrono do Ring0
 
 ## Streaming como Modelo Fundamental de Execução
 
@@ -8,7 +8,7 @@ Versão: 0.1
 
 # Introdução
 
-No ODB++, **streaming não é uma otimização**.
+No Ring0, **streaming não é uma otimização**.
 
 Streaming é o modelo nativo de execução de consultas.
 
@@ -305,7 +305,7 @@ Cliente
 
 # Lotes
 
-O ODB++ não possui lotes lógicos.
+O Ring0 não possui lotes lógicos.
 
 O servidor nunca espera acumular
 

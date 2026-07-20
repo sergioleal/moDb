@@ -1,9 +1,0 @@
-.git
-build/
-benchmark-results*/
-docs/CONSTITUTION_RING0.md
-**/*.modb
-**/*.wal
-**/CMakeFiles/
-**/.cache/
-agent-transcripts/

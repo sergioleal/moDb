@@ -16,7 +16,7 @@ Nunca copie só um dos dois se o WAL existir: o par deve ser consistente.
 
 O processo do servidor/CLI deve rodar sob um supervisor externo:
 
-- Linux: systemd / Kubernetes
+- Linux: systemd
 - Windows: Serviço Windows / agendador equivalente
 
 Após crash, a **próxima abertura** do banco executa recovery do WAL (Fase 5):

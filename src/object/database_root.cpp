@@ -155,6 +155,12 @@ Result<DatabaseRoot> DatabaseRoot::open(storage::PageFile& file) {
         if (auto next_lsn = reader.read_u64(); next_lsn) {
             root.next_lsn_ = *next_lsn == 0 ? 1 : *next_lsn;
         }
+        if (auto checkpoint = reader.read_u64(); checkpoint) {
+            root.checkpoint_lsn_ = *checkpoint;
+        }
+        if (auto ack = reader.read_u64(); ack) {
+            root.follower_ack_lsn_ = *ack;
+        }
         if (root.database_uuid_.is_nil()) {
             root.database_uuid_ = generate_database_uuid();
             root.timeline_id_ = root.timeline_id_ == 0 ? 1 : root.timeline_id_;
@@ -199,6 +205,8 @@ Result<void> DatabaseRoot::persist() {
         database_uuid_.bytes.size()});
     writer.write_u64(timeline_id_);
     writer.write_u64(next_lsn_);
+    writer.write_u64(checkpoint_lsn_);
+    writer.write_u64(follower_ack_lsn_);
 
     Page page;
     const auto bytes = writer.bytes();
@@ -310,6 +318,36 @@ Result<void> DatabaseRoot::set_next_lsn(std::uint64_t next) {
         return std::unexpected(persisted.error());
     }
     return {};
+}
+
+Result<void> DatabaseRoot::set_checkpoint_lsn(std::uint64_t lsn) {
+    const auto previous = checkpoint_lsn_;
+    checkpoint_lsn_ = lsn;
+    if (auto persisted = persist(); !persisted) {
+        checkpoint_lsn_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+Result<void> DatabaseRoot::set_follower_ack_lsn(std::uint64_t lsn) {
+    const auto previous = follower_ack_lsn_;
+    follower_ack_lsn_ = lsn;
+    if (auto persisted = persist(); !persisted) {
+        follower_ack_lsn_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+std::uint64_t DatabaseRoot::oldest_available_lsn() const noexcept {
+    if (checkpoint_lsn_ == 0) {
+        return 1;
+    }
+    if (follower_ack_lsn_ == 0) {
+        return checkpoint_lsn_;
+    }
+    return checkpoint_lsn_ < follower_ack_lsn_ ? checkpoint_lsn_ : follower_ack_lsn_;
 }
 
 } // namespace modb::object

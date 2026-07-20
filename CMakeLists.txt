@@ -51,6 +51,7 @@ add_library(modb
     src/object/type_registry.cpp
     src/index/btree.cpp
     src/net/protocol.cpp
+    src/net/replication_protocol.cpp
     src/net/native_socket.cpp
     src/net/server.cpp
     src/net/client.cpp
@@ -60,11 +61,14 @@ add_library(modb
     examples/transfer_funds/transfer_funds.cpp
     examples/accounts_facade/accounts_facade.cpp
     src/graph/graph_view.cpp
+    src/repl/bootstrap.cpp
     src/storage/binary.cpp
     src/storage/codec.cpp
     src/storage/page_file.cpp
     src/storage/database_check.cpp
     src/storage/native_file.cpp
+    $<$<BOOL:${WIN32}>:src/storage/async_file_windows.cpp>
+    $<$<NOT:$<BOOL:${WIN32}>>:src/storage/async_file_linux.cpp>
     src/storage/buffer_pool.cpp
     src/storage/scratch_page_pool.cpp
     src/storage/slotted_page.cpp
@@ -74,18 +78,20 @@ add_library(modb
     src/tx/wal.cpp
     src/version.cpp
 )
-if(WIN32)
-    target_sources(modb PRIVATE src/storage/async_file_windows.cpp)
-else()
-    target_sources(modb PRIVATE src/storage/async_file_linux.cpp)
-endif()
 add_library(modb::modb ALIAS modb)
+
+add_library(modb_app_client
+    src/app/server_connection.cpp
+)
+add_library(modb::app_client ALIAS modb_app_client)
+set_target_properties(modb_app_client PROPERTIES EXPORT_NAME app_client)
+target_link_libraries(modb_app_client PUBLIC modb::modb)
 
 # --- Fase 10E: instalação da API pública + pacote CMake ---
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-install(TARGETS modb
+install(TARGETS modb modb_app_client
     EXPORT moDbTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -126,6 +132,9 @@ install(FILES
 target_compile_definitions(modb PUBLIC MODB_PAGE_SIZE=${MODB_PAGE_SIZE})
 if(WIN32)
     target_link_libraries(modb PUBLIC ws2_32)
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(modb PUBLIC rt)
 endif()
 
 if("cxx_std_26" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
@@ -211,6 +220,47 @@ add_executable(modb_cli apps/modb_cli/main.cpp)
 target_link_libraries(modb_cli PRIVATE modb::modb)
 set_target_properties(modb_cli PROPERTIES OUTPUT_NAME modb)
 
+option(MODB_BUILD_EXAMPLES "Build Ring0 example applications" ON)
+if(MODB_BUILD_EXAMPLES)
+    function(modb_add_server_example target source)
+        add_executable(${target} ${source})
+        target_link_libraries(${target} PRIVATE modb::app_client)
+        if(MINGW)
+            target_link_options(${target} PRIVATE ${MODB_MINGW_LINK_OPTS})
+        endif()
+    endfunction()
+
+    modb_add_server_example(ring0_server_phase_00_version_compatibility
+        examples/server/by_phase/phase_00/version_compatibility.cpp)
+    modb_add_server_example(ring0_server_phase_01_bind_type
+        examples/server/by_phase/phase_01/bind_type.cpp)
+    modb_add_server_example(ring0_server_phase_02_persist_reopen
+        examples/server/by_phase/phase_02/persist_reopen.cpp)
+    modb_add_server_example(ring0_server_phase_03_handle_update
+        examples/server/by_phase/phase_03/handle_update.cpp)
+    modb_add_server_example(ring0_server_phase_04_relationships
+        examples/server/by_phase/phase_04/relationships.cpp)
+    modb_add_server_example(ring0_server_phase_05_transaction_recovery
+        examples/server/by_phase/phase_05/transaction_recovery.cpp)
+    modb_add_server_example(ring0_server_phase_06_snapshot_read
+        examples/server/by_phase/phase_06/snapshot_read.cpp)
+    modb_add_server_example(ring0_server_phase_07_streaming_query
+        examples/server/by_phase/phase_07/streaming_query.cpp)
+    add_executable(ring0_server_phase_08_connect_query
+        examples/server/by_phase/phase_08/connect_query.cpp)
+    target_link_libraries(ring0_server_phase_08_connect_query PRIVATE modb::app_client)
+    modb_add_server_example(ring0_server_phase_09_call_operation
+        examples/server/by_phase/phase_09/call_operation.cpp)
+    modb_add_server_example(ring0_server_phase_10_handshake_capabilities
+        examples/server/by_phase/phase_10/handshake_capabilities.cpp)
+    modb_add_server_example(ring0_server_phase_11_open_facade
+        examples/server/by_phase/phase_11/open_facade.cpp)
+    modb_add_server_example(ring0_server_phase_12_graph_traversal
+        examples/server/by_phase/phase_12/graph_traversal.cpp)
+    modb_add_server_example(ring0_server_phase_13_async_io
+        examples/server/by_phase/phase_13/async_io.cpp)
+endif()
+
 add_executable(modb_object_bench benchmarks/object_throughput.cpp)
 target_link_libraries(modb_object_bench PRIVATE modb::modb)
 
@@ -237,6 +287,10 @@ if(MINGW)
     # de RTTI; desativá-lo evita a definição duplicada e mantém a ABI coerente.
     target_compile_options(modb PUBLIC -fno-rtti)
     target_link_options(modb_cli PRIVATE ${MODB_MINGW_LINK_OPTS})
+    target_link_options(modb_app_client PRIVATE ${MODB_MINGW_LINK_OPTS})
+    if(MODB_BUILD_EXAMPLES)
+        target_link_options(ring0_server_phase_08_connect_query PRIVATE ${MODB_MINGW_LINK_OPTS})
+    endif()
     target_link_options(modb_object_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
     target_link_options(modb_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
 endif()
@@ -348,10 +402,22 @@ if(BUILD_TESTING)
     target_link_libraries(modb_graph_algorithms_tests PRIVATE modb::modb)
     add_executable(modb_async_file_tests tests/async_file_test.cpp)
     target_link_libraries(modb_async_file_tests PRIVATE modb::modb)
-    add_executable(modb_server_lifecycle_tests tests/server_lifecycle_test.cpp)
-    target_link_libraries(modb_server_lifecycle_tests PRIVATE modb::modb)
+    add_executable(modb_app_server_connection_tests tests/app_server_connection_test.cpp)
+    target_link_libraries(modb_app_server_connection_tests PRIVATE modb::app_client)
     add_executable(modb_database_identity_tests tests/database_identity_test.cpp)
     target_link_libraries(modb_database_identity_tests PRIVATE modb::modb)
+    add_executable(modb_wal_v2_tests tests/wal_v2_test.cpp)
+    target_link_libraries(modb_wal_v2_tests PRIVATE modb::modb)
+    add_executable(modb_replication_protocol_tests tests/replication_protocol_test.cpp)
+    target_link_libraries(modb_replication_protocol_tests PRIVATE modb::modb)
+    add_executable(modb_replication_bootstrap_tests tests/replication_bootstrap_test.cpp)
+    target_link_libraries(modb_replication_bootstrap_tests PRIVATE modb::modb)
+    add_executable(modb_replication_apply_tests tests/replication_apply_test.cpp)
+    target_link_libraries(modb_replication_apply_tests PRIVATE modb::modb)
+    add_executable(modb_replication_streaming_tests tests/replication_streaming_test.cpp)
+    target_link_libraries(modb_replication_streaming_tests PRIVATE modb::modb)
+    add_executable(modb_replication_recovery_tests tests/replication_recovery_test.cpp)
+    target_link_libraries(modb_replication_recovery_tests PRIVATE modb::modb)
 
     add_executable(modb_benchmark_runner_tests tests/benchmark_runner_test.cpp)
     target_link_libraries(modb_benchmark_runner_tests PRIVATE modb_bench_core)
@@ -444,8 +510,14 @@ if(BUILD_TESTING)
         target_link_options(modb_graph_view_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_graph_algorithms_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_async_file_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
-        target_link_options(modb_server_lifecycle_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_app_server_connection_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_database_identity_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_wal_v2_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_replication_protocol_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_replication_bootstrap_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_replication_apply_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_replication_streaming_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_replication_recovery_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -499,8 +571,14 @@ if(BUILD_TESTING)
     add_test(NAME modb.graph_view COMMAND modb_graph_view_tests)
     add_test(NAME modb.graph_algorithms COMMAND modb_graph_algorithms_tests)
     add_test(NAME modb.async_file COMMAND modb_async_file_tests)
-    add_test(NAME modb.server_lifecycle COMMAND modb_server_lifecycle_tests)
+    add_test(NAME modb.app_server_connection COMMAND modb_app_server_connection_tests)
     add_test(NAME modb.database_identity COMMAND modb_database_identity_tests)
+    add_test(NAME modb.wal_v2 COMMAND modb_wal_v2_tests)
+    add_test(NAME modb.replication_protocol COMMAND modb_replication_protocol_tests)
+    add_test(NAME modb.replication_bootstrap COMMAND modb_replication_bootstrap_tests)
+    add_test(NAME modb.replication_apply COMMAND modb_replication_apply_tests)
+    add_test(NAME modb.replication_streaming COMMAND modb_replication_streaming_tests)
+    add_test(NAME modb.replication_recovery COMMAND modb_replication_recovery_tests)
     add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
@@ -544,8 +622,6 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.protocol_demo COMMAND modb_cli protocol demo)
     add_test(NAME modb.cli.protocol_help COMMAND modb_cli protocol --help)
     add_test(NAME modb.cli.serve_help COMMAND modb_cli serve --help)
-    add_test(NAME modb.cli.serve_from_env_requires_path COMMAND modb_cli serve --from-env)
-    set_tests_properties(modb.cli.serve_from_env_requires_path PROPERTIES WILL_FAIL TRUE)
     add_test(NAME modb.cli.serve_demo
         COMMAND modb_cli serve demo
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-demo.modb --force)

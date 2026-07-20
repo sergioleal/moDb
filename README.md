@@ -1,8 +1,11 @@
-# moDb
+# Ring0
 
-Banco **Orientado a Objetos** embutido (ODB++), persistente em arquivo, em C++26.
+Banco **Orientado a Objetos** embutido, persistente em arquivo, em C++26.
 Identidade estável (`ObjectId`), tipos versionados, relacionamentos, coleções,
 transações com WAL, consultas com streaming e operações de domínio no processo.
+
+O repositório, o namespace, a CLI e o pacote CMake ainda usam o identificador
+técnico `modb` / `moDb`.
 
 ## Começar em 5 minutos
 
@@ -44,7 +47,7 @@ auto db = modb::object::Database::create("shop.modb");
 | Documento | Uso |
 |---|---|
 | [docs/RASTREADOR.md](docs/RASTREADOR.md) | estado das fases |
-| [docs/PLANO_ODB.md](docs/PLANO_ODB.md) | plano ODB++ |
+| [docs/PLANO_ODB.md](docs/PLANO_ODB.md) | plano Ring0 |
 | [docs/PROTOCOLO_FASES.md](docs/PROTOCOLO_FASES.md) | critérios por fase |
 | [docs/FORMATO_DE_ARQUIVO.md](docs/FORMATO_DE_ARQUIVO.md) | layout em disco |
 | [docs/API_PUBLICA.md](docs/API_PUBLICA.md) | headers instaláveis |

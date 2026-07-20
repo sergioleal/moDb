@@ -9,6 +9,7 @@
 #include "modb/graph/algorithms.hpp"
 #include "modb/graph/traversal.hpp"
 #include "modb/tx/wal.hpp"
+#include "modb/repl/replication.hpp"
 #include "modb/row.hpp"
 #include "modb/text_escape.hpp"
 #include "modb/value.hpp"
@@ -17,8 +18,6 @@
 #include "modb/net/client.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/server.hpp"
-#include "modb/net/probe.hpp"
-#include "modb/storage/async_file.hpp"
 #include "examples/accounts_facade/accounts_facade.hpp"
 #include "examples/transfer_funds/transfer_funds.hpp"
 #include "modb/ops/facade_catalog.hpp"
@@ -176,6 +175,7 @@ int run_blob_command(int argc, char* argv[]);
 int run_graph_command(int argc, char* argv[]);
 int run_coll_command(int argc, char* argv[]);
 int run_tx_command(int argc, char* argv[]);
+int run_replicate_command(int argc, char* argv[]);
 int run_mvcc_command(int argc, char* argv[]);
 int command_blob_put(const std::filesystem::path& path, std::string_view text);
 int command_blob_get(const std::filesystem::path& path, std::uint64_t blob_id);
@@ -264,6 +264,7 @@ void print_help() {
            "  graph    Demo an object graph: refs, embedded, cascade (ODB++ Fase 4).\n"
            "  coll     Demo persistent vector/set/map collections (ODB++ Fase 4).\n"
            "  tx       Exercise transactions, the WAL and recovery (ODB++ Fase 5).\n"
+           "  replicate Bootstrap/apply/status for read replicas (ODB++ Fase 14).\n"
            "  mvcc     Inspect/advance the MVCC epoch and demo snapshots (ODB++ Fase "
            "6A/6B).\n"
            "\n"
@@ -343,7 +344,6 @@ void print_serve_help() {
                  "  modb serve cancel-demo <file> [--force]\n"
                  "  modb serve process-demo <file> [--force]\n"
                  "  modb serve <file> [--host H] [--port N] [--once]\n"
-                 "  modb serve --from-env [--once]\n"
                  "\n"
                  "demo               Listen, complete Hello/HelloOk with a local client and exit.\n"
                  "query-demo         Seed objects, stream a remote Query end-to-end and exit.\n"
@@ -1894,65 +1894,9 @@ int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
 
 int command_serve_loop(const std::filesystem::path& path, std::string_view host,
                        std::uint16_t port) {
-    const auto cold_start = std::chrono::steady_clock::now();
     auto server = modb::net::Server::listen(path, host, port);
     if (!server) {
         return print_error(server.error());
-    }
-    const auto ready_at = std::chrono::steady_clock::now();
-    const auto cold_start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   ready_at - cold_start)
-                                   .count();
-
-    // Readiness só após open+recovery+listen (cold start completo).
-    const char* ready_env = std::getenv("MODB_READY_FILE");
-    const char* live_env = std::getenv("MODB_LIVE_FILE");
-    const char* metrics_env = std::getenv("MODB_METRICS_FILE");
-    const std::filesystem::path ready_file =
-        ready_env && *ready_env != '\0' ? ready_env : std::filesystem::path{};
-    const std::filesystem::path live_file =
-        live_env && *live_env != '\0' ? live_env : std::filesystem::path{};
-    if (!ready_file.empty()) {
-        if (auto status = modb::net::write_probe_file(ready_file); !status) {
-            return print_error(status.error());
-        }
-    }
-    if (!live_file.empty()) {
-        if (auto status = modb::net::write_probe_file(live_file, "live\n"); !status) {
-            return print_error(status.error());
-        }
-    }
-
-    // Métricas estruturadas (Fase 13E): backend AsyncFile + cold start.
-    {
-        modb::storage::AsyncFileOptions options;
-        options.max_inflight = 1;
-        const auto probe_path = std::filesystem::temp_directory_path() /
-                                ("modb-io-probe-" + std::to_string(server->port()) + ".bin");
-        std::string async_backend = "unavailable";
-        std::string async_reason = "probe skipped";
-        if (auto probe = modb::storage::AsyncFile::open(
-                probe_path, modb::storage::AsyncFile::Mode::create_new, options)) {
-            async_backend = std::string{probe->backend_name()};
-            async_reason = std::string{probe->fallback_reason()};
-            static_cast<void>(probe->close());
-        }
-        std::error_code ignored;
-        std::filesystem::remove(probe_path, ignored);
-
-        std::ostringstream metrics;
-        metrics << "{\"event\":\"ready\",\"cold_start_ms\":" << cold_start_ms
-                << ",\"port\":" << server->port()
-                << ",\"async_file_backend\":\"" << async_backend << "\""
-                << ",\"async_file_reason\":\"" << async_reason << "\"}\n";
-        std::cout << "METRICS " << metrics.str();
-        std::cout.flush();
-        if (metrics_env && *metrics_env != '\0') {
-            std::ofstream out{metrics_env, std::ios::app};
-            if (out) {
-                out << metrics.str();
-            }
-        }
     }
 
     static modb::net::Server* signal_server = nullptr;
@@ -1970,16 +1914,10 @@ int command_serve_loop(const std::filesystem::path& path, std::string_view host,
     std::cout << "READY " << server->port() << '\n';
     std::cout.flush();
     std::cout << "Serving " << path.string() << " on " << host << ':' << server->port()
-              << " (loop until SIGTERM/SIGINT)\n";
+              << " (loop until SIGINT/SIGTERM)\n";
     std::cout.flush();
     const auto status = server->serve_forever();
     signal_server = nullptr;
-    if (!ready_file.empty()) {
-        static_cast<void>(modb::net::remove_probe_file(ready_file));
-    }
-    if (!live_file.empty()) {
-        static_cast<void>(modb::net::remove_probe_file(live_file));
-    }
     if (!status) {
         return print_error(status.error());
     }
@@ -5229,6 +5167,111 @@ int run_coll_command(int argc, char* argv[]) {
     return 2;
 }
 
+int run_replicate_command(int argc, char* argv[]) {
+    auto print_help = [] {
+        std::cout << "Usage:\n"
+                     "  modb replicate bootstrap <primary.modb> <follower.modb>\n"
+                     "  modb replicate apply-wal <follower.modb> <primary.wal> <from_lsn>\n"
+                     "  modb replicate status <file.modb>\n";
+    };
+    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
+        print_help();
+        return 0;
+    }
+    const std::string_view sub{argv[2]};
+    if (sub == "bootstrap") {
+        if (argc != 5) {
+            return print_usage_error("modb replicate bootstrap <primary> <follower>");
+        }
+        const std::filesystem::path primary_path{argv[3]};
+        const std::filesystem::path follower_path{argv[4]};
+        auto opened = modb::object::Database::open(primary_path);
+        if (!opened) {
+            return print_error(opened.error());
+        }
+        auto primary = std::make_shared<modb::object::Database>(std::move(*opened));
+        auto id = modb::object::DatabaseRegistry::instance().attach(primary);
+        if (!id) {
+            return print_error(id.error());
+        }
+        auto snap = modb::repl::create_bootstrap_snapshot(
+            *primary, follower_path.parent_path() / ".modb-bootstrap-tmp");
+        if (!snap) {
+            (void)modb::object::DatabaseRegistry::instance().detach(*id);
+            return print_error(snap.error());
+        }
+        auto installed = modb::repl::install_bootstrap_snapshot(*snap, follower_path);
+        (void)modb::object::DatabaseRegistry::instance().detach(*id);
+        if (!installed) {
+            return print_error(installed.error());
+        }
+        std::cout << "bootstrap ok cut_lsn=" << snap->begin.cut_lsn
+                  << " size=" << snap->begin.size_bytes << '\n';
+        return 0;
+    }
+    if (sub == "apply-wal") {
+        if (argc != 6) {
+            return print_usage_error("modb replicate apply-wal <follower> <primary.wal> <from_lsn>");
+        }
+        auto from = parse_integer(argv[5]);
+        if (!from || *from < 0) {
+            return print_usage_error("from_lsn must be a non-negative integer");
+        }
+        const auto from_lsn = static_cast<std::uint64_t>(*from);
+        auto opened = modb::object::Database::open(argv[3]);
+        if (!opened) {
+            return print_error(opened.error());
+        }
+        auto follower = std::make_shared<modb::object::Database>(std::move(*opened));
+        auto id = modb::object::DatabaseRegistry::instance().attach(follower);
+        if (!id) {
+            return print_error(id.error());
+        }
+        follower->set_read_only_replica(true);
+        auto records = modb::tx::Wal::read_from(argv[4], from_lsn);
+        if (!records) {
+            (void)modb::object::DatabaseRegistry::instance().detach(*id);
+            return print_error(records.error());
+        }
+        const auto applied_before = from_lsn == 0 ? 0 : from_lsn - 1;
+        auto applied =
+            modb::repl::apply_wal_records(follower->page_file(), *records, applied_before);
+        if (!applied) {
+            (void)modb::object::DatabaseRegistry::instance().detach(*id);
+            return print_error(applied.error());
+        }
+        if (auto ack = follower->set_follower_ack_lsn(*applied); !ack) {
+            (void)modb::object::DatabaseRegistry::instance().detach(*id);
+            return print_error(ack.error());
+        }
+        (void)modb::object::DatabaseRegistry::instance().detach(*id);
+        std::cout << "applied_lsn=" << *applied << '\n';
+        return 0;
+    }
+    if (sub == "status") {
+        if (argc != 4) {
+            return print_usage_error("modb replicate status <file>");
+        }
+        auto opened = modb::object::Database::open(argv[3]);
+        if (!opened) {
+            return print_error(opened.error());
+        }
+        std::cout << "uuid=";
+        for (auto b : opened->database_uuid().bytes) {
+            std::cout << std::hex << std::setw(2) << std::setfill('0')
+                      << static_cast<unsigned>(b);
+        }
+        std::cout << std::dec << std::setfill(' ') << "\ntimeline=" << opened->timeline_id().value
+                  << "\nnext_lsn=" << opened->next_lsn()
+                  << "\ncheckpoint_lsn=" << opened->checkpoint_lsn()
+                  << "\nfollower_ack_lsn=" << opened->follower_ack_lsn()
+                  << "\noldest_available_lsn=" << opened->oldest_available_lsn() << '\n';
+        return 0;
+    }
+    std::cerr << "Unknown replicate command: " << sub << '\n';
+    return 2;
+}
+
 int run_tx_command(int argc, char* argv[]) {
     if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
         print_tx_help();
@@ -5884,42 +5927,9 @@ int run(int argc, char* argv[]) {
             }
             return command_serve_process_demo(argv[3], force, argv[0]);
         }
-        // modb serve --from-env [--once]
         // modb serve <file> [--host H] [--port N] [--once] [--fail-after N] [--small-buffers]
-        if (argc >= 3 && std::string_view{argv[2]} == "--from-env") {
-            const char* db = std::getenv("MODB_DB_PATH");
-            const char* host_env = std::getenv("MODB_HOST");
-            const char* port_env = std::getenv("MODB_PORT");
-            if (db == nullptr || *db == '\0') {
-                return print_error(modb::Error{modb::ErrorCode::invalid_argument,
-                                               "MODB_DB_PATH is required for --from-env"});
-            }
-            std::string host = host_env && *host_env != '\0' ? host_env : "0.0.0.0";
-            std::uint16_t port = 7400;
-            if (port_env && *port_env != '\0') {
-                auto parsed = parse_integer(port_env);
-                if (!parsed || *parsed < 0 || *parsed > 65535) {
-                    return print_error(modb::Error{modb::ErrorCode::invalid_argument,
-                                                   "MODB_PORT must be 0..65535"});
-                }
-                port = static_cast<std::uint16_t>(*parsed);
-            }
-            bool once = false;
-            for (int i = 3; i < argc; ++i) {
-                if (std::string_view{argv[i]} == "--once") {
-                    once = true;
-                } else {
-                    return print_usage_error("modb serve --from-env [--once]");
-                }
-            }
-            if (once) {
-                return command_serve_once(db, port, std::nullopt, false, host);
-            }
-            return command_serve_loop(db, host, port);
-        }
         if (argc < 3) {
-            return print_usage_error(
-                "modb serve <file> [--host H] [--port N] [--once] | modb serve --from-env");
+            return print_usage_error("modb serve <file> [--host H] [--port N] [--once]");
         }
         const std::filesystem::path file = argv[2];
         std::string host = "127.0.0.1";
@@ -6021,6 +6031,9 @@ int run(int argc, char* argv[]) {
     }
     if (command == "tx") {
         return run_tx_command(argc, argv);
+    }
+    if (command == "replicate") {
+        return run_replicate_command(argc, argv);
     }
     if (command == "mvcc") {
         return run_mvcc_command(argc, argv);

@@ -5,13 +5,13 @@
 
 ## Contexto
 
-Depois do servidor de rede (Fase 8), do runtime de módulos (Fase 9), da
-estabilização (Fase 10) e da implantação serverless (Fase 13), o moDb ainda
-tem uma única instância que serve leituras e escritas. Cargas de leitura
-pesadas competem com o escritor e não há como escalar leitura nem manter uma
-cópia quente do banco atualizada de forma contínua.
+Depois do servidor de rede (Fase 8), do runtime de módulos (Fase 9) e da
+estabilização (Fase 10), o moDb ainda tem uma única instância que serve
+leituras e escritas. Cargas de leitura pesadas competem com o escritor e não
+há como escalar leitura nem manter uma cópia quente do banco atualizada de
+forma contínua.
 
-O modelo transacional permanece **single-writer** (ADR-011, ADR-013): um único
+O modelo transacional permanece **single-writer** (ADR-011): um único
 produtor de commits por banco. Replicação, alta disponibilidade e execução
 distribuída estavam explicitamente fora do plano. Esta ADR abre uma exceção
 estreita: **uma réplica de leitura (follower read-only) alimentada por
@@ -40,6 +40,10 @@ durável e retida**, e só então transmiti-la.
 **A Fase 14 introduz um WAL durável com LSN global, identidade persistente do
 banco e um follower read-only que aplica o stream de forma idempotente,
 expondo leituras consistentes.** Promoção e failover ficam fora da fase.
+
+Entrega em subfases verticais: **14A** (ADR + identidade) → **14B** (WAL v2) →
+**14C** (protocolo + bootstrap) → **14D** (streaming/applier/read-only) →
+**14E** (reconexão/CLI/docs); tags `0.0.14a`…`0.0.14e`.
 
 ### 1. Identidade persistente do banco
 
@@ -154,6 +158,8 @@ cancelamento e backpressure da Fase 8. Mensagens previstas:
   followers com consenso e resolução de conflito multi-writer.
 - Novos erros da Fase 14: `replica_read_only`, `replication_gap`,
   `timeline_mismatch`, `database_uuid_mismatch` e `bootstrap_required`.
-- A ADR-013 é atualizada: o item que excluía "replicação" passa a remeter a
-  esta ADR para a réplica **de leitura**, mantendo HA/failover/distribuição
-  fora do plano.
+- O item do plano que excluía "replicação" passa a remeter a esta ADR para a
+  réplica **de leitura**, mantendo HA/failover/distribuição fora do plano.
+- A Fase 15 ([ADR-017](ADR-017-primary-wal-only-sem-arquivos-de-dados.md))
+  acrescenta o modo opcional em que o primary **não** mantém arquivos de dados
+  (`primary_storage=wal_only`); esta ADR cobre o modo `full` e o follower.

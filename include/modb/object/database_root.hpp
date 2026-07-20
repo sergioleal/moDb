@@ -51,6 +51,12 @@ public:
     [[nodiscard]] TimelineId timeline_id() const noexcept { return TimelineId{timeline_id_}; }
     // Próximo LSN global a emitir no WAL v2 (nunca reinicia por sessão).
     [[nodiscard]] std::uint64_t next_lsn() const noexcept { return next_lsn_; }
+    // Maior commit_lsn cujas páginas já estão duráveis no arquivo de dados.
+    [[nodiscard]] std::uint64_t checkpoint_lsn() const noexcept { return checkpoint_lsn_; }
+    // Maior applied_lsn ACK'd por um follower (retenção); 0 = nenhum ACK.
+    [[nodiscard]] std::uint64_t follower_ack_lsn() const noexcept { return follower_ack_lsn_; }
+    // Menor LSN ainda retido: min(checkpoint, ack) com ack==0 → só checkpoint.
+    [[nodiscard]] std::uint64_t oldest_available_lsn() const noexcept;
 
     // Cada setter atualiza o espelho e regrava a página imediatamente, para que
     // a raiz em disco nunca fique atrás do estado observável.
@@ -64,6 +70,8 @@ public:
     [[nodiscard]] Result<void> set_database_uuid(DatabaseUuid uuid);
     [[nodiscard]] Result<void> set_timeline_id(TimelineId timeline);
     [[nodiscard]] Result<void> set_next_lsn(std::uint64_t next);
+    [[nodiscard]] Result<void> set_checkpoint_lsn(std::uint64_t lsn);
+    [[nodiscard]] Result<void> set_follower_ack_lsn(std::uint64_t lsn);
 
 private:
     DatabaseRoot(storage::PageFile& file, storage::PageId page) noexcept
@@ -87,6 +95,8 @@ private:
     DatabaseUuid database_uuid_{};
     std::uint64_t timeline_id_{1};
     std::uint64_t next_lsn_{1};
+    std::uint64_t checkpoint_lsn_{0};
+    std::uint64_t follower_ack_lsn_{0};
 };
 
 } // namespace modb::object

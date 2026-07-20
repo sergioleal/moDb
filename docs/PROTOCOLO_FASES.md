@@ -1,4 +1,4 @@
-# Protocolo de Implementação por Fase — ODB++ (moDb)
+# Protocolo de Implementação por Fase — Ring0
 
 > Este documento detalha cada fase do [PLANO_ODB.md](PLANO_ODB.md) no nível de
 > execução: design binário, assinaturas de API, passo a passo de implementação
@@ -1829,7 +1829,7 @@ cobertas. Status: ✅ (11A–11D).
 
 A fase reutiliza streaming, cancelamento e índices das Fases 6–7 e começa após
 a estabilização da Fase 10. Decisão:
-[ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md).
+[ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md).
 
 ## Fase 12A — EdgeHandle e factories
 
@@ -1840,7 +1840,7 @@ Artefatos:
 ```text
 include/modb/graph/edge_handle.hpp
 tests/edge_handle_test.cpp
-docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md
+docs/decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md
 ```
 
 `EdgeHandle` runtime-only; factories tipadas para `Ref`/`OwnedRef`; rejeitar
@@ -1926,107 +1926,78 @@ executa BFS, DFS, caminho mínimo e toposort sob snapshot.
 
 ---
 
-# Fase 13 — Container serverless
+# Fase 13 — I/O assíncrono
 
 ## Sequência de entregas verticais
 
-Começa somente depois das Fases 8, 9, 10, 11 e 12. Decisão:
-[ADR-013](decisions/ADR-013-execucao-serverless-em-container.md).
+Adicionar um backend opcional de I/O posicional assíncrono, mantendo o contrato
+das camadas existentes. A fase não altera formato em disco, identidade,
+transações, WAL nem protocolo público; ela mede e isola a diferença entre
+execução síncrona e assíncrona.
 
-## Fase 13A — ADR e modelo de implantação
-
-Status: ✅ Concluída — tag `0.0.13a` (2026-07-19).
-
-Registrar volume persistente, writer único, cold start, escala a zero e
-plataforma de referência ([ADR-013](decisions/ADR-013-execucao-serverless-em-container.md)).
-Tag: `0.0.13a`.
-
-## Fase 13B — I/O assíncrono real
-
-Status: ✅ Concluída — tag `0.0.13b` (2026-07-19).
-
-Artefatos:
+## Artefatos previstos
 
 ```text
+docs/decisions/ADR-019-io-assincrono.md
 include/modb/storage/async_file.hpp
-src/storage/async_file_linux.cpp       (`io_uring` ou sync_fallback)
-src/storage/async_file_windows.cpp     (IOCP ou sync_fallback)
+src/storage/async_file_windows.cpp
+src/storage/async_file_linux.cpp
 tests/async_file_test.cpp
+benchmarks/scenarios/storage_async_io.*
 ```
 
-API única `read_at`/`write_at`/`sync`/cancel com completion real; fallback
-síncrono explícito; ordering WAL → flush → páginas por barreiras, não por
-ordem de submissão.
+## Design
 
-Critério: `modb.async_file` + métricas `io_backend`; fallback observável. Tag:
-`0.0.13b`.
+`AsyncFile` espelha o contrato essencial de `NativeFile`: leitura/escrita
+posicional, flush/sync explícito, propagação de erro por `Result` e fechamento
+determinístico. Windows usa IOCP/`OVERLAPPED`; Linux usa POSIX AIO
+(`aio_read`/`aio_write`/`aio_suspend`/`aio_fsync`). A camada superior só enxerga
+operações pendentes e conclusão ordenada.
 
-## Fase 13C — Imagem OCI, config e volume
+O modo síncrono continua existindo como baseline e fallback. Backpressure é
+parte do contrato: o executor deve ter fila limitada configurável e rejeitar ou
+aguardar nova demanda em vez de acumular trabalho sem limite.
 
-Status: ✅ Concluída — tag `0.0.13c` (2026-07-19).
+## Passo a passo
 
-Artefatos:
+1. Registrar ADR de I/O assíncrono com contrato, fallback, cancelamento,
+   flush/sync e limites de fila.
+2. Criar `AsyncFile` com contrato próximo de `NativeFile`.
+3. Adicionar backends nativos por plataforma sem vazar headers de SO para a API
+   pública.
+4. Integrar pontos de leitura/escrita escolhidos por opção interna, preservando
+   a ordem WAL antes de páginas.
+5. Cobrir cancelamento, falha de I/O, flush/sync e concorrência.
+6. Medir com cenário de benchmark próprio e comparar com `NativeFile`.
+7. Documentar limites e critério de uso.
 
-```text
-deploy/Dockerfile
-deploy/.dockerignore
-deploy/compose.yaml
-deploy/k8s/modb.yaml
-deploy/entrypoint.sh
-```
+## Testes automatizados
 
-Imagem multi-stage mínima, não privilegiada, rootfs read-only; config só por
-env/secrets; volume para `<db>`+`<db>.wal`; ingresso do protocolo da Fase 8
-via `modb serve --from-env` / `serve_forever`.
+`tests/async_file_test.cpp` (`modb.async_file`) cobre round-trip posicional,
+leituras concorrentes, fila limitada, cancelamento, erro propagado como
+`Result`, flush/sync e fallback síncrono.
 
-Critério: compose local sobe, monta volume e completa handshake/cliente. Tag:
-`0.0.13c`.
+## Critério de conclusão
 
-## Fase 13D — Probes, shutdown e recovery
-
-Status: ✅ Concluída — tag `0.0.13d` (2026-07-19).
-
-Readiness/liveness/startup via `MODB_READY_FILE`/`MODB_LIVE_FILE`;
-`Server::request_stop` + SIGTERM/SIGINT; prova cold start e stop limpo em
-`modb.server_lifecycle` (kill -9 continua coberto por `modb tx crash`).
-
-Critério: commits preservados, incompletos ausentes; readiness pós-recovery.
-Tag: `0.0.13d`.
-
-## Fase 13E — Observabilidade, CI e guia
-
-Status: ✅ Concluída — tag `0.0.13e` (2026-07-19).
-
-Artefatos:
-
-```text
-docs/OPERACAO_SERVERLESS.md
-.github/workflows/oci-image.yml
-```
-
-Logs/métricas (`METRICS` / `MODB_METRICS_FILE`: cold start, async backend);
-publish versionado; guia operacional com backup/restore e restrição
-multi-writer.
-
-Critério: pipeline publica; guia opera do zero; métricas observáveis. Tag:
-`0.0.13e`.
-
-## Critério de conclusão (fase)
-
-Imagem inicia sem estado local prévio, monta volume durável, recupera WAL,
-atende cliente remoto, sobrevive a término forçado e encerra graciosamente.
+Todos os fluxos cobertos passam com backend assíncrono e fallback síncrono;
+nenhuma falha encerra o processo; a ordem de durabilidade do WAL permanece
+inalterada; benchmarks registram impacto medido. Tag alvo: `0.0.13`.
 
 ---
 
 # Fase 14 — Réplica de leitura por streaming do WAL
 
-## Objetivo
+## Sequência de entregas verticais
 
 Manter um follower read-only continuamente atualizado a partir do WAL do
 primary, escalando leitura sem violar o single-writer. Esta fase começa depois
 das Fases 5, 6 e 8: WAL/recuperação, snapshots/MVCC e rede com backpressure
 precisam existir. Ela também **transforma o WAL efêmero atual em um WAL
-durável, segmentado e retido** — pré-requisito da replicação.
+durável, segmentado e retido** — pré-requisito da replicação. Decisão:
+[ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
+
+Cinco entregas: 14A (identidade) → 14B (WAL v2) → 14C (protocolo/bootstrap) →
+14D (streaming/applier/read-only) → 14E (reconexão/CLI/docs).
 
 ## Decisões fixadas (conteúdo da ADR-016)
 
@@ -2046,26 +2017,6 @@ durável, segmentado e retido** — pré-requisito da replicação.
 7. **Consistência conservadora.** Query/snapshot com lock compartilhado; apply
    com lock exclusivo; nova época só visível após apply completo; sem GC local.
 
-## Artefatos novos
-
-```text
-docs/decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md
-docs/OPERACAO_REPLICACAO.md
-include/modb/tx/wal.hpp                 (WAL v2: LSN global, commit_lsn, segmentos)
-include/modb/repl/replication.hpp       (serviço do primary + applier do follower)
-include/modb/net/replication_protocol.hpp
-src/tx/wal_v2.cpp
-src/repl/primary_stream.cpp
-src/repl/follower_apply.cpp
-src/net/replication_protocol.cpp
-tests/wal_v2_test.cpp
-tests/replication_protocol_test.cpp
-tests/replication_bootstrap_test.cpp
-tests/replication_apply_test.cpp
-tests/replication_recovery_test.cpp
-tests/replication_streaming_test.cpp
-```
-
 ## Formato do canal de replicação
 
 Reutiliza o framing da Fase 8 (`length u32 | type u8 | payload`) em um espaço
@@ -2084,53 +2035,219 @@ de mensagens próprio, autenticado e incompatível com o cliente de consulta:
 | `ReplicationHeartbeat` | `primary_commit_lsn` (mesmo sem tráfego) |
 | `ReplicationError` / `Cancel` | ErrorCode + mensagem |
 
-## Passo a passo
+## Fase 14A — ADR e identidade persistente
 
-1. Escrever a [ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
-2. WAL v2: adicionar LSN global persistente e `commit_lsn`; parar de reiniciar
-   `lsn`/`tx_id`; segmentar; validar continuidade, sequência begin/commit e CRC
-   no leitor de replicação (truncamento de rede é erro, não fim lógico).
-3. Identidade: gerar/gravar `DatabaseUuid` e `timeline_id`; expor no handshake.
-4. Retenção: transformar checkpoint em posição persistente; reter segmentos até
-   checkpoint + ACK; expor `oldest_available_lsn`.
-5. Bootstrap: barreira do escritor → fixar `(cut_lsn, epoch, baseline)` → copiar
-   arquivo consistente → enviar manifesto+chunks → follower grava em temporário,
-   `sync`, valida hash e renomeia atomicamente.
-6. Streaming: primary envia `WalFrame` incremental com backpressure/heartbeat;
-   cancelamento encerra o stream sem corromper o WAL.
-7. Applier: spool durável → apply de after-images sob lock exclusivo → flush →
-   persistir `applied_lsn` → ressincronizar `ObjectStore` → `WalAck`.
-8. Read-only: `begin`/bind/GC/operações de escrita retornam `replica_read_only`;
-   leitura/snapshot/operações read-only permitidas.
-9. Reconexão/gap: reabrir de `applied_lsn + 1`; UUID/timeline divergente,
-   ordem quebrada ou gap interrompem apply; abaixo da retenção → `WalGap` e novo
-   bootstrap.
-10. CLI `modb replicate serve/follow/status`; failpoints (queda no apply, no
-    bootstrap, após ACK) provando idempotência; documentar em
-    `OPERACAO_REPLICACAO.md`.
+Artefatos:
 
-## Testes
+```text
+docs/decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md
+include/modb/object/ids.hpp              (DatabaseUuid)
+include/modb/object/database_root.hpp    (uuid + timeline_id + next_lsn)
+tests/database_identity_test.cpp
+```
 
-- `wal_v2_test`: LSN global monotônico entre sessões, `commit_lsn`, segmentos,
-  leitura a partir de um LSN, rejeição de truncamento como fim válido.
-- `replication_protocol_test`: encode/decode e validação de todas as mensagens;
-  frames grandes; UUID/timeline mismatch; cancelamento.
-- `replication_bootstrap_test`: snapshot base consistente sob barreira; follower
-  reconstrói e assina de `cut_lsn + 1`.
-- `replication_apply_test`: apply idempotente, reaplicação de LSN duplicado,
-  recusa de gap, ACK só após durabilidade.
-- `replication_recovery_test`: queda do follower antes/depois do ACK e no meio
-  do apply; retomada correta.
-- `replication_streaming_test`: fluxo contínuo, backpressure, heartbeat,
-  reconexão de `applied_lsn + 1`, `WalGap` forçando rebootstrap.
+Gravar `DatabaseUuid` e `timeline_id` no DBRT; gerar UUID na criação do banco;
+sobreviver a reabertura. `DatabaseId` de runtime não os substitui. ErrorCodes
+`database_uuid_mismatch` / `timeline_mismatch` entram no mapa (usados nas
+subfases seguintes).
 
-## Critério de conclusão
+Critério: `modb.database_identity`. Tag: `0.0.14a`.
+
+## Fase 14B — WAL v2: LSN global, segmentos e retenção
+
+Artefatos:
+
+```text
+include/modb/tx/wal.hpp                  (WAL v2)
+src/tx/wal_v2.cpp                        (ou evolução de wal.cpp)
+tests/wal_v2_test.cpp
+```
+
+LSN global monotônico por banco, nunca reiniciado; `commit_lsn` na fronteira de
+cada transação; segmentos append-only; checkpoint como posição persistente;
+retenção até checkpoint + ACK do follower; `oldest_available_lsn`. O leitor de
+replicação valida continuidade, sequência begin/commit e CRC — truncamento de
+rede é erro, não fim lógico.
+
+Critério: `modb.wal_v2`. Tag: `0.0.14b`.
+
+## Fase 14C — Protocolo e bootstrap consistente
+
+Artefatos:
+
+```text
+include/modb/net/replication_protocol.hpp
+src/net/replication_protocol.cpp
+src/repl/bootstrap.cpp                   (barreira + manifesto + chunks)
+tests/replication_protocol_test.cpp
+tests/replication_bootstrap_test.cpp
+```
+
+Encode/decode de todas as mensagens do canal privilegiado. Bootstrap: barreira
+do escritor → fixar `(cut_lsn, epoch, baseline)` → copiar arquivo consistente →
+enviar manifesto+chunks → follower grava em temporário, `sync`, valida hash e
+renomeia atomicamente; assina de `cut_lsn + 1`.
+
+Critério: `modb.replication_protocol` + `modb.replication_bootstrap`. Tag:
+`0.0.14c`.
+
+## Fase 14D — Streaming, applier e follower read-only
+
+Artefatos:
+
+```text
+include/modb/repl/replication.hpp
+src/repl/primary_stream.cpp
+src/repl/follower_apply.cpp
+tests/replication_apply_test.cpp
+tests/replication_streaming_test.cpp
+```
+
+Primary envia `WalFrame` incremental com backpressure/heartbeat/cancel.
+Applier: spool durável → apply de after-images sob lock exclusivo → flush →
+persistir `applied_lsn` → ressincronizar `ObjectStore` → `WalAck`. Follower
+read-only: `begin`/bind/GC/escritas → `replica_read_only`; query/snapshot com
+lock compartilhado; sem GC local independente.
+
+Critério: `modb.replication_apply` + fluxo contínuo em
+`modb.replication_streaming`. Tag: `0.0.14d`.
+
+## Fase 14E — Reconexão, CLI e fechamento
+
+Artefatos:
+
+```text
+apps/modb_cli/main.cpp                   (replicate serve/follow/status)
+docs/OPERACAO_REPLICACAO.md
+docs/USO_DA_CLI.md
+tests/replication_recovery_test.cpp
+tests/replication_streaming_test.cpp     (reconexão / WalGap)
+```
+
+Reconexão de `applied_lsn + 1`; UUID/timeline divergente, ordem quebrada ou gap
+interrompem apply; abaixo da retenção → `WalGap` e novo bootstrap. Failpoints
+(queda no apply, no bootstrap, após ACK). CLI e guia operacional; suítes
+`debug` e `sanitizers` verdes em Linux e Windows.
+
+Critério: recovery + reconexão/`WalGap` + CLI/docs. Tag: `0.0.14e`.
+
+## Critério de conclusão (fase)
 
 O follower faz bootstrap consistente, acompanha commits do primary e, após
 queda/reconexão, retoma de `applied_lsn + 1` sem perder nem duplicar efeitos.
 Gap além da retenção força novo bootstrap explícito. Escritas no follower são
 rejeitadas e nenhuma leitura observa estado parcial de uma transação replicada.
-Suítes `debug` e `sanitizers` verdes em Linux e Windows.
+
+---
+
+# Fase 15 — Primary `wal_only`: só WAL, dados nas réplicas
+
+## Sequência de entregas verticais
+
+Permitir que o primary de escrita, via parâmetro, **não crie arquivos de
+dados** — apenas mantenha o WAL e replique; as instâncias de leitura mantêm os
+arquivos de dados. Depende da Fase 14 completa (WAL v2, protocolo, applier,
+follower read-only). Decisão:
+[ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md).
+
+Cinco entregas: 15A (parâmetro) → 15B (primary sem data files) → 15C
+(ACK/retenção) → 15D (bootstrap/seed) → 15E (CLI/docs).
+
+## Decisões fixadas (conteúdo da ADR-017)
+
+1. **Parâmetro.** `primary_storage`: `full` (default) | `wal_only`. Só no
+   primary; follower com `wal_only` → `invalid_instance_config`.
+2. **Primary `wal_only`.** Persiste WAL + identidade/controle do log; não cria
+   nem checkpointa arquivo de páginas; after-images em memória/scratch.
+3. **Réplicas.** Donas dos arquivos de dados; apply da Fase 14 inalterado em
+   espírito; leituras de objetos vivem nelas.
+4. **Commit.** Default: confirmar ao cliente após ACK de ≥1 réplica de dados;
+   retenção do WAL no primary guiada por esses ACKs.
+5. **Bootstrap.** Sem cópia de arquivo do primary; seed vazio+WAL ou snapshot
+   doado por réplica de dados.
+6. **Fora.** Promoção automática, multi-writer, primary sem WAL.
+
+## Fase 15A — ADR e parâmetro de instância
+
+Artefatos:
+
+```text
+docs/decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md
+include/modb/object/database.hpp     (PrimaryStorage / opções de abertura)
+tests/primary_storage_config_test.cpp
+```
+
+Expor `primary_storage` na API de abertura e na CLI; validar combinação com
+papel primary/follower; default `full`.
+
+Critério: `modb.primary_storage_config`. Tag: `0.0.15a`.
+
+## Fase 15B — Primary sem arquivos de dados
+
+Artefatos:
+
+```text
+src/object/database.cpp              (ramo wal_only)
+src/tx/wal*.cpp
+tests/wal_only_primary_test.cpp
+```
+
+Com `wal_only`: não criar/abrir PageFile durável; commits appendam ao WAL;
+reabertura restaura UUID/timeline/`next_lsn` do log/controle. Erro
+`data_files_disabled` se código tentar materializar heap local.
+
+Critério: `modb.wal_only_primary`. Tag: `0.0.15b`.
+
+## Fase 15C — Réplicas donas dos dados e política de commit
+
+Artefatos:
+
+```text
+src/repl/primary_stream.cpp          (espera ACK / política)
+tests/wal_only_commit_ack_test.cpp
+```
+
+Commit ao cliente sob política de ACK; sem réplica de dados →
+`no_data_replica` ou `commit_await_replica_timeout`. Retenção de segmentos
+sem checkpoint de páginas no primary.
+
+Critério: `modb.wal_only_commit_ack`. Tag: `0.0.15c`.
+
+## Fase 15D — Bootstrap/seed sem dados no primary
+
+Artefatos:
+
+```text
+src/repl/bootstrap.cpp               (seed vazio / doação entre réplicas)
+tests/wal_only_bootstrap_test.cpp
+```
+
+Réplica nova: arquivo de dados vazio compatível + apply desde origem; ou
+bootstrap a partir de outra réplica de dados. Primary `wal_only` nunca é fonte
+de snapshot de páginas.
+
+Critério: `modb.wal_only_bootstrap`. Tag: `0.0.15d`.
+
+## Fase 15E — CLI, operação e fechamento
+
+Artefatos:
+
+```text
+apps/modb_cli/main.cpp
+docs/OPERACAO_REPLICACAO.md          (seção wal_only)
+docs/USO_DA_CLI.md
+```
+
+Flags/status (`primary_storage`, ACKs, lag); failpoints; guia operacional;
+suítes `debug` e `sanitizers` verdes.
+
+Critério: fluxo CLI ponta a ponta + docs. Tag: `0.0.15e`.
+
+## Critério de conclusão (fase)
+
+Com `primary_storage=wal_only`, o primary não possui arquivo de dados; commits
+seguem no WAL e para as réplicas; as réplicas mantêm os dados e servem leitura;
+bootstrap/seed não depende de snapshot do primary; suítes verdes.
 
 ---
 
@@ -2147,6 +2264,7 @@ Suítes `debug` e `sanitizers` verdes em Linux e Windows.
 | 11 | `facade_not_found`, `facade_method_not_found`, `incompatible_facade_version` |
 | 12 | `invalid_edge`, `graph_limit_exceeded`, `graph_cycle`, `edge_target_not_found` |
 | 14 | `replica_read_only`, `replication_gap`, `timeline_mismatch`, `database_uuid_mismatch`, `bootstrap_required` |
+| 15 | `invalid_instance_config`, `data_files_disabled`, `no_data_replica`, `commit_await_replica_timeout` |
 
 # Apêndice B — Mapa de páginas do formato
 
