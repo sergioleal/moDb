@@ -1,4 +1,4 @@
-# Execução de Código de Domínio no ODB++
+# Execução de Código de Domínio no Ring0
 
 ## Arquitetura de Módulos C++ Executáveis
 
@@ -8,7 +8,7 @@ Versão: 0.2
 
 # Objetivo
 
-O ODB++ permite que aplicações registrem código C++ executável dentro do servidor do banco.
+O Ring0 permite que aplicações registrem código C++ executável dentro do servidor do banco.
 
 O objetivo não é reproduzir Stored Procedures SQL, mas permitir que regras de domínio, algoritmos e operações transacionais sejam executados próximas dos dados.
 
@@ -680,9 +680,7 @@ A recomendação é executar cada instância sob supervisão.
 Exemplos
 
 * systemd
-* Kubernetes
 * Windows Service Recovery
-* Docker Restart Policy
 
 ---
 

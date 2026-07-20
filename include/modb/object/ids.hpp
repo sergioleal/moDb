@@ -1,6 +1,7 @@
 #pragma once
 
 // Disponibiliza inteiros com largura fixa para os identificadores.
+#include <array>
 #include <cstdint>
 
 namespace modb::object {
@@ -35,6 +36,30 @@ struct DatabaseId {
     std::uint32_t value{};
 
     friend bool operator==(DatabaseId, DatabaseId) = default;
+};
+
+// Identidade persistente do arquivo de banco (Fase 14 / ADR-016). Gerada uma
+// vez na criação e gravada no DBRT; distinta de DatabaseId (runtime).
+struct DatabaseUuid {
+    std::array<std::uint8_t, 16> bytes{};
+
+    [[nodiscard]] bool is_nil() const noexcept {
+        for (const auto b : bytes) {
+            if (b != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    friend bool operator==(const DatabaseUuid&, const DatabaseUuid&) = default;
+};
+
+// Linha do tempo do banco; muda em restore/recriação divergente (Fase 14).
+struct TimelineId {
+    std::uint64_t value{1};
+
+    friend bool operator==(TimelineId, TimelineId) = default;
 };
 
 // O catálogo também é composto por objetos: a identidade de uma

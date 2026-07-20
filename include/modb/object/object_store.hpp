@@ -108,6 +108,23 @@ public:
         return current_baseline_;
     }
     [[nodiscard]] std::uint64_t epoch() const noexcept { return root_.epoch(); }
+    [[nodiscard]] DatabaseUuid database_uuid() const noexcept { return root_.database_uuid(); }
+    [[nodiscard]] TimelineId timeline_id() const noexcept { return root_.timeline_id(); }
+    [[nodiscard]] std::uint64_t next_lsn() const noexcept { return root_.next_lsn(); }
+    [[nodiscard]] std::uint64_t checkpoint_lsn() const noexcept { return root_.checkpoint_lsn(); }
+    [[nodiscard]] std::uint64_t follower_ack_lsn() const noexcept {
+        return root_.follower_ack_lsn();
+    }
+    [[nodiscard]] std::uint64_t oldest_available_lsn() const noexcept {
+        return root_.oldest_available_lsn();
+    }
+    [[nodiscard]] Result<void> set_next_lsn(std::uint64_t next) { return root_.set_next_lsn(next); }
+    [[nodiscard]] Result<void> set_checkpoint_lsn(std::uint64_t lsn) {
+        return root_.set_checkpoint_lsn(lsn);
+    }
+    [[nodiscard]] Result<void> set_follower_ack_lsn(std::uint64_t lsn) {
+        return root_.set_follower_ack_lsn(lsn);
+    }
     // Total de registros físicos vivos no heap de dados (Fase 6C): inclui as
     // versões `previous` ainda preservadas e cópias órfãs ainda não coletadas.
     // Diagnóstico read-only, usado por testes e pela CLI para observar o efeito

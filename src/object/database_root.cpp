@@ -8,7 +8,10 @@
 #include <array>
 // Disponibiliza std::equal ao comparar o magic.
 #include <algorithm>
+#include <chrono>
 #include <limits>
+#include <random>
+#include <span>
 // Disponibiliza std::to_string nas mensagens de erro.
 #include <string>
 
@@ -33,6 +36,21 @@ std::optional<PageId> optional_page(std::uint64_t value) {
     return PageId{value};
 }
 
+DatabaseUuid generate_database_uuid() {
+    DatabaseUuid uuid{};
+    std::random_device rd;
+    std::mt19937_64 gen{rd() ^ static_cast<std::uint64_t>(
+                                    std::chrono::steady_clock::now().time_since_epoch().count())};
+    std::uniform_int_distribution<unsigned> dist(0, 255);
+    for (auto& byte : uuid.bytes) {
+        byte = static_cast<std::uint8_t>(dist(gen));
+    }
+    // Variante RFC 4122-ish: version 4 + variant 10xx.
+    uuid.bytes[6] = static_cast<std::uint8_t>((uuid.bytes[6] & 0x0F) | 0x40);
+    uuid.bytes[8] = static_cast<std::uint8_t>((uuid.bytes[8] & 0x3F) | 0x80);
+    return uuid;
+}
+
 } // namespace
 
 Result<DatabaseRoot> DatabaseRoot::create(storage::PageFile& file) {
@@ -43,6 +61,9 @@ Result<DatabaseRoot> DatabaseRoot::create(storage::PageFile& file) {
     }
     // Monta o objeto com os campos zerados (next_object_id já no piso de usuário).
     DatabaseRoot root{file, *page_id};
+    root.database_uuid_ = generate_database_uuid();
+    root.timeline_id_ = 1;
+    root.next_lsn_ = 1;
     if (auto persisted = root.persist(); !persisted) {
         return std::unexpected(persisted.error());
     }
@@ -122,6 +143,32 @@ Result<DatabaseRoot> DatabaseRoot::open(storage::PageFile& file) {
         if (auto index_dir = reader.read_u64(); index_dir) {
             root.index_dir_ = *index_dir;
         }
+        // Fase 14: uuid (16) + timeline + next_lsn — ausentes em arquivos antigos.
+        if (auto uuid_bytes = reader.read_bytes(16); uuid_bytes) {
+            for (std::size_t i = 0; i < 16; ++i) {
+                root.database_uuid_.bytes[i] = static_cast<std::uint8_t>((*uuid_bytes)[i]);
+            }
+        }
+        if (auto timeline = reader.read_u64(); timeline) {
+            root.timeline_id_ = *timeline == 0 ? 1 : *timeline;
+        }
+        if (auto next_lsn = reader.read_u64(); next_lsn) {
+            root.next_lsn_ = *next_lsn == 0 ? 1 : *next_lsn;
+        }
+        if (auto checkpoint = reader.read_u64(); checkpoint) {
+            root.checkpoint_lsn_ = *checkpoint;
+        }
+        if (auto ack = reader.read_u64(); ack) {
+            root.follower_ack_lsn_ = *ack;
+        }
+        if (root.database_uuid_.is_nil()) {
+            root.database_uuid_ = generate_database_uuid();
+            root.timeline_id_ = root.timeline_id_ == 0 ? 1 : root.timeline_id_;
+            root.next_lsn_ = root.next_lsn_ == 0 ? 1 : root.next_lsn_;
+            if (auto upgraded = root.persist(); !upgraded) {
+                return std::unexpected(upgraded.error());
+            }
+        }
     } else if (auto upgraded = root.persist(); !upgraded) {
         return std::unexpected(upgraded.error());
     }
@@ -153,6 +200,13 @@ Result<void> DatabaseRoot::persist() {
     writer.write_u64(current_baseline_);
     writer.write_u64(epoch_);
     writer.write_u64(index_dir_);
+    writer.write_bytes(std::span<const std::byte>{
+        reinterpret_cast<const std::byte*>(database_uuid_.bytes.data()),
+        database_uuid_.bytes.size()});
+    writer.write_u64(timeline_id_);
+    writer.write_u64(next_lsn_);
+    writer.write_u64(checkpoint_lsn_);
+    writer.write_u64(follower_ack_lsn_);
 
     Page page;
     const auto bytes = writer.bytes();
@@ -231,6 +285,69 @@ Result<void> DatabaseRoot::advance_epoch() {
         return std::unexpected(persisted.error());
     }
     return {};
+}
+
+Result<void> DatabaseRoot::set_database_uuid(DatabaseUuid uuid) {
+    const auto previous = database_uuid_;
+    database_uuid_ = uuid;
+    if (auto persisted = persist(); !persisted) {
+        database_uuid_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+Result<void> DatabaseRoot::set_timeline_id(TimelineId timeline) {
+    const auto previous = timeline_id_;
+    timeline_id_ = timeline.value == 0 ? 1 : timeline.value;
+    if (auto persisted = persist(); !persisted) {
+        timeline_id_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+Result<void> DatabaseRoot::set_next_lsn(std::uint64_t next) {
+    if (next == 0) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "next_lsn must be >= 1"});
+    }
+    const auto previous = next_lsn_;
+    next_lsn_ = next;
+    if (auto persisted = persist(); !persisted) {
+        next_lsn_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+Result<void> DatabaseRoot::set_checkpoint_lsn(std::uint64_t lsn) {
+    const auto previous = checkpoint_lsn_;
+    checkpoint_lsn_ = lsn;
+    if (auto persisted = persist(); !persisted) {
+        checkpoint_lsn_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+Result<void> DatabaseRoot::set_follower_ack_lsn(std::uint64_t lsn) {
+    const auto previous = follower_ack_lsn_;
+    follower_ack_lsn_ = lsn;
+    if (auto persisted = persist(); !persisted) {
+        follower_ack_lsn_ = previous;
+        return std::unexpected(persisted.error());
+    }
+    return {};
+}
+
+std::uint64_t DatabaseRoot::oldest_available_lsn() const noexcept {
+    if (checkpoint_lsn_ == 0) {
+        return 1;
+    }
+    if (follower_ack_lsn_ == 0) {
+        return checkpoint_lsn_;
+    }
+    return checkpoint_lsn_ < follower_ack_lsn_ ? checkpoint_lsn_ : follower_ack_lsn_;
 }
 
 } // namespace modb::object

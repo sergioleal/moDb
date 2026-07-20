@@ -1,4 +1,7 @@
-# Formato de arquivo do moDb (ODB++)
+# Formato de arquivo do Ring0
+
+O magic de arquivo (`MODB`), o namespace, a CLI e alguns nomes de pacote ainda
+usam o identificador técnico `modb` / `moDb`.
 
 Estado: consolidado na **Fase 10F**. Compatibilidade major/minor:
 [COMPATIBILIDADE.md](COMPATIBILIDADE.md) · [ADR-015](decisions/ADR-015-compatibilidade.md).

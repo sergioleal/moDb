@@ -81,7 +81,7 @@ public:
     // Aceita sessões em loop até `request_stop()` ou falha do listener.
     [[nodiscard]] Result<void> serve_forever();
 
-    // Fecha o listener para despertar `accept` e encerrar o loop (SIGTERM / probe).
+    // Fecha o listener para despertar `accept` e encerrar o loop (SIGINT/SIGTERM).
     void request_stop() noexcept;
     [[nodiscard]] bool stop_requested() const noexcept { return stop_requested_.load(); }
 

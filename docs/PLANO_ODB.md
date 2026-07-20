@@ -1,8 +1,10 @@
-# Plano de desenvolvimento do ODB++ (moDb)
+# Plano de desenvolvimento do Ring0
 
 > Este plano substitui o `PLANO_DE_DESENVOLVIMENTO.md` relacional. O produto
 > deixa de ser um banco relacional e passa a ser um banco **nativamente
-> Orientado a Objetos**, conforme os três documentos de visão:
+> Orientado a Objetos**. `moDb`/`modb` permanecem como identificadores técnicos
+> de repositório, namespace, CLI e pacote CMake. O plano segue os três
+> documentos de visão:
 >
 > - [arquitetura.md](../arquitetura.md) — modelo de objetos, catálogo, codec,
 >   binding, projeção e evolução de schema;
@@ -27,7 +29,7 @@ subsistemas isolados antes do primeiro resultado funcional.
 
 A fundação física construída até aqui permanece e vira a base do ObjectStore:
 
-| Componente atual | Papel no ODB++ |
+| Componente atual | Papel no Ring0 |
 |---|---|
 | `NativeFile` (I/O posicional + fsync) | inalterado — durabilidade real |
 | `PageFile` (superbloco, alocação) | inalterado — o campo `catalog_root` já existe |
@@ -70,8 +72,9 @@ Mantida do plano anterior. Uma tarefa só está concluída quando:
 | 10 | Desempenho e estabilização | benchmarks, buffer pool, fuzzing | todas |
 | 11 | Catálogo de facades e handles | `FacadeHandle` tipado sobre operações (11A–11D) | 9, 10 |
 | 12 | Handles de arestas e algoritmos de grafos | BFS/DFS e caminhos sobre relacionamentos tipados (12A–12E) | 4, 6, 7, 10 |
-| 13 | Container serverless | imagem OCI com escala a zero e dados duráveis (13A–13E) | 8, 9, 10, 11, 12 |
-| 14 | Réplica de leitura por streaming do WAL | follower read-only atualizado por WAL contínuo | 5, 6, 8 |
+| 13 | I/O assíncrono | backend nativo opcional para I/O posicional assíncrono com fallback síncrono | 5, 8, 10 |
+| 14 | Réplica de leitura por streaming do WAL | follower read-only atualizado por WAL contínuo (14A–14E) | 5, 6, 8 |
+| 15 | Primary `wal_only` (só WAL; dados nas réplicas) | parâmetro: primary sem arquivos de dados (15A–15E) | 14 |
 
 O **MVP OO** compreende as fases 0 a 3. Critério, análogo ao MVP relacional:
 criar um tipo `Employee`, persistir um objeto, fechar completamente a
@@ -577,7 +580,7 @@ Tarefas:
 - [x] Migrações como Operations, reutilizando a mesma infraestrutura
       (`MigrationOperation` → ExecutionContext → Transaction → Projection).
 - [x] Documentar o modelo de falhas: crash do módulo encerra a instância;
-      recuperação por supervisor externo (systemd/Kubernetes/Windows Service)
+      recuperação por supervisor externo (systemd/Windows Service)
       + WAL recovery. Sem sandbox no primeiro runtime, por decisão registrada.
 - [x] Exemplo completo `TransferFunds` de ponta a ponta com teste de
       atomicidade (saldo insuficiente → rollback).
@@ -748,7 +751,7 @@ algoritmos básicos de grafos sob snapshot, reutilizando `Ref<T>`,
 `EdgeHandle<From, To, Kind>` é uma visão runtime da aresta: guarda
 `DatabaseId`, origem, alvo e `FieldId`, mas não é persistido. `Ref<T>` e
 `OwnedRef<T>` continuam sendo a representação no arquivo; `Embedded<T>` não é
-vértice. ([ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md)).
+vértice. ([ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md)).
 
 A fase é dividida em cinco entregas verticais, cada uma com teste e tag própria.
 
@@ -756,7 +759,7 @@ A fase é dividida em cinco entregas verticais, cada uma com teste e tag própri
 
 - [x] Registrar em ADR identidade, persistência, direção, ownership e política
       de referências órfãs para arestas
-      ([ADR-015](decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md)).
+      ([ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md)).
 - [x] Implementar `EdgeHandle<From, To, EdgeKind>` runtime-only, com origem,
       alvo, `FieldId` e resolução sob `Snapshot`.
 - [x] Implementar factories tipadas para campos escalares `Ref<T>` e
@@ -808,86 +811,38 @@ registrados no runner. Tag: `0.0.12e`.
 
 Entregáveis: `EdgeHandle` tipado; `GraphView`/provedor de adjacência; BFS,
 DFS, caminho mínimo, ciclo, ordenação topológica e componentes; CLI, testes,
-benchmarks e ADR-015.
+benchmarks e ADR-018.
 
-### Fase 13 — Container serverless
+### Fase 13 — I/O assíncrono
 
-Objetivo: empacotar e operar o servidor moDb em uma plataforma de containers
-serverless, preservando as garantias de durabilidade e recuperação do banco.
+Objetivo: introduzir I/O posicional assíncrono como otimização explícita e
+opcional, preservando a semântica de durabilidade, recuperação e backpressure
+já comprovada nas fases anteriores.
 
-O moDb continua stateful: o disco efêmero do container não é fonte de verdade
-e a fase não introduz escala horizontal de escrita. A implantação inicial usa
-um volume persistente compatível com escrita posicional e `fsync`, uma única
-instância ativa por banco e escala a zero quando o serviço está ocioso.
+A fase não muda o formato em disco nem a API pública de objetos. Ela fornece um
+backend nativo para filas de leitura/escrita quando o sistema operacional
+suportar, com fallback síncrono de mesmo contrato para ambientes sem backend
+assíncrono.
 
-A fase é dividida em cinco entregas verticais, cada uma com prova e tag própria.
+Tarefas:
 
-#### Fase 13A — ADR e modelo de implantação
+- [ ] Definir a ADR da camada de I/O assíncrono: contrato, backend por sistema
+      operacional, fallback, cancelamento e relação com `NativeFile`.
+- [ ] Introduzir `AsyncFile`/executor de I/O posicional sem expor detalhes do
+      sistema operacional às camadas de objeto, WAL ou rede.
+- [ ] Integrar o backend ao caminho de leitura/escrita sem alterar a ordem de
+      durabilidade do WAL nem a recuperação da Fase 5.
+- [ ] Propagar backpressure entre storage, servidor e streaming, evitando filas
+      ilimitadas.
+- [ ] Manter modo síncrono como baseline e como fallback determinístico.
+- [ ] Testar cancelamento, falha de I/O, flush/sync, fallback e concorrência.
+- [ ] Medir impacto em benchmarks de leitura quente/fria e buffer pool.
+- [ ] Documentar limites operacionais e quando habilitar o backend assíncrono.
 
-- [x] Registrar em ADR o modelo de implantação, incluindo volume persistente,
-      instância escritora única, cold start, escala a zero e plataformas
-      serverless suportadas
-      ([ADR-013](decisions/ADR-013-execucao-serverless-em-container.md)).
-
-Critério de aceite: ADR-013 aceita e referenciada pelo protocolo/rastreador.
-Tag: `0.0.13a`.
-
-#### Fase 13B — I/O assíncrono real
-
-- [x] Implementar I/O assíncrono real sob uma abstração única: `io_uring` no
-      Linux e IOCP no Windows, com leitura, escrita, flush, cancelamento,
-      limites de operações em voo e fallback síncrono detectado em runtime.
-- [x] Garantir que a ordem WAL → flush → páginas depende de completions /
-      barreiras explícitas, nunca só da ordem de submissão.
-
-Critério de aceite: `modb.async_file` comprova completions reais (ou fallback
-explícito) e ordering de durabilidade. Tag: `0.0.13b`.
-
-#### Fase 13C — Imagem OCI, config e volume
-
-- [x] Criar imagem OCI reproduzível em build multi-stage, mínima, executada por
-      usuário não privilegiado e com filesystem raiz somente leitura.
-- [x] Configurar banco, porta, credenciais e limites somente por variáveis de
-      ambiente e secrets; nunca incluir segredos ou dados na imagem.
-- [x] Montar os arquivos do banco e WAL em armazenamento persistente com as
-      garantias de locking, flush e atomicidade exigidas pelo motor.
-- [x] Adaptar o protocolo da fase 8 ao ingresso suportado pela plataforma
-      escolhida, sem expor o formato físico nem enfraquecer backpressure.
-
-Critério de aceite: imagem sobe localmente (compose) com volume montado e
-atende handshake/cliente da Fase 8. Tag: `0.0.13c`.
-
-#### Fase 13D — Probes, shutdown e recovery
-
-- [x] Implementar readiness, liveness, startup probe e desligamento gracioso,
-      bloqueando novas operações e concluindo ou revertendo transações antes do
-      prazo de término da plataforma.
-- [x] Comprovar recovery no cold start e após término forçado do container,
-      incluindo banco com WAL pendente.
-
-Critério de aceite: kill -9 + reabertura no mesmo volume preserva commits e
-descarta incompletos; readiness só após recovery. Tag: `0.0.13d`.
-
-#### Fase 13E — Observabilidade, CI e guia operacional
-
-- [x] Adicionar logs estruturados e métricas de cold start, recovery, conexões,
-      transações, memória, I/O e duração das requisições.
-- [x] Automatizar build, SBOM, scan de vulnerabilidades e publicação versionada
-      da imagem OCI.
-- [x] Documentar execução local e implantação de referência
-      (`OPERACAO_SERVERLESS.md`), incluindo backup/restauração e restrições.
-
-Critério de aceite: pipeline publica imagem versionada; guia permite operar do
-zero; métricas de I/O/backend observáveis. Tag: `0.0.13e`.
-
-Entregáveis: imagem OCI publicada; manifesto de implantação serverless de
-referência; camada de I/O assíncrono real; guia operacional; testes de
-container, cold start e recovery.
-
-Critério de aceite da fase: a imagem sobe a partir de zero, monta armazenamento
-durável, recupera o banco quando necessário e atende um cliente das fases
-8/9/11/12; após término completo e nova inicialização, os objetos commitados
-permanecem e transações incompletas não aparecem.
+Critério de aceite: os mesmos fluxos de persistência/recovery passam com backend
+assíncrono e fallback síncrono; falhas retornam `Result`; backpressure impede
+crescimento não limitado de filas; benchmarks registram ganho ou custo medido.
+Tag alvo: `0.0.13`.
 
 ### Fase 14 — Réplica de leitura por streaming do WAL
 
@@ -904,46 +859,150 @@ automático e replicação síncrona/quórum ficam fora desta fase; ver
 Esta fase depende de tornar o WAL durável: hoje ele é recriado e removido a
 cada commit e o `lsn` reinicia por sessão, o que impede reconexão e histórico.
 
-Tarefas:
+A fase é dividida em cinco entregas verticais, cada uma com teste e tag própria.
 
-- [ ] Registrar em ADR o modelo de replicação física read-only, WAL durável,
-      retenção, consistência na réplica e papel do follower.
-      ([ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md))
-- [ ] Dar identidade persistente ao banco: `DatabaseUuid` e `timeline_id`
-      gravados no DBRT ou em página de controle.
-- [ ] Evoluir o WAL para v2 com LSN global monotônico persistente (nunca
+#### Fase 14A — ADR e identidade persistente
+
+- [x] Registrar em ADR o modelo de replicação física read-only, WAL durável,
+      retenção, consistência na réplica e papel do follower
+      ([ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md)).
+- [x] Dar identidade persistente ao banco: `DatabaseUuid` e `timeline_id`
+      gravados no DBRT (ou página de controle); expor no handshake futuro.
+
+Critério de aceite: `modb.database_identity` — UUID/timeline sobrevivem a
+reabertura; `DatabaseId` de runtime não os substitui. Tag: `0.0.14a`.
+
+#### Fase 14B — WAL v2: LSN global, segmentos e retenção
+
+- [x] Evoluir o WAL para v2 com LSN global monotônico persistente (nunca
       reiniciado) e `commit_lsn` na fronteira de cada transação.
-- [ ] Segmentar o WAL, transformar checkpoint em posição persistente e
-      implementar política de retenção por checkpoint e ACK do follower.
-- [ ] Implementar snapshot base consistente via barreira do escritor para o
-      bootstrap inicial do follower.
-- [ ] Definir o canal/protocolo de replicação privilegiado (hello, bootstrap,
+- [x] Segmentar o WAL, transformar checkpoint em posição persistente e
+      implementar política de retenção por checkpoint e ACK do follower;
+      expor `oldest_available_lsn`.
+
+Critério de aceite: `modb.wal_v2` — LSN monotônico entre sessões; leitura a
+partir de um LSN; retenção e rejeição de truncamento como fim válido. Tag:
+`0.0.14b`.
+
+#### Fase 14C — Protocolo e bootstrap consistente
+
+- [x] Definir o canal/protocolo de replicação privilegiado (hello, bootstrap,
       subscribe/frame/ack/gap, heartbeat, cancel), reutilizando framing,
       backpressure e cancelamento da Fase 8 sem expor o formato ao cliente comum.
-- [ ] Implementar streaming incremental do WAL por LSN com backpressure,
+- [x] Implementar snapshot base consistente via barreira do escritor para o
+      bootstrap inicial do follower.
+
+Critério de aceite: `modb.replication_protocol` + `modb.replication_bootstrap`
+— encode/decode das mensagens; snapshot sob barreira; follower assina de
+`cut_lsn + 1`. Tag: `0.0.14c`.
+
+#### Fase 14D — Streaming, applier e follower read-only
+
+- [x] Implementar streaming incremental do WAL por LSN com backpressure,
       heartbeat e cancelamento.
-- [ ] Implementar o applier do follower: spool durável, apply idempotente sob
+- [x] Implementar o applier do follower: spool durável, apply idempotente sob
       lock exclusivo e ACK somente após durabilidade local.
-- [ ] Impor modo read-only ao follower: escrita/`begin`/evolução/GC retornam
-      erro; consultas, snapshots e operações read-only permanecem permitidas.
-- [ ] Garantir leitura consistente na réplica (lock compartilhado durante o
+- [x] Impor modo read-only ao follower: escrita/`begin`/evolução/GC retornam
+      `replica_read_only`; consultas, snapshots e operações read-only
+      permanecem permitidas.
+- [x] Garantir leitura consistente na réplica (lock compartilhado durante o
       snapshot vs. exclusivo no apply; sem GC local independente).
-- [ ] Tratar reconexão a partir de `applied_lsn + 1`, detecção de gap
+
+Critério de aceite: `modb.replication_apply` + `modb.replication_streaming` —
+fluxo contínuo, apply idempotente, escrita no follower rejeitada, leitura sem
+estado parcial. Tag: `0.0.14d`.
+
+#### Fase 14E — Reconexão, CLI e fechamento
+
+- [x] Tratar reconexão a partir de `applied_lsn + 1`, detecção de gap
       (`WalGap` → novo bootstrap), UUID/timeline divergentes e métricas de lag.
-- [ ] Expor CLI `modb replicate serve/follow/status`, failpoints de queda e
-      documentação operacional; suítes `debug` e `sanitizers` verdes.
+- [x] Expor CLI `modb replicate bootstrap/apply-wal/status`, failpoints de queda e
+      documentação operacional (`OPERACAO_REPLICACAO.md`); suítes `debug` e
+      `sanitizers` verdes.
+
+Critério de aceite: após queda o follower retoma sem perder/duplicar; gap força
+rebootstrap; CLI e guia cobertos. Tag: `0.0.14e`.
 
 Entregáveis: WAL v2 durável, segmentado e retido; identidade persistente do
 banco; protocolo e serviço de replicação; follower read-only com apply
 idempotente; CLI e guia de operação; testes de bootstrap, apply, recovery,
 reconexão/gap e streaming.
 
-Critério de aceite: partindo de um primary com dados, o follower faz bootstrap
-consistente, assina o WAL e acompanha commits subsequentes; após queda e
-reconexão do follower, ele retoma de `applied_lsn + 1` sem perder nem duplicar
-efeitos; um gap além da retenção força novo bootstrap explícito; escritas no
-follower são rejeitadas e leituras nunca observam estado parcial de uma
-transação replicada.
+### Fase 15 — Primary `wal_only`: só WAL, dados nas réplicas
+
+Objetivo: permitir que a instância principal de escrita **não crie nem
+mantenha arquivos de dados**, persistindo apenas o WAL e replicando para as
+instâncias de leitura, que são as donas dos arquivos de dados.
+
+O modo padrão (`primary_storage=full`) permanece o da Fase 14: primary com
+dados + WAL. O modo novo (`primary_storage=wal_only`) é opt-in via parâmetro
+de instância. Promoção/failover automático e multi-writer ficam fora; ver
+[ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md).
+
+Depende da Fase 14 (WAL v2, canal de replicação, follower read-only com apply).
+
+A fase é dividida em cinco entregas verticais, cada uma com teste e tag própria.
+
+#### Fase 15A — ADR e parâmetro de instância
+
+- [x] Registrar em ADR o modo `wal_only`, papéis primary/réplica, durabilidade
+      por ACK e bootstrap sem arquivo de dados no primary
+      ([ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md)).
+- [ ] Introduzir o parâmetro `primary_storage` (`full` | `wal_only`) na abertura
+      da instância primary (API + CLI); rejeitar `wal_only` em follower
+      (`invalid_instance_config`).
+
+Critério de aceite: `modb.primary_storage_config` — default `full`; `wal_only`
+aceito só no primary; follower com `wal_only` falha. Tag: `0.0.15a`.
+
+#### Fase 15B — Primary sem arquivos de dados
+
+- [ ] No modo `wal_only`, não criar/abrir arquivo de páginas para escrita
+      durável; manter WAL (e controle mínimo de identidade/log).
+- [ ] Produzir after-images/registros de WAL a partir de estado em memória (ou
+      scratch não durável); crash do primary recupera o log, não um heap local.
+
+Critério de aceite: `modb.wal_only_primary` — commits geram WAL; ausência de
+arquivo de dados no primary; reabertura `wal_only` restaura LSN/identidade do
+log. Tag: `0.0.15b`.
+
+#### Fase 15C — Réplicas donas dos dados e política de commit
+
+- [ ] Garantir que só as réplicas de leitura materializam e mantêm os arquivos
+      de dados nesse modo; leituras de objetos no primary `wal_only` são
+      rejeitadas ou redirecionadas por política explícita (`data_files_disabled`).
+- [ ] Definir política de confirmação ao cliente (default: aguardar ACK de ≥1
+      réplica de dados); retenção do WAL no primary guiada por esses ACKs, não
+      por checkpoint de páginas locais.
+
+Critério de aceite: `modb.wal_only_commit_ack` — commit visível ao cliente só
+após ACK configurado; sem réplica → erro claro (`no_data_replica` /
+timeout). Tag: `0.0.15c`.
+
+#### Fase 15D — Bootstrap/seed sem dados no primary
+
+- [ ] Seed de réplica a partir de arquivo vazio + WAL desde a origem, ou doação
+      de snapshot entre réplicas de dados (nunca exigir cópia do primary
+      `wal_only`).
+- [ ] Tratar `WalGap`/rebootstrap com fonte de snapshot em réplica de dados.
+
+Critério de aceite: `modb.wal_only_bootstrap` — réplica nova fica consistente
+sem arquivo de dados no primary. Tag: `0.0.15d`.
+
+#### Fase 15E — CLI, operação e fechamento
+
+- [ ] Expor o parâmetro na CLI (`serve` / `replicate`) e status
+      (`primary_storage`, ACK, lag).
+- [ ] Documentar operação (`OPERACAO_REPLICACAO.md` ou guia dedicado),
+      failpoints (queda do primary só-WAL, perda de réplica de dados) e suítes
+      `debug`/`sanitizers` verdes.
+
+Critério de aceite: fluxo ponta a ponta documentado e exercido pela CLI; tag
+`0.0.15e`.
+
+Entregáveis: parâmetro `primary_storage`; primary `wal_only` só com WAL;
+réplicas com arquivos de dados; política de commit/ACK; bootstrap sem dados no
+primary; CLI e docs; testes de config, commit, bootstrap e falha.
 
 ## 6. Itens deliberadamente fora deste plano
 
@@ -970,7 +1029,11 @@ transação replicada.
 - sandbox para código de domínio (o código C++ é confiável por decisão);
 - alta disponibilidade, promoção/failover automático, replicação de escrita
   (multi-writer) e execução distribuída (a réplica **de leitura** por streaming
-  do WAL está na Fase 14);
+  do WAL está na Fase 14; o primary opcional só-WAL está na Fase 15);
+- containers, orquestração, funções como serviço e demais ambientes serverless
+  como alvo de produto ou modelo operacional (ver Princípio VIII —
+  Bare Metal em [CONSTITUTION_RING0.md](CONSTITUTION_RING0.md)); o processo
+  nativo no SO hospedeiro é o modelo de implantação;
 - otimizador baseado em custos com estatísticas sofisticadas;
 - criptografia transparente do arquivo;
 - compatibilidade com SQL ou com outro banco.
@@ -990,11 +1053,13 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
   rejeição de método alheio à facade;
 - grafos: handles de aresta, BFS/DFS, caminho mínimo, ciclo, direção,
   cancelamento, limites e snapshots;
-- container serverless: build da imagem, cold start, término gracioso,
-  persistência em volume e recovery após término forçado;
+- I/O assíncrono: fallback síncrono, cancelamento, falhas de leitura/escrita,
+  flush/sync e pressão de filas;
 - replicação: WAL v2 com LSN global, bootstrap consistente, apply idempotente,
   reconexão a partir de `applied_lsn + 1`, detecção de gap, rejeição de escrita
   no follower e leitura sem estado parcial;
+- primary `wal_only`: ausência de arquivos de dados no escritor, commit com ACK
+  de réplica de dados, bootstrap/seed sem snapshot do primary;
 - sanitizers nos toolchains que os suportam (preset já configurado);
 - benchmarks separados dos testes funcionais.
 
@@ -1026,11 +1091,16 @@ Mantém a estratégia vigente e acrescenta os riscos novos:
    com garantias comprovadas.
 5. A Fase 10 estabiliza o produto; a Fase 11 organiza a superfície de
    domínio em facades/handles; a Fase 12 acrescenta algoritmos de grafos
-   sobre relacionamentos; a Fase 13 adiciona os riscos operacionais de
-   container, cold start e armazenamento remoto persistente.
-6. A Fase 14 vem por último: só faz sentido escalar leitura por réplica depois
-   de WAL/recuperação (Fases 5–6) e rede/backpressure (Fase 8) comprovados, e
-   ela exige tornar o WAL durável e com LSN global antes de transmiti-lo.
+   sobre relacionamentos.
+6. A Fase 13 introduz I/O assíncrono apenas depois de existir baseline de
+   performance, recovery e rede, para que o backend seja uma otimização medida
+   e não uma mudança semântica.
+7. A Fase 14 (14A–14E) escala leitura por réplica depois de WAL/recuperação
+   (Fases 5–6) e rede/backpressure (Fase 8), tornando o WAL durável e com LSN
+   global antes de transmiti-lo.
+8. A Fase 15 (15A–15E) vem depois da 14: só então o primary pode optar por
+   `wal_only` (só log + stream), deixando os arquivos de dados exclusivamente
+   nas réplicas de leitura.
 
 Não iniciar índices, streaming ou servidor antes de existir um teste confiável
 de persistência, reabertura e recuperação. Cada fase preserva os testes e

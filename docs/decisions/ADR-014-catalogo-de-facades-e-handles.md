@@ -74,8 +74,6 @@ de invocação para o consumidor.**
   sem alterar o formato físico do banco.
 - Erros novos (`facade_not_found`, `facade_method_not_found`,
   `incompatible_facade_version`) entram no mapa de ErrorCodes da Fase 11.
-- A implantação serverless (agora Fase 13) pode assumir que a superfície
-  pública de domínio já inclui facades e handles, além de `client.call`.
 - Persistência de facades/handles como objetos de banco fica fora do
   escopo; o catálogo é runtime (e, se necessário, derivado do manifesto
   dos módulos carregados).

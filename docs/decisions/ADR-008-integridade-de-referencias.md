@@ -56,4 +56,4 @@ remover qualquer objeto ainda pendente na pilha de recursão. Composição saud�
   criar uma quarta categoria persistente. Algoritmos de grafos declaram como
   tratam refs órfãs (`fail`, `skip` ou `yield_error`) e só incluem
   `OwnedRef` por opção; a topologia válida de ownership continua uma árvore
-  ([ADR-015](ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md)).
+  ([ADR-018](ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md)).

@@ -448,8 +448,8 @@ int main() {
         suite.check(database->bind(item_builder()).has_value(), "checkpoint type is rebound");
         check_item(suite, database, item_id, Item{3, "already applied"},
                    "checkpoint recovery preserves the committed item");
-        suite.check(!std::filesystem::exists(temporary.wal_path()),
-                    "checkpoint recovery removes the residual WAL");
+        suite.check(std::filesystem::exists(temporary.wal_path()),
+                    "checkpoint recovery keeps the durable WAL");
         detach(database_id);
     }
 

@@ -1,4 +1,4 @@
-# Plano completo de benchmarks do moDb
+# Plano completo de benchmarks do Ring0
 
 - Estado: especificação em implementação incremental (Fase 10A: runner +
   cenário `object_store.lifecycle` + perfis smoke/standard/diagnostic)
@@ -9,7 +9,7 @@
 
 ## 1. Objetivo
 
-Este plano define como medir todas as camadas do moDb, registrar os resultados
+Este plano define como medir todas as camadas do Ring0, registrar os resultados
 de forma reproduzível e construir uma série histórica útil para investigar
 regressões, avaliar otimizações e comparar plataformas.
 

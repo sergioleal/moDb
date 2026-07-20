@@ -1,6 +1,6 @@
 # Glossário
 
-> O produto é um banco Orientado a Objetos (ODB++). Os termos OO abaixo são os
+> O produto é o Ring0, um banco Orientado a Objetos. Os termos OO abaixo são os
 > vigentes; os termos relacionais ao final são legados, mantidos para leitura do
 > histórico. Ver [PLANO_ODB.md](PLANO_ODB.md).
 

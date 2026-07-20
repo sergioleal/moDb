@@ -1,6 +1,8 @@
 // Importa a interface de Database.
 #include "modb/object/database.hpp"
 
+// Importa DatabaseRoot para ler checkpoint na abertura.
+#include "modb/object/database_root.hpp"
 // Importa a recuperação executada na abertura.
 #include "modb/tx/recovery.hpp"
 // Importa o WAL usado no commit.
@@ -69,15 +71,46 @@ Result<Database> Database::open(const std::filesystem::path& path,
         return std::unexpected(page_file.error());
     }
     auto file = std::make_unique<storage::PageFile>(std::move(*page_file));
-    // Recuperação antes de reconstruir o catálogo: reaplica transações
-    // commitadas do WAL para que o ObjectStore leia o estado consolidado.
+    // Lê checkpoint do DBRT (se existir) para redo incremental do WAL durável.
+    std::uint64_t after_lsn = 0;
+    if (file->catalog_root()) {
+        if (auto root = object::DatabaseRoot::open(*file); root) {
+            after_lsn = root->checkpoint_lsn();
+        }
+    }
     auto wal_path = wal_path_for(path);
-    if (auto recovered = tx::recover(*file, wal_path); !recovered) {
+    auto recovered = tx::recover(*file, wal_path, after_lsn);
+    if (!recovered) {
         return std::unexpected(recovered.error());
     }
     auto store = ObjectStore::open(*file);
     if (!store) {
         return std::unexpected(store.error());
+    }
+    if (recovered->max_commit_lsn > store->checkpoint_lsn()) {
+        if (auto ckpt = store->set_checkpoint_lsn(recovered->max_commit_lsn); !ckpt) {
+            return std::unexpected(ckpt.error());
+        }
+        if (auto flushed = file->flush(); !flushed) {
+            return std::unexpected(flushed.error());
+        }
+    }
+    // Garante next_lsn >= max LSN no arquivo + 1 (janela de crash pós-apply).
+    if (auto records = tx::Wal::read_all(wal_path); records) {
+        std::uint64_t max_lsn = 0;
+        for (const auto& record : *records) {
+            if (record.lsn > max_lsn) {
+                max_lsn = record.lsn;
+            }
+        }
+        if (max_lsn > 0 && max_lsn + 1 > store->next_lsn()) {
+            if (auto set_lsn = store->set_next_lsn(max_lsn + 1); !set_lsn) {
+                return std::unexpected(set_lsn.error());
+            }
+            if (auto flushed = file->flush(); !flushed) {
+                return std::unexpected(flushed.error());
+            }
+        }
     }
     return Database{std::move(file), std::move(*store), std::move(wal_path)};
 }
@@ -151,6 +184,10 @@ Result<Transaction> Database::begin() {
     if (auto usable = check_usable(); !usable) {
         return std::unexpected(usable.error());
     }
+    if (read_only_replica_) {
+        return std::unexpected(
+            Error{ErrorCode::replica_read_only, "follower rejects begin/write"});
+    }
     if (database_id_.value == 0) {
         return std::unexpected(
             Error{ErrorCode::invalid_argument, "database must be attached before begin"});
@@ -175,13 +212,18 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
     if (auto advanced = store_.advance_epoch(); !advanced) {
         return std::unexpected(advanced.error());
     }
+    std::uint64_t commit_lsn = 0;
     {
-        // Mantém o descritor do WAL em um escopo próprio. Ele precisa estar
-        // fechado antes do checkpoint removê-lo, especialmente no Windows.
-        // 1. Escreve begin + imagens de página no WAL e o torna durável. A
-        // fábrica do arquivo é injetável: produção abre um NativeFile; testes
-        // injetam um FailpointFile que falha após N escritas (failpoints).
-        auto wal = tx::Wal::create(wal_path_, wal_factory_);
+        // WAL v2 durável: append no arquivo existente com LSN global do DBRT.
+        // Failpoints ainda usam a fábrica injetável; se a fábrica for a nativa
+        // efêmera (create), open_durable não é usado — detectamos pela factory.
+        Result<tx::Wal> wal = [&]() -> Result<tx::Wal> {
+            if (custom_wal_factory_) {
+                // Failpoint: recria por commit (comportamento efêmero dos testes).
+                return tx::Wal::create(wal_path_, wal_factory_);
+            }
+            return tx::Wal::open_durable(wal_path_, store_.next_lsn());
+        }();
         if (!wal) {
             return std::unexpected(wal.error());
         }
@@ -198,48 +240,46 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
         if (auto synced = wal->sync(); !synced) {
             return std::unexpected(synced.error());
         }
-        // Costura de failpoint: parar aqui deixa o WAL sem registro de commit; a
-        // recuperação descarta a transação (tudo-ou-nada → nada).
         if (phase == CommitPhase::stop_after_images) {
             return {};
         }
-        // 2. Registro de commit + sync: a partir daqui a transação é durável.
         if (auto appended = wal->append_commit(current_tx_id_); !appended) {
             return std::unexpected(appended.error());
         }
+        commit_lsn = wal->last_appended_lsn();
         if (auto synced = wal->sync(); !synced) {
             return std::unexpected(synced.error());
         }
-        // Só agora o registro commit chegou duravelmente ao WAL. Antes disso,
-        // falhas de escrita/sync ainda permitem rollback normal e remoção do
-        // log incompleto.
         commit_durable_ = true;
-        // Costura: parar aqui simula queda após o commit durável, antes de aplicar;
-        // a recuperação reaplica (tudo-ou-nada → tudo).
         if (phase == CommitPhase::stop_after_commit_record) {
             return {};
         }
-        // 3. Aplica as páginas ao arquivo de dados e as torna duráveis.
         if (auto applied = file_->apply_transaction(); !applied) {
             return std::unexpected(applied.error());
         }
         if (auto flushed = file_->flush(); !flushed) {
             return std::unexpected(flushed.error());
         }
-        // Costura: parar aqui mantém o WAL; a recuperação reaplica de forma
-        // idempotente e então o remove.
+        // Persiste o próximo LSN global antes do checkpoint (ainda na mesma
+        // janela; DBRT já foi escrito via apply das páginas da tx).
+        if (auto set_lsn = store_.set_next_lsn(wal->next_lsn()); !set_lsn) {
+            return std::unexpected(set_lsn.error());
+        }
+        if (auto flushed = file_->flush(); !flushed) {
+            return std::unexpected(flushed.error());
+        }
         if (phase == CommitPhase::stop_before_wal_cleanup) {
             return {};
         }
     }
-    // 4. Checkpoint: as páginas já estão duráveis, o WAL pode ser removido.
-    std::error_code remove_error;
-    std::filesystem::remove(wal_path_, remove_error);
-    if (remove_error) {
-        // O commit já é durável e o WAL residual é seguro (redo idempotente),
-        // mas não escondemos a falha: o chamador deve reabrir para recuperá-lo.
-        return std::unexpected(
-            Error{ErrorCode::io_error, "could not remove checkpoint WAL: " + remove_error.message()});
+    // Checkpoint: páginas duráveis; avança posição (não remove o WAL).
+    if (commit_lsn != 0) {
+        if (auto ckpt = store_.set_checkpoint_lsn(commit_lsn); !ckpt) {
+            return std::unexpected(ckpt.error());
+        }
+        if (auto flushed = file_->flush(); !flushed) {
+            return std::unexpected(flushed.error());
+        }
     }
     return {};
 }

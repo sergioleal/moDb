@@ -125,8 +125,8 @@ int main() {
         }
         auto opened = Database::open(temporary.path());
         suite.check(opened.has_value(), "opening with a zero-byte WAL succeeds");
-        suite.check(!std::filesystem::exists(temporary.wal_path()),
-                    "recovery removes the zero-byte WAL");
+        // WAL v2 durável: arquivo vazio pode permanecer; não há registros a aplicar.
+        suite.check(opened.has_value(), "zero-byte WAL does not block open");
     }
 
     // Uma transação com commit durável, mas sem páginas aplicadas, é refeita
@@ -179,8 +179,8 @@ int main() {
             suite.check(employee.has_value() && *employee == Employee{"Ana", 7},
                         "redo restores the complete object");
         }
-        suite.check(!std::filesystem::exists(temporary.wal_path()),
-                    "successful recovery removes the WAL");
+        suite.check(std::filesystem::exists(temporary.wal_path()),
+                    "durable WAL remains after successful recovery");
         detach(database_id);
     }
 
@@ -274,8 +274,7 @@ int main() {
                     "uncommitted database type is rebound");
         suite.check_error(database->get<Employee>(employee_id), ErrorCode::record_not_found,
                           "transaction without commit remains absent");
-        suite.check(!std::filesystem::exists(temporary.wal_path()),
-                    "uncommitted WAL is discarded");
+        // WAL v2 durável: registros sem commit podem permanecer; não são aplicados.
         detach(database_id);
     }
 

@@ -1,4 +1,4 @@
-# Rastreador de andamento — ODB++ (moDb)
+# Rastreador de andamento — Ring0
 
 > Este é o **único lugar** onde o estado atual de cada tarefa é mantido.
 > Para o texto completo e o "porquê" de cada tarefa, veja
@@ -51,14 +51,15 @@
 | [8](#fase-8--servidor-protocolo-binário-e-backpressure) | Servidor, protocolo, backpressure | ✅ Concluída | 12/12 | Fase 7 |
 | [9](#fase-9--runtime-de-módulos-de-domínio) | Runtime de módulos de domínio | ✅ Concluída | 10/10 | Fases 5, 8 |
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ✅ Concluída | 9/9 | Todas |
-| [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | 🔄 Em andamento | 6/10 | Fases 9, 10 · 11A–11D |
+| [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ✅ Concluída | 10/10 | Fases 9, 10 · 11A–11D |
 | [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ✅ Concluída | 12/12 | Fases 4, 6, 7, 10 · 12A–12E |
-| [13](#fase-13--container-serverless) | Container serverless | ✅ Concluída | 11/11 | Fases 8, 9, 10, 11, 12 · 13A–13E |
-| [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ⬜ Não iniciada | 0/12 | Fases 5, 6, 8 |
-| **Total** | | | **115/158 (~73%)** | |
+| [13](#fase-13--io-assíncrono) | I/O assíncrono | 🔄 Em andamento | 4/8 | Fases 5, 8, 10 |
+| [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ✅ Concluída | 12/12 | Fases 5, 6, 8 · 14A–14E |
+| [15](#fase-15--primary-wal_only-só-wal-dados-nas-réplicas) | Primary `wal_only` (dados nas réplicas) | 🔄 Em andamento | 1/10 | Fase 14 · 15A–15E |
+| **Total** | | | **114/165 (~69%)** | |
 
-**MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 29/39
-tarefas (~74%).
+**MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 39/39
+tarefas (100%).
 
 ---
 
@@ -871,7 +872,7 @@ aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
 | Cenário `storage.buffer_pool.oversubscribed` | `benchmarks/scenarios/` | ✅ 10B |
 | Alvos de fuzzing (preset `fuzz`) | `tests/fuzz/` | ✅ 10D |
 
-Critério de aceite: ⬜ benchmarks reproduzíveis, regressões detectadas
+Critério de aceite: ✅ benchmarks reproduzíveis, regressões detectadas
 automaticamente, interfaces públicas documentadas.
 
 ---
@@ -952,7 +953,7 @@ Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 12.1 | ADR de handles de arestas e algoritmos de grafos | ✅ | 12A · merge `e0f32cb`, tag `0.0.12a` |
+| 12.1 | ADR de handles de arestas e algoritmos de grafos | ✅ | 12A · [ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md), merge `e0f32cb`, tag `0.0.12a` |
 | 12.2 | `EdgeHandle<From, To, EdgeKind>` runtime-only | ✅ | 12A · Origem, alvo, FieldId e DatabaseId |
 | 12.3 | Factories tipadas para `Ref` / `OwnedRef` | ✅ | 12A · `Embedded` e campo inválido rejeitados |
 | 12.4 | Adjacência em `PersistentVector<Ref<T>>` | ✅ | 12B · merge `dd2adb3`, tag `0.0.12b` |
@@ -971,7 +972,7 @@ Status: ✅ Concluída — merge `e0f32cb`, tag `0.0.12a` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| ADR-015 + `EdgeHandle` + factories | ✅ | `modb.edge_handle` |
+| ADR-018 + `EdgeHandle` + factories | ✅ | `modb.edge_handle` |
 
 ### Fase 12B — Adjacência e arestas de entrada
 
@@ -1014,7 +1015,7 @@ Status: ✅ Concluída — tag `0.0.12e` (2026-07-19).
 | Algoritmos e limites | `tests/graph_algorithms_test.cpp` | ✅ 12C–12E |
 | CLI de travessia/caminho/toposort | `apps/modb_cli/main.cpp` | ✅ 12E |
 | Benchmarks de grafos | `benchmarks/scenarios/graph_traversal.*` | ✅ 12E |
-| ADR de grafos | `docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md` | ✅ 12A |
+| ADR de grafos | `docs/decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md` | ✅ 12A |
 
 Critério de aceite: ✅ após reabertura, handles tipados representam arestas
 entre classes e BFS/DFS/caminho mínimo/toposort executam sob snapshot; ciclo,
@@ -1022,124 +1023,196 @@ direção, refs órfãs, ownership, cancelamento e limites são determinísticos
 
 ---
 
-## Fase 13 — Container serverless
+## Fase 13 — I/O assíncrono
 
-Status: ✅ Concluída (11/11) — cinco entregas verticais 13A–13E.
+Status: 🔄 Em andamento (4/8) — backend opcional de I/O posicional assíncrono.
 Definição completa:
-[PLANO_ODB.md §Fase 13](PLANO_ODB.md#fase-13--container-serverless) ·
-[PROTOCOLO_FASES.md §Fase 13](PROTOCOLO_FASES.md#fase-13--container-serverless)
+[PLANO_ODB.md §Fase 13](PLANO_ODB.md#fase-13--io-assíncrono) ·
+[PROTOCOLO_FASES.md §Fase 13](PROTOCOLO_FASES.md#fase-13--io-assíncrono)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 13.1 | ADR do modelo de implantação serverless (volume, writer único, cold start) | ✅ | 13A · merge tag `0.0.13a` · [ADR-013](decisions/ADR-013-execucao-serverless-em-container.md) |
-| 13.2 | Imagem OCI multi-stage, mínima, não privilegiada, rootfs read-only | ✅ | 13C · `deploy/Dockerfile` |
-| 13.3 | Ingresso/protocolo da Fase 8 na plataforma escolhida | ✅ | 13C · `serve --from-env` / `0.0.0.0` |
-| 13.4 | Configuração só por env/secrets | ✅ | 13C · `MODB_DB_PATH`/`HOST`/`PORT` |
-| 13.5 | Volume persistente para banco + WAL com `fsync` confiável | ✅ | 13C · compose volume `/data` |
-| 13.6 | I/O assíncrono real: `io_uring` (Linux), IOCP (Windows) e fallback | ✅ | 13B · tag `0.0.13b` · `modb.async_file` |
-| 13.7 | Readiness, liveness, startup probe e desligamento gracioso | ✅ | 13D · `request_stop` + `MODB_READY_FILE` |
-| 13.8 | Recovery em cold start e após término forçado | ✅ | 13D · `modb.server_lifecycle` + tx crash |
-| 13.9 | Logs estruturados e métricas operacionais | ✅ | 13E · `METRICS` + `MODB_METRICS_FILE` |
-| 13.10 | CI: build, SBOM, scan e publish versionado da imagem | ✅ | 13E · `.github/workflows/oci-image.yml` |
-| 13.11 | Guia de operação local e implantação de referência | ✅ | 13E · `docs/OPERACAO_SERVERLESS.md` |
-
-### Fase 13A — ADR e modelo de implantação
-
-Status: ✅ Concluída — tag `0.0.13a` (2026-07-19).
-
-| Entrega | Status | Aceite |
-|---|---|---|
-| ADR-013 (volume, writer único, cold start, scale-to-zero) | ✅ | ADR aceita |
-
-### Fase 13B — I/O assíncrono real
-
-Status: ✅ Concluída — tag `0.0.13b` (2026-07-19).
-
-| Entrega | Status | Aceite |
-|---|---|---|
-| `AsyncFile` io_uring/IOCP + fallback | ✅ | `modb.async_file` (sync_fallback observável neste build) |
-
-### Fase 13C — Imagem OCI, config e volume
-
-Status: ✅ Concluída — tag `0.0.13c` (2026-07-19).
-
-| Entrega | Status | Aceite |
-|---|---|---|
-| Dockerfile + env/secrets + volume + ingresso | ✅ | `deploy/compose.yaml` + `serve --from-env` |
-
-### Fase 13D — Probes, shutdown e recovery
-
-Status: ✅ Concluída — tag `0.0.13d` (2026-07-19).
-
-| Entrega | Status | Aceite |
-|---|---|---|
-| Health + SIGTERM + cold start / kill -9 | ✅ | `modb.server_lifecycle` |
-
-### Fase 13E — Observabilidade, CI e guia
-
-Status: ✅ Concluída — tag `0.0.13e` (2026-07-19).
-
-| Entrega | Status | Aceite |
-|---|---|---|
-| Métricas/logs + publish + `OPERACAO_SERVERLESS.md` | ✅ | Pipeline + guia |
+| 13.1 | ADR de I/O assíncrono: contrato, fallback, cancelamento e sync | ✅ | [ADR-019](decisions/ADR-019-io-assincrono.md) |
+| 13.2 | `AsyncFile` com backend assíncrono e API próxima de `NativeFile` | ✅ | `include/modb/storage/async_file.hpp`; `modb.async_file` verde no Windows |
+| 13.3 | Backends nativos por plataforma | 🔄 | IOCP validado no Windows; POSIX AIO implementado no Linux, compilação local pendente |
+| 13.4 | Integração ao caminho de storage preservando WAL antes de páginas | ⬜ | Sem mudança de formato |
+| 13.5 | Fila limitada e backpressure | ✅ | `max_inflight`; `modb.async_file` verde no Windows |
+| 13.6 | Cancelamento e propagação de falhas como `Result` | ✅ | `cancel_all` + erros; `modb.async_file` verde no Windows |
+| 13.7 | Benchmarks de I/O assíncrono vs. síncrono | ⬜ | Cenário `storage_async_io` |
+| 13.8 | Documentação operacional e limites de uso | ⬜ | Quando habilitar/desabilitar |
 
 ### Testes/artefatos desta fase
 
 | Item | Local | Status |
 |---|---|---|
-| Build da imagem OCI | `deploy/Dockerfile` | ✅ 13C |
-| Smoke container + volume | `deploy/compose.yaml` + healthcheck | ✅ 13C/13D |
-| Contrato de I/O assíncrono real | `tests/async_file_test.cpp` | ✅ 13B |
-| Kill -9 + reabertura no mesmo volume | `modb.server_lifecycle` + `tx crash` | ✅ 13D |
-| Guia operacional | `docs/OPERACAO_SERVERLESS.md` | ✅ 13E |
-| CI OCI (SBOM/scan/publish) | `.github/workflows/oci-image.yml` | ✅ 13E |
-| Manifesto de referência | `deploy/` | ⬜ 13C |
+| ADR de I/O assíncrono | `docs/decisions/ADR-019-io-assincrono.md` | ✅ |
+| API de I/O assíncrono | `include/modb/storage/async_file.hpp` | ✅ |
+| Implementação por plataforma | `src/storage/async_file_*` | 🔄 |
+| Teste de contrato | `tests/async_file_test.cpp` | ✅ no Windows |
+| Benchmark | `benchmarks/scenarios/storage_async_io.*` | ⬜ |
 
-Critério de aceite: ⬜ imagem sobe do zero com volume durável, recupera WAL,
-atende cliente 8/9/11/12, preserva commits após término forçado, uma instância
-ativa, sem privilégios, com backpressure. Em ambientes compatíveis, testes e
-métricas comprovam completions reais por `io_uring`/IOCP; fallback explícito
-mantém a mesma durabilidade.
+Critério de aceite: ⬜ os mesmos fluxos de persistência/recovery passam com
+backend assíncrono e fallback síncrono; falhas retornam `Result`; backpressure
+impede filas ilimitadas; benchmarks registram impacto medido.
 
 ---
 
 ## Fase 14 — Réplica de leitura por streaming do WAL
 
-Status: ⬜ Não iniciada (0/12) — Definição completa:
+Status: ✅ Concluída (12/12) — tags `0.0.14a`–`0.0.14e` (2026-07-20).
+Definição completa:
 [PLANO_ODB.md §Fase 14](PLANO_ODB.md#fase-14--réplica-de-leitura-por-streaming-do-wal) ·
 [PROTOCOLO_FASES.md §Fase 14](PROTOCOLO_FASES.md#fase-14--réplica-de-leitura-por-streaming-do-wal)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 14.1 | ADR de replicação física read-only, WAL durável, retenção e consistência | ⬜ | [ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md) |
-| 14.2 | Identidade persistente: `DatabaseUuid` + `timeline_id` | ⬜ | DBRT ou página de controle |
-| 14.3 | WAL v2: LSN global monotônico persistente + `commit_lsn` | ⬜ | `lsn`/`tx_id` deixam de reiniciar por sessão |
-| 14.4 | Segmentação, checkpoint como posição e política de retenção | ⬜ | Reter até checkpoint + ACK; expor `oldest_available_lsn` |
-| 14.5 | Snapshot base consistente via barreira do escritor (bootstrap) | ⬜ | Evita misturar `page_count`/DBRT/páginas |
-| 14.6 | Protocolo de replicação privilegiado | ⬜ | Hello/Bootstrap/Subscribe/Frame/Ack/Gap/Heartbeat/Cancel |
-| 14.7 | Streaming incremental por LSN com backpressure/heartbeat/cancel | ⬜ | Reutiliza framing da Fase 8 |
-| 14.8 | Applier do follower: spool durável + apply idempotente + ACK | ⬜ | ACK só após durabilidade local |
-| 14.9 | Modo read-only ao follower | ⬜ | Escrita/`begin`/GC → `replica_read_only` |
-| 14.10 | Leitura consistente na réplica | ⬜ | Lock compartilhado (query) vs. exclusivo (apply); sem GC local |
-| 14.11 | Reconexão, gap, UUID/timeline mismatch e métricas de lag | ⬜ | Retoma de `applied_lsn + 1`; `WalGap` → rebootstrap |
-| 14.12 | CLI `modb replicate serve/follow/status`, failpoints e docs | ⬜ | `docs/OPERACAO_REPLICACAO.md` |
+| 14.1 | ADR de replicação física read-only, WAL durável, retenção e consistência | ✅ | 14A · [ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md) |
+| 14.2 | Identidade persistente: `DatabaseUuid` + `timeline_id` | ✅ | 14A · `modb.database_identity` |
+| 14.3 | WAL v2: LSN global monotônico persistente + `commit_lsn` | ✅ | 14B · `modb.wal_v2` |
+| 14.4 | Segmentação, checkpoint como posição e política de retenção | ✅ | 14B · `oldest_available_lsn` / checkpoint + ACK |
+| 14.5 | Protocolo de replicação privilegiado | ✅ | 14C · `modb.replication_protocol` |
+| 14.6 | Snapshot base consistente via barreira do escritor (bootstrap) | ✅ | 14C · `modb.replication_bootstrap` |
+| 14.7 | Streaming incremental por LSN com backpressure/heartbeat/cancel | ✅ | 14D · `modb.replication_streaming` |
+| 14.8 | Applier do follower: spool durável + apply idempotente + ACK | ✅ | 14D · `modb.replication_apply` |
+| 14.9 | Modo read-only ao follower | ✅ | 14D · `replica_read_only` |
+| 14.10 | Leitura consistente na réplica | ✅ | 14D · apply sob exclusão; queries no follower |
+| 14.11 | Reconexão, gap, UUID/timeline mismatch e métricas de lag | ✅ | 14E · `modb.replication_recovery` |
+| 14.12 | CLI `modb replicate bootstrap/apply-wal/status`, failpoints e docs | ✅ | 14E · [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md) |
+
+### Fase 14A — ADR e identidade persistente
+
+Status: ✅ Concluída — tag `0.0.14a`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| ADR-016 | ✅ | Aceita |
+| `DatabaseUuid` + `timeline_id` no DBRT | ✅ | `modb.database_identity` |
+
+### Fase 14B — WAL v2: LSN global, segmentos e retenção
+
+Status: ✅ Concluída — tag `0.0.14b`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| LSN global + `commit_lsn` + segmentos + retenção | ✅ | `modb.wal_v2` |
+
+### Fase 14C — Protocolo e bootstrap consistente
+
+Status: ✅ Concluída — tag `0.0.14c`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Mensagens do canal privilegiado | ✅ | `modb.replication_protocol` |
+| Bootstrap sob barreira do escritor | ✅ | `modb.replication_bootstrap` |
+
+### Fase 14D — Streaming, applier e follower read-only
+
+Status: ✅ Concluída — tag `0.0.14d`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Stream + applier + read-only + locks | ✅ | `modb.replication_apply` / `modb.replication_streaming` |
+
+### Fase 14E — Reconexão, CLI e fechamento
+
+Status: ✅ Concluída — tag `0.0.14e`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Reconexão/gap + CLI + `OPERACAO_REPLICACAO.md` | ✅ | `modb.replication_recovery` + CLI |
 
 ### Testes/artefatos desta fase
 
 | Item | Local | Status |
 |---|---|---|
-| WAL v2 (LSN global, segmentos, leitura por LSN) | `tests/wal_v2_test.cpp` | ⬜ |
-| Protocolo de replicação | `tests/replication_protocol_test.cpp` | ⬜ |
-| Bootstrap consistente | `tests/replication_bootstrap_test.cpp` | ⬜ |
-| Apply idempotente / gap / duplicata | `tests/replication_apply_test.cpp` | ⬜ |
-| Recovery do follower (queda antes/depois do ACK) | `tests/replication_recovery_test.cpp` | ⬜ |
-| Streaming, backpressure, reconexão, `WalGap` | `tests/replication_streaming_test.cpp` | ⬜ |
-| ADR de replicação | `docs/decisions/ADR-016-*.md` | ✅ |
+| Identidade persistente | `tests/database_identity_test.cpp` | ✅ 14A |
+| WAL v2 (LSN global, segmentos, leitura por LSN) | `tests/wal_v2_test.cpp` | ✅ 14B |
+| Protocolo de replicação | `tests/replication_protocol_test.cpp` | ✅ 14C |
+| Bootstrap consistente | `tests/replication_bootstrap_test.cpp` | ✅ 14C |
+| Apply idempotente / gap / duplicata | `tests/replication_apply_test.cpp` | ✅ 14D |
+| Streaming, backpressure | `tests/replication_streaming_test.cpp` | ✅ 14D |
+| Recovery / reconexão / `WalGap` | `tests/replication_recovery_test.cpp` | ✅ 14E |
+| ADR de replicação | `docs/decisions/ADR-016-*.md` | ✅ 14A |
+| Guia operacional | `docs/OPERACAO_REPLICACAO.md` | ✅ 14E |
 
-Critério de aceite: ⬜ o follower faz bootstrap consistente, acompanha commits
+Critério de aceite: ✅ o follower faz bootstrap consistente, acompanha commits
 e retoma de `applied_lsn + 1` após queda sem perder/duplicar efeitos; gap além
 da retenção força novo bootstrap; escrita no follower é rejeitada e leituras
 nunca observam transação replicada pela metade.
+## Fase 15 — Primary `wal_only`: só WAL, dados nas réplicas
+
+Status: 🔄 Em andamento (1/10) — cinco entregas verticais 15A–15E.
+Definição completa:
+[PLANO_ODB.md §Fase 15](PLANO_ODB.md#fase-15--primary-wal_only-só-wal-dados-nas-réplicas) ·
+[PROTOCOLO_FASES.md §Fase 15](PROTOCOLO_FASES.md#fase-15--primary-wal_only-só-wal-dados-nas-réplicas)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 15.1 | ADR do modo `wal_only` (primary só WAL; dados nas réplicas) | ✅ | 15A · [ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md) |
+| 15.2 | Parâmetro `primary_storage` (`full` \| `wal_only`) na abertura/CLI | ⬜ | 15A · Rejeitar em follower |
+| 15.3 | Primary `wal_only` sem criar/abrir arquivo de dados | ⬜ | 15B · Só WAL + controle |
+| 15.4 | Produção de WAL a partir de estado em memória / scratch | ⬜ | 15B · Crash recupera log |
+| 15.5 | Réplicas como únicas donas dos arquivos de dados | ⬜ | 15C · `data_files_disabled` no primary |
+| 15.6 | Política de commit com ACK de réplica de dados + retenção | ⬜ | 15C · Default: ≥1 ACK |
+| 15.7 | Seed/bootstrap sem snapshot do primary (`vazio+WAL` ou doação) | ⬜ | 15D |
+| 15.8 | `WalGap`/rebootstrap com fonte em réplica de dados | ⬜ | 15D |
+| 15.9 | CLI/status (`primary_storage`, ACK, lag) | ⬜ | 15E |
+| 15.10 | Docs operacionais, failpoints e suítes verdes | ⬜ | 15E |
+
+### Fase 15A — ADR e parâmetro de instância
+
+Status: 🔄 Em andamento — ADR aceita. Tag alvo: `0.0.15a`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| ADR-017 | ✅ | Aceita |
+| Parâmetro `primary_storage` | ⬜ | `modb.primary_storage_config` |
+
+### Fase 15B — Primary sem arquivos de dados
+
+Status: ⬜ Não iniciada. Tag alvo: `0.0.15b`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Primary só WAL | ⬜ | `modb.wal_only_primary` |
+
+### Fase 15C — Réplicas donas dos dados e política de commit
+
+Status: ⬜ Não iniciada. Tag alvo: `0.0.15c`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| ACK / retenção / sem dados no primary para leitura | ⬜ | `modb.wal_only_commit_ack` |
+
+### Fase 15D — Bootstrap/seed sem dados no primary
+
+Status: ⬜ Não iniciada. Tag alvo: `0.0.15d`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Seed vazio+WAL ou doação entre réplicas | ⬜ | `modb.wal_only_bootstrap` |
+
+### Fase 15E — CLI, operação e fechamento
+
+Status: ⬜ Não iniciada. Tag alvo: `0.0.15e`.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| CLI + docs + failpoints | ⬜ | fluxo ponta a ponta |
+
+### Testes/artefatos desta fase
+
+| Item | Local | Status |
+|---|---|---|
+| Config `primary_storage` | `tests/primary_storage_config_test.cpp` | ⬜ 15A |
+| Primary `wal_only` | `tests/wal_only_primary_test.cpp` | ⬜ 15B |
+| Commit + ACK | `tests/wal_only_commit_ack_test.cpp` | ⬜ 15C |
+| Bootstrap/seed | `tests/wal_only_bootstrap_test.cpp` | ⬜ 15D |
+| ADR | `docs/decisions/ADR-017-*.md` | ✅ 15A |
+
+Critério de aceite: ⬜ com `primary_storage=wal_only`, o primary não possui
+arquivo de dados; commits vão ao WAL e às réplicas; as réplicas mantêm os dados
+e servem leitura; bootstrap não depende de snapshot do primary.
 
 ---
 

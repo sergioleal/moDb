@@ -134,6 +134,16 @@ enum class ErrorCode {
     graph_limit_exceeded,
     // Ciclo detectado onde a topologia não permite (Fase 12).
     graph_cycle,
+    // Escrita/begin/GC em follower read-only (Fase 14).
+    replica_read_only,
+    // Pedido de LSN abaixo da retenção / gap no stream (Fase 14).
+    replication_gap,
+    // timeline_id diverge entre primary e follower (Fase 14).
+    timeline_mismatch,
+    // DatabaseUuid diverge entre primary e follower (Fase 14).
+    database_uuid_mismatch,
+    // Follower precisa de novo bootstrap (Fase 14).
+    bootstrap_required,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

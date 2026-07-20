@@ -1,4 +1,4 @@
-# ODB++ — Arquitetura de um Banco de Dados Orientado a Objetos
+# Ring0 — Arquitetura de um Banco de Dados Orientado a Objetos
 
 > Especificação de Arquitetura (Draft)
 
@@ -8,7 +8,7 @@ Versão: 0.2
 
 # 1. Visão Geral
 
-O ODB++ é um banco de dados **nativamente Orientado a Objetos**.
+O Ring0 é um banco de dados **nativamente Orientado a Objetos**.
 
 Seu objetivo é eliminar completamente o paradigma relacional da API pública.
 
@@ -413,7 +413,7 @@ auto department = edge.target(snapshot);
 O handle carrega `DatabaseId`, origem, alvo e `FieldId`; não é persistido.
 `Ref<T>`/`OwnedRef<T>` permanecem no objeto. `Embedded<T>` não forma aresta
 porque não possui identidade. A decisão completa está na
-[ADR-015](docs/decisions/ADR-015-handles-de-arestas-e-algoritmos-de-grafos.md).
+[ADR-018](docs/decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md).
 
 ## Réplica de leitura em runtime
 

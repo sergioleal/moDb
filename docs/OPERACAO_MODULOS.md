@@ -25,8 +25,8 @@ arquitetura está em
 
 1. Código nativo defeituoso pode corromper memória ou derrubar o processo —
    não há sandbox no MVP.
-2. A instância deve rodar sob **supervisor externo** (systemd, Kubernetes,
-   Windows Service).
+2. A instância deve rodar sob **supervisor externo** (systemd ou Windows
+   Service).
 3. Após restart, a abertura do banco executa **WAL recovery** (Fase 5):
    commits duráveis reaparecem; trabalho sem commit não aparece.
 4. O teste `modb.operation_server` documenta o ciclo: `client.call` →
