@@ -46,6 +46,7 @@ auto db = modb::object::Database::create("shop.modb");
 
 | Documento | Uso |
 |---|---|
+| [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | guia passo a passo para quem chega agora (EN) |
 | [docs/RASTREADOR.md](docs/RASTREADOR.md) | estado das fases |
 | [docs/PLANO_ODB.md](docs/PLANO_ODB.md) | plano Ring0 |
 | [docs/PROTOCOLO_FASES.md](docs/PROTOCOLO_FASES.md) | critérios por fase |
