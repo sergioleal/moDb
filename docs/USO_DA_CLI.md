@@ -113,8 +113,21 @@ Imprime um roteiro guiado com todos os comandos abaixo, na ordem certa, prontos
 para copiar e colar (assume que `demo.modb` ainda não existe).
 
 ```text
-modb demo              # imprime o roteiro
-modb demo run [-force] # executa o roteiro de verdade, passo a passo
+modb demo                                      # imprime o roteiro
+modb demo run [-force]                         # executa o roteiro de verdade
+modb demo protocol
+modb demo serve-handshake <file> [--force]
+modb demo serve-query <file> [--force]
+modb demo serve-backpressure <file> [--force]
+modb demo serve-cancel <file> [--force]
+modb demo serve-process <file> [--force]
+modb demo ops-transfer <file> [--force]
+modb demo ops-facade <file> [--force]
+modb demo employee <file> [--force]
+modb demo graph <file> [--force]
+modb demo coll <file> [--force]
+modb demo tx <file> [--force]
+modb demo mvcc-snapshot <file> [--force]
 ```
 
 `-force` permite rodar mesmo se `demo.modb` já existir (apaga e recomeça). É a
@@ -369,10 +382,10 @@ Decoded row: 1 | Ana
 Round-trip: OK
 ```
 
-## `modb protocol demo` — frames do protocolo binário em memória (Fase 8A)
+## `modb demo protocol` — frames do protocolo binário em memória (Fase 8A)
 
 ```text
-modb protocol demo
+modb demo protocol
 ```
 
 O subcomando `demo`, sem rede, explica e executa passo a passo a codificação e
@@ -382,7 +395,7 @@ demonstrando o codec da
 [ADR-011](decisions/ADR-011-concorrencia-do-servidor.md).
 
 ```text
-$ modb protocol demo
+$ modb demo protocol
 ODB++ protocol demo (Fase 8A, in-memory, no network)
 ...
 Result: all protocol round-trips passed
@@ -391,20 +404,20 @@ Result: all protocol round-trips passed
 ## `modb serve` / `modb ping` — rede (Fases 8B–8F)
 
 ```text
-modb serve demo <file> [--force]
-modb serve query-demo <file> [--force]
-modb serve backpressure-demo <file> [--force]
-modb serve cancel-demo <file> [--force]
-modb serve process-demo <file> [--force]
+modb demo serve-handshake <file> [--force]
+modb demo serve-query <file> [--force]
+modb demo serve-backpressure <file> [--force]
+modb demo serve-cancel <file> [--force]
+modb demo serve-process <file> [--force]
 modb serve <file> [--port N] --once [--fail-after N] [--small-buffers]
 modb ping <host> <port> <database-name>
 ```
 
-`serve cancel-demo` (Fase 8E) cancela no meio do fluxo e reutiliza a
+`demo serve-cancel` (Fase 8E) cancela no meio do fluxo e reutiliza a
 mesma conexão para uma segunda consulta.
 
 ```text
-$ modb serve cancel-demo cancel.modb --force
+$ modb demo serve-cancel cancel.modb --force
 ODB++ serve cancel-demo (Fase 8E)
   Cancel sent after 10 objects
   first stream ended with … objects
@@ -412,12 +425,12 @@ ODB++ serve cancel-demo (Fase 8E)
 Result: cancel + reusable connection OK
 ```
 
-`serve process-demo` (Fase 8F) sobe o servidor num processo filho e o
+`demo serve-process` (Fase 8F) sobe o servidor num processo filho e o
 cliente neste processo: negociacao RLE, consumo lento com backpressure e
 `StreamError` injetado apos 40 objetos.
 
 ```text
-$ modb serve process-demo phase8.modb --force
+$ modb demo serve-process phase8.modb --force
 ODB++ serve process-demo (Fase 8F)
   negotiated codec=rle …
   StreamError after 40 objects: injected stream failure
@@ -515,13 +528,13 @@ modb oo employee evolve <file> --schema <1|2>
 modb oo employee get <file> <object-id> --schema <1|2>
 modb oo employee set-salary <file> <object-id> <salary> --schema <1|2>
 modb oo employee index <file> --schema <1|2>
-modb oo employee demo <file> [--force]
+modb demo employee <file> [--force]
 ```
 
 O caminho mais curto para comprovar a Fase 3 é:
 
 ```text
-$ modb oo employee demo phase3.modb --force
+$ modb demo employee phase3.modb --force
 v1 wrote Employee{id=18, name=Ana, salary=15000}
 v2 projected old object: country=BR annual_salary=180000
 lazy migration rewrote Employee 18 as v2
@@ -674,7 +687,7 @@ $ modb blob info dados.modb 1
 Blob 1: pages=1 bytes=18
 ```
 
-## `modb graph demo` — grafo de objetos (ODB++ Fase 4)
+## `modb demo graph` — grafo de objetos (ODB++ Fase 4)
 
 Mostra os quatro tipos de relacionamento numa passada de ponta a ponta:
 associação (`Ref`), valor embutido (`Embedded`), composição (`OwnedRef`) e uma
@@ -683,11 +696,11 @@ aresta e então remove o pai para evidenciar a cascata (o filho `owned` some; os
 objetos de associação sobrevivem).
 
 ```text
-modb graph demo <file> [--force]
+modb demo graph <file> [--force]
 ```
 
 ```text
-$ modb graph demo grafo.modb --force
+$ modb demo graph grafo.modb --force
 wrote Staff{id=28, name=Ana}
   dept -> Department{id=24} (association)
   home -> Address{street=Rua das Flores} (embedded)
@@ -730,6 +743,7 @@ A Fase 14 entrega comandos de réplica local (MVP sem daemon de streaming):
 
 ```text
 modb replicate bootstrap <primary.modb> <follower.modb>
+modb replicate seed-wal <follower.modb> <primary.wal> <primary.modb>
 modb replicate apply-wal <follower.modb> <primary.wal> <from_lsn>
 modb replicate status <file.modb>
 ```
@@ -738,17 +752,51 @@ modb replicate status <file.modb>
 registros a partir de `from_lsn`; `status` mostra uuid/timeline/LSNs. Guia:
 [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md).
 
-## `modb coll demo` — coleções persistentes (ODB++ Fase 4)
+### Primary `wal_only` (Fase 15) — primary sem arquivo de dados
+
+Com `primary_storage=wal_only` o primary persiste só o controle `MCTL` e o
+WAL; quem tem os arquivos de dados são as réplicas. Esse modo é uma opção de
+abertura (`DatabaseOptions::primary_storage`) — a CLI hoje **detecta e opera**
+um primary já criado nesse modo, mas não tem um subcomando para *criar* um do
+zero (isso é feito pela API, como em `Database::create(path, opts)`; veja
+`tests/wal_only_primary_test.cpp`).
+
+`replicate bootstrap` falha nesse modo (`data_files_disabled`) porque não há
+snapshot de páginas para copiar. Use `seed-wal` para criar a réplica vazia e
+aplicar o WAL desde o LSN 1:
+
+```text
+$ modb replicate seed-wal follower.modb primary.modb.wal primary.modb
+seed-wal ok applied_lsn=7
+```
+
+`replicate status` mostra o campo `primary_storage` (`full` ou `wal_only`)
+junto com uuid/timeline/LSNs/`follower_ack_lsn`:
+
+```text
+$ modb replicate status primary.modb
+primary_storage=wal_only
+uuid=...
+timeline=1
+next_lsn=8
+checkpoint_lsn=7
+follower_ack_lsn=7
+oldest_available_lsn=1
+```
+
+Detalhes de política de ACK do commit e retenção: [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md#primary-wal_only-fase-15).
+
+## `modb demo coll` — coleções persistentes (ODB++ Fase 4)
 
 Exercita `PersistentVector`, `PersistentSet` (deduplicação e ordem) e
 `PersistentMap` (`put`/`get`/`remove`), tudo sobrevivendo a uma reabertura.
 
 ```text
-modb coll demo <file> [--force]
+modb demo coll <file> [--force]
 ```
 
 ```text
-$ modb coll demo colecoes.modb --force
+$ modb demo coll colecoes.modb --force
 wrote PersistentVector<int64> with 5 elements
 wrote PersistentSet<int64> from 7 inserts -> 4 unique elements
 wrote PersistentMap<string,int64>: put ana/bia, replaced ana, removed bia -> 1 entry
@@ -764,7 +812,7 @@ Phase 4 collection demo: OK
 ## `modb tx` — transações, WAL e recuperação (ODB++ Fase 5)
 
 ```text
-modb tx demo <file> [--force]
+modb demo tx <file> [--force]
 modb tx crash <file> <before-commit|after-commit|mid-apply|before-cleanup> [--force]
 modb tx wal-info <file>
 modb tx get <file> <object-id>
@@ -848,7 +896,7 @@ modb heap scan demo.modb 3
 modb codec
 modb types
 
-modb oo employee demo phase3-demo.modb --force
+modb demo employee phase3-demo.modb --force
 modb type history phase3-demo.modb Employee
 modb baseline list phase3-demo.modb
 
@@ -909,10 +957,10 @@ modb mvcc upgrade exemplo-6a.modb
 ## MVCC — Fase 6B (snapshots e leituras consistentes)
 
 ```text
-modb mvcc snapshot-demo <file> [--force]
+modb demo mvcc-snapshot <file> [--force]
 ```
 
-`snapshot-demo` cria um arquivo autocontido e demonstra o snapshot ponta a ponta:
+`demo mvcc-snapshot` cria um arquivo autocontido e demonstra o snapshot ponta a ponta:
 
 1. cria uma conta e commita;
 2. abre um `Snapshot` na época corrente;
@@ -927,7 +975,7 @@ Roteiro passo a passo:
 
 ```text
 # Executa a demonstração completa num arquivo novo (--force recria se existir).
-modb mvcc snapshot-demo exemplo-6b.modb --force
+modb demo mvcc-snapshot exemplo-6b.modb --force
 ```
 
 A demonstração também exercita o GC da Fase 6C: com o snapshot aberto, o GC

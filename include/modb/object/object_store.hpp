@@ -125,6 +125,12 @@ public:
     [[nodiscard]] Result<void> set_follower_ack_lsn(std::uint64_t lsn) {
         return root_.set_follower_ack_lsn(lsn);
     }
+    [[nodiscard]] Result<void> set_database_uuid(DatabaseUuid uuid) {
+        return root_.set_database_uuid(uuid);
+    }
+    [[nodiscard]] Result<void> set_timeline_id(TimelineId timeline) {
+        return root_.set_timeline_id(timeline);
+    }
     // Total de registros físicos vivos no heap de dados (Fase 6C): inclui as
     // versões `previous` ainda preservadas e cópias órfãs ainda não coletadas.
     // Diagnóstico read-only, usado por testes e pela CLI para observar o efeito

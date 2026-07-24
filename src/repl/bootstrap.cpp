@@ -44,7 +44,11 @@ Result<void> copy_file_bytes(const std::filesystem::path& from, const std::files
 
 Result<BootstrapSnapshot> create_bootstrap_snapshot(object::Database& primary,
                                                     const std::filesystem::path& temp_dir) {
-    // Barreira: nenhuma outra tx; usamos begin+rollback como trava do escritor.
+    if (primary.primary_storage() == object::PrimaryStorage::wal_only) {
+        return std::unexpected(
+            Error{ErrorCode::data_files_disabled,
+                  "wal_only primary cannot donate a data-file bootstrap snapshot"});
+    }
     auto barrier = primary.begin();
     if (!barrier) {
         return std::unexpected(barrier.error());
@@ -193,6 +197,35 @@ Result<net::WalFrame> build_wal_frame(const std::filesystem::path& wal_path,
     frame.records.assign(packed.begin(), packed.end());
     frame.crc = crc32(frame.records);
     return frame;
+}
+
+Result<std::uint64_t> seed_replica_from_wal(const std::filesystem::path& follower_path,
+                                            const std::filesystem::path& wal_path,
+                                            object::DatabaseUuid uuid,
+                                            object::TimelineId timeline,
+                                            std::uint64_t from_lsn) {
+    auto created = object::Database::create(follower_path);
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+    auto follower = std::make_shared<object::Database>(std::move(*created));
+    auto id = object::DatabaseRegistry::instance().attach(follower);
+    if (!id) {
+        return std::unexpected(id.error());
+    }
+    if (auto set = follower->set_replication_identity(uuid, timeline); !set) {
+        (void)object::DatabaseRegistry::instance().detach(*id);
+        return std::unexpected(set.error());
+    }
+    auto records = tx::Wal::read_from(wal_path, from_lsn);
+    if (!records) {
+        (void)object::DatabaseRegistry::instance().detach(*id);
+        return std::unexpected(records.error());
+    }
+    auto applied =
+        apply_wal_records(follower->page_file(), *records, from_lsn == 0 ? 0 : from_lsn - 1);
+    (void)object::DatabaseRegistry::instance().detach(*id);
+    return applied;
 }
 
 } // namespace modb::repl

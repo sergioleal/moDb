@@ -48,5 +48,22 @@ Mostra `uuid`, `timeline`, `next_lsn`, `checkpoint_lsn`, `follower_ack_lsn` e
 
 ## Primary `wal_only` (Fase 15)
 
-O modo em que o primary não mantém arquivos de dados está na Fase 15
-([ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md)).
+Com `primary_storage=wal_only` o primary **não** mantém arquivo de páginas.
+Persiste apenas o controle `MCTL` no path lógico e o WAL (`<path>.wal`).
+Decisão: [ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md).
+
+### Seed sem snapshot do primary
+
+```text
+modb replicate seed-wal follower.modb primary.modb.wal primary.modb
+```
+
+Cria a réplica com arquivo de dados vazio (identidade alinhada) e aplica o WAL
+desde o LSN 1. O primary `wal_only` **não** pode doar bootstrap por cópia de
+arquivo (`replicate bootstrap` falha com `data_files_disabled`); use seed-wal
+ou doação entre réplicas de dados.
+
+### Status
+
+`modb replicate status` mostra `primary_storage`, uuid/timeline e LSNs (incluindo
+`follower_ack_lsn` usado na retenção e na política de ACK do commit).

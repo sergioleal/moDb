@@ -87,7 +87,7 @@ int main() {
     }
     auto follower = std::make_shared<Database>(std::move(*follower_open));
     auto fid = DatabaseRegistry::instance().attach(follower);
-    follower->set_read_only_replica(true);
+    (void)follower->set_read_only_replica(true);
 
     auto rejected = follower->begin();
     suite.check(!rejected && rejected.error().code == ErrorCode::replica_read_only,

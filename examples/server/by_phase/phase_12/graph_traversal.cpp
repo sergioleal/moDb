@@ -5,7 +5,10 @@
 #include <vector>
 
 int main() {
+    std::cout << "Objective: traverse a graph with breadth-first search.\n";
+
     using modb::object::ObjectId;
+    // The traversal engine only needs ObjectIds and an adjacency callback.
     std::unordered_map<std::uint64_t, std::vector<ObjectId>> edges{
         {1, {ObjectId{2}, ObjectId{3}}},
         {2, {ObjectId{4}}},
@@ -14,9 +17,11 @@ int main() {
     };
 
     int visited = 0;
+    // In a database-backed app, this callback would resolve outgoing edges from storage.
     auto adjacency = [&edges](ObjectId from) -> modb::Result<std::vector<ObjectId>> {
         return edges[from.value];
     };
+    // bfs() streams traversal items so callers can stop early if needed.
     for (auto& item : modb::graph::bfs(ObjectId{1}, adjacency)) {
         if (!item) {
             std::cerr << item.error().message << '\n';

@@ -128,7 +128,7 @@ inválido mantém a semântica de fim lógico do formato.
   `Database::rollback_transaction()` chama `resync_store_after_rollback()`
   (reconstrói `store_` via `ObjectStore::open`, uma operação puramente de
   leitura) depois de descartar o buffer. Isto foi um bug real, encontrado ao
-  exercitar `rollback → create → commit → reopen` pela CLI (`modb tx demo`) —
+  exercitar `rollback → create → commit → reopen` pela CLI (`modb demo tx`) —
   a suíte de testes anterior não cobria esse caminho.
 - **O contador de `ObjectId` nunca retrocede, mesmo com o resync acima.** Como
   o contador vive na mesma página (DBRT) que os demais campos gravados
@@ -201,7 +201,7 @@ para as camadas). Detalhes de formato/época no
 
 Critério 6B: ✅ suíte completa (62 testes) verde em Debug, `-Werror` e
 `sanitizers`; snapshot devolve o estado lógico da época mesmo com commits
-concorrentes intercalados (`modb.snapshot`, `modb mvcc snapshot-demo`).
+concorrentes intercalados (`modb.snapshot`, `modb demo mvcc-snapshot`).
 
 ## 9. Retenção, coleta de lixo e concorrência (Fase 6C)
 

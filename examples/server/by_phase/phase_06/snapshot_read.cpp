@@ -9,12 +9,14 @@
 
 namespace {
 
+// The account balance changes after the snapshot is opened.
 struct Account {
     std::string owner;
     std::int64_t balance{};
 };
 
 modb::object::BindingBuilder<Account> account_binding() {
+    // Snapshot reads use the same typed binding as current reads.
     modb::object::BindingBuilder<Account> builder{"Account"};
     builder.field<1>("owner", &Account::owner).field<2>("balance", &Account::balance);
     return builder;
@@ -35,6 +37,8 @@ void cleanup(const std::filesystem::path& path) {
 } // namespace
 
 int main() {
+    std::cout << "Objective: prove that a snapshot keeps a stable view after a later commit.\n";
+
     const auto path = temp_path();
     cleanup(path);
     auto created = modb::object::Database::create(path);
@@ -54,6 +58,7 @@ int main() {
         return 1;
     }
 
+    // Open the snapshot before the second transaction changes the balance.
     auto snapshot = database->snapshot();
     auto tx2 = database->begin();
     auto handle = database->get<Account>(account->id());
@@ -64,6 +69,7 @@ int main() {
         return 1;
     }
 
+    // The snapshot sees the old version; the current read sees the new version.
     auto stable = database->get<Account>(account->id(), *snapshot);
     auto current = database->materialize(*database->get<Account>(account->id()));
     std::cout << "snapshot=" << stable->balance << " current=" << current->balance << '\n';

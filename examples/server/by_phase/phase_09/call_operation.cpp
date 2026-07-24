@@ -16,6 +16,7 @@
 namespace {
 
 modb::object::BindingBuilder<modb::examples::Account> account_binding() {
+    // The transfer operation expects Account objects with owner and balance fields.
     modb::object::BindingBuilder<modb::examples::Account> builder{"Account"};
     builder.field<1>("owner", &modb::examples::Account::owner)
         .field<2>("balance", &modb::examples::Account::balance);
@@ -37,11 +38,14 @@ void cleanup(const std::filesystem::path& path) {
 } // namespace
 
 int main() {
+    std::cout << "Objective: call a remote domain operation through the Ring0 server.\n";
+
     const auto path = temp_path();
     cleanup(path);
     modb::object::ObjectId alice{};
     modb::object::ObjectId bob{};
     {
+        // Seed two accounts locally; the remote operation will move money between them.
         auto created = modb::object::Database::create(path);
         auto database = std::make_shared<modb::object::Database>(std::move(*created));
         auto attached = modb::object::DatabaseRegistry::instance().attach(database);
@@ -61,6 +65,7 @@ int main() {
         modb::object::DatabaseRegistry::instance().detach(*attached);
     }
 
+    // The server owns the operation registry used to dispatch OpCall frames.
     auto server = modb::net::Server::listen(path, "127.0.0.1", 0);
     if (!server->database().bind(account_binding())) {
         std::cerr << "failed to bind server Account\n";
@@ -71,6 +76,7 @@ int main() {
     modb::ops::ModuleLoader loader;
     const auto baseline = server->database().current_baseline()->id();
     const auto manifest = modb::examples::transfer_funds_manifest(baseline);
+    // Admission models the production allowlist check before loading a module.
     loader.admit_hash(manifest.hash);
     auto loaded = loader.load(manifest, baseline, *registry, [](modb::ops::OperationRegistry& reg) {
         return modb::examples::register_transfer_funds_module(reg);
@@ -85,13 +91,29 @@ int main() {
     std::thread acceptor([&server] { (void)server->serve_one(); });
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
 
-    auto connection = modb::app::ServerConnection::connect({
-        .host = "127.0.0.1",
-        .port = server->port(),
-        .database_name = std::string{server->database_name()},
-    });
-    auto args = modb::examples::TransferFunds::encode_args(alice, bob, 40);
-    auto result = connection->call(modb::examples::TransferFunds::k_id, *args);
+    modb::Result<std::vector<std::byte>> result{
+        std::unexpected(modb::Error{modb::ErrorCode::connection_closed, "not started"})};
+    {
+        // Keep the connection scoped so the server sees EOF before join().
+        auto connection = modb::app::ServerConnection::connect({
+            .host = "127.0.0.1",
+            .port = server->port(),
+            .database_name = std::string{server->database_name()},
+        });
+        if (!connection) {
+            std::cerr << connection.error().message << '\n';
+            cleanup(path);
+            return 1;
+        }
+        // Arguments are encoded by the operation type and sent through call().
+        auto args = modb::examples::TransferFunds::encode_args(alice, bob, 40);
+        if (!args) {
+            std::cerr << args.error().message << '\n';
+            cleanup(path);
+            return 1;
+        }
+        result = connection->call(modb::examples::TransferFunds::k_id, *args);
+    }
     acceptor.join();
     if (!result) {
         std::cerr << result.error().message << '\n';

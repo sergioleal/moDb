@@ -38,4 +38,10 @@ struct BootstrapSnapshot {
                                                     std::uint64_t from_lsn,
                                                     std::uint64_t oldest_available_lsn);
 
+// Fase 15D: cria réplica com arquivo de dados vazio alinhada à identidade do
+// primary wal_only e aplica o WAL desde `from_lsn` (tipicamente 1).
+[[nodiscard]] Result<std::uint64_t> seed_replica_from_wal(
+    const std::filesystem::path& follower_path, const std::filesystem::path& wal_path,
+    object::DatabaseUuid uuid, object::TimelineId timeline, std::uint64_t from_lsn = 1);
+
 } // namespace modb::repl

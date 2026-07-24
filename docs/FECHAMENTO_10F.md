@@ -16,7 +16,7 @@ Commit de entrega: `8d6a7a5` (merge em `master`).
 
 Validado conforme [OPERACAO.md](OPERACAO.md):
 
-1. `modb oo employee demo` + `index`
+1. `modb demo employee` + `modb oo employee index`
 2. `modb db check` verde (reconhece DBRT/IDMD/IDMP/BLBP/IXDR/BTLF/BTIN)
 3. Cópia quiescente de `<db>` (+ WAL se houver)
 4. Remoção do original, restauração, `db check` verde de novo

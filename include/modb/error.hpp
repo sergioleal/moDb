@@ -144,6 +144,14 @@ enum class ErrorCode {
     database_uuid_mismatch,
     // Follower precisa de novo bootstrap (Fase 14).
     bootstrap_required,
+    // Combinação inválida de papel/parâmetro de instância (Fase 15).
+    invalid_instance_config,
+    // Operação exige arquivo de dados; primary está em wal_only (Fase 15).
+    data_files_disabled,
+    // Commit wal_only exige réplica de dados e nenhuma está disponível (Fase 15).
+    no_data_replica,
+    // Timeout aguardando ACK de réplica de dados (Fase 15).
+    commit_await_replica_timeout,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

@@ -83,4 +83,4 @@ transação no servidor faz rollback — o mesmo contrato da Fase 9.
 | `modb.facade_catalog` | catálogo local |
 | `modb.facade_handle` | invoke embedded |
 | `modb.facade_server` | list/open + invoke remoto + rollback |
-| `modb ops facade-demo` | demo CLI ponta a ponta |
+| `modb demo ops-facade` | demo CLI ponta a ponta |

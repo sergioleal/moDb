@@ -55,8 +55,8 @@
 | [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ✅ Concluída | 12/12 | Fases 4, 6, 7, 10 · 12A–12E |
 | [13](#fase-13--io-assíncrono) | I/O assíncrono | 🔄 Em andamento | 4/8 | Fases 5, 8, 10 |
 | [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ✅ Concluída | 12/12 | Fases 5, 6, 8 · 14A–14E |
-| [15](#fase-15--primary-wal_only-só-wal-dados-nas-réplicas) | Primary `wal_only` (dados nas réplicas) | 🔄 Em andamento | 1/10 | Fase 14 · 15A–15E |
-| **Total** | | | **114/165 (~69%)** | |
+| [15](#fase-15--primary-wal_only-só-wal-dados-nas-réplicas) | Primary `wal_only` (dados nas réplicas) | ✅ Concluída | 10/10 | Fase 14 · 15A–15E |
+| **Total** | | | **123/165 (~75%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 39/39
 tarefas (100%).
@@ -253,8 +253,8 @@ associação (`modb.collection`, caso "grafo do critério"). Validado em Debug,
 
 **Extra (fora da lista de tarefas):** a CLI ganhou três grupos para exercitar a
 Fase 4 (no espírito do `modb oo` da Fase 3) — `modb blob` (put/get/info sobre o
-BlobStore), `modb graph demo` (associação + embedded + cascata + vector-de-refs
-de ponta a ponta) e `modb coll demo` (vector/set/map). Cobertos por seis testes
+BlobStore), `modb demo graph` (associação + embedded + cascata + vector-de-refs
+de ponta a ponta) e `modb demo coll` (vector/set/map). Cobertos por seis testes
 `modb.cli.*` (help + demos); suíte total em 48/48. Ver
 [USO_DA_CLI.md](USO_DA_CLI.md#modb-blob--binários-encadeados-odb-fase-4).
 
@@ -383,12 +383,12 @@ ignorando cópias antigas/órfãs.
 | `modb.snapshot` | leitura estável, remoção/criação invisível, scan consistente e `snapshot_conflict` | ✅ |
 | `modb.identity_map` | `find_at`/`current_epoch`/`has_previous` em bind→rebind→erase versionados | ✅ |
 | `modb.object_store` | `update`/`remove` com época e `scan` filtrando físicos preservados | ✅ |
-| `modb.cli.mvcc_snapshot_demo` | `modb mvcc snapshot-demo`: leitura estável + conflito + liberação | ✅ |
+| `modb.cli.mvcc_snapshot_demo` | `modb demo mvcc-snapshot`: leitura estável + conflito + liberação | ✅ |
 
 Critério de aceite 6B: ✅ um snapshot devolve o estado lógico da época em que foi
 criado (imune a update/remove/criação posteriores) enquanto a leitura sem
 snapshot devolve o último commit — demonstrado por `modb.snapshot` e pela CLI
-(`modb mvcc snapshot-demo`). Suíte completa 62/62 em Debug, `-Werror` e
+(`modb demo mvcc-snapshot`). Suíte completa 62/62 em Debug, `-Werror` e
 sanitizers.
 
 ### Fase 6C — Retenção, GC e concorrência
@@ -608,7 +608,7 @@ Status: ✅ Concluída (2/2) — commit `9f65f81`, tag `0.0.8a`.
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
 | `modb.protocol` | round-trip; frames hostis (truncado, length, >16 MiB, diretório inválido, lixo) | ✅ |
-| `modb.cli.protocol_demo` | demo explicativa `modb protocol demo` em memória | ✅ |
+| `modb.cli.protocol_demo` | demo explicativa `modb demo protocol` em memória | ✅ |
 
 Critério de aceite 8A: ✅ encode→decode idêntico; entradas hostis →
 `protocol_error`/`frame_too_large` sem alocação gigante. Suíte completa
@@ -628,7 +628,7 @@ Status: ✅ Concluída (2/2) — commit `6be4673`, tag `0.0.8b`.
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
 | `modb.server_streaming` | loopback: conexão, negociação, encerramento limpo | ✅ |
-| `modb.cli.serve_demo` | `modb serve demo` handshake in-process | ✅ |
+| `modb.cli.serve_demo` | `modb demo serve-handshake` handshake in-process | ✅ |
 
 Critério de aceite 8B: ✅ handshake e encerramento limpos; CLI demonstra
 servidor e ping/info remoto. Suíte completa 89/89 em Debug e sanitizers.
@@ -647,7 +647,7 @@ Status: ✅ Concluída (2/2) — commit `e1a61d3`, tag `0.0.8c`.
 | Teste (CTest) | Cobre | Status |
 |---|---|---|
 | `modb.server_streaming` | 10 mil objetos; ordem; independência física; erro após N; filtro/projeção | ✅ |
-| `modb.cli.serve_query_demo` | `modb serve query-demo` stream remoto in-process | ✅ |
+| `modb.cli.serve_query_demo` | `modb demo serve-query` stream remoto in-process | ✅ |
 
 Critério de aceite 8C: ✅ fluxo íntegro de 10 mil objetos; falha parcial
 entrega N + `StreamError`. Suíte completa 90/90 em Debug e sanitizers.
@@ -698,7 +698,7 @@ Status: ✅ Concluída (2/2) — commit `18f85d3`, tag `0.0.8f`.
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
 | 8F.1 | Timeout, limites de stream/frame/expansão; compressão negociada | ✅ | RLE embutido; `none` obrigatório/fallback; HelloOk anuncia limites |
-| 8F.2 | Suíte completa + demo CLI entre processos | ✅ | `serve process-demo`; CTest `modb.cli.serve_process_demo` |
+| 8F.2 | Suíte completa + demo CLI entre processos | ✅ | `modb demo serve-process`; CTest `modb.cli.serve_process_demo` |
 
 ### Testes automatizados desta subfase
 
@@ -742,7 +742,7 @@ Definição completa:
 |---|---|---|
 | `modb.operation` | `tests/operation_test.cpp` | ✅ |
 | `modb.operation_server` | `tests/operation_server_test.cpp` | ✅ |
-| `modb.cli.ops_transfer_demo` | CLI `ops transfer-demo` | ✅ |
+| `modb.cli.ops_transfer_demo` | CLI `modb demo ops-transfer` | ✅ |
 
 Critério de aceite: ✅ `TransferFunds` atômico via `client.call`, rollback em
 exceção/saldo insuficiente, consistente após reopen + recovery.
@@ -936,7 +936,7 @@ Status: ✅ Concluída — merge `2252aa1`, tag `0.0.11d` (2026-07-19).
 | `modb.facade_catalog` | `tests/facade_catalog_test.cpp` | ✅ 11A |
 | `modb.facade_handle` | `tests/facade_handle_test.cpp` | ✅ 11B |
 | `modb.facade_server` | `tests/facade_server_test.cpp` | ✅ 11C/11D |
-| `modb.cli.ops_facade_demo` | CLI `ops facade-demo` | ✅ 11D |
+| `modb.cli.ops_facade_demo` | CLI `modb demo ops-facade` | ✅ 11D |
 
 Critério de aceite: ✅ consumidor obtém `FacadeHandle`, invoca método tipado
 pela rede com contrato da Fase 9; descoberta lista facades/métodos; versão
@@ -1141,80 +1141,79 @@ da retenção força novo bootstrap; escrita no follower é rejeitada e leituras
 nunca observam transação replicada pela metade.
 ## Fase 15 — Primary `wal_only`: só WAL, dados nas réplicas
 
-Status: 🔄 Em andamento (1/10) — cinco entregas verticais 15A–15E.
+Status: ✅ Concluída (10/10) — tags `0.0.15a`–`0.0.15e` (2026-07-20).
 Definição completa:
 [PLANO_ODB.md §Fase 15](PLANO_ODB.md#fase-15--primary-wal_only-só-wal-dados-nas-réplicas) ·
 [PROTOCOLO_FASES.md §Fase 15](PROTOCOLO_FASES.md#fase-15--primary-wal_only-só-wal-dados-nas-réplicas)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 15.1 | ADR do modo `wal_only` (primary só WAL; dados nas réplicas) | ✅ | 15A · [ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md) |
-| 15.2 | Parâmetro `primary_storage` (`full` \| `wal_only`) na abertura/CLI | ⬜ | 15A · Rejeitar em follower |
-| 15.3 | Primary `wal_only` sem criar/abrir arquivo de dados | ⬜ | 15B · Só WAL + controle |
-| 15.4 | Produção de WAL a partir de estado em memória / scratch | ⬜ | 15B · Crash recupera log |
-| 15.5 | Réplicas como únicas donas dos arquivos de dados | ⬜ | 15C · `data_files_disabled` no primary |
-| 15.6 | Política de commit com ACK de réplica de dados + retenção | ⬜ | 15C · Default: ≥1 ACK |
-| 15.7 | Seed/bootstrap sem snapshot do primary (`vazio+WAL` ou doação) | ⬜ | 15D |
-| 15.8 | `WalGap`/rebootstrap com fonte em réplica de dados | ⬜ | 15D |
-| 15.9 | CLI/status (`primary_storage`, ACK, lag) | ⬜ | 15E |
-| 15.10 | Docs operacionais, failpoints e suítes verdes | ⬜ | 15E |
+| 15.1 | ADR do modo `wal_only` | ✅ | 15A · [ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md) |
+| 15.2 | Parâmetro `primary_storage` na abertura/CLI | ✅ | 15A · `modb.primary_storage_config` |
+| 15.3 | Primary `wal_only` sem arquivo de dados | ✅ | 15B · `modb.wal_only_primary` |
+| 15.4 | After-images em scratch; reopen restaura LSN/identidade | ✅ | 15B · MCTL + WAL |
+| 15.5 | Réplicas donas dos dados; leituras no primary rejeitadas | ✅ | 15C · `data_files_disabled` |
+| 15.6 | Política de commit com ACK de réplica | ✅ | 15C · `modb.wal_only_commit_ack` |
+| 15.7 | Retenção guiada por ACK (sem checkpoint de páginas) | ✅ | 15C · `follower_ack_lsn` |
+| 15.8 | Seed vazio+WAL / doação entre réplicas | ✅ | 15D · `modb.wal_only_bootstrap` |
+| 15.9 | CLI/status (`primary_storage`, ACK, lag) | ✅ | 15E · `seed-wal` + status |
+| 15.10 | Docs operacionais e suítes verdes | ✅ | 15E · [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md) |
 
 ### Fase 15A — ADR e parâmetro de instância
 
-Status: 🔄 Em andamento — ADR aceita. Tag alvo: `0.0.15a`.
+Status: ✅ Concluída — tag `0.0.15a`.
 
 | Entrega | Status | Aceite |
 |---|---|---|
 | ADR-017 | ✅ | Aceita |
-| Parâmetro `primary_storage` | ⬜ | `modb.primary_storage_config` |
+| Parâmetro `primary_storage` | ✅ | `modb.primary_storage_config` |
 
 ### Fase 15B — Primary sem arquivos de dados
 
-Status: ⬜ Não iniciada. Tag alvo: `0.0.15b`.
+Status: ✅ Concluída — tag `0.0.15b`.
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Primary só WAL | ⬜ | `modb.wal_only_primary` |
+| Primary só WAL + MCTL | ✅ | `modb.wal_only_primary` |
 
 ### Fase 15C — Réplicas donas dos dados e política de commit
 
-Status: ⬜ Não iniciada. Tag alvo: `0.0.15c`.
+Status: ✅ Concluída — tag `0.0.15c`.
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| ACK / retenção / sem dados no primary para leitura | ⬜ | `modb.wal_only_commit_ack` |
+| ACK / retenção / `data_files_disabled` | ✅ | `modb.wal_only_commit_ack` |
 
 ### Fase 15D — Bootstrap/seed sem dados no primary
 
-Status: ⬜ Não iniciada. Tag alvo: `0.0.15d`.
+Status: ✅ Concluída — tag `0.0.15d`.
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Seed vazio+WAL ou doação entre réplicas | ⬜ | `modb.wal_only_bootstrap` |
+| Seed vazio+WAL / doação | ✅ | `modb.wal_only_bootstrap` |
 
 ### Fase 15E — CLI, operação e fechamento
 
-Status: ⬜ Não iniciada. Tag alvo: `0.0.15e`.
+Status: ✅ Concluída — tag `0.0.15e`.
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| CLI + docs + failpoints | ⬜ | fluxo ponta a ponta |
+| CLI + docs | ✅ | `seed-wal` / status / OPERACAO |
 
 ### Testes/artefatos desta fase
 
 | Item | Local | Status |
 |---|---|---|
-| Config `primary_storage` | `tests/primary_storage_config_test.cpp` | ⬜ 15A |
-| Primary `wal_only` | `tests/wal_only_primary_test.cpp` | ⬜ 15B |
-| Commit + ACK | `tests/wal_only_commit_ack_test.cpp` | ⬜ 15C |
-| Bootstrap/seed | `tests/wal_only_bootstrap_test.cpp` | ⬜ 15D |
+| Config `primary_storage` | `tests/primary_storage_config_test.cpp` | ✅ 15A |
+| Primary `wal_only` | `tests/wal_only_primary_test.cpp` | ✅ 15B |
+| Commit + ACK | `tests/wal_only_commit_ack_test.cpp` | ✅ 15C |
+| Bootstrap/seed | `tests/wal_only_bootstrap_test.cpp` | ✅ 15D |
 | ADR | `docs/decisions/ADR-017-*.md` | ✅ 15A |
+| Guia | `docs/OPERACAO_REPLICACAO.md` | ✅ 15E |
 
-Critério de aceite: ⬜ com `primary_storage=wal_only`, o primary não possui
-arquivo de dados; commits vão ao WAL e às réplicas; as réplicas mantêm os dados
-e servem leitura; bootstrap não depende de snapshot do primary.
-
----
+Critério de aceite: ✅ com `primary_storage=wal_only`, o primary não possui
+arquivo de dados; commits seguem no WAL e para as réplicas; seed/bootstrap não
+depende de snapshot do primary; suítes verdes.
 
 ## Histórico de fechamento de fases
 

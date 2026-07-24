@@ -10,14 +10,17 @@
 
 namespace {
 
+// Department is referenced by association; deleting an employee would not own it.
 struct Department {
     std::string name;
 };
 
+// Badge is owned by Employee through OwnedRef.
 struct Badge {
     std::int64_t code{};
 };
 
+// Employee demonstrates both association and ownership references.
 struct Employee {
     std::string name;
     modb::object::Ref<Department> department{};
@@ -37,6 +40,7 @@ modb::object::BindingBuilder<Badge> badge_binding() {
 }
 
 modb::object::BindingBuilder<Employee> employee_binding() {
+    // Relationship fields are persisted like normal attributes.
     modb::object::BindingBuilder<Employee> builder{"Employee"};
     builder.field<1>("name", &Employee::name)
         .field<2>("department", &Employee::department)
@@ -59,6 +63,8 @@ void cleanup(const std::filesystem::path& path) {
 } // namespace
 
 int main() {
+    std::cout << "Objective: store domain relationships with Ref<T> and OwnedRef<T>.\n";
+
     const auto path = temp_path();
     cleanup(path);
     auto created = modb::object::Database::create(path);
@@ -71,6 +77,7 @@ int main() {
         return 1;
     }
 
+    // Store all nodes and connect them by ObjectId inside one transaction.
     auto tx = database->begin();
     auto department = database->create(*tx, Department{"Engineering"});
     auto badge = database->create(*tx, Badge{7});
@@ -81,6 +88,7 @@ int main() {
         return 1;
     }
 
+    // Materializing Employee shows that the relationship handles survived storage.
     auto ana = database->materialize(*database->get<Employee>(employee->id()));
     std::cout << ana->name << " department_ref=" << ana->department.target.value
               << " badge_owned_ref=" << ana->badge.target.value << '\n';

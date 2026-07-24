@@ -948,7 +948,7 @@ A fase é dividida em cinco entregas verticais, cada uma com teste e tag própri
 - [x] Registrar em ADR o modo `wal_only`, papéis primary/réplica, durabilidade
       por ACK e bootstrap sem arquivo de dados no primary
       ([ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md)).
-- [ ] Introduzir o parâmetro `primary_storage` (`full` | `wal_only`) na abertura
+- [x] Introduzir o parâmetro `primary_storage` (`full` | `wal_only`) na abertura
       da instância primary (API + CLI); rejeitar `wal_only` em follower
       (`invalid_instance_config`).
 
@@ -957,9 +957,9 @@ aceito só no primary; follower com `wal_only` falha. Tag: `0.0.15a`.
 
 #### Fase 15B — Primary sem arquivos de dados
 
-- [ ] No modo `wal_only`, não criar/abrir arquivo de páginas para escrita
+- [x] No modo `wal_only`, não criar/abrir arquivo de páginas para escrita
       durável; manter WAL (e controle mínimo de identidade/log).
-- [ ] Produzir after-images/registros de WAL a partir de estado em memória (ou
+- [x] Produzir after-images/registros de WAL a partir de estado em memória (ou
       scratch não durável); crash do primary recupera o log, não um heap local.
 
 Critério de aceite: `modb.wal_only_primary` — commits geram WAL; ausência de
@@ -968,10 +968,10 @@ log. Tag: `0.0.15b`.
 
 #### Fase 15C — Réplicas donas dos dados e política de commit
 
-- [ ] Garantir que só as réplicas de leitura materializam e mantêm os arquivos
+- [x] Garantir que só as réplicas de leitura materializam e mantêm os arquivos
       de dados nesse modo; leituras de objetos no primary `wal_only` são
       rejeitadas ou redirecionadas por política explícita (`data_files_disabled`).
-- [ ] Definir política de confirmação ao cliente (default: aguardar ACK de ≥1
+- [x] Definir política de confirmação ao cliente (default: aguardar ACK de ≥1
       réplica de dados); retenção do WAL no primary guiada por esses ACKs, não
       por checkpoint de páginas locais.
 
@@ -981,19 +981,19 @@ timeout). Tag: `0.0.15c`.
 
 #### Fase 15D — Bootstrap/seed sem dados no primary
 
-- [ ] Seed de réplica a partir de arquivo vazio + WAL desde a origem, ou doação
+- [x] Seed de réplica a partir de arquivo vazio + WAL desde a origem, ou doação
       de snapshot entre réplicas de dados (nunca exigir cópia do primary
       `wal_only`).
-- [ ] Tratar `WalGap`/rebootstrap com fonte de snapshot em réplica de dados.
+- [x] Tratar `WalGap`/rebootstrap com fonte de snapshot em réplica de dados.
 
 Critério de aceite: `modb.wal_only_bootstrap` — réplica nova fica consistente
 sem arquivo de dados no primary. Tag: `0.0.15d`.
 
 #### Fase 15E — CLI, operação e fechamento
 
-- [ ] Expor o parâmetro na CLI (`serve` / `replicate`) e status
+- [x] Expor o parâmetro na CLI (`serve` / `replicate`) e status
       (`primary_storage`, ACK, lag).
-- [ ] Documentar operação (`OPERACAO_REPLICACAO.md` ou guia dedicado),
+- [x] Documentar operação (`OPERACAO_REPLICACAO.md` ou guia dedicado),
       failpoints (queda do primary só-WAL, perda de réplica de dados) e suítes
       `debug`/`sanitizers` verdes.
 

@@ -2,6 +2,7 @@
 #include "modb/object/blob_store.hpp"
 #include "modb/object/collection.hpp"
 #include "modb/object/database.hpp"
+#include "modb/object/instance_control.hpp"
 #include "modb/object/object_store.hpp"
 #include "modb/object/ref.hpp"
 #include "modb/object/type_definition.hpp"
@@ -98,10 +99,8 @@ void print_page_help();
 void print_record_help();
 void print_heap_help();
 void print_codec_help();
-void print_protocol_help();
 void print_serve_help();
 void print_ping_help();
-void print_ops_help();
 void print_types_help();
 void print_type_help();
 void print_baseline_help();
@@ -110,7 +109,6 @@ void print_oo_help();
 void print_query_help();
 void print_blob_help();
 void print_graph_help();
-void print_coll_help();
 void print_tx_help();
 void print_mvcc_help();
 
@@ -173,7 +171,6 @@ int run_oo_command(int argc, char* argv[]);
 int run_query_command(int argc, char* argv[]);
 int run_blob_command(int argc, char* argv[]);
 int run_graph_command(int argc, char* argv[]);
-int run_coll_command(int argc, char* argv[]);
 int run_tx_command(int argc, char* argv[]);
 int run_replicate_command(int argc, char* argv[]);
 int run_mvcc_command(int argc, char* argv[]);
@@ -250,10 +247,8 @@ void print_help() {
            "  record   Manage records stored in one page.\n"
            "  heap     Manage multi-page table heaps.\n"
            "  codec    Encode and decode a row in memory.\n"
-           "  protocol Encode/decode protocol frames in memory (ODB++ Fase 8A).\n"
            "  serve    Host a database and complete Hello/HelloOk (ODB++ Fase 8B).\n"
            "  ping     Connect and negotiate Hello with a running server (Fase 8B).\n"
-           "  ops      Domain operations / TransferFunds demo (ODB++ Fase 9).\n"
            "  types    Exercise the in-memory object model (ODB++).\n"
            "  type     Define and list persistent object types (ODB++).\n"
            "  baseline Inspect immutable catalog baselines (ODB++).\n"
@@ -262,7 +257,6 @@ void print_help() {
            "  query    Stream Employees with filter/index/project/sort/top-k (ODB++ Fase 7).\n"
            "  blob     Store and read chained BLBP blobs (ODB++ Fase 4).\n"
            "  graph    Demo an object graph: refs, embedded, cascade (ODB++ Fase 4).\n"
-           "  coll     Demo persistent vector/set/map collections (ODB++ Fase 4).\n"
            "  tx       Exercise transactions, the WAL and recovery (ODB++ Fase 5).\n"
            "  replicate Bootstrap/apply/status for read replicas (ODB++ Fase 14).\n"
            "  mvcc     Inspect/advance the MVCC epoch and demo snapshots (ODB++ Fase "
@@ -276,9 +270,25 @@ void print_help() {
 }
 
 void print_demo_help() {
-    std::cout << "Usage:\n"
-                 "  modb demo\n"
-                 "  modb demo run [-force]\n";
+    std::cout
+        << "Usage:\n"
+           "  modb demo\n"
+           "  modb demo run [-force]\n"
+           "  modb demo protocol\n"
+           "  modb demo serve-handshake <file> [--force]\n"
+           "  modb demo serve-query <file> [--force]\n"
+           "  modb demo serve-backpressure <file> [--force]\n"
+           "  modb demo serve-cancel <file> [--force]\n"
+           "  modb demo serve-process <file> [--force]\n"
+           "  modb demo ops-transfer <file> [--force]\n"
+           "  modb demo ops-facade <file> [--force]\n"
+           "  modb demo employee <file> [--force]\n"
+           "  modb demo graph <file> [--force]\n"
+           "  modb demo coll <file> [--force]\n"
+           "  modb demo tx <file> [--force]\n"
+           "  modb demo mvcc-snapshot <file> [--force]\n"
+           "\n"
+           "All CLI demos are centralized here.\n";
 }
 
 void print_db_help() {
@@ -327,29 +337,10 @@ void print_codec_help() {
                  "  modb codec\n";
 }
 
-void print_protocol_help() {
-    std::cout << "Usage:\n"
-                 "  modb protocol demo\n"
-                 "\n"
-                 "Commands:\n"
-                 "  demo  Show, step by step, how Hello, Query and ObjectFrame are\n"
-                 "        encoded and decoded in memory (no network).\n";
-}
-
 void print_serve_help() {
     std::cout << "Usage:\n"
-                 "  modb serve demo <file> [--force]\n"
-                 "  modb serve query-demo <file> [--force]\n"
-                 "  modb serve backpressure-demo <file> [--force]\n"
-                 "  modb serve cancel-demo <file> [--force]\n"
-                 "  modb serve process-demo <file> [--force]\n"
                  "  modb serve <file> [--host H] [--port N] [--once]\n"
                  "\n"
-                 "demo               Listen, complete Hello/HelloOk with a local client and exit.\n"
-                 "query-demo         Seed objects, stream a remote Query end-to-end and exit.\n"
-                 "backpressure-demo  Slow client (50 ms/obj); print produzidos-enviados bound.\n"
-                 "cancel-demo        Cancel mid-stream then reuse the connection (Fase 8E).\n"
-                 "process-demo       Client in this process, server child process (Fase 8F).\n"
                  "--once             Accept one connection session until the client disconnects.\n";
 }
 
@@ -398,7 +389,6 @@ void print_oo_help() {
                  "  modb oo employee set-salary <file> <object-id> <salary> "
                  "--schema <1|2>\n"
                  "  modb oo employee index <file> --schema <1|2>\n"
-                 "  modb oo employee demo <file> [--force]\n"
                  "\n"
                  "index builds a B+ tree on Employee.salary (ODB++ Fase 7B). See\n"
                  "'modb query --help' to stream/filter/index-scan the Employees.\n";
@@ -446,41 +436,24 @@ void print_blob_help() {
 
 void print_graph_help() {
     std::cout << "Usage:\n"
-                 "  modb graph demo <file> [--force]\n"
                  "  modb graph bfs <file> [--force]\n"
                  "  modb graph dfs <file> [--force]\n"
                  "  modb graph shortest-path <file> [--force]\n"
                  "  modb graph toposort <file> [--force]\n"
                  "\n"
-                 "End-to-end object graph (Fase 4): association (Ref), embedded value,\n"
-                 "composition (OwnedRef) and a PersistentVector<Ref>. Writes the graph,\n"
-                 "reopens the file, resolves every edge, then removes the parent to show\n"
-                 "the owned child cascading while associated objects survive.\n"
-                 "\n"
                  "Fase 12 algorithms (bfs/dfs/shortest-path/toposort): seed a Node tree,\n"
                  "reopen the database, then run the algorithm under a single Snapshot.\n";
 }
 
-void print_coll_help() {
-    std::cout << "Usage:\n"
-                 "  modb coll demo <file> [--force]\n"
-                 "\n"
-                 "Exercises the persistent collections (Fase 4): PersistentVector,\n"
-                 "PersistentSet (dedup + order) and PersistentMap (put/get/remove),\n"
-                 "surviving a reopen of the file.\n";
-}
-
 void print_tx_help() {
     std::cout << "Usage:\n"
-                 "  modb tx demo <file> [--force]\n"
                  "  modb tx crash <file> <before-commit|after-commit|mid-apply|before-cleanup> "
                  "[--force]\n"
                  "  modb tx wal-info <file>\n"
                  "  modb tx get <file> <object-id>\n"
                  "\n"
                  "Exercises transactions, the write-ahead log and recovery (ODB++ Fase 5).\n"
-                 "`demo` runs commit/rollback/transact() in one process. `crash` stages a\n"
-                 "transaction, reaches the given commit phase, then calls std::exit — no\n"
+                 "`crash` reaches the given commit phase, then calls std::exit — no\n"
                  "destructor runs, genuinely simulating a crashed process (it prints the\n"
                  "staged ObjectId). Inspect the aftermath with `wal-info` (raw WAL records,\n"
                  "no recovery) and `get <object-id>` (reopens the file, which runs recovery\n"
@@ -528,9 +501,10 @@ int command_demo() {
            "[6/8] Try the in-memory tools\n"
            "  modb codec\n"
            "  modb types\n"
+           "  modb demo protocol\n"
            "\n"
            "[7/8] Run the Phase 3 typed OO scenario\n"
-           "  modb oo employee demo phase3-demo.modb --force\n"
+           "  modb demo employee phase3-demo.modb --force\n"
            "  modb type history phase3-demo.modb Employee\n"
            "  modb baseline list phase3-demo.modb\n"
            "\n"
@@ -591,7 +565,8 @@ int command_demo_run(bool force) {
         {"modb", "heap", "scan", "demo.modb", "3"},
         {"modb", "codec"},
         {"modb", "types"},
-        {"modb", "oo", "employee", "demo", "phase3-demo.modb", "--force"},
+        {"modb", "demo", "protocol"},
+        {"modb", "demo", "employee", "phase3-demo.modb", "--force"},
         {"modb", "type", "history", "phase3-demo.modb", "Employee"},
         {"modb", "baseline", "list", "phase3-demo.modb"},
         {"modb", "db", "check", "demo.modb"},
@@ -2113,15 +2088,6 @@ int command_serve_process_demo(const std::filesystem::path& path, bool force,
     return (saw_stream_error && count == 40 && child_exit == 0) ? 0 : 1;
 }
 
-void print_ops_help() {
-    std::cout << "Usage:\n"
-                 "  modb ops transfer-demo <file> [--force]\n"
-                 "  modb ops facade-demo <file> [--force]\n"
-                 "\n"
-                 "transfer-demo  Seed accounts, serve OpCall TransferFunds and exit (Fase 9).\n"
-                 "facade-demo    Accounts facade via open_facade + invoke pela rede (Fase 11D).\n";
-}
-
 int command_ops_transfer_demo(const std::filesystem::path& path, bool force) {
     using modb::examples::Account;
     using modb::examples::TransferFunds;
@@ -2838,7 +2804,6 @@ void print_mvcc_help() {
                  "  modb mvcc upgrade <file>\n"
                  "  modb mvcc tick <file>\n"
                  "  modb mvcc versions <file> <object-id>\n"
-                 "  modb mvcc snapshot-demo <file> [--force]\n"
                  "  modb mvcc gc <file>\n"
                  "\n"
                  "Exercises Fase 6A: status reports the epoch, the DBRT/IDMP version and\n"
@@ -2848,14 +2813,6 @@ void print_mvcc_help() {
                  "versions reports the versioning state of one object (Fase 6B/6C): the\n"
                  "current epoch and physical location, and whether a previous version is\n"
                  "still retained (with its epoch) — i.e. what a gc could reclaim.\n"
-                 "\n"
-                 "snapshot-demo exercises Fase 6B/6C: it opens a Snapshot, commits an update\n"
-                 "behind its back, shows the snapshot still reading the old value while a\n"
-                 "plain read sees the new one, shows a second concurrent update being\n"
-                 "rejected with snapshot_conflict while the snapshot is still open, shows\n"
-                 "gc retaining the previous version while the snapshot is open, and finally\n"
-                 "— once the snapshot is closed — the update succeeding and gc reclaiming\n"
-                 "the obsolete version.\n"
                  "\n"
                  "gc exercises Fase 6C: reclaims the physical space of previous versions no\n"
                  "open snapshot can still see, and reports how many records were recovered.\n";
@@ -4945,12 +4902,6 @@ int run_oo_command(int argc, char* argv[]) {
         return schema ? command_employee_set_salary(argv[4], *id, *salary, *schema)
                       : print_error(schema.error());
     }
-    if (subcommand == "demo") {
-        if (argc != 5 && !(argc == 6 && std::string_view{argv[5]} == "--force")) {
-            return print_usage_error("modb oo employee demo <file> [--force]");
-        }
-        return command_employee_demo(argv[4], argc == 6);
-    }
     if (subcommand == "index") {
         if (argc != 7 || std::string_view{argv[5]} != "--schema") {
             return print_usage_error("modb oo employee index <file> --schema <1|2>");
@@ -5117,12 +5068,6 @@ int run_graph_command(int argc, char* argv[]) {
     }
     const std::string_view subcommand{argv[2]};
     const auto force = argc == 5 && std::string_view{argv[4]} == "--force";
-    if (subcommand == "demo") {
-        if (argc != 4 && !force) {
-            return print_usage_error("modb graph demo <file> [--force]");
-        }
-        return command_graph_demo(argv[3], force);
-    }
     if (subcommand == "bfs") {
         if (argc != 4 && !force) {
             return print_usage_error("modb graph bfs <file> [--force]");
@@ -5151,26 +5096,11 @@ int run_graph_command(int argc, char* argv[]) {
     return 2;
 }
 
-int run_coll_command(int argc, char* argv[]) {
-    if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
-        print_coll_help();
-        return 0;
-    }
-    const std::string_view subcommand{argv[2]};
-    if (subcommand == "demo") {
-        if (argc != 4 && !(argc == 5 && std::string_view{argv[4]} == "--force")) {
-            return print_usage_error("modb coll demo <file> [--force]");
-        }
-        return command_coll_demo(argv[3], argc == 5);
-    }
-    std::cerr << "Unknown coll command: " << subcommand << '\n';
-    return 2;
-}
-
 int run_replicate_command(int argc, char* argv[]) {
     auto print_help = [] {
         std::cout << "Usage:\n"
                      "  modb replicate bootstrap <primary.modb> <follower.modb>\n"
+                     "  modb replicate seed-wal <follower.modb> <primary.wal> <primary.modb>\n"
                      "  modb replicate apply-wal <follower.modb> <primary.wal> <from_lsn>\n"
                      "  modb replicate status <file.modb>\n";
     };
@@ -5209,6 +5139,31 @@ int run_replicate_command(int argc, char* argv[]) {
                   << " size=" << snap->begin.size_bytes << '\n';
         return 0;
     }
+    if (sub == "seed-wal") {
+        if (argc != 6) {
+            return print_usage_error(
+                "modb replicate seed-wal <follower.modb> <primary.wal> <primary.modb>");
+        }
+        const std::filesystem::path follower_path{argv[3]};
+        const std::filesystem::path wal_path{argv[4]};
+        const std::filesystem::path primary_path{argv[5]};
+        modb::object::DatabaseOptions opts;
+        opts.primary_storage = modb::object::PrimaryStorage::wal_only;
+        opts.commit_ack = modb::object::CommitAckPolicy::local_wal;
+        auto primary = modb::object::is_instance_control_file(primary_path)
+                           ? modb::object::Database::open(primary_path, opts)
+                           : modb::object::Database::open(primary_path);
+        if (!primary) {
+            return print_error(primary.error());
+        }
+        auto applied = modb::repl::seed_replica_from_wal(
+            follower_path, wal_path, primary->database_uuid(), primary->timeline_id(), 1);
+        if (!applied) {
+            return print_error(applied.error());
+        }
+        std::cout << "seed-wal ok applied_lsn=" << *applied << '\n';
+        return 0;
+    }
     if (sub == "apply-wal") {
         if (argc != 6) {
             return print_usage_error("modb replicate apply-wal <follower> <primary.wal> <from_lsn>");
@@ -5227,7 +5182,9 @@ int run_replicate_command(int argc, char* argv[]) {
         if (!id) {
             return print_error(id.error());
         }
-        follower->set_read_only_replica(true);
+        if (auto ro = follower->set_read_only_replica(true); !ro) {
+            return print_error(ro.error());
+        }
         auto records = modb::tx::Wal::read_from(argv[4], from_lsn);
         if (!records) {
             (void)modb::object::DatabaseRegistry::instance().detach(*id);
@@ -5252,11 +5209,20 @@ int run_replicate_command(int argc, char* argv[]) {
         if (argc != 4) {
             return print_usage_error("modb replicate status <file>");
         }
-        auto opened = modb::object::Database::open(argv[3]);
+        auto opened = [&]() -> modb::Result<modb::object::Database> {
+            if (modb::object::is_instance_control_file(argv[3])) {
+                modb::object::DatabaseOptions opts;
+                opts.primary_storage = modb::object::PrimaryStorage::wal_only;
+                opts.commit_ack = modb::object::CommitAckPolicy::local_wal;
+                return modb::object::Database::open(argv[3], opts);
+            }
+            return modb::object::Database::open(argv[3]);
+        }();
         if (!opened) {
             return print_error(opened.error());
         }
-        std::cout << "uuid=";
+        std::cout << "primary_storage=" << modb::object::to_string(opened->primary_storage())
+                  << "\nuuid=";
         for (auto b : opened->database_uuid().bytes) {
             std::cout << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned>(b);
@@ -5278,12 +5244,6 @@ int run_tx_command(int argc, char* argv[]) {
         return 0;
     }
     const std::string_view subcommand{argv[2]};
-    if (subcommand == "demo") {
-        if (argc != 4 && !(argc == 5 && std::string_view{argv[4]} == "--force")) {
-            return print_usage_error("modb tx demo <file> [--force]");
-        }
-        return command_tx_demo(argv[3], argc == 5);
-    }
     if (subcommand == "crash") {
         const bool has_force = argc == 6 && std::string_view{argv[5]} == "--force";
         if (argc != 5 && !has_force) {
@@ -5512,12 +5472,6 @@ int run_mvcc_command(int argc, char* argv[]) {
             return print_error(id.error());
         }
         return command_mvcc_versions(argv[3], *id);
-    }
-    if (subcommand == "snapshot-demo") {
-        if (argc != 4 && !(argc == 5 && std::string_view{argv[4]} == "--force")) {
-            return print_usage_error("modb mvcc snapshot-demo <file> [--force]");
-        }
-        return command_mvcc_snapshot_demo(argv[3], argc == 5);
     }
     if (subcommand == "gc") {
         if (argc != 4) {
@@ -5793,7 +5747,8 @@ int run(int argc, char* argv[]) {
             print_demo_help();
             return 0;
         }
-        if (std::string_view{argv[2]} == "run") {
+        const std::string_view demo{argv[2]};
+        if (demo == "run") {
             if (argc == 4 && is_help_argument(argv[3])) {
                 print_command_help(
                     "modb demo run [-force]",
@@ -5809,6 +5764,143 @@ int run(int argc, char* argv[]) {
                 return command_demo_run(true);
             }
             return print_usage_error("modb demo run [-force]");
+        }
+        if (demo == "protocol") {
+            if (argc == 4 && is_help_argument(argv[3])) {
+                print_command_help(
+                    "modb demo protocol",
+                    "Show, step by step, how Hello, Query and ObjectFrame are encoded and "
+                    "decoded in memory.");
+                return 0;
+            }
+            if (argc != 3) {
+                return print_usage_error("modb demo protocol");
+            }
+            return command_protocol_demo();
+        }
+
+        auto parse_demo_file = [&](std::string_view usage)
+            -> modb::Result<std::pair<std::filesystem::path, bool>> {
+            if (argc < 4 || argc > 5) {
+                return std::unexpected(modb::Error{modb::ErrorCode::invalid_argument,
+                                                   std::string{"Usage: "} + std::string{usage}});
+            }
+            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
+            if (argc == 5 && !force) {
+                return std::unexpected(modb::Error{modb::ErrorCode::invalid_argument,
+                                                   std::string{"Usage: "} + std::string{usage}});
+            }
+            return std::pair<std::filesystem::path, bool>{std::filesystem::path{argv[3]}, force};
+        };
+        auto dispatch_file_demo = [&](std::string_view usage, std::string_view description,
+                                      auto invoker) -> int {
+            if (argc == 4 && is_help_argument(argv[3])) {
+                print_command_help(usage, description);
+                return 0;
+            }
+            auto parsed = parse_demo_file(usage);
+            if (!parsed) {
+                std::cerr << parsed.error().message << '\n';
+                return 2;
+            }
+            return invoker(parsed->first, parsed->second);
+        };
+
+        if (demo == "serve-handshake") {
+            return dispatch_file_demo(
+                "modb demo serve-handshake <file> [--force]",
+                "Seed a database, complete Hello/HelloOk with an in-process client and exit.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_serve_demo(path, force);
+                });
+        }
+        if (demo == "serve-query") {
+            return dispatch_file_demo(
+                "modb demo serve-query <file> [--force]",
+                "Seed objects, stream a remote Query end-to-end and exit.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_serve_query_demo(path, force);
+                });
+        }
+        if (demo == "serve-backpressure") {
+            return dispatch_file_demo(
+                "modb demo serve-backpressure <file> [--force]",
+                "Run a slow client and show that max_outstanding stays bounded.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_serve_backpressure_demo(path, force);
+                });
+        }
+        if (demo == "serve-cancel") {
+            return dispatch_file_demo(
+                "modb demo serve-cancel <file> [--force]",
+                "Cancel a stream mid-flight, then reuse the same server connection.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_serve_cancel_demo(path, force);
+                });
+        }
+        if (demo == "serve-process") {
+            return dispatch_file_demo(
+                "modb demo serve-process <file> [--force]",
+                "Run a client in this process against a server child process.",
+                [argv](const std::filesystem::path& path, bool force) {
+                    return command_serve_process_demo(path, force, argv[0]);
+                });
+        }
+        if (demo == "ops-transfer") {
+            return dispatch_file_demo(
+                "modb demo ops-transfer <file> [--force]",
+                "Seed accounts, serve OpCall TransferFunds and exit.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_ops_transfer_demo(path, force);
+                });
+        }
+        if (demo == "ops-facade") {
+            return dispatch_file_demo(
+                "modb demo ops-facade <file> [--force]",
+                "Open a typed accounts facade and invoke it over the server.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_ops_facade_demo(path, force);
+                });
+        }
+        if (demo == "employee") {
+            return dispatch_file_demo(
+                "modb demo employee <file> [--force]",
+                "Run the Phase 3 typed Employee binding and schema evolution scenario.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_employee_demo(path, force);
+                });
+        }
+        if (demo == "graph") {
+            return dispatch_file_demo(
+                "modb demo graph <file> [--force]",
+                "Run the Phase 4 object graph invariant scenario.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_graph_demo(path, force);
+                });
+        }
+        if (demo == "coll") {
+            return dispatch_file_demo(
+                "modb demo coll <file> [--force]",
+                "Exercise persistent vector, set and map collections.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_coll_demo(path, force);
+                });
+        }
+        if (demo == "tx") {
+            return dispatch_file_demo(
+                "modb demo tx <file> [--force]",
+                "Exercise transactions, WAL commit, rollback and recovery invariants.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_tx_demo(path, force);
+                });
+        }
+        if (demo == "mvcc-snapshot") {
+            return dispatch_file_demo(
+                "modb demo mvcc-snapshot <file> [--force]",
+                "Exercise MVCC snapshots, conflict detection and version garbage collection.",
+                [](const std::filesystem::path& path, bool force) {
+                    return command_mvcc_snapshot_demo(path, force);
+                });
         }
         std::cerr << "Unknown demo command: " << argv[2] << '\n';
         return 2;
@@ -5835,97 +5927,10 @@ int run(int argc, char* argv[]) {
         }
         return command_codec_run();
     }
-    if (command == "protocol") {
-        if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
-            print_protocol_help();
-            return 0;
-        }
-        if (argc == 3 && std::string_view{argv[2]} == "demo") {
-            return command_protocol_demo();
-        }
-        return print_usage_error("modb protocol demo");
-    }
-    if (command == "ops") {
-        if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
-            print_ops_help();
-            return 0;
-        }
-        if (std::string_view{argv[2]} == "transfer-demo") {
-            if (argc < 4 || argc > 5) {
-                return print_usage_error("modb ops transfer-demo <file> [--force]");
-            }
-            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
-            if (argc == 5 && !force) {
-                return print_usage_error("modb ops transfer-demo <file> [--force]");
-            }
-            return command_ops_transfer_demo(argv[3], force);
-        }
-        if (std::string_view{argv[2]} == "facade-demo") {
-            if (argc < 4 || argc > 5) {
-                return print_usage_error("modb ops facade-demo <file> [--force]");
-            }
-            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
-            if (argc == 5 && !force) {
-                return print_usage_error("modb ops facade-demo <file> [--force]");
-            }
-            return command_ops_facade_demo(argv[3], force);
-        }
-        return print_usage_error("modb ops transfer-demo|facade-demo <file> [--force]");
-    }
     if (command == "serve") {
         if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
             print_serve_help();
             return 0;
-        }
-        if (std::string_view{argv[2]} == "demo") {
-            if (argc < 4 || argc > 5) {
-                return print_usage_error("modb serve demo <file> [--force]");
-            }
-            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
-            if (argc == 5 && !force) {
-                return print_usage_error("modb serve demo <file> [--force]");
-            }
-            return command_serve_demo(argv[3], force);
-        }
-        if (std::string_view{argv[2]} == "query-demo") {
-            if (argc < 4 || argc > 5) {
-                return print_usage_error("modb serve query-demo <file> [--force]");
-            }
-            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
-            if (argc == 5 && !force) {
-                return print_usage_error("modb serve query-demo <file> [--force]");
-            }
-            return command_serve_query_demo(argv[3], force);
-        }
-        if (std::string_view{argv[2]} == "backpressure-demo") {
-            if (argc < 4 || argc > 5) {
-                return print_usage_error("modb serve backpressure-demo <file> [--force]");
-            }
-            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
-            if (argc == 5 && !force) {
-                return print_usage_error("modb serve backpressure-demo <file> [--force]");
-            }
-            return command_serve_backpressure_demo(argv[3], force);
-        }
-        if (std::string_view{argv[2]} == "cancel-demo") {
-            if (argc < 4 || argc > 5) {
-                return print_usage_error("modb serve cancel-demo <file> [--force]");
-            }
-            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
-            if (argc == 5 && !force) {
-                return print_usage_error("modb serve cancel-demo <file> [--force]");
-            }
-            return command_serve_cancel_demo(argv[3], force);
-        }
-        if (std::string_view{argv[2]} == "process-demo") {
-            if (argc < 4 || argc > 5) {
-                return print_usage_error("modb serve process-demo <file> [--force]");
-            }
-            const bool force = argc == 5 && std::string_view{argv[4]} == "--force";
-            if (argc == 5 && !force) {
-                return print_usage_error("modb serve process-demo <file> [--force]");
-            }
-            return command_serve_process_demo(argv[3], force, argv[0]);
         }
         // modb serve <file> [--host H] [--port N] [--once] [--fail-after N] [--small-buffers]
         if (argc < 3) {
@@ -6025,9 +6030,6 @@ int run(int argc, char* argv[]) {
     }
     if (command == "graph") {
         return run_graph_command(argc, argv);
-    }
-    if (command == "coll") {
-        return run_coll_command(argc, argv);
     }
     if (command == "tx") {
         return run_tx_command(argc, argv);

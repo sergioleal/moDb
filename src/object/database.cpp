@@ -1,32 +1,32 @@
 // Importa a interface de Database.
 #include "modb/object/database.hpp"
 
-// Importa DatabaseRoot para ler checkpoint na abertura.
 #include "modb/object/database_root.hpp"
-// Importa a recuperação executada na abertura.
+#include "modb/object/instance_control.hpp"
 #include "modb/tx/recovery.hpp"
-// Importa o WAL usado no commit.
 #include "modb/tx/wal.hpp"
 
-// Disponibiliza std::error_code na remoção do WAL.
+#include <chrono>
+#include <thread>
 #include <system_error>
-// Disponibiliza o conjunto de ids visitados na cascata.
 #include <unordered_set>
-// Disponibiliza std::move.
 #include <utility>
 
 namespace modb::object {
 namespace {
 
-// Deriva o caminho do WAL a partir do caminho do banco (`<db>.wal`).
 std::filesystem::path wal_path_for(const std::filesystem::path& path) {
     std::filesystem::path wal = path;
     wal += ".wal";
     return wal;
 }
 
-// Compara duas TypeDefinitions ignorando o id (que difere entre a canônica do
-// binding, ainda sem id, e a persistida). Confere nome e atributos.
+std::filesystem::path scratch_path_for(const std::filesystem::path& path) {
+    std::filesystem::path scratch = path;
+    scratch += ".scratch";
+    return scratch;
+}
+
 bool same_structure(const TypeDefinition& stored, const TypeDefinition& canonical) {
     if (stored.name() != canonical.name()) {
         return false;
@@ -45,33 +45,169 @@ bool same_structure(const TypeDefinition& stored, const TypeDefinition& canonica
 
 } // namespace
 
-Result<Database> Database::create(const std::filesystem::path& path,
+Database::Database(Database&& other) noexcept = default;
+
+Database::~Database() {
+    if (primary_storage_ == PrimaryStorage::wal_only && file_) {
+        const auto scratch = file_->path();
+        file_.reset();
+        std::error_code ignored;
+        std::filesystem::remove(scratch, ignored);
+    }
+}
+
+Result<Database> Database::create(const std::filesystem::path& path, std::size_t cache_capacity) {
+    return create(path, DatabaseOptions{}, cache_capacity);
+}
+
+Result<Database> Database::create(const std::filesystem::path& path, const DatabaseOptions& options,
                                   std::size_t cache_capacity) {
+    auto opts = options;
+    // Sem upgrade implícito: o default de DatabaseOptions é local_wal; quem
+    // quiser await_one_replica (ADR-017) passa explicitamente nas options.
+
+    if (opts.primary_storage == PrimaryStorage::wal_only) {
+        if (is_instance_control_file(path) || std::filesystem::exists(path)) {
+            return std::unexpected(
+                Error{ErrorCode::file_already_exists, "instance path already exists"});
+        }
+        const auto scratch = scratch_path_for(path);
+        std::error_code remove_error;
+        std::filesystem::remove(scratch, remove_error);
+        auto page_file = storage::PageFile::create(scratch, cache_capacity);
+        if (!page_file) {
+            return std::unexpected(page_file.error());
+        }
+        auto file = std::make_unique<storage::PageFile>(std::move(*page_file));
+        auto store = ObjectStore::create(*file);
+        if (!store) {
+            return std::unexpected(store.error());
+        }
+        auto wal_path = wal_path_for(path);
+        std::filesystem::remove(wal_path, remove_error);
+        Database db{std::move(file), std::move(*store), std::move(wal_path), path,
+                    PrimaryStorage::wal_only, opts.commit_ack, opts.commit_ack_timeout};
+        if (auto persisted = db.persist_instance_control(); !persisted) {
+            return std::unexpected(persisted.error());
+        }
+        return db;
+    }
+
     auto page_file = storage::PageFile::create(path, cache_capacity);
     if (!page_file) {
         return std::unexpected(page_file.error());
     }
-    // Endereço estável: o ObjectStore guardará um PageFile* para dentro dele.
     auto file = std::make_unique<storage::PageFile>(std::move(*page_file));
     auto store = ObjectStore::create(*file);
     if (!store) {
         return std::unexpected(store.error());
     }
-    // Um banco novo não deve herdar um WAL residual de um banco homônimo antigo.
     auto wal_path = wal_path_for(path);
     std::error_code remove_error;
     std::filesystem::remove(wal_path, remove_error);
-    return Database{std::move(file), std::move(*store), std::move(wal_path)};
+    return Database{std::move(file), std::move(*store), std::move(wal_path), path,
+                    PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout};
 }
 
-Result<Database> Database::open(const std::filesystem::path& path,
+Result<Database> Database::open(const std::filesystem::path& path, std::size_t cache_capacity) {
+    return open(path, DatabaseOptions{}, cache_capacity);
+}
+
+Result<Database> Database::open(const std::filesystem::path& path, const DatabaseOptions& options,
                                 std::size_t cache_capacity) {
+    auto opts = options;
+
+    if (opts.primary_storage == PrimaryStorage::wal_only) {
+        auto control = read_instance_control(path);
+        if (!control) {
+            return std::unexpected(control.error());
+        }
+        const auto scratch = scratch_path_for(path);
+        std::error_code remove_error;
+        std::filesystem::remove(scratch, remove_error);
+        auto page_file = storage::PageFile::create(scratch, cache_capacity);
+        if (!page_file) {
+            return std::unexpected(page_file.error());
+        }
+        auto file = std::make_unique<storage::PageFile>(std::move(*page_file));
+        // Seed mínimo: ObjectStore::create, depois aplica WAL e alinha identidade.
+        auto created_store = ObjectStore::create(*file);
+        if (!created_store) {
+            return std::unexpected(created_store.error());
+        }
+        ObjectStore store = std::move(*created_store);
+        if (auto set_uuid = store.set_database_uuid(control->database_uuid); !set_uuid) {
+            return std::unexpected(set_uuid.error());
+        }
+        if (auto set_tl = store.set_timeline_id(control->timeline_id); !set_tl) {
+            return std::unexpected(set_tl.error());
+        }
+        if (auto flushed = file->flush(); !flushed) {
+            return std::unexpected(flushed.error());
+        }
+        auto wal_path = wal_path_for(path);
+        auto recovered = tx::recover(*file, wal_path, control->checkpoint_lsn);
+        if (!recovered) {
+            return std::unexpected(recovered.error());
+        }
+        // Reabre store após recovery para refletir páginas aplicadas.
+        auto reopened = ObjectStore::open(*file);
+        if (!reopened) {
+            return std::unexpected(reopened.error());
+        }
+        store = std::move(*reopened);
+        if (auto set_uuid = store.set_database_uuid(control->database_uuid); !set_uuid) {
+            return std::unexpected(set_uuid.error());
+        }
+        if (auto set_tl = store.set_timeline_id(control->timeline_id); !set_tl) {
+            return std::unexpected(set_tl.error());
+        }
+        if (auto set_next = store.set_next_lsn(control->next_lsn); !set_next) {
+            return std::unexpected(set_next.error());
+        }
+        if (auto set_ckpt = store.set_checkpoint_lsn(control->checkpoint_lsn); !set_ckpt) {
+            return std::unexpected(set_ckpt.error());
+        }
+        if (auto set_ack = store.set_follower_ack_lsn(control->follower_ack_lsn); !set_ack) {
+            return std::unexpected(set_ack.error());
+        }
+        if (recovered->max_commit_lsn > store.checkpoint_lsn()) {
+            if (auto ckpt = store.set_checkpoint_lsn(recovered->max_commit_lsn); !ckpt) {
+                return std::unexpected(ckpt.error());
+            }
+        }
+        if (auto records = tx::Wal::read_all(wal_path); records) {
+            std::uint64_t max_lsn = 0;
+            for (const auto& record : *records) {
+                if (record.lsn > max_lsn) {
+                    max_lsn = record.lsn;
+                }
+            }
+            if (max_lsn > 0 && max_lsn + 1 > store.next_lsn()) {
+                if (auto set_lsn = store.set_next_lsn(max_lsn + 1); !set_lsn) {
+                    return std::unexpected(set_lsn.error());
+                }
+            }
+        }
+        Database db{std::move(file), std::move(store), std::move(wal_path), path,
+                    PrimaryStorage::wal_only, opts.commit_ack, opts.commit_ack_timeout};
+        db.data_replica_seen_ = control->follower_ack_lsn > 0;
+        if (auto persisted = db.persist_instance_control(); !persisted) {
+            return std::unexpected(persisted.error());
+        }
+        return db;
+    }
+
+    if (is_instance_control_file(path)) {
+        return std::unexpected(Error{ErrorCode::invalid_instance_config,
+                                     "path is wal_only control; open with primary_storage=wal_only"});
+    }
+
     auto page_file = storage::PageFile::open(path, cache_capacity);
     if (!page_file) {
         return std::unexpected(page_file.error());
     }
     auto file = std::make_unique<storage::PageFile>(std::move(*page_file));
-    // Lê checkpoint do DBRT (se existir) para redo incremental do WAL durável.
     std::uint64_t after_lsn = 0;
     if (file->catalog_root()) {
         if (auto root = object::DatabaseRoot::open(*file); root) {
@@ -95,7 +231,6 @@ Result<Database> Database::open(const std::filesystem::path& path,
             return std::unexpected(flushed.error());
         }
     }
-    // Garante next_lsn >= max LSN no arquivo + 1 (janela de crash pós-apply).
     if (auto records = tx::Wal::read_all(wal_path); records) {
         std::uint64_t max_lsn = 0;
         for (const auto& record : *records) {
@@ -112,7 +247,39 @@ Result<Database> Database::open(const std::filesystem::path& path,
             }
         }
     }
-    return Database{std::move(file), std::move(*store), std::move(wal_path)};
+    return Database{std::move(file), std::move(*store), std::move(wal_path), path,
+                    PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout};
+}
+
+Result<void> Database::persist_instance_control() {
+    InstanceControl control;
+    control.database_uuid = store_.database_uuid();
+    control.timeline_id = store_.timeline_id();
+    control.next_lsn = store_.next_lsn();
+    control.checkpoint_lsn = store_.checkpoint_lsn();
+    control.follower_ack_lsn = store_.follower_ack_lsn();
+    return write_instance_control(instance_path_, control);
+}
+
+Result<void> Database::await_commit_ack(std::uint64_t commit_lsn) {
+    if (commit_ack_policy_ != CommitAckPolicy::await_one_replica) {
+        return {};
+    }
+    const auto deadline = std::chrono::steady_clock::now() + commit_ack_timeout_;
+    while (store_.follower_ack_lsn() < commit_lsn) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            if (!data_replica_seen_ && store_.follower_ack_lsn() == 0) {
+                return std::unexpected(Error{ErrorCode::no_data_replica,
+                                             "wal_only commit requires a data replica ACK"});
+            }
+            return std::unexpected(
+                Error{ErrorCode::commit_await_replica_timeout,
+                      "timed out waiting for replica ACK of commit_lsn"});
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    data_replica_seen_ = true;
+    return persist_instance_control();
 }
 
 Result<TypeDefinitionId> Database::register_or_adopt(const Binding& binding) {
@@ -272,12 +439,19 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
             return {};
         }
     }
-    // Checkpoint: páginas duráveis; avança posição (não remove o WAL).
+    // Checkpoint: páginas duráveis (full) ou controle MCTL (wal_only).
     if (commit_lsn != 0) {
         if (auto ckpt = store_.set_checkpoint_lsn(commit_lsn); !ckpt) {
             return std::unexpected(ckpt.error());
         }
-        if (auto flushed = file_->flush(); !flushed) {
+        if (primary_storage_ == PrimaryStorage::wal_only) {
+            if (auto persisted = persist_instance_control(); !persisted) {
+                return std::unexpected(persisted.error());
+            }
+            if (auto acked = await_commit_ack(commit_lsn); !acked) {
+                return std::unexpected(acked.error());
+            }
+        } else if (auto flushed = file_->flush(); !flushed) {
             return std::unexpected(flushed.error());
         }
     }
@@ -415,10 +589,16 @@ Result<void> Transaction::commit(CommitPhase phase) {
         active_ = false;
         committed_ = true;
         if (!committed) {
-            (*database)->require_recovery();
-            return std::unexpected(Error{ErrorCode::commit_recovery_required,
-                                         "commit is durable in WAL but requires recovery: " +
-                                             committed.error().message});
+            const auto code = committed.error().code;
+            // ACK de réplica (Fase 15): o WAL já é durável; o cliente não recebeu
+            // confirmação, mas a instância permanece utilizável sem recovery.
+            if (code != ErrorCode::no_data_replica &&
+                code != ErrorCode::commit_await_replica_timeout) {
+                (*database)->require_recovery();
+                return std::unexpected(Error{ErrorCode::commit_recovery_required,
+                                             "commit is durable in WAL but requires recovery: " +
+                                                 committed.error().message});
+            }
         }
     }
     return committed;

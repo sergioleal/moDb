@@ -9,12 +9,14 @@
 
 namespace {
 
+// Account is the durable object written through the WAL-backed transaction.
 struct Account {
     std::string owner;
     std::int64_t balance{};
 };
 
 modb::object::BindingBuilder<Account> account_binding() {
+    // The binding is repeated after reopen so the stored payload can be decoded.
     modb::object::BindingBuilder<Account> builder{"Account"};
     builder.field<1>("owner", &Account::owner).field<2>("balance", &Account::balance);
     return builder;
@@ -35,10 +37,13 @@ void cleanup(const std::filesystem::path& path) {
 } // namespace
 
 int main() {
+    std::cout << "Objective: commit durable data and verify it after reopening the database.\n";
+
     const auto path = temp_path();
     cleanup(path);
     modb::object::ObjectId id{};
     {
+        // Commit once, then close the database lifetime to force a real reopen.
         auto created = modb::object::Database::create(path);
         auto database = std::make_shared<modb::object::Database>(std::move(*created));
         auto attached = modb::object::DatabaseRegistry::instance().attach(database);
@@ -58,6 +63,7 @@ int main() {
         modb::object::DatabaseRegistry::instance().detach(*attached);
     }
 
+    // Reopening validates that committed data is durable and recoverable.
     auto opened = modb::object::Database::open(path);
     auto database = std::make_shared<modb::object::Database>(std::move(*opened));
     auto attached = modb::object::DatabaseRegistry::instance().attach(database);

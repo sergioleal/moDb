@@ -9,18 +9,21 @@
 
 namespace {
 
+// Plain C++ domain type that will be described to the Ring0 catalog.
 struct Customer {
     std::string name;
     std::int64_t score{};
 };
 
 modb::object::BindingBuilder<Customer> customer_binding() {
+    // Binding maps stable field ids to real C++ data members.
     modb::object::BindingBuilder<Customer> builder{"Customer"};
     builder.field<1>("name", &Customer::name).field<2>("score", &Customer::score);
     return builder;
 }
 
 std::filesystem::path temp_path() {
+    // Each run uses an isolated temporary database file.
     return std::filesystem::temp_directory_path() /
            ("ring0-phase-01-" +
             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".modb");
@@ -35,8 +38,12 @@ void cleanup(const std::filesystem::path& path) {
 } // namespace
 
 int main() {
+    std::cout << "Objective: bind a C++ type and register it in the catalog.\n";
+
     const auto path = temp_path();
     cleanup(path);
+
+    // Create a database and attach it so typed operations can resolve bindings.
     auto created = modb::object::Database::create(path);
     if (!created) {
         std::cerr << created.error().message << '\n';
@@ -49,6 +56,8 @@ int main() {
         cleanup(path);
         return 1;
     }
+
+    // The registered type id proves the C++ type is now known to the catalog.
     auto type_id = database->type_id_of<Customer>();
     std::cout << "Customer type id: " << type_id->value << '\n';
     modb::object::DatabaseRegistry::instance().detach(*attached);

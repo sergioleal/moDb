@@ -12,6 +12,7 @@
 namespace {
 
 std::filesystem::path temp_path() {
+    // Capability handshakes still need a real database name on the server.
     return std::filesystem::temp_directory_path() /
            ("ring0-phase-10-" +
             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".modb");
@@ -26,9 +27,12 @@ void cleanup(const std::filesystem::path& path) {
 } // namespace
 
 int main() {
+    std::cout << "Objective: inspect public server capabilities negotiated during handshake.\n";
+
     const auto path = temp_path();
     cleanup(path);
     {
+        // Create the backing file once; this example only inspects connection metadata.
         auto created = modb::object::Database::create(path);
         if (!created) {
             std::cerr << created.error().message << '\n';
@@ -41,9 +45,11 @@ int main() {
         cleanup(path);
         return 1;
     }
+    // The server accepts one handshake-only session.
     std::thread acceptor([&server] { (void)server->serve_one(); });
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
 
+    // handshake() stops after Hello/HelloOk and exposes negotiated limits.
     auto info = modb::app::ServerConnection::handshake({
         .host = "127.0.0.1",
         .port = server->port(),

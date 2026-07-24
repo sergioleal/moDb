@@ -10,6 +10,7 @@
 #include "modb/object/handle.hpp"
 // Importa ObjectStore (usado pelos métodos template inline).
 #include "modb/object/object_store.hpp"
+#include "modb/object/primary_storage.hpp"
 // Importa ProjectionPlan para materializar versões históricas.
 #include "modb/object/projection_plan.hpp"
 // Importa o encoding ordenável usado no fallback Scan+Predicate (Fase 7E).
@@ -28,6 +29,8 @@
 #include <cstddef>
 // Disponibiliza caminhos.
 #include <filesystem>
+// Disponibiliza timeouts de ACK (Fase 15).
+#include <chrono>
 // Disponibiliza callbacks de migração.
 #include <functional>
 // Disponibiliza a posse estável do PageFile.
@@ -375,16 +378,22 @@ public:
     [[nodiscard]] static Result<Database> create(
         const std::filesystem::path& path,
         std::size_t cache_capacity = storage::page_cache_capacity);
+    [[nodiscard]] static Result<Database> create(const std::filesystem::path& path,
+                                                 const DatabaseOptions& options,
+                                                 std::size_t cache_capacity = storage::page_cache_capacity);
     // Abre um banco OO existente.
     [[nodiscard]] static Result<Database> open(
         const std::filesystem::path& path,
         std::size_t cache_capacity = storage::page_cache_capacity);
+    [[nodiscard]] static Result<Database> open(const std::filesystem::path& path,
+                                               const DatabaseOptions& options,
+                                               std::size_t cache_capacity = storage::page_cache_capacity);
 
     Database(const Database&) = delete;
     Database& operator=(const Database&) = delete;
-    Database(Database&&) = default;
+    Database(Database&&) noexcept;
     Database& operator=(Database&&) = delete;
-    ~Database() = default;
+    ~Database();
 
     // Registra o binding do tipo T e reconcilia com o catálogo persistido:
     // tipo inexistente → grava; idêntico → adota o id existente; divergente →
@@ -450,6 +459,9 @@ public:
     [[nodiscard]] Result<Handle<T>> get(ObjectId id) {
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
+        }
+        if (auto data = check_durable_data(); !data) {
+            return std::unexpected(data.error());
         }
         if (database_id_.value == 0) {
             return std::unexpected(
@@ -852,12 +864,54 @@ public:
         return store_.oldest_available_lsn();
     }
     [[nodiscard]] Result<void> set_follower_ack_lsn(std::uint64_t lsn) {
-        return store_.set_follower_ack_lsn(lsn);
+        auto set = store_.set_follower_ack_lsn(lsn);
+        if (!set) {
+            return set;
+        }
+        data_replica_seen_ = true;
+        if (primary_storage_ == PrimaryStorage::wal_only) {
+            return persist_instance_control();
+        }
+        return {};
+    }
+    // Alinha UUID/timeline (seed de réplica a partir de primary wal_only).
+    [[nodiscard]] Result<void> set_replication_identity(DatabaseUuid uuid, TimelineId timeline) {
+        if (auto set_uuid = store_.set_database_uuid(uuid); !set_uuid) {
+            return set_uuid;
+        }
+        if (auto set_tl = store_.set_timeline_id(timeline); !set_tl) {
+            return set_tl;
+        }
+        if (primary_storage_ == PrimaryStorage::wal_only) {
+            return persist_instance_control();
+        }
+        return file_->flush();
+    }
+    [[nodiscard]] const std::filesystem::path& instance_path() const noexcept {
+        return instance_path_;
     }
     [[nodiscard]] const std::filesystem::path& data_path() const noexcept { return file_->path(); }
     [[nodiscard]] const std::filesystem::path& wal_path() const noexcept { return wal_path_; }
+    [[nodiscard]] PrimaryStorage primary_storage() const noexcept { return primary_storage_; }
+    [[nodiscard]] bool has_durable_data_files() const noexcept {
+        return primary_storage_ == PrimaryStorage::full;
+    }
     [[nodiscard]] bool is_read_only_replica() const noexcept { return read_only_replica_; }
-    void set_read_only_replica(bool enabled) noexcept { read_only_replica_ = enabled; }
+    [[nodiscard]] Result<void> set_read_only_replica(bool enabled) {
+        if (enabled && primary_storage_ == PrimaryStorage::wal_only) {
+            return std::unexpected(
+                Error{ErrorCode::invalid_instance_config,
+                      "follower cannot use primary_storage=wal_only"});
+        }
+        read_only_replica_ = enabled;
+        return {};
+    }
+    // Política/timeout de ACK (Fase 15C); útil em testes.
+    void set_commit_ack_policy(CommitAckPolicy policy,
+                               std::chrono::milliseconds timeout = std::chrono::seconds{5}) noexcept {
+        commit_ack_policy_ = policy;
+        commit_ack_timeout_ = timeout;
+    }
     [[nodiscard]] storage::PageFile& page_file() noexcept { return *file_; }
     [[nodiscard]] Result<std::reference_wrapper<const Baseline>> find_baseline(
         BaselineId id) const {
@@ -930,8 +984,27 @@ private:
     };
 
     Database(std::unique_ptr<storage::PageFile> file, ObjectStore store,
-             std::filesystem::path wal_path)
-        : file_{std::move(file)}, store_{std::move(store)}, wal_path_{std::move(wal_path)} {}
+             std::filesystem::path wal_path, std::filesystem::path instance_path,
+             PrimaryStorage primary_storage, CommitAckPolicy commit_ack,
+             std::chrono::milliseconds commit_ack_timeout)
+        : file_{std::move(file)},
+          store_{std::move(store)},
+          instance_path_{std::move(instance_path)},
+          wal_path_{std::move(wal_path)},
+          primary_storage_{primary_storage},
+          commit_ack_policy_{commit_ack},
+          commit_ack_timeout_{commit_ack_timeout} {}
+
+    [[nodiscard]] Result<void> check_durable_data() const {
+        if (primary_storage_ == PrimaryStorage::wal_only) {
+            return std::unexpected(Error{ErrorCode::data_files_disabled,
+                                         "primary wal_only has no durable data files"});
+        }
+        return {};
+    }
+
+    [[nodiscard]] Result<void> persist_instance_control();
+    [[nodiscard]] Result<void> await_commit_ack(std::uint64_t commit_lsn);
 
     // Confere que uma escrita pode prosseguir: banco anexado, transação da mesma
     // instância e de fato ativa no PageFile.
@@ -1365,8 +1438,14 @@ private:
                        std::unordered_map<std::string, std::function<Result<AttributeValue>(const void*)>>>
         computed_fns_;
     DatabaseId database_id_{};
+    // Caminho lógico da instância (PageFile full ou MCTL wal_only).
+    std::filesystem::path instance_path_;
     // Caminho do write-ahead log (`<db>.wal`).
     std::filesystem::path wal_path_;
+    PrimaryStorage primary_storage_{PrimaryStorage::full};
+    CommitAckPolicy commit_ack_policy_{CommitAckPolicy::local_wal};
+    std::chrono::milliseconds commit_ack_timeout_{std::chrono::seconds{5}};
+    bool data_replica_seen_{false};
     // Id da transação corrente e o próximo a atribuir (monotônico por sessão).
     std::uint64_t current_tx_id_{0};
     std::uint64_t next_tx_id_{1};

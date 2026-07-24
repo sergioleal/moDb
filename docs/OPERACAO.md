@@ -76,7 +76,7 @@ critério operacional desta fase.
 
 ```powershell
 cmake --build --preset debug
-.\build\debug\modb.exe oo employee demo shop.modb --force
+.\build\debug\modb.exe demo employee shop.modb --force
 .\build\debug\modb.exe db check shop.modb
 
 # backup
@@ -94,6 +94,6 @@ Copy-Item .\op-backup\* -Destination .
 
 ## Relacionados
 
-- Transações / crash: `modb tx demo`, `modb tx crash`, `modb tx wal-info`
+- Transações / crash: `modb demo tx`, `modb tx crash`, `modb tx wal-info`
 - API: [API_PUBLICA.md](API_PUBLICA.md)
 - Formato: [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md)

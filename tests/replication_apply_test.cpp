@@ -80,7 +80,7 @@ int main() {
     }
     auto follower = std::make_shared<Database>(std::move(*follower_open));
     auto fid = DatabaseRegistry::instance().attach(follower);
-    follower->set_read_only_replica(true);
+    (void)follower->set_read_only_replica(true);
 
     auto applied =
         repl::apply_wal_records(follower->page_file(), *records, snap->begin.cut_lsn);

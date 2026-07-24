@@ -15,7 +15,7 @@ cmake --build --preset debug
 ctest --preset debug
 
 # Demo OO (cria, evolui schema, consulta)
-.\build\debug\modb.exe oo employee demo demo.modb --force
+.\build\debug\modb.exe demo employee demo.modb --force
 
 # Diagnóstico
 .\build\debug\modb.exe db check demo.modb
@@ -80,11 +80,11 @@ detalhes em [API_PUBLICA.md](docs/API_PUBLICA.md).
 ## CLI (amostra)
 
 ```text
-modb oo employee demo <file> [--force]
+modb demo employee <file> [--force]
 modb db check <file>
-modb tx demo <file> [--force]
+modb demo tx <file> [--force]
 modb tx wal-info <file>
-modb serve demo <file> [--force]
+modb demo serve-handshake <file> [--force]
 modb_bench run --profile smoke --seed 1 --output-dir benchmark-results
 ```
 

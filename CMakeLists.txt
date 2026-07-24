@@ -42,6 +42,8 @@ add_library(modb
     src/object/collection.cpp
     src/object/database.cpp
     src/object/database_root.cpp
+    src/object/primary_storage.cpp
+    src/object/instance_control.cpp
     src/object/identity_map.cpp
     src/object/index_catalog.cpp
     src/object/object_codec.cpp
@@ -418,6 +420,14 @@ if(BUILD_TESTING)
     target_link_libraries(modb_replication_streaming_tests PRIVATE modb::modb)
     add_executable(modb_replication_recovery_tests tests/replication_recovery_test.cpp)
     target_link_libraries(modb_replication_recovery_tests PRIVATE modb::modb)
+    add_executable(modb_primary_storage_config_tests tests/primary_storage_config_test.cpp)
+    target_link_libraries(modb_primary_storage_config_tests PRIVATE modb::modb)
+    add_executable(modb_wal_only_primary_tests tests/wal_only_primary_test.cpp)
+    target_link_libraries(modb_wal_only_primary_tests PRIVATE modb::modb)
+    add_executable(modb_wal_only_commit_ack_tests tests/wal_only_commit_ack_test.cpp)
+    target_link_libraries(modb_wal_only_commit_ack_tests PRIVATE modb::modb)
+    add_executable(modb_wal_only_bootstrap_tests tests/wal_only_bootstrap_test.cpp)
+    target_link_libraries(modb_wal_only_bootstrap_tests PRIVATE modb::modb)
 
     add_executable(modb_benchmark_runner_tests tests/benchmark_runner_test.cpp)
     target_link_libraries(modb_benchmark_runner_tests PRIVATE modb_bench_core)
@@ -518,6 +528,10 @@ if(BUILD_TESTING)
         target_link_options(modb_replication_apply_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_replication_streaming_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_replication_recovery_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_primary_storage_config_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_wal_only_primary_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_wal_only_commit_ack_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_wal_only_bootstrap_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -579,6 +593,10 @@ if(BUILD_TESTING)
     add_test(NAME modb.replication_apply COMMAND modb_replication_apply_tests)
     add_test(NAME modb.replication_streaming COMMAND modb_replication_streaming_tests)
     add_test(NAME modb.replication_recovery COMMAND modb_replication_recovery_tests)
+    add_test(NAME modb.primary_storage_config COMMAND modb_primary_storage_config_tests)
+    add_test(NAME modb.wal_only_primary COMMAND modb_wal_only_primary_tests)
+    add_test(NAME modb.wal_only_commit_ack COMMAND modb_wal_only_commit_ack_tests)
+    add_test(NAME modb.wal_only_bootstrap COMMAND modb_wal_only_bootstrap_tests)
     add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
@@ -619,29 +637,28 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.heap_help COMMAND modb_cli heap --help)
     add_test(NAME modb.cli.codec COMMAND modb_cli codec)
     add_test(NAME modb.cli.codec_help COMMAND modb_cli codec --help)
-    add_test(NAME modb.cli.protocol_demo COMMAND modb_cli protocol demo)
-    add_test(NAME modb.cli.protocol_help COMMAND modb_cli protocol --help)
+    add_test(NAME modb.cli.protocol_demo COMMAND modb_cli demo protocol)
     add_test(NAME modb.cli.serve_help COMMAND modb_cli serve --help)
     add_test(NAME modb.cli.serve_demo
-        COMMAND modb_cli serve demo
+        COMMAND modb_cli demo serve-handshake
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-demo.modb --force)
     add_test(NAME modb.cli.serve_query_demo
-        COMMAND modb_cli serve query-demo
+        COMMAND modb_cli demo serve-query
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-query-demo.modb --force)
     add_test(NAME modb.cli.serve_backpressure_demo
-        COMMAND modb_cli serve backpressure-demo
+        COMMAND modb_cli demo serve-backpressure
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-backpressure-demo.modb --force)
     add_test(NAME modb.cli.serve_cancel_demo
-        COMMAND modb_cli serve cancel-demo
+        COMMAND modb_cli demo serve-cancel
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-cancel-demo.modb --force)
     add_test(NAME modb.cli.serve_process_demo
-        COMMAND modb_cli serve process-demo
+        COMMAND modb_cli demo serve-process
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-serve-process-demo.modb --force)
     add_test(NAME modb.cli.ops_transfer_demo
-        COMMAND modb_cli ops transfer-demo
+        COMMAND modb_cli demo ops-transfer
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-ops-transfer-demo.modb --force)
     add_test(NAME modb.cli.ops_facade_demo
-        COMMAND modb_cli ops facade-demo
+        COMMAND modb_cli demo ops-facade
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-ops-facade-demo.modb --force)
     add_test(NAME modb.cli.ping_help COMMAND modb_cli ping --help)
     add_test(NAME modb.cli.types COMMAND modb_cli types)
@@ -651,7 +668,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.cli.object_help COMMAND modb_cli object --help)
     add_test(NAME modb.cli.oo_help COMMAND modb_cli oo --help)
     add_test(NAME modb.cli.oo_demo
-        COMMAND modb_cli oo employee demo
+        COMMAND modb_cli demo employee
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase3-demo.modb --force)
     add_test(NAME modb.cli.query_help COMMAND modb_cli query --help)
     # Consulta em streaming (Fase 7A), comando top-level `query`, sobre o
@@ -694,11 +711,10 @@ if(BUILD_TESTING)
     set_tests_properties(modb.cli.query_explain PROPERTIES DEPENDS modb.cli.query_indexed)
     add_test(NAME modb.cli.blob_help COMMAND modb_cli blob --help)
     add_test(NAME modb.cli.graph_help COMMAND modb_cli graph --help)
-    add_test(NAME modb.cli.coll_help COMMAND modb_cli coll --help)
     add_test(NAME modb.cli.blob_put
         COMMAND modb_cli blob put ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-blob.modb hello)
     add_test(NAME modb.cli.graph_demo
-        COMMAND modb_cli graph demo
+        COMMAND modb_cli demo graph
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-graph.modb --force)
     add_test(NAME modb.cli.graph_bfs
         COMMAND modb_cli graph bfs
@@ -713,12 +729,12 @@ if(BUILD_TESTING)
         COMMAND modb_cli graph toposort
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase12-graph-topo.modb --force)
     add_test(NAME modb.cli.coll_demo
-        COMMAND modb_cli coll demo
+        COMMAND modb_cli demo coll
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-coll.modb --force)
     add_test(NAME modb.cli.tx_help COMMAND modb_cli tx --help)
     add_test(NAME modb.cli.mvcc_help COMMAND modb_cli mvcc --help)
     add_test(NAME modb.cli.mvcc_snapshot_demo
-        COMMAND modb_cli mvcc snapshot-demo
+        COMMAND modb_cli demo mvcc-snapshot
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase6b-snapshot-demo.modb --force)
     # gc roda sobre o arquivo que a demo deixou (já compactado): coleta 0 e sai
     # 0. Ordem fixada via DEPENDS para o arquivo existir e ser determinístico.
@@ -738,7 +754,7 @@ if(BUILD_TESTING)
     set_tests_properties(modb.cli.mvcc_status modb.cli.mvcc_versions PROPERTIES
         DEPENDS modb.cli.mvcc_snapshot_demo)
     add_test(NAME modb.cli.tx_demo
-        COMMAND modb_cli tx demo
+        COMMAND modb_cli demo tx
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase5-tx-demo.modb --force)
     add_test(NAME modb.cli.tx_crash_before_commit
         COMMAND modb_cli tx crash

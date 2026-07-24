@@ -78,7 +78,7 @@ int main() {
         auto fid = DatabaseRegistry::instance().attach(follower);
         suite.check(follower->bind(emp_builder()).has_value(), "follower bind");
         suite.check(follower->database_uuid() == primary->database_uuid(), "uuid match");
-        follower->set_read_only_replica(true);
+        (void)follower->set_read_only_replica(true);
         auto denied = follower->begin();
         suite.check(!denied && denied.error().code == ErrorCode::replica_read_only,
                     "follower begin rejected");

@@ -9,12 +9,14 @@
 
 namespace {
 
+// The same type definition is used before and after reopening the database.
 struct Customer {
     std::string name;
     std::int64_t score{};
 };
 
 modb::object::BindingBuilder<Customer> customer_binding() {
+    // Stable field ids let persisted data survive process boundaries.
     modb::object::BindingBuilder<Customer> builder{"Customer"};
     builder.field<1>("name", &Customer::name).field<2>("score", &Customer::score);
     return builder;
@@ -35,10 +37,13 @@ void cleanup(const std::filesystem::path& path) {
 } // namespace
 
 int main() {
+    std::cout << "Objective: persist an object, reopen the database, and read it by ObjectId.\n";
+
     const auto path = temp_path();
     cleanup(path);
     modb::object::ObjectId customer_id{};
     {
+        // First lifetime: create, bind, persist one object, and commit it.
         auto created = modb::object::Database::create(path);
         if (!created) {
             std::cerr << created.error().message << '\n';
@@ -64,6 +69,7 @@ int main() {
         modb::object::DatabaseRegistry::instance().detach(*attached);
     }
 
+    // Second lifetime: reopen the file and materialize the object by ObjectId.
     auto opened = modb::object::Database::open(path);
     auto database = std::make_shared<modb::object::Database>(std::move(*opened));
     auto attached = modb::object::DatabaseRegistry::instance().attach(database);
