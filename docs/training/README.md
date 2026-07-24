@@ -12,10 +12,9 @@ persistence, transactions, typed handles, relationships and collections,
 snapshots, indexed queries, a network server and client, remote domain
 operations, versioned facades, and a graph-shaped org chart.
 
-Source material lives in `docs/training/en`. It is currently a **skeleton**:
-each lesson has its structure, learning goals, and pointers to the real
-reference documentation already in place, with the step-by-step content and
-code still to be written.
+Source material lives in `docs/training/en`. All 13 lessons are complete:
+real, compiling, cumulative code under `examples/employee_directory/`, one
+file per lesson, each verified against an actual build and run.
 
 Start at [`en/README.md`](en/README.md).
 

@@ -11,11 +11,10 @@ lambdas, RAII, smart pointers, `std::filesystem`) and have already skimmed
 [docs/DEVELOPER_GUIDE.md](../../DEVELOPER_GUIDE.md) or at least Chapter 0-1
 of it (what Ring0 is, how to build it).
 
-> **Status:** 🚧 skeleton course. Lessons below have their structure and
-> learning goals written; step-by-step content and runnable code land
-> lesson by lesson. Each lesson names its target reference doc(s) in
-> `docs/reference/` — those are already written in full and safe to read
-> ahead of the lesson prose.
+> **Status:** ✅ complete — all 13 lessons have real, compiling code under
+> `examples/employee_directory/`, verified against an actual build and
+> run. Each lesson names its target reference doc(s) in `docs/reference/`
+> — those are written in full and safe to read ahead of the lesson prose.
 
 ## Lessons
 
@@ -46,15 +45,46 @@ of it (what Ring0 is, how to build it).
 13. *(Optional, advanced)* [A Read Replica for Reporting](13-read-replica.md)
     — offload reports to a follower.
 
+## How the Code Is Organized
+
+Each lesson is one self-contained, cumulative file under
+`examples/employee_directory/` — `lesson_01_binding.cpp`,
+`lesson_02_persist_reopen.cpp`, ... `lesson_13_read_replica.cpp`. Every
+file's `main()` replays every earlier lesson's function in order, on one
+continuously-reopened temp database file, and then runs that lesson's own
+new function. Concretely: `lesson_05_relationships.cpp` contains
+`lesson_01_bind_type`, `lesson_02_persist_and_reopen`, ... through
+`lesson_05_relationships`, called in that order from `main()`. This means:
+
+- Running `lesson_NN.exe` prints the *entire story* from Lesson 1 through
+  lesson `NN`, not just that lesson's new output.
+- Diffing `lesson_04_handles.cpp` against `lesson_05_relationships.cpp`
+  shows *exactly* what Lesson 5 added — nothing more.
+- Object ids, salaries, and other printed values are deterministic across
+  runs of the same lesson (the same sequence of creates/removes always
+  produces the same ids), except where a lesson explicitly measures wall-clock
+  time (Lesson 12).
+
+Lessons 8, 9, and 10 (networking, remote operations, facades) keep the
+server and the client in **one binary**: a background thread runs the
+server's accept loop while the main thread drives the client connection.
+A real deployment would split these into separate processes, but nothing
+in `Server`/`ServerConnection` requires it, and keeping them together
+preserves the single-cumulative-file story.
+
 ## Build the Exercises
 
-Each lesson names an executable target under `examples/employee_directory/`
-once its code exists. Until then:
+Every lesson has its own CMake target, `employee_directory_lesson_NN`:
 
 ```powershell
 cmake --preset debug
-cmake --build --preset debug
+cmake --build --preset debug --target employee_directory_lesson_01
+.\build\debug\employee_directory_lesson_01.exe
 ```
+
+Swap `01` for any lesson number 01-13. Building a later lesson's target
+does not require building earlier ones first — each `.cpp` file is fully
+self-contained.
 
 ## Conventions Used in Every Lesson
 

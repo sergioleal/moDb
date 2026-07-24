@@ -1,7 +1,6 @@
 # Lesson 1 — Binding Your First Type
 
-> **Status:** 🚧 skeleton — structure and goals only, step-by-step content
-> and code not yet written.
+> **Status:** ✅ code written and verified against a real build.
 
 ## What You'll Add
 
@@ -24,19 +23,19 @@ None — this is the first lesson. You start from an empty `.cpp` file.
 
 ## Steps
 
-- TODO: define `Employee` (`name`, `salary`, maybe `hired_on`).
-- TODO: write `employee_binding()` returning a `BindingBuilder<Employee>`.
-- TODO: `Database::create`, wrap in `shared_ptr`, attach to the registry.
-- TODO: call `bind()`, print the resulting `TypeDefinitionId`.
-- TODO: clean up (detach, remove the temp file).
+- Define `Employee` (`name`, `salary`).
+- Write `employee_binding()` returning a `BindingBuilder<Employee>`.
+- `Database::create`, wrap in `shared_ptr`, attach to the registry.
+- Call `bind()`, print the resulting `TypeDefinitionId`.
+- Detach from the registry — but leave the file itself in place. Every
+  later lesson keeps reopening this same file, so nothing gets deleted
+  until the very end of the whole run.
 
 ## Full Listing (End of Lesson)
 
-TODO — target: `examples/employee_directory/lesson_01_binding.cpp`.
+[examples/employee_directory/lesson_01_binding.cpp](../../../examples/employee_directory/lesson_01_binding.cpp)
 
 ## Build and Run
-
-TODO — target name once the CMake entry exists:
 
 ```powershell
 cmake --build --preset debug --target employee_directory_lesson_01
@@ -45,15 +44,21 @@ cmake --build --preset debug --target employee_directory_lesson_01
 
 ## Expected Output
 
-TODO (should resemble `examples/server/by_phase/phase_01/bind_type.cpp`'s
-output shape: a printed `TypeDefinitionId`).
+```
+Objective: bind an Employee type and register it in the catalog.
+Lesson 1: Employee type id = 16
+```
+
+The exact id depends on how many catalog-internal types are registered
+ahead of it; treat the number as "some small positive id," not a promise
+of `16` specifically.
 
 ## What to Notice
 
-- TODO: the field id, not the field name, is what's actually persisted —
-  this is the single idea the rest of the course leans on whenever the
+- The field id, not the field name, is what's actually persisted — this
+  is the single idea the rest of the course leans on whenever the
   `Employee` struct grows.
-- TODO: nothing was written to disk yet in a durable sense — no
+- Nothing was written to disk yet in a durable sense — no
   transaction has been opened. That's next.
 
 ## Related Reference

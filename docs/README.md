@@ -18,8 +18,9 @@ rede, facades, grafos), com código real citado do repositório. É o ponto de
 partida recomendado para quem chega agora.
 
 Quer aprender construindo um projeto próprio, em vez de um tour rápido?
-**[training/](training/README.md)** (em inglês, 🚧 esqueleto) é um curso
-prático organizado por funcionalidade: você constrói uma única aplicação —
+**[training/](training/README.md)** (em inglês, ✅ completo, código real e
+verificado) é um curso prático organizado por funcionalidade: você constrói
+uma única aplicação —
 um diretório de funcionários — do zero, e cada lição soma uma capacidade
 nova (persistência, transações, relacionamentos, consultas, rede, operações
 remotas, facades, grafos) à mesma base de código.

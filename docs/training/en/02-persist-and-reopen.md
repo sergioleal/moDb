@@ -1,7 +1,6 @@
 # Lesson 2 — Persist and Reopen
 
-> **Status:** 🚧 skeleton — structure and goals only, step-by-step content
-> and code not yet written.
+> **Status:** ✅ code written and verified against a real build.
 
 ## What You'll Add
 
@@ -23,21 +22,23 @@ Lesson 1's `Employee` binding and database creation.
 
 ## Steps
 
-- TODO: split `main()` into two lifetimes ("first run" / "second run") in
-  the same process, mirroring two separate program invocations.
-- TODO: first lifetime: create, bind, begin a transaction, create a few
+- Split `main()` into two lifetimes ("first run" / "second run") in the
+  same process, mirroring two separate program invocations.
+- First lifetime: create, bind, begin a transaction, create a few
   `Employee` records, commit, detach.
-- TODO: second lifetime: open (not create), re-bind, read one record back
-  by the `ObjectId` captured earlier.
-- TODO: print before/after to make the round-trip visible.
+- Second lifetime: open (not create), re-bind, read one record back by
+  the `ObjectId` captured earlier.
+- Print before/after to make the round-trip visible.
 
 ## Full Listing (End of Lesson)
 
-TODO — target: `examples/employee_directory/lesson_02_persist_reopen.cpp`.
+[examples/employee_directory/lesson_02_persist_reopen.cpp](../../../examples/employee_directory/lesson_02_persist_reopen.cpp)
+— note this file also carries Lesson 1's `lesson_01_bind_type` function
+forward and calls it first, since `main()` replays every lesson up to the
+current one against one continuously-reopened file (see the course
+[README](README.md#how-the-code-is-organized)).
 
 ## Build and Run
-
-TODO
 
 ```powershell
 cmake --build --preset debug --target employee_directory_lesson_02
@@ -46,16 +47,26 @@ cmake --build --preset debug --target employee_directory_lesson_02
 
 ## Expected Output
 
-TODO — should show the same employee name/salary printed twice, once
-right after creation and once after the simulated restart.
+```
+Objective: persist real employees and read them back after a restart.
+Lesson 1: Employee type id = 16
+Lesson 2: wrote 3 employees (Ana=18, Bruno=19, Carla=20)
+Lesson 2: after reopen, employee 18 = Ana (12000)
+```
+
+The object ids (18/19/20) are deterministic for this exact sequence of
+operations, but they're not "2, 3, 4" — the catalog itself consumes a few
+ids first (type definitions, baselines) before your first real record.
 
 ## What to Notice
 
-- TODO: forgetting to re-`bind()` after `open()` is the most common mistake
-  at this stage — call it out explicitly with a broken/fixed comparison.
-- TODO: the `shared_ptr`/registry attach isn't ceremony — it's why a
-  `Handle` obtained in the first lifetime would be meaningless in the
-  second (different registry id, even same file).
+- Forgetting to re-`bind()` after `open()` is the most common mistake at
+  this stage — every lesson function in this course re-binds every type
+  it touches, every single time it opens the file, for exactly this
+  reason.
+- The `shared_ptr`/registry attach isn't ceremony — it's why a `Handle`
+  obtained in the first lifetime would be meaningless in the second
+  (different registry id, even same file).
 
 ## Related Reference
 
