@@ -1,0 +1,17 @@
+This phase shifts from direct object lookup to query processing.
+
+The example seeds several Item objects and then asks for even values, limited to two results. That may look like a small C++ range pipeline, and that is intentional. The API should feel familiar.
+
+But the database meaning is important. A streaming query does not require the whole result set to be materialized before the caller sees the first row. That can improve time to first result and reduce memory pressure.
+
+Each streamed result is still a Result type. The caller must check it. In a real server stream, an error might arrive after some rows were already delivered.
+
+What we want to achieve is a mental model of queries as incremental flows. This prepares you for the network streaming example, where incremental delivery becomes part of the client/server protocol.
+
+Streaming is about latency and memory shape. A materialized query waits until the full answer exists before the caller can act. A streaming query allows the caller to begin work when the first result is available. That is valuable for large result sets, remote clients, and interactive applications. It also changes error handling, because a stream can succeed for a while and then fail later. The consumer must treat each item as part of an ongoing conversation.
+
+The context for this lesson is that Applications should not always wait for a full result set before doing useful work. Phase 07 introduces lazy, typed query streaming.
+
+What we are trying to achieve is this: Filter typed objects, limit the result set, and consume results incrementally.
+
+By the end of this lesson, the learner should be able to understand query<T>() as a typed query entry point. See why streaming improves time to first result. Remember that each streamed item can carry either a value or an error.

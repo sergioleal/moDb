@@ -1,0 +1,17 @@
+This phase adds server-side behavior.
+
+The example uses TransferFunds because it is a familiar domain operation. Moving money is not just a raw write. It has rules: debit one account, credit another account, and keep the operation atomic.
+
+The server registers the operation in an OperationRegistry. The module manifest is admitted before loading, modeling the allowlist discipline that a production system needs. Then the client encodes arguments and calls the operation by id.
+
+The key architectural point is ownership. The client does not directly edit account balances in server storage. It asks the server to perform a named operation. The server validates and commits the behavior under its own transaction boundary.
+
+What we want to achieve is a safer remote API model. Remote operations let you expose business actions without exposing arbitrary storage mutation.
+
+Remote operations move business behavior to the place where data is owned. That is important because many domain changes are not simple writes. A transfer needs validation, debit, credit, rollback on error, and a commit boundary. If clients performed raw mutations, each client would need to reimplement the rules correctly. By registering operations on the server, Ring0 lets applications expose intent-oriented commands while keeping invariants close to the data.
+
+The context for this lesson is that Querying data is not enough for many applications. Phase 09 moves domain behavior to the server through registered operations.
+
+What we are trying to achieve is this: Register TransferFunds, call it remotely, and let the server perform the mutation transactionally.
+
+By the end of this lesson, the learner should be able to understand OperationRegistry as the dispatch table for remote behavior. See why module manifests and admitted hashes matter. Recognize that clients send intent while the server owns mutation.

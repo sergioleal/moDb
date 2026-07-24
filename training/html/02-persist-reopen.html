@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phase 02 - Persist and Reopen - Ring0 Training</title>
+  <link rel="stylesheet" href="assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="index.html">
+        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">C++ server examples, phase by phase</span>
+        </span>
+      </a>
+      <nav class="topnav"><a class="nav-button" href="01-bind-type.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="03-handle-update.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Modules</p>
+        <ol class="lesson-list">
+          <li><a href="index.html">Index</a></li>
+<li><a href="00-version-compatibility.html">Phase 00</a></li>
+<li><a href="01-bind-type.html">Phase 01</a></li>
+<li><a href="02-persist-reopen.html" aria-current="page">Phase 02</a></li>
+<li><a href="03-handle-update.html">Phase 03</a></li>
+<li><a href="04-relationships.html">Phase 04</a></li>
+<li><a href="05-transactions-recovery.html">Phase 05</a></li>
+<li><a href="06-snapshots.html">Phase 06</a></li>
+<li><a href="07-streaming-query.html">Phase 07</a></li>
+<li><a href="08-server-connection.html">Phase 08</a></li>
+<li><a href="09-remote-operation.html">Phase 09</a></li>
+<li><a href="10-handshake-capabilities.html">Phase 10</a></li>
+<li><a href="11-remote-facade.html">Phase 11</a></li>
+<li><a href="12-graph-traversal.html">Phase 12</a></li>
+<li><a href="13-async-io.html">Phase 13</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Phase 02 - Persist and Reopen</h1>
+          <p>Learn one capability, run the example, then carry the idea into the next phase.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>audio/02-persist-reopen.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="audio/02-persist-reopen.mp3"></audio>
+          <a class="script-link" href="narration/02-persist-reopen.txt">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Example</h2>
+          <p>After a type is known to the catalog, the next question is whether an object can survive beyond the current process lifetime.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Persist a typed object, keep its ObjectId, reopen the database, and materialize the same logical object again.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Understand ObjectId as logical identity rather than a physical location. See why reopening is a stronger persistence proof than an immediate read. Know why bindings must be registered again before typed materialization.</p>
+          <h3>Conceptual Layer</h3>
+          <p>Persistence is not the same as allocation. Creating an object inside a process only proves that memory was allocated and the API accepted the value. Reopening the database proves a stronger chain: the object was encoded, written, committed, indexed by identity, found again, and decoded through the registered binding. This is the first point where Ring0 starts behaving like durable infrastructure rather than an in-memory object registry.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>This lesson turns the schema from phase one into an actual durable object.</p>
+<p>The example creates a Customer, commits it, stores the ObjectId, and then lets that first database lifetime end. That lifetime boundary is important. If we only read the object immediately after writing it, we might accidentally be validating in-memory state. Reopening the file forces the system to prove that the object was encoded, stored, found, and decoded again.</p>
+<p>The ObjectId is the application-level identity. It is not asking you to care about the page number, slot number, or storage layout. Ring0 owns those details. Your domain code keeps the logical identity.</p>
+<p>Notice that the binding is registered again after reopen. The database file contains persistent data and metadata, but the running process still needs the C++ mapping to turn bytes back into a Customer instance.</p>
+<p>What we want to achieve in this phase is the first complete persistence loop: bind, create, commit, reopen, materialize. Most later examples repeat this loop with more advanced behavior layered on top.</p>
+        </section>
+
+        <h2>What You Will Learn</h2>
+<p>You will create an object, commit it, reopen the database, and read it back by <code>ObjectId</code>.</p>
+<h2>Related Source</h2>
+<p><code>examples/server/by_phase/phase_02/persist_reopen.cpp</code></p>
+<h2>Step by Step</h2>
+<p>The example reuses the <code>Customer</code> binding from phase 01. It then opens a transaction and creates one object:</p>
+<pre><code class="language-cpp">auto tx = database-&gt;begin();
+auto customer = database-&gt;create(*tx, Customer{&quot;Ana&quot;, 42});
+tx-&gt;commit();</code></pre>
+<p>After the first database lifetime ends, the file is reopened:</p>
+<pre><code class="language-cpp">auto opened = modb::object::Database::open(path);</code></pre>
+<p>The binding is registered again before materialization. This is normal for typed C++ APIs: the stored object has bytes and type metadata, but the process still needs the C++ binding to decode those bytes into <code>Customer</code>.</p>
+<h2>Build and Run</h2>
+<pre><code class="language-powershell">cmake --build build/debug --target ring0_server_phase_02_persist_reopen
+.\build\debug\ring0_server_phase_02_persist_reopen.exe</code></pre>
+<h2>Expected Output</h2>
+<pre><code class="language-text">Objective: persist an object, reopen the database, and read it by ObjectId.
+Ana score=42</code></pre>
+<h2>What To Notice</h2>
+<p><code>ObjectId</code> is the stable identity. You do not search by physical page or slot; you ask the object layer for the logical object.</p>
+        <nav class="bottomnav"><a class="nav-button" href="01-bind-type.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="03-handle-update.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

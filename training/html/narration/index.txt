@@ -1,0 +1,17 @@
+Think of this training as a guided technical onboarding for a commercial C++ storage product.
+
+The examples are intentionally compact, but they are not toy ideas. Each one isolates a production concern: version negotiation, schema description, durable identity, transactional mutation, server boundaries, remote domain behavior, and asynchronous persistence.
+
+What we want to achieve is not memorizing commands. We want to build a mental model. By the end of the course, a developer should be able to look at a Ring0 application and understand where type metadata is registered, where object identity is created, where transactions begin and end, where the server takes ownership of remote calls, and where low-level I/O becomes explicitly ordered.
+
+The course assumes C++ fluency so we can move quickly. When we see a struct, lambda, smart pointer, or pointer-to-member expression, we will treat it as normal C++ and focus on what Ring0 adds around it.
+
+Use the examples as executable checkpoints. Run the code, read the output, then return to the lesson and ask: what contract did this phase add to the system? That question is the spine of the training.
+
+The larger concept behind the course is progressive disclosure of a storage system. A database is not one feature; it is a stack of agreements. At the bottom are compatibility and file I/O. Above that are schemas, object identity, transactions, and versioned reads. Above that are query streams, server protocols, operations, and facades. The training follows that stack so the learner can see why each layer exists before depending on it.
+
+The context for this lesson is that This course is the guided path through Ring0 as a product, not just a list of sample programs. The examples are small on purpose, but the architecture they introduce is the same architecture an application would use when it grows from embedded storage to a networked service.
+
+What we are trying to achieve is this: Set expectations for the full learning arc: compatibility, object binding, persistence, transactions, snapshots, streaming, server access, remote behavior, facades, graph traversal, and asynchronous I/O.
+
+By the end of this lesson, the learner should be able to understand why the course starts with contracts before storage. See how each phase adds one capability without discarding the previous model. Know where the source examples live and how to build them.

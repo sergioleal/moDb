@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phase 10 - Handshake Capabilities - Ring0 Training</title>
+  <link rel="stylesheet" href="assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="index.html">
+        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">C++ server examples, phase by phase</span>
+        </span>
+      </a>
+      <nav class="topnav"><a class="nav-button" href="09-remote-operation.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="11-remote-facade.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Modules</p>
+        <ol class="lesson-list">
+          <li><a href="index.html">Index</a></li>
+<li><a href="00-version-compatibility.html">Phase 00</a></li>
+<li><a href="01-bind-type.html">Phase 01</a></li>
+<li><a href="02-persist-reopen.html">Phase 02</a></li>
+<li><a href="03-handle-update.html">Phase 03</a></li>
+<li><a href="04-relationships.html">Phase 04</a></li>
+<li><a href="05-transactions-recovery.html">Phase 05</a></li>
+<li><a href="06-snapshots.html">Phase 06</a></li>
+<li><a href="07-streaming-query.html">Phase 07</a></li>
+<li><a href="08-server-connection.html">Phase 08</a></li>
+<li><a href="09-remote-operation.html">Phase 09</a></li>
+<li><a href="10-handshake-capabilities.html" aria-current="page">Phase 10</a></li>
+<li><a href="11-remote-facade.html">Phase 11</a></li>
+<li><a href="12-graph-traversal.html">Phase 12</a></li>
+<li><a href="13-async-io.html">Phase 13</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Phase 10 - Handshake Capabilities</h1>
+          <p>Learn one capability, run the example, then carry the idea into the next phase.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>audio/10-handshake-capabilities.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="audio/10-handshake-capabilities.mp3"></audio>
+          <a class="script-link" href="narration/10-handshake-capabilities.txt">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Example</h2>
+          <p>A robust client should learn what a server supports before relying on optional limits or advanced behavior.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Use the handshake to inspect negotiated protocol version and public server limits.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Read protocol and capability values returned by the handshake. Connect phase 10 back to phase 00 compatibility negotiation. Understand why capability discovery supports safer clients.</p>
+          <h3>Conceptual Layer</h3>
+          <p>A capability handshake is how a client learns the shape of the server it has reached. This matters when systems evolve. A newer client may know optimizations or limits that an older server does not support. A server may also advertise conservative limits to protect itself. Reading those values early lets the client choose behavior instead of discovering incompatibility through failures halfway through a workflow.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>This phase returns to the idea of contracts, now through the network.</p>
+<p>The example starts a server and performs only the handshake. It does not query objects and does not call a domain operation. That is the point: sometimes the first useful thing a client can do is ask what the server supports.</p>
+<p>The returned information includes protocol version and public limits such as maximum concurrent streams. A production client can use that information to decide how aggressively to stream, whether to enable an optional path, or whether to reject the connection.</p>
+<p>This is the same habit you saw in phase zero, but now it is attached to a live server.</p>
+<p>What we want to achieve is an operational mindset. Compatibility and capability checks are not ceremony. They are how clients stay predictable as servers evolve.</p>
+        </section>
+
+        <h2>What You Will Learn</h2>
+<p>You will inspect the public capabilities negotiated during a server handshake.</p>
+<h2>Related Source</h2>
+<p><code>examples/server/by_phase/phase_10/handshake_capabilities.cpp</code></p>
+<h2>Step by Step</h2>
+<p>This example creates an empty database, starts a server, and performs only the handshake:</p>
+<pre><code class="language-cpp">auto info = modb::app::ServerConnection::handshake(...);</code></pre>
+<p>The returned info includes protocol version and server limits:</p>
+<pre><code class="language-cpp">info-&gt;protocol_major
+info-&gt;protocol_minor
+info-&gt;max_concurrent_streams</code></pre>
+<h2>Build and Run</h2>
+<pre><code class="language-powershell">cmake --build build/debug --target ring0_server_phase_10_handshake_capabilities
+.\build\debug\ring0_server_phase_10_handshake_capabilities.exe</code></pre>
+<h2>Expected Output</h2>
+<pre><code class="language-text">Objective: inspect public server capabilities negotiated during handshake.
+protocol 1.0 max_streams=...</code></pre>
+<h2>What To Notice</h2>
+<p>Capability discovery is useful before choosing client behavior. It is the network version of the compatibility habit you saw in phase 00.</p>
+        <nav class="bottomnav"><a class="nav-button" href="09-remote-operation.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="11-remote-facade.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

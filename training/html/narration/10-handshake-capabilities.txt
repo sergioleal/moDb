@@ -1,0 +1,17 @@
+This phase returns to the idea of contracts, now through the network.
+
+The example starts a server and performs only the handshake. It does not query objects and does not call a domain operation. That is the point: sometimes the first useful thing a client can do is ask what the server supports.
+
+The returned information includes protocol version and public limits such as maximum concurrent streams. A production client can use that information to decide how aggressively to stream, whether to enable an optional path, or whether to reject the connection.
+
+This is the same habit you saw in phase zero, but now it is attached to a live server.
+
+What we want to achieve is an operational mindset. Compatibility and capability checks are not ceremony. They are how clients stay predictable as servers evolve.
+
+A capability handshake is how a client learns the shape of the server it has reached. This matters when systems evolve. A newer client may know optimizations or limits that an older server does not support. A server may also advertise conservative limits to protect itself. Reading those values early lets the client choose behavior instead of discovering incompatibility through failures halfway through a workflow.
+
+The context for this lesson is that A robust client should learn what a server supports before relying on optional limits or advanced behavior.
+
+What we are trying to achieve is this: Use the handshake to inspect negotiated protocol version and public server limits.
+
+By the end of this lesson, the learner should be able to read protocol and capability values returned by the handshake. Connect phase 10 back to phase 00 compatibility negotiation. Understand why capability discovery supports safer clients.

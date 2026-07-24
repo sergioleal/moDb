@@ -1,0 +1,17 @@
+This phase improves the consumer experience.
+
+In phase nine, the client called an operation directly. That works, but larger applications need a more organized public surface. A facade groups related methods and gives clients a stable handle to that surface.
+
+The server registers both the operation registry and the facade catalog. The client opens AccountsFacade and then invokes TransferFunds through the typed handle.
+
+Under the hood, the work still travels through operation dispatch. The facade does not replace operations. It gives consumers a clearer, versioned API.
+
+What we want to achieve is the shape of an application SDK. Instead of making every consumer remember operation ids and argument encoding details, the facade gives them a typed C++ entry point with compatibility checks around it.
+
+A facade is a product-facing API boundary. Operations are the executable units, but facades organize those units into a stable surface that clients can understand and version. This is similar to the difference between individual functions and a service interface. The facade gives a consumer a typed handle and a vocabulary of methods, while the operation layer still performs dispatch, validation, and transactional execution.
+
+The context for this lesson is that Operations are powerful, but consumers often need a stable, typed surface. Phase 11 introduces facades as that public API layer.
+
+What we are trying to achieve is this: Open a typed AccountsFacade remotely and invoke TransferFunds through the facade handle.
+
+By the end of this lesson, the learner should be able to distinguish operation dispatch from facade discovery. Understand facades as versioned consumer-facing surfaces. See how typed invocation improves ergonomics over raw operation ids.

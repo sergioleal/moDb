@@ -1,0 +1,17 @@
+This is the point where the course becomes a server course, not only an embedded storage course.
+
+The example first seeds a database locally. Then it starts a server on loopback, using port zero so the operating system can choose a free port. The server handles one session in a background thread.
+
+The client uses ServerConnection, which packages the handshake and client operations into a smaller application-facing API. It sends a QueryDescription to the server and collects the objects returned by the remote stream.
+
+The important architectural shift is that the client is no longer running arbitrary C++ code inside the database. It is describing a request across a protocol boundary.
+
+What we want to achieve is a clear picture of client/server responsibility. The server owns the database. The client connects, negotiates, sends a structured request, and receives structured results.
+
+Crossing the server boundary changes the programming model. Inside one process, a C++ lambda can inspect objects directly. Across a network, the client must describe intent in a serializable form. QueryDescription is that boundary object. It carries enough information for the server to execute a query without importing client code. This separation is what lets Ring0 become a service rather than only an embedded library.
+
+The context for this lesson is that Phase 08 crosses the process boundary. The database is now exposed through a server, and applications connect through a client library.
+
+What we are trying to achieve is this: Start a loopback server, connect with ServerConnection, and collect remote query results.
+
+By the end of this lesson, the learner should be able to identify the seed, listen, serve, connect, and collect steps. Understand why the remote query uses QueryDescription and type ids. See how the application client avoids direct access to server internals.

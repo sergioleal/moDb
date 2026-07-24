@@ -1,0 +1,17 @@
+This final lesson moves below the object and server APIs into the storage engine's I/O control model.
+
+The example opens an AsyncFile and asks for the native asynchronous backend. It submits a write at offset zero, a sync request, and another write at offset sixty-four. The important detail is that submission does not mean completion.
+
+The barrier is where the example waits for all previously submitted work to finish. That gives the caller a clear point for ordering and durability reasoning.
+
+The max_inflight option is also important. Asynchronous I/O is not simply about doing everything at once. A storage engine needs bounded concurrency so it can keep throughput high without losing control.
+
+What we want to achieve is a practical understanding of asynchronous I/O as a contract: submit work, bound the amount of outstanding work, and choose the exact moment where completion is required.
+
+Asynchronous I/O is about control over waiting. Synchronous I/O ties submission and completion together: the caller asks for work and blocks until it is done. Asynchronous I/O separates those moments. A storage engine can submit several positional operations, keep a bounded number in flight, and then choose a barrier where completion is required. That model is useful for write-ahead logging, page flushing, and any workflow where ordering matters but waiting after every individual write would waste throughput.
+
+The context for this lesson is that Storage engines eventually need explicit control over I/O ordering and concurrency. Phase 13 introduces asynchronous positional file operations.
+
+What we are trying to achieve is this: Submit writes and sync operations without waiting after each call, then wait at an explicit barrier.
+
+By the end of this lesson, the learner should be able to distinguish I/O submission from I/O completion. Understand max_inflight as a concurrency bound. Recognize barrier as the explicit completion and ordering point.

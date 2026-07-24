@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phase 09 - Remote Operation - Ring0 Training</title>
+  <link rel="stylesheet" href="assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="index.html">
+        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">C++ server examples, phase by phase</span>
+        </span>
+      </a>
+      <nav class="topnav"><a class="nav-button" href="08-server-connection.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="10-handshake-capabilities.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Modules</p>
+        <ol class="lesson-list">
+          <li><a href="index.html">Index</a></li>
+<li><a href="00-version-compatibility.html">Phase 00</a></li>
+<li><a href="01-bind-type.html">Phase 01</a></li>
+<li><a href="02-persist-reopen.html">Phase 02</a></li>
+<li><a href="03-handle-update.html">Phase 03</a></li>
+<li><a href="04-relationships.html">Phase 04</a></li>
+<li><a href="05-transactions-recovery.html">Phase 05</a></li>
+<li><a href="06-snapshots.html">Phase 06</a></li>
+<li><a href="07-streaming-query.html">Phase 07</a></li>
+<li><a href="08-server-connection.html">Phase 08</a></li>
+<li><a href="09-remote-operation.html" aria-current="page">Phase 09</a></li>
+<li><a href="10-handshake-capabilities.html">Phase 10</a></li>
+<li><a href="11-remote-facade.html">Phase 11</a></li>
+<li><a href="12-graph-traversal.html">Phase 12</a></li>
+<li><a href="13-async-io.html">Phase 13</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Phase 09 - Remote Operation</h1>
+          <p>Learn one capability, run the example, then carry the idea into the next phase.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>audio/09-remote-operation.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="audio/09-remote-operation.mp3"></audio>
+          <a class="script-link" href="narration/09-remote-operation.txt">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Example</h2>
+          <p>Querying data is not enough for many applications. Phase 09 moves domain behavior to the server through registered operations.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Register TransferFunds, call it remotely, and let the server perform the mutation transactionally.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Understand OperationRegistry as the dispatch table for remote behavior. See why module manifests and admitted hashes matter. Recognize that clients send intent while the server owns mutation.</p>
+          <h3>Conceptual Layer</h3>
+          <p>Remote operations move business behavior to the place where data is owned. That is important because many domain changes are not simple writes. A transfer needs validation, debit, credit, rollback on error, and a commit boundary. If clients performed raw mutations, each client would need to reimplement the rules correctly. By registering operations on the server, Ring0 lets applications expose intent-oriented commands while keeping invariants close to the data.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>This phase adds server-side behavior.</p>
+<p>The example uses TransferFunds because it is a familiar domain operation. Moving money is not just a raw write. It has rules: debit one account, credit another account, and keep the operation atomic.</p>
+<p>The server registers the operation in an OperationRegistry. The module manifest is admitted before loading, modeling the allowlist discipline that a production system needs. Then the client encodes arguments and calls the operation by id.</p>
+<p>The key architectural point is ownership. The client does not directly edit account balances in server storage. It asks the server to perform a named operation. The server validates and commits the behavior under its own transaction boundary.</p>
+<p>What we want to achieve is a safer remote API model. Remote operations let you expose business actions without exposing arbitrary storage mutation.</p>
+        </section>
+
+        <h2>What You Will Learn</h2>
+<p>You will call a domain operation over the server.</p>
+<h2>Related Source</h2>
+<p><code>examples/server/by_phase/phase_09/call_operation.cpp</code></p>
+<h2>Step by Step</h2>
+<p>The example seeds two accounts and registers the <code>TransferFunds</code> operation in an <code>OperationRegistry</code>.</p>
+<pre><code class="language-cpp">auto registry = std::make_shared&lt;modb::ops::OperationRegistry&gt;();
+server-&gt;set_operation_registry(registry);</code></pre>
+<p>The module manifest is admitted before loading:</p>
+<pre><code class="language-cpp">loader.admit_hash(manifest.hash);
+loader.load(manifest, baseline, *registry, ...);</code></pre>
+<p>The client encodes operation arguments and calls by operation id:</p>
+<pre><code class="language-cpp">auto args = modb::examples::TransferFunds::encode_args(alice, bob, 40);
+result = connection-&gt;call(modb::examples::TransferFunds::k_id, *args);</code></pre>
+<h2>Build and Run</h2>
+<pre><code class="language-powershell">cmake --build build/debug --target ring0_server_phase_09_call_operation
+.\build\debug\ring0_server_phase_09_call_operation.exe</code></pre>
+<h2>Expected Output</h2>
+<pre><code class="language-text">Objective: call a remote domain operation through the Ring0 server.
+remote TransferFunds committed</code></pre>
+<h2>What To Notice</h2>
+<p>The server owns the transaction boundary for the operation. The client sends intent and arguments; it does not mutate server storage directly.</p>
+        <nav class="bottomnav"><a class="nav-button" href="08-server-connection.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="10-handshake-capabilities.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

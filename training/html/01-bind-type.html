@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phase 01 - Binding a C++ Type - Ring0 Training</title>
+  <link rel="stylesheet" href="assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="index.html">
+        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">C++ server examples, phase by phase</span>
+        </span>
+      </a>
+      <nav class="topnav"><a class="nav-button" href="00-version-compatibility.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="02-persist-reopen.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Modules</p>
+        <ol class="lesson-list">
+          <li><a href="index.html">Index</a></li>
+<li><a href="00-version-compatibility.html">Phase 00</a></li>
+<li><a href="01-bind-type.html" aria-current="page">Phase 01</a></li>
+<li><a href="02-persist-reopen.html">Phase 02</a></li>
+<li><a href="03-handle-update.html">Phase 03</a></li>
+<li><a href="04-relationships.html">Phase 04</a></li>
+<li><a href="05-transactions-recovery.html">Phase 05</a></li>
+<li><a href="06-snapshots.html">Phase 06</a></li>
+<li><a href="07-streaming-query.html">Phase 07</a></li>
+<li><a href="08-server-connection.html">Phase 08</a></li>
+<li><a href="09-remote-operation.html">Phase 09</a></li>
+<li><a href="10-handshake-capabilities.html">Phase 10</a></li>
+<li><a href="11-remote-facade.html">Phase 11</a></li>
+<li><a href="12-graph-traversal.html">Phase 12</a></li>
+<li><a href="13-async-io.html">Phase 13</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Phase 01 - Binding a C++ Type</h1>
+          <p>Learn one capability, run the example, then carry the idea into the next phase.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>audio/01-bind-type.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="audio/01-bind-type.mp3"></audio>
+          <a class="script-link" href="narration/01-bind-type.txt">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Example</h2>
+          <p>Ring0 stores objects, but it does not force domain types to inherit from a framework base class. Instead, C++ types are described at the boundary through bindings.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Understand how a plain C++ struct becomes a persistent catalog type with stable field identifiers.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Read a BindingBuilder definition and identify the persistent field ids. Explain why field ids matter more than field names for durability. Understand why binding is required before typed object operations.</p>
+          <h3>Conceptual Layer</h3>
+          <p>Binding is Ring0&#x27;s answer to the impedance mismatch between C++ memory layout and durable schema. A C++ struct is compiled into one program, but stored data may live for years and be opened by future versions. The binding tells Ring0 which fields are part of the persistent contract. Stable field ids matter because names and code layout can evolve; the id is the durable coordinate that lets old bytes be interpreted with intent.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>This phase is where ordinary C++ meets the Ring0 catalog.</p>
+<p>The Customer struct has no framework inheritance and no hidden macro. It is just a domain type with a name and a score. The binding is the bridge between that C++ type and the persistent schema stored by Ring0.</p>
+<p>The central idea is stable field identity. When the binding says field one is name and field two is score, those ids become part of the durable contract. A name can help humans understand the schema, but a stable id helps software decode old data predictably.</p>
+<p>What we want to achieve is confidence that Ring0 can work with normal C++ shapes. You describe the type explicitly, register it, and then the catalog can assign and track a type id.</p>
+<p>This is the first step toward persistence. We are not yet storing a Customer object. We are teaching the database what a Customer means. That distinction matters: schema knowledge comes before durable object instances.</p>
+        </section>
+
+        <h2>What You Will Learn</h2>
+<p>You will map a normal C++ struct into the Ring0 catalog.</p>
+<h2>Related Source</h2>
+<p><code>examples/server/by_phase/phase_01/bind_type.cpp</code></p>
+<h2>Step by Step</h2>
+<p>The domain type is deliberately plain:</p>
+<pre><code class="language-cpp">struct Customer {
+    std::string name;
+    std::int64_t score{};
+};</code></pre>
+<p>The binding names the persistent type and maps stable field ids to C++ members:</p>
+<pre><code class="language-cpp">modb::object::BindingBuilder&lt;Customer&gt; builder{&quot;Customer&quot;};
+builder.field&lt;1&gt;(&quot;name&quot;, &amp;Customer::name)
+       .field&lt;2&gt;(&quot;score&quot;, &amp;Customer::score);</code></pre>
+<p>The key idea is that field ids are the durable contract. Field names are useful for humans, but the ids are what let Ring0 decode stored objects predictably.</p>
+<h2>Build and Run</h2>
+<pre><code class="language-powershell">cmake --build build/debug --target ring0_server_phase_01_bind_type
+.\build\debug\ring0_server_phase_01_bind_type.exe</code></pre>
+<h2>Expected Output</h2>
+<pre><code class="language-text">Objective: bind a C++ type and register it in the catalog.
+Customer type id: ...</code></pre>
+<h2>What To Notice</h2>
+<p>The example creates a temporary database only to prove that the type reaches the catalog. It does not store a <code>Customer</code> object yet. That comes next.</p>
+        <nav class="bottomnav"><a class="nav-button" href="00-version-compatibility.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="02-persist-reopen.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

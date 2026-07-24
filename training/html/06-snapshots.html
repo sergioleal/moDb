@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phase 06 - Snapshots - Ring0 Training</title>
+  <link rel="stylesheet" href="assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="index.html">
+        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">C++ server examples, phase by phase</span>
+        </span>
+      </a>
+      <nav class="topnav"><a class="nav-button" href="05-transactions-recovery.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="07-streaming-query.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Modules</p>
+        <ol class="lesson-list">
+          <li><a href="index.html">Index</a></li>
+<li><a href="00-version-compatibility.html">Phase 00</a></li>
+<li><a href="01-bind-type.html">Phase 01</a></li>
+<li><a href="02-persist-reopen.html">Phase 02</a></li>
+<li><a href="03-handle-update.html">Phase 03</a></li>
+<li><a href="04-relationships.html">Phase 04</a></li>
+<li><a href="05-transactions-recovery.html">Phase 05</a></li>
+<li><a href="06-snapshots.html" aria-current="page">Phase 06</a></li>
+<li><a href="07-streaming-query.html">Phase 07</a></li>
+<li><a href="08-server-connection.html">Phase 08</a></li>
+<li><a href="09-remote-operation.html">Phase 09</a></li>
+<li><a href="10-handshake-capabilities.html">Phase 10</a></li>
+<li><a href="11-remote-facade.html">Phase 11</a></li>
+<li><a href="12-graph-traversal.html">Phase 12</a></li>
+<li><a href="13-async-io.html">Phase 13</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Phase 06 - Snapshots</h1>
+          <p>Learn one capability, run the example, then carry the idea into the next phase.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>audio/06-snapshots.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="audio/06-snapshots.mp3"></audio>
+          <a class="script-link" href="narration/06-snapshots.txt">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Example</h2>
+          <p>Readers and writers often overlap. Phase 06 introduces stable read views so readers can observe a consistent version while newer commits continue.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Show one snapshot reading the old object version while a current read sees the new version.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Explain why a snapshot is a read view, not a full database copy. Understand how old and current versions can both be meaningful. Recognize the role of snapshots in concurrent applications.</p>
+          <h3>Conceptual Layer</h3>
+          <p>Snapshots are a way to separate time from mutation. Without snapshots, a reader can be confused by concurrent writes because the meaning of &#x27;the database&#x27; changes while the reader is working. With a snapshot, the reader asks for the database as of a particular logical moment. This is the core intuition behind MVCC: multiple committed versions can coexist long enough for readers and writers to make progress without blocking each other unnecessarily.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>This phase introduces one of the most important ideas for concurrent data systems: a stable read view.</p>
+<p>The example starts with an Account balance of one hundred. It opens a snapshot, then updates the current balance to two hundred in a later transaction. After that, two reads produce different answers, and both answers are correct.</p>
+<p>The snapshot sees the world as it existed when the snapshot was opened. The current read sees the latest committed state.</p>
+<p>This does not mean Ring0 copied the entire database. The snapshot is a logical view over object versions. That is what makes it practical.</p>
+<p>What we want to achieve is an intuition for MVCC-style behavior. A reader can keep working with a consistent view, while writers continue to commit newer versions. Later, when remote queries and graph traversal appear, this same consistency idea becomes even more valuable.</p>
+        </section>
+
+        <h2>What You Will Learn</h2>
+<p>You will keep a stable read view while a later transaction updates the object.</p>
+<h2>Related Source</h2>
+<p><code>examples/server/by_phase/phase_06/snapshot_read.cpp</code></p>
+<h2>Step by Step</h2>
+<p>The example commits an account with balance <code>100</code>, opens a snapshot, then commits a second transaction that changes the balance to <code>200</code>.</p>
+<pre><code class="language-cpp">auto snapshot = database-&gt;snapshot();
+...
+handle-&gt;set&lt;&amp;Account::balance&gt;(*tx2, 200);
+tx2-&gt;commit();</code></pre>
+<p>The snapshot read and the current read intentionally disagree:</p>
+<pre><code class="language-cpp">auto stable = database-&gt;get&lt;Account&gt;(account-&gt;id(), *snapshot);
+auto current = database-&gt;materialize(*database-&gt;get&lt;Account&gt;(account-&gt;id()));</code></pre>
+<h2>Build and Run</h2>
+<pre><code class="language-powershell">cmake --build build/debug --target ring0_server_phase_06_snapshot_read
+.\build\debug\ring0_server_phase_06_snapshot_read.exe</code></pre>
+<h2>Expected Output</h2>
+<pre><code class="language-text">Objective: prove that a snapshot keeps a stable view after a later commit.
+snapshot=100 current=200</code></pre>
+<h2>What To Notice</h2>
+<p>A snapshot is not a copy of the whole database. It is a read view over object versions.</p>
+        <nav class="bottomnav"><a class="nav-button" href="05-transactions-recovery.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="07-streaming-query.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

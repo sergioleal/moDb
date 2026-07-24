@@ -1,0 +1,17 @@
+This phase is where ordinary C++ meets the Ring0 catalog.
+
+The Customer struct has no framework inheritance and no hidden macro. It is just a domain type with a name and a score. The binding is the bridge between that C++ type and the persistent schema stored by Ring0.
+
+The central idea is stable field identity. When the binding says field one is name and field two is score, those ids become part of the durable contract. A name can help humans understand the schema, but a stable id helps software decode old data predictably.
+
+What we want to achieve is confidence that Ring0 can work with normal C++ shapes. You describe the type explicitly, register it, and then the catalog can assign and track a type id.
+
+This is the first step toward persistence. We are not yet storing a Customer object. We are teaching the database what a Customer means. That distinction matters: schema knowledge comes before durable object instances.
+
+Binding is Ring0's answer to the impedance mismatch between C++ memory layout and durable schema. A C++ struct is compiled into one program, but stored data may live for years and be opened by future versions. The binding tells Ring0 which fields are part of the persistent contract. Stable field ids matter because names and code layout can evolve; the id is the durable coordinate that lets old bytes be interpreted with intent.
+
+The context for this lesson is that Ring0 stores objects, but it does not force domain types to inherit from a framework base class. Instead, C++ types are described at the boundary through bindings.
+
+What we are trying to achieve is this: Understand how a plain C++ struct becomes a persistent catalog type with stable field identifiers.
+
+By the end of this lesson, the learner should be able to read a BindingBuilder definition and identify the persistent field ids. Explain why field ids matter more than field names for durability. Understand why binding is required before typed object operations.

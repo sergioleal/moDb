@@ -20,6 +20,8 @@ option(MODB_ALLOW_CXX23_FALLBACK "Allow a local C++23 build when C++26 is unavai
 # pelo PATH). Reative com -DMODB_STATIC_MINGW_RUNTIME=ON numa toolchain onde o
 # link totalmente estático funcione (ex.: GCC 13).
 option(MODB_STATIC_MINGW_RUNTIME "Link the MinGW runtime statically into executables" OFF)
+option(MODB_BUILD_TRAINING "Build the Ring0 Markdown training as static HTML" ON)
+set(MODB_PYTHON_EXECUTABLE "" CACHE FILEPATH "Python interpreter used to render training HTML")
 set(MODB_PAGE_SIZE 4096 CACHE STRING "Database page size in bytes")
 set(MODB_CHURN_RECORD_TOTAL 10000 CACHE STRING "Record count used by churn tests")
 
@@ -261,6 +263,32 @@ if(MODB_BUILD_EXAMPLES)
         examples/server/by_phase/phase_12/graph_traversal.cpp)
     modb_add_server_example(ring0_server_phase_13_async_io
         examples/server/by_phase/phase_13/async_io.cpp)
+endif()
+
+if(MODB_BUILD_TRAINING)
+    if(NOT MODB_PYTHON_EXECUTABLE)
+        find_package(Python3 COMPONENTS Interpreter)
+        if(Python3_Interpreter_FOUND)
+            set(MODB_PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+        else()
+            find_program(MODB_PYTHON_EXECUTABLE NAMES python3 python py)
+        endif()
+    endif()
+    if(MODB_PYTHON_EXECUTABLE)
+        add_custom_target(modb_training_html
+            COMMAND ${MODB_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/render_training.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Rendering Ring0 training Markdown to HTML"
+            VERBATIM
+        )
+    else()
+        add_custom_target(modb_training_html
+            COMMAND ${CMAKE_COMMAND} -E echo
+                "Python not found. Reconfigure with -DMODB_PYTHON_EXECUTABLE=<python>."
+            COMMAND ${CMAKE_COMMAND} -E false
+            VERBATIM
+        )
+    endif()
 endif()
 
 add_executable(modb_object_bench benchmarks/object_throughput.cpp)

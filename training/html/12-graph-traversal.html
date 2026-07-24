@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phase 12 - Graph Traversal - Ring0 Training</title>
+  <link rel="stylesheet" href="assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="index.html">
+        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">C++ server examples, phase by phase</span>
+        </span>
+      </a>
+      <nav class="topnav"><a class="nav-button" href="11-remote-facade.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="13-async-io.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Modules</p>
+        <ol class="lesson-list">
+          <li><a href="index.html">Index</a></li>
+<li><a href="00-version-compatibility.html">Phase 00</a></li>
+<li><a href="01-bind-type.html">Phase 01</a></li>
+<li><a href="02-persist-reopen.html">Phase 02</a></li>
+<li><a href="03-handle-update.html">Phase 03</a></li>
+<li><a href="04-relationships.html">Phase 04</a></li>
+<li><a href="05-transactions-recovery.html">Phase 05</a></li>
+<li><a href="06-snapshots.html">Phase 06</a></li>
+<li><a href="07-streaming-query.html">Phase 07</a></li>
+<li><a href="08-server-connection.html">Phase 08</a></li>
+<li><a href="09-remote-operation.html">Phase 09</a></li>
+<li><a href="10-handshake-capabilities.html">Phase 10</a></li>
+<li><a href="11-remote-facade.html">Phase 11</a></li>
+<li><a href="12-graph-traversal.html" aria-current="page">Phase 12</a></li>
+<li><a href="13-async-io.html">Phase 13</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Phase 12 - Graph Traversal</h1>
+          <p>Learn one capability, run the example, then carry the idea into the next phase.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>audio/12-graph-traversal.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="audio/12-graph-traversal.mp3"></audio>
+          <a class="script-link" href="narration/12-graph-traversal.txt">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Example</h2>
+          <p>Object relationships naturally form graphs. Phase 12 introduces traversal as a reusable algorithm over ObjectId adjacency.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Run breadth-first traversal using an adjacency callback, then relate that callback to persisted graph edges.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Understand why traversal depends on ObjectId and adjacency, not one fixed container. See BFS as a streaming result producer. Know how a database-backed adjacency callback would replace the in-memory map.</p>
+          <h3>Conceptual Layer</h3>
+          <p>A graph is a set of nodes connected by edges. In Ring0 terms, nodes can be objects and edges can be relationships expressed through ObjectId references. Traversal algorithms such as breadth-first search answer questions about reachability and distance: what can I reach from here, and how many steps away is it. BFS explores level by level, so it is useful when the first time you reach a node should represent the shortest number of edges from the start. The example uses an in-memory adjacency map, but the concept is the same when adjacency is resolved from persisted object relationships.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>This phase teaches graph traversal by stripping away storage details first.</p>
+<p>The example uses an in-memory map from ObjectId to neighboring ObjectIds. That keeps the traversal contract visible. The BFS function does not need to know where edges come from. It only needs a starting id and an adjacency callback.</p>
+<p>In a real Ring0-backed graph, that callback would resolve outgoing references from persisted objects. The algorithm shape would remain the same.</p>
+<p>The result is streamed, which means a caller can process visits incrementally and potentially stop early.</p>
+<p>What we want to achieve is separation of concerns. Ring0 can store object relationships, and traversal algorithms can operate over a small adjacency abstraction. That makes graph behavior reusable instead of hard-wired to one storage representation.</p>
+        </section>
+
+        <h2>What You Will Learn</h2>
+<p>You will traverse a graph with breadth-first search using an adjacency callback.</p>
+<h2>Related Source</h2>
+<p><code>examples/server/by_phase/phase_12/graph_traversal.cpp</code></p>
+<h2>Step by Step</h2>
+<p>The traversal engine does not require a specific container. It needs a starting <code>ObjectId</code> and a callback that returns outgoing neighbors:</p>
+<pre><code class="language-cpp">auto adjacency = [&amp;edges](ObjectId from) -&gt; modb::Result&lt;std::vector&lt;ObjectId&gt;&gt; {
+    return edges[from.value];
+};</code></pre>
+<p>The BFS result is streamed:</p>
+<pre><code class="language-cpp">for (auto&amp; item : modb::graph::bfs(ObjectId{1}, adjacency)) {
+    ...
+}</code></pre>
+<h2>Build and Run</h2>
+<pre><code class="language-powershell">cmake --build build/debug --target ring0_server_phase_12_graph_traversal
+.\build\debug\ring0_server_phase_12_graph_traversal.exe</code></pre>
+<h2>Expected Output</h2>
+<pre><code class="language-text">Objective: traverse a graph with breadth-first search.
+visit 1 depth=0
+visit 2 depth=1
+visit 3 depth=1
+visit 4 depth=2</code></pre>
+<h2>What To Notice</h2>
+<p>The example uses an in-memory map so the traversal contract is obvious. In a database-backed application, the adjacency callback would resolve stored edges.</p>
+        <nav class="bottomnav"><a class="nav-button" href="11-remote-facade.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="13-async-io.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

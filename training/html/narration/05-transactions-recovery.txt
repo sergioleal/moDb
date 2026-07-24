@@ -1,0 +1,17 @@
+This lesson is about trust.
+
+When a database says a transaction committed, the application expects the data to survive beyond the current object in memory. The example writes an Account, commits it, closes that lifetime, reopens the database, and reads the Account again.
+
+This is not a crash simulation yet. It is the simpler guarantee that committed data is durable enough to be found after a fresh open.
+
+The write-ahead log and recovery machinery are deeper topics, but the application-facing contract is easy to state: if commit succeeds, later opens should see the committed object.
+
+What we want to achieve is a durable checkpoint in the course. From this point on, when later examples talk about snapshots, remote operations, or facades, they are building on a storage layer that already has a transaction and recovery story.
+
+A transaction is a promise about grouping. Either the intended change becomes visible as a coherent unit, or it does not. Recovery extends that promise across process boundaries and failures. Even though this example only performs a clean reopen, it prepares the learner to think in terms of committed intent rather than individual writes. Storage engines need this discipline because pages, indexes, identity maps, and logs may all be touched by one logical change.
+
+The context for this lesson is that Persistence is useful only if committed data survives process boundaries and recovery events. Phase 05 introduces the practical durability checkpoint.
+
+What we are trying to achieve is this: Commit an object, reopen the database, and verify that the durable state is still available.
+
+By the end of this lesson, the learner should be able to connect commit with durable visibility after reopen. Understand why a reopen validates more than an in-process read. Prepare for WAL and recovery behavior used by later phases.

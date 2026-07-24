@@ -1,0 +1,17 @@
+This lesson turns the schema from phase one into an actual durable object.
+
+The example creates a Customer, commits it, stores the ObjectId, and then lets that first database lifetime end. That lifetime boundary is important. If we only read the object immediately after writing it, we might accidentally be validating in-memory state. Reopening the file forces the system to prove that the object was encoded, stored, found, and decoded again.
+
+The ObjectId is the application-level identity. It is not asking you to care about the page number, slot number, or storage layout. Ring0 owns those details. Your domain code keeps the logical identity.
+
+Notice that the binding is registered again after reopen. The database file contains persistent data and metadata, but the running process still needs the C++ mapping to turn bytes back into a Customer instance.
+
+What we want to achieve in this phase is the first complete persistence loop: bind, create, commit, reopen, materialize. Most later examples repeat this loop with more advanced behavior layered on top.
+
+Persistence is not the same as allocation. Creating an object inside a process only proves that memory was allocated and the API accepted the value. Reopening the database proves a stronger chain: the object was encoded, written, committed, indexed by identity, found again, and decoded through the registered binding. This is the first point where Ring0 starts behaving like durable infrastructure rather than an in-memory object registry.
+
+The context for this lesson is that After a type is known to the catalog, the next question is whether an object can survive beyond the current process lifetime.
+
+What we are trying to achieve is this: Persist a typed object, keep its ObjectId, reopen the database, and materialize the same logical object again.
+
+By the end of this lesson, the learner should be able to understand ObjectId as logical identity rather than a physical location. See why reopening is a stronger persistence proof than an immediate read. Know why bindings must be registered again before typed materialization.

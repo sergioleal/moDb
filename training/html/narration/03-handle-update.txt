@@ -1,0 +1,17 @@
+This phase introduces typed updates, and it is a good example of Ring0 trying to feel natural to C++ developers.
+
+The Account object has an owner and a balance. After creating it, the example updates the balance through Handle<T>. The field is selected using a pointer-to-member expression, not a string. That means the compiler participates in the API.
+
+This is convenient, but it is still a database operation. The handle does not give permission to mutate durable state outside a transaction. The transaction remains the unit that decides whether the update becomes durable.
+
+What we want to achieve is a clean mental model: Handle<T> gives typed access to a logical object, while the transaction gives durability and atomicity. Those two concepts work together.
+
+As systems grow, this pattern matters because it keeps domain code readable. You can see which field is being changed, and you can see where the commit happens.
+
+A handle is a controlled reference to durable identity. In ordinary C++, a reference or pointer lets you mutate memory directly. In Ring0, a handle gives you typed access to an object, but mutation still flows through a transaction because the system must preserve atomicity, versioning, and recovery. The pointer-to-member expression makes the update feel native to C++, while the transaction keeps the database semantics intact.
+
+The context for this lesson is that Real applications need to change existing objects. Phase 03 introduces typed mutation through Handle<T> while keeping transaction boundaries explicit.
+
+What we are trying to achieve is this: Update one persistent field using a C++ pointer-to-member expression and commit the change.
+
+By the end of this lesson, the learner should be able to understand Handle<T> as a typed reference to a persistent object. See how member pointers select persistent fields without string lookup. Connect typed mutation with transaction commit semantics.

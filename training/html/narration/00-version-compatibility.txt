@@ -1,0 +1,17 @@
+This lesson is deliberately small because the concept is foundational.
+
+Before we talk about pages, objects, transactions, or servers, we need a compatibility story. A client that connects to a server must know whether both sides agree on the public protocol. If that agreement is missing, every later feature becomes unsafe.
+
+The example creates a client version and a server version, then asks Ring0 to negotiate. In a production system this check would happen before the client sends richer requests. It is not glamorous, but it is the kind of quiet contract that prevents expensive failures later.
+
+The project version tells you what build of the product you are running. The protocol version tells you what wire-level conversation is allowed. Those are related, but they are not the same thing.
+
+What we want to achieve in this phase is a habit: do not assume compatibility. Ask for it, handle failure, and only then continue. Every networked lesson later in the course builds on this discipline.
+
+Compatibility is a product design problem as much as a technical one. Once an application depends on a database server, upgrades become normal. A protocol version gives both sides a way to decide whether they can communicate without guessing. Major versions usually represent breaking changes, while minor versions can represent compatible evolution. The habit we want is defensive optimism: try to negotiate, continue when the result is safe, and fail clearly when it is not.
+
+The context for this lesson is that Any serious client/server system needs a compatibility boundary before it exchanges stateful data. Phase 00 introduces that boundary before storage or networking makes the situation more complex.
+
+What we are trying to achieve is this: Learn how Ring0 represents protocol versions and why negotiation is the first decision a client should make.
+
+By the end of this lesson, the learner should be able to explain the difference between project version and protocol version. Describe what a successful negotiation permits the caller to do next. Recognize incompatible protocol versions as a normal operational case.

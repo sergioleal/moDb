@@ -1,0 +1,17 @@
+This phase introduces one of the most important ideas for concurrent data systems: a stable read view.
+
+The example starts with an Account balance of one hundred. It opens a snapshot, then updates the current balance to two hundred in a later transaction. After that, two reads produce different answers, and both answers are correct.
+
+The snapshot sees the world as it existed when the snapshot was opened. The current read sees the latest committed state.
+
+This does not mean Ring0 copied the entire database. The snapshot is a logical view over object versions. That is what makes it practical.
+
+What we want to achieve is an intuition for MVCC-style behavior. A reader can keep working with a consistent view, while writers continue to commit newer versions. Later, when remote queries and graph traversal appear, this same consistency idea becomes even more valuable.
+
+Snapshots are a way to separate time from mutation. Without snapshots, a reader can be confused by concurrent writes because the meaning of 'the database' changes while the reader is working. With a snapshot, the reader asks for the database as of a particular logical moment. This is the core intuition behind MVCC: multiple committed versions can coexist long enough for readers and writers to make progress without blocking each other unnecessarily.
+
+The context for this lesson is that Readers and writers often overlap. Phase 06 introduces stable read views so readers can observe a consistent version while newer commits continue.
+
+What we are trying to achieve is this: Show one snapshot reading the old object version while a current read sees the new version.
+
+By the end of this lesson, the learner should be able to explain why a snapshot is a read view, not a full database copy. Understand how old and current versions can both be meaningful. Recognize the role of snapshots in concurrent applications.

@@ -1,0 +1,17 @@
+This phase moves from isolated objects to a small object graph.
+
+The Employee object refers to a Department and owns a Badge. Those two relationships look similar in C++ because both point at another object, but they mean different things in the domain model.
+
+A Ref is an association. It says this object is connected to another object, but it does not own that object's lifecycle. An OwnedRef communicates a stronger relationship: the target belongs to the owner.
+
+The example prints object ids because the relationship is stored as a durable edge, not as an embedded copy. That is an important distinction. If the target object changes, the relationship still points to the target identity.
+
+What we want to achieve is the ability to model a realistic domain without flattening everything into one record. Later graph-oriented features build on this same idea of stable object identity and resolvable edges.
+
+Object relationships are the reason an object database can model domains more naturally than a flat record store. A Ref expresses that one object knows another object. An OwnedRef expresses that one object has lifecycle responsibility for another object. That semantic difference becomes important when deleting, traversing, or reasoning about ownership. The relationship is stored as identity, not as a physical address, so the graph remains meaningful even when storage layout changes.
+
+The context for this lesson is that Object databases are valuable when domain models contain relationships. Phase 04 shows how Ring0 stores durable edges between objects.
+
+What we are trying to achieve is this: Represent association and ownership using Ref<T> and OwnedRef<T>.
+
+By the end of this lesson, the learner should be able to distinguish association from ownership in persisted object graphs. Understand relationships as logical ObjectId edges. Recognize why relationship semantics matter for lifecycle rules.

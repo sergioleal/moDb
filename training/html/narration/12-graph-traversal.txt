@@ -1,0 +1,17 @@
+This phase teaches graph traversal by stripping away storage details first.
+
+The example uses an in-memory map from ObjectId to neighboring ObjectIds. That keeps the traversal contract visible. The BFS function does not need to know where edges come from. It only needs a starting id and an adjacency callback.
+
+In a real Ring0-backed graph, that callback would resolve outgoing references from persisted objects. The algorithm shape would remain the same.
+
+The result is streamed, which means a caller can process visits incrementally and potentially stop early.
+
+What we want to achieve is separation of concerns. Ring0 can store object relationships, and traversal algorithms can operate over a small adjacency abstraction. That makes graph behavior reusable instead of hard-wired to one storage representation.
+
+A graph is a set of nodes connected by edges. In Ring0 terms, nodes can be objects and edges can be relationships expressed through ObjectId references. Traversal algorithms such as breadth-first search answer questions about reachability and distance: what can I reach from here, and how many steps away is it. BFS explores level by level, so it is useful when the first time you reach a node should represent the shortest number of edges from the start. The example uses an in-memory adjacency map, but the concept is the same when adjacency is resolved from persisted object relationships.
+
+The context for this lesson is that Object relationships naturally form graphs. Phase 12 introduces traversal as a reusable algorithm over ObjectId adjacency.
+
+What we are trying to achieve is this: Run breadth-first traversal using an adjacency callback, then relate that callback to persisted graph edges.
+
+By the end of this lesson, the learner should be able to understand why traversal depends on ObjectId and adjacency, not one fixed container. See BFS as a streaming result producer. Know how a database-backed adjacency callback would replace the in-memory map.
