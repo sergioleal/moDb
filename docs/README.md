@@ -42,7 +42,7 @@ pontual.
 
 | Área | Documento | Status |
 |---|---|---|
-| Modelo de objetos e catálogo | [reference/object-model.md](reference/object-model.md) | 🚧 esqueleto |
+| Modelo de objetos e catálogo | [reference/object-model.md](reference/object-model.md) | ✅ |
 | Ciclo de vida do banco (create/open/options) | [reference/database-lifecycle.md](reference/database-lifecycle.md) | 🚧 esqueleto |
 | Transações e WAL | [GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md) | ✅ |
 | Handles e acesso tipado | [reference/handles.md](reference/handles.md) | 🚧 esqueleto |
