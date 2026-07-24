@@ -30,39 +30,44 @@ produto:
 - **`streaming.md`** — streaming assíncrono como modelo nativo de execução de
   consultas (TTFR, coroutines, backpressure).
 
-## 2. Uso e operação
+## 2. Referência por área do produto
 
-- **[USO_DA_CLI.md](USO_DA_CLI.md)** — referência de uso da CLI `modb`
-  (`demo`, `oo`, `type`, `baseline`, `object`, `db`, `tx`, `serve`, `query` e
-  ferramentas físicas).
-- **[OPERACAO.md](OPERACAO.md)** — operação do arquivo: backup, restauração,
-  supervisor, `db check`.
-- **[OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md)** — réplica de leitura
-  (follower alimentado pelo WAL do primary) e primary `wal_only`.
-- **[OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md)** — `DatabaseOptions::wal_io`,
-  quando (não) vale a pena habilitar o I/O assíncrono do WAL.
-- **[OPERACAO_MODULOS.md](OPERACAO_MODULOS.md)** — modelo de falhas do
-  runtime de módulos (execução de código de domínio no processo).
-- **[PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md)** — metodologia de medição:
-  camadas, métricas, datasets, formato JSONL das campanhas.
-- **[FUZZING.md](FUZZING.md)** — alvos de fuzzing da suíte de testes.
+Índice geral e definitivo de `docs/`: cada área do produto tem um documento
+de referência. Onde ainda não existe um documento dedicado, `reference/`
+tem um **esqueleto** (🚧) a ser preenchido — links de código real já
+apontados, prosa ainda por escrever. Não confundir com o
+[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md): aquele é um tutorial narrativo de
+ponta a ponta; isto aqui é referência, um documento por área, para consulta
+pontual.
 
-## 3. Contratos e garantias
+| Área | Documento | Status |
+|---|---|---|
+| Modelo de objetos e catálogo | [reference/object-model.md](reference/object-model.md) | 🚧 esqueleto |
+| Ciclo de vida do banco (create/open/options) | [reference/database-lifecycle.md](reference/database-lifecycle.md) | 🚧 esqueleto |
+| Transações e WAL | [GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md) | ✅ |
+| Handles e acesso tipado | [reference/handles.md](reference/handles.md) | 🚧 esqueleto |
+| Relacionamentos e coleções | [reference/relationships-collections.md](reference/relationships-collections.md) | 🚧 esqueleto |
+| Snapshots e MVCC | [reference/snapshots-mvcc.md](reference/snapshots-mvcc.md) | 🚧 esqueleto |
+| Consultas e índices | [reference/queries-indexes.md](reference/queries-indexes.md) | 🚧 esqueleto |
+| Rede e protocolo | [reference/networking-protocol.md](reference/networking-protocol.md) | 🚧 esqueleto |
+| Operações de domínio remotas | [reference/domain-operations.md](reference/domain-operations.md) | 🚧 esqueleto |
+| Facades | [FACADES.md](FACADES.md) | ✅ |
+| Grafos | [reference/graphs.md](reference/graphs.md) | 🚧 esqueleto |
+| Réplica de leitura e `wal_only` | [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md) | ✅ |
+| I/O assíncrono do WAL | [OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md) | ✅ |
+| CLI (`modb`) | [USO_DA_CLI.md](USO_DA_CLI.md) | ✅ |
+| Formato de arquivo em disco | [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) | ✅ |
+| Compatibilidade major/minor | [COMPATIBILIDADE.md](COMPATIBILIDADE.md) | ✅ |
+| API pública C++ instalável | [API_PUBLICA.md](API_PUBLICA.md) | ✅ |
+| Operação de arquivo (backup/restore) | [OPERACAO.md](OPERACAO.md) | ✅ |
+| Modelo de falhas de módulos | [OPERACAO_MODULOS.md](OPERACAO_MODULOS.md) | ✅ |
+| Metodologia de benchmarks | [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md) | ✅ |
+| Fuzzing | [FUZZING.md](FUZZING.md) | ✅ |
+| Glossário | [GLOSSARIO.md](GLOSSARIO.md) | ✅ |
+| Constituição Ring0 | [CONSTITUTION_RING0.md](CONSTITUTION_RING0.md) | ✅ |
+| Decisões arquiteturais | [decisions/](decisions/) (tabela abaixo) | ✅ |
 
-- **[GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md)** — garantias do
-  gerenciador de transações/WAL/recuperação (modelo redo-only, single-writer).
-- **[FACADES.md](FACADES.md)** — contrato de facades e handles versionados
-  para consumidores remotos.
-- **[API_PUBLICA.md](API_PUBLICA.md)** — contrato estável da API pública C++
-  instalada (`modb::modb`, `modb::app_client`, headers instalados).
-- **[COMPATIBILIDADE.md](COMPATIBILIDADE.md)** — matriz de compatibilidade
-  major/minor do formato de arquivo e do protocolo.
-- **[FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md)** — especificação do
-  layout em disco (superbloco, páginas, magic `MODB`).
-- **[CONSTITUTION_RING0.md](CONSTITUTION_RING0.md)** — princípios fundamentais
-  e duradouros do produto Ring0.
-
-## 4. Decisões arquiteturais — `decisions/`
+## 3. Decisões arquiteturais — `decisions/`
 
 Registram decisões pontuais e suas justificativas, no formato ADR (Contexto →
 Decisão → Consequências). Cada ADR documenta uma decisão de design que
@@ -100,7 +105,7 @@ foi tomada, mas o conteúdo é atemporal.
   sobrevive são os tipos SQL e os metadados relacionais, superados por
   ADR-003/004/005.
 
-## 5. Glossário
+## 4. Glossário
 
 - **[GLOSSARIO.md](GLOSSARIO.md)** — termos do modelo OO vigente (Objeto,
   ObjectId, Handle, TypeDefinition, Binding, ProjectionPlan, Snapshot, TTFR
