@@ -7,8 +7,8 @@ artefatos técnicos existentes, como namespace, CLI e alvo CMake.
 Esta pasta reúne a documentação **de funcionalidade** — o que o produto faz e
 como usá-lo hoje, independente de quando cada parte foi construída. O
 histórico de construção (plano por fases, rastreador de progresso, protocolo
-de implementação, relatórios de fechamento, o curso de treinamento) vive em
-[`docs-process/`](../docs-process/README.md).
+de implementação, relatórios de fechamento, e o curso de treinamento
+organizado por fase) vive em [`docs-process/`](../docs-process/README.md).
 
 ## Novo por aqui? Comece pelo guia do desenvolvedor
 
@@ -16,6 +16,13 @@ de implementação, relatórios de fechamento, o curso de treinamento) vive em
 passo a passo, do build ao uso avançado (transações, snapshots, consultas,
 rede, facades, grafos), com código real citado do repositório. É o ponto de
 partida recomendado para quem chega agora.
+
+Quer aprender construindo um projeto próprio, em vez de um tour rápido?
+**[training/](training/README.md)** (em inglês, 🚧 esqueleto) é um curso
+prático organizado por funcionalidade: você constrói uma única aplicação —
+um diretório de funcionários — do zero, e cada lição soma uma capacidade
+nova (persistência, transações, relacionamentos, consultas, rede, operações
+remotas, facades, grafos) à mesma base de código.
 
 ## 1. Documentos de visão (na raiz do repositório, não em `docs/`)
 
