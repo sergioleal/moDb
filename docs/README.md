@@ -33,9 +33,10 @@ produto:
 ## 2. Referência por área do produto
 
 Índice geral e definitivo de `docs/`: cada área do produto tem um documento
-de referência. Onde ainda não existe um documento dedicado, `reference/`
-tem um **esqueleto** (🚧) a ser preenchido — links de código real já
-apontados, prosa ainda por escrever. Não confundir com o
+de referência. Os nove documentos em `reference/` já estão escritos por
+completo (✅); um futuro documento novo nesta pasta pode começar como
+**esqueleto** (🚧) — links de código real já apontados, prosa ainda por
+escrever — até ser preenchido. Não confundir com o
 [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md): aquele é um tutorial narrativo de
 ponta a ponta; isto aqui é referência, um documento por área, para consulta
 pontual.
@@ -43,16 +44,16 @@ pontual.
 | Área | Documento | Status |
 |---|---|---|
 | Modelo de objetos e catálogo | [reference/object-model.md](reference/object-model.md) | ✅ |
-| Ciclo de vida do banco (create/open/options) | [reference/database-lifecycle.md](reference/database-lifecycle.md) | 🚧 esqueleto |
+| Ciclo de vida do banco (create/open/options) | [reference/database-lifecycle.md](reference/database-lifecycle.md) | ✅ |
 | Transações e WAL | [GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md) | ✅ |
-| Handles e acesso tipado | [reference/handles.md](reference/handles.md) | 🚧 esqueleto |
-| Relacionamentos e coleções | [reference/relationships-collections.md](reference/relationships-collections.md) | 🚧 esqueleto |
-| Snapshots e MVCC | [reference/snapshots-mvcc.md](reference/snapshots-mvcc.md) | 🚧 esqueleto |
-| Consultas e índices | [reference/queries-indexes.md](reference/queries-indexes.md) | 🚧 esqueleto |
-| Rede e protocolo | [reference/networking-protocol.md](reference/networking-protocol.md) | 🚧 esqueleto |
-| Operações de domínio remotas | [reference/domain-operations.md](reference/domain-operations.md) | 🚧 esqueleto |
+| Handles e acesso tipado | [reference/handles.md](reference/handles.md) | ✅ |
+| Relacionamentos e coleções | [reference/relationships-collections.md](reference/relationships-collections.md) | ✅ |
+| Snapshots e MVCC | [reference/snapshots-mvcc.md](reference/snapshots-mvcc.md) | ✅ |
+| Consultas e índices | [reference/queries-indexes.md](reference/queries-indexes.md) | ✅ |
+| Rede e protocolo | [reference/networking-protocol.md](reference/networking-protocol.md) | ✅ |
+| Operações de domínio remotas | [reference/domain-operations.md](reference/domain-operations.md) | ✅ |
 | Facades | [FACADES.md](FACADES.md) | ✅ |
-| Grafos | [reference/graphs.md](reference/graphs.md) | 🚧 esqueleto |
+| Grafos | [reference/graphs.md](reference/graphs.md) | ✅ |
 | Réplica de leitura e `wal_only` | [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md) | ✅ |
 | I/O assíncrono do WAL | [OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md) | ✅ |
 | CLI (`modb`) | [USO_DA_CLI.md](USO_DA_CLI.md) | ✅ |
