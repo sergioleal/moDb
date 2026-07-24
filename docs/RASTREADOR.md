@@ -53,10 +53,10 @@
 | [10](#fase-10--desempenho-e-estabilização) | Desempenho e estabilização | ✅ Concluída | 9/9 | Todas |
 | [11](#fase-11--catálogo-de-facades-e-handles) | Catálogo de facades e handles | ✅ Concluída | 10/10 | Fases 9, 10 · 11A–11D |
 | [12](#fase-12--handles-de-arestas-e-algoritmos-de-grafos) | Handles de arestas e algoritmos de grafos | ✅ Concluída | 12/12 | Fases 4, 6, 7, 10 · 12A–12E |
-| [13](#fase-13--io-assíncrono) | I/O assíncrono | 🔄 Em andamento | 4/8 | Fases 5, 8, 10 |
+| [13](#fase-13--io-assíncrono) | I/O assíncrono | ✅ Concluída | 8/8 | Fases 5, 8, 10 |
 | [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ✅ Concluída | 12/12 | Fases 5, 6, 8 · 14A–14E |
 | [15](#fase-15--primary-wal_only-só-wal-dados-nas-réplicas) | Primary `wal_only` (dados nas réplicas) | ✅ Concluída | 10/10 | Fase 14 · 15A–15E |
-| **Total** | | | **123/165 (~75%)** | |
+| **Total** | | | **127/165 (~77%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 39/39
 tarefas (100%).
@@ -1025,7 +1025,8 @@ direção, refs órfãs, ownership, cancelamento e limites são determinísticos
 
 ## Fase 13 — I/O assíncrono
 
-Status: 🔄 Em andamento (4/8) — backend opcional de I/O posicional assíncrono.
+Status: ✅ Concluída (8/8) — backend opcional de I/O posicional assíncrono,
+integrado ao WAL como opção (2026-07-24).
 Definição completa:
 [PLANO_ODB.md §Fase 13](PLANO_ODB.md#fase-13--io-assíncrono) ·
 [PROTOCOLO_FASES.md §Fase 13](PROTOCOLO_FASES.md#fase-13--io-assíncrono)
@@ -1034,12 +1035,12 @@ Definição completa:
 |---|---|---|---|
 | 13.1 | ADR de I/O assíncrono: contrato, fallback, cancelamento e sync | ✅ | [ADR-019](decisions/ADR-019-io-assincrono.md) |
 | 13.2 | `AsyncFile` com backend assíncrono e API próxima de `NativeFile` | ✅ | `include/modb/storage/async_file.hpp`; `modb.async_file` verde no Windows |
-| 13.3 | Backends nativos por plataforma | 🔄 | IOCP validado no Windows; POSIX AIO implementado no Linux, compilação local pendente |
-| 13.4 | Integração ao caminho de storage preservando WAL antes de páginas | ⬜ | Sem mudança de formato |
+| 13.3 | Backends nativos por plataforma | ✅ | IOCP validado no Windows; POSIX AIO validado em WSL Ubuntu 24.04 (g++ 13.3, toolchain CLion, preset `local-gcc13`) — `modb.async_file` verde nos dois |
+| 13.4 | Integração ao caminho de storage preservando WAL antes de páginas | ✅ | `AsyncWalSink` (`src/tx/wal.cpp`) + `DatabaseOptions::wal_io` (default `sync`); `modb.wal_async_sink` verde no Windows e no Linux |
 | 13.5 | Fila limitada e backpressure | ✅ | `max_inflight`; `modb.async_file` verde no Windows |
 | 13.6 | Cancelamento e propagação de falhas como `Result` | ✅ | `cancel_all` + erros; `modb.async_file` verde no Windows |
-| 13.7 | Benchmarks de I/O assíncrono vs. síncrono | ⬜ | Cenário `storage_async_io` |
-| 13.8 | Documentação operacional e limites de uso | ⬜ | Quando habilitar/desabilitar |
+| 13.7 | Benchmarks de I/O assíncrono vs. síncrono | ✅ | Cenário `storage.async_io.{sync,async}`; sem ganho consistente medido (ver [OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md)) |
+| 13.8 | Documentação operacional e limites de uso | ✅ | [OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md) |
 
 ### Testes/artefatos desta fase
 
@@ -1047,13 +1048,17 @@ Definição completa:
 |---|---|---|
 | ADR de I/O assíncrono | `docs/decisions/ADR-019-io-assincrono.md` | ✅ |
 | API de I/O assíncrono | `include/modb/storage/async_file.hpp` | ✅ |
-| Implementação por plataforma | `src/storage/async_file_*` | 🔄 |
-| Teste de contrato | `tests/async_file_test.cpp` | ✅ no Windows |
-| Benchmark | `benchmarks/scenarios/storage_async_io.*` | ⬜ |
+| Implementação por plataforma | `src/storage/async_file_*` | ✅ |
+| Teste de contrato | `tests/async_file_test.cpp` | ✅ Windows + Linux (WSL) |
+| Sink assíncrono do WAL | `tests/wal_async_sink_test.cpp` | ✅ Windows + Linux (WSL) |
+| Benchmark | `benchmarks/scenarios/storage_async_io.*` | ✅ |
+| Guia operacional | `docs/OPERACAO_IO_ASSINCRONO.md` | ✅ |
 
-Critério de aceite: ⬜ os mesmos fluxos de persistência/recovery passam com
-backend assíncrono e fallback síncrono; falhas retornam `Result`; backpressure
-impede filas ilimitadas; benchmarks registram impacto medido.
+Critério de aceite: ✅ os mesmos fluxos de persistência/recovery passam com
+backend assíncrono e síncrono (`modb.wal_async_sink`, suíte completa 128/128
+no Windows); falhas retornam `Result`; backpressure impede filas ilimitadas;
+benchmarks registram impacto medido — sem ganho consistente no tamanho de
+transação testado (documentado, não escondido).
 
 ---
 

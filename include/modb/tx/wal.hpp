@@ -50,6 +50,12 @@ using WalFileFactory =
 [[nodiscard]] Result<std::unique_ptr<WalSink>> open_append_wal_sink(
     const std::filesystem::path& path);
 
+// Igual a `open_append_wal_sink`, mas sobre storage::AsyncFile (Fase 13):
+// write_at só enfileira (submit_write_at); sync() drena tudo desde o último
+// drain (após-imagens + o próprio marcador de sync) num único barrier.
+[[nodiscard]] Result<std::unique_ptr<WalSink>> open_async_wal_sink(
+    const std::filesystem::path& path);
+
 // Tipos de registro do WAL. Os valores fazem parte do formato: nunca renumerar.
 enum class WalRecordType : std::uint8_t {
     begin = 1,

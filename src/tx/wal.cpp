@@ -5,6 +5,8 @@
 #include "modb/storage/endian.hpp"
 // Importa NativeFile, base do sink de produção.
 #include "modb/storage/native_file.hpp"
+// Importa AsyncFile, base do sink assíncrono (Fase 13).
+#include "modb/storage/async_file.hpp"
 
 // Disponibiliza std::copy/std::equal.
 #include <algorithm>
@@ -200,6 +202,36 @@ Result<std::unique_ptr<WalSink>> open_append_wal_sink(const std::filesystem::pat
         return std::unexpected(file.error());
     }
     return std::make_unique<NativeWalSink>(std::move(*file));
+}
+
+// Sink assíncrono (Fase 13): write_at só enfileira; sync() drena tudo desde o
+// último drain (após-imagens acumuladas + o próprio marcador de sync) num
+// único barrier, preservando a ordenação WAL exigida pelo chamador.
+class AsyncWalSink final : public WalSink {
+public:
+    explicit AsyncWalSink(storage::AsyncFile file) noexcept : file_{std::move(file)} {}
+    Result<void> write_at(std::uint64_t offset, std::span<const std::byte> source) override {
+        return file_.submit_write_at(offset, source);
+    }
+    Result<void> sync() override { return file_.sync(); }
+
+private:
+    storage::AsyncFile file_;
+};
+
+Result<std::unique_ptr<WalSink>> open_async_wal_sink(const std::filesystem::path& path) {
+    std::error_code exists_error;
+    const bool exists = std::filesystem::exists(path, exists_error);
+    if (exists_error) {
+        return std::unexpected(io_error("could not stat WAL: " + exists_error.message()));
+    }
+    const auto mode =
+        exists ? storage::AsyncFile::Mode::open_existing : storage::AsyncFile::Mode::create_new;
+    auto file = storage::AsyncFile::open(path, mode);
+    if (!file) {
+        return std::unexpected(file.error());
+    }
+    return std::make_unique<AsyncWalSink>(std::move(*file));
 }
 
 Result<Wal> Wal::create(const std::filesystem::path& path) {

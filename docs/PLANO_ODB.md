@@ -826,23 +826,27 @@ assíncrono.
 
 Tarefas:
 
-- [ ] Definir a ADR da camada de I/O assíncrono: contrato, backend por sistema
+- [x] Definir a ADR da camada de I/O assíncrono: contrato, backend por sistema
       operacional, fallback, cancelamento e relação com `NativeFile`.
-- [ ] Introduzir `AsyncFile`/executor de I/O posicional sem expor detalhes do
+- [x] Introduzir `AsyncFile`/executor de I/O posicional sem expor detalhes do
       sistema operacional às camadas de objeto, WAL ou rede.
-- [ ] Integrar o backend ao caminho de leitura/escrita sem alterar a ordem de
+- [x] Integrar o backend ao caminho de leitura/escrita sem alterar a ordem de
       durabilidade do WAL nem a recuperação da Fase 5.
-- [ ] Propagar backpressure entre storage, servidor e streaming, evitando filas
+- [x] Propagar backpressure entre storage, servidor e streaming, evitando filas
       ilimitadas.
-- [ ] Manter modo síncrono como baseline e como fallback determinístico.
-- [ ] Testar cancelamento, falha de I/O, flush/sync, fallback e concorrência.
-- [ ] Medir impacto em benchmarks de leitura quente/fria e buffer pool.
-- [ ] Documentar limites operacionais e quando habilitar o backend assíncrono.
+- [x] Manter modo síncrono como baseline e como fallback determinístico.
+- [x] Testar cancelamento, falha de I/O, flush/sync, fallback e concorrência.
+- [x] Medir impacto em benchmarks de leitura quente/fria e buffer pool.
+- [x] Documentar limites operacionais e quando habilitar o backend assíncrono.
 
 Critério de aceite: os mesmos fluxos de persistência/recovery passam com backend
 assíncrono e fallback síncrono; falhas retornam `Result`; backpressure impede
 crescimento não limitado de filas; benchmarks registram ganho ou custo medido.
-Tag alvo: `0.0.13`.
+Tag alvo: `0.0.13`. Concluída em 2026-07-24: `DatabaseOptions::wal_io` (sync
+default / async) via `AsyncWalSink`; backend assíncrono valida em Windows
+(IOCP) e Linux (POSIX AIO, WSL Ubuntu 24.04); benchmark
+`storage.async_io.{sync,async}` sem ganho consistente medido — ver
+[OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md).
 
 ### Fase 14 — Réplica de leitura por streaming do WAL
 

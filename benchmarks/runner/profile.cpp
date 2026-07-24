@@ -51,6 +51,20 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .warmup = 0,
             .samples = 2,
         });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.async_io.sync",
+            .object_count = 100, // transações
+            .stride = 32,        // objetos (page-images) por transação
+            .warmup = 1,
+            .samples = 3,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.async_io.async",
+            .object_count = 100,
+            .stride = 32,
+            .warmup = 1,
+            .samples = 3,
+        });
         return profile;
     }
     if (name == "standard") {
@@ -101,6 +115,20 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .warmup = 1,
             .samples = 5,
         });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.async_io.sync",
+            .object_count = 1'000,
+            .stride = 32,
+            .warmup = 2,
+            .samples = 8,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.async_io.async",
+            .object_count = 1'000,
+            .stride = 32,
+            .warmup = 2,
+            .samples = 8,
+        });
         return profile;
     }
     if (name == "diagnostic") {
@@ -134,6 +162,20 @@ std::optional<CampaignProfile> find_profile(std::string_view name) {
             .scenario_id = "graph.traversal.warm",
             .object_count = 2,
             .stride = 2,
+            .warmup = 0,
+            .samples = 1,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.async_io.sync",
+            .object_count = 40,
+            .stride = 4,
+            .warmup = 0,
+            .samples = 1,
+        });
+        profile.scenarios.push_back(ScenarioProfileOverride{
+            .scenario_id = "storage.async_io.async",
+            .object_count = 40,
+            .stride = 4,
             .warmup = 0,
             .samples = 1,
         });

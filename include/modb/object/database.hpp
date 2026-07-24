@@ -893,6 +893,7 @@ public:
     [[nodiscard]] const std::filesystem::path& data_path() const noexcept { return file_->path(); }
     [[nodiscard]] const std::filesystem::path& wal_path() const noexcept { return wal_path_; }
     [[nodiscard]] PrimaryStorage primary_storage() const noexcept { return primary_storage_; }
+    [[nodiscard]] WalIoMode wal_io() const noexcept { return wal_io_; }
     [[nodiscard]] bool has_durable_data_files() const noexcept {
         return primary_storage_ == PrimaryStorage::full;
     }
@@ -986,14 +987,15 @@ private:
     Database(std::unique_ptr<storage::PageFile> file, ObjectStore store,
              std::filesystem::path wal_path, std::filesystem::path instance_path,
              PrimaryStorage primary_storage, CommitAckPolicy commit_ack,
-             std::chrono::milliseconds commit_ack_timeout)
+             std::chrono::milliseconds commit_ack_timeout, WalIoMode wal_io)
         : file_{std::move(file)},
           store_{std::move(store)},
           instance_path_{std::move(instance_path)},
           wal_path_{std::move(wal_path)},
           primary_storage_{primary_storage},
           commit_ack_policy_{commit_ack},
-          commit_ack_timeout_{commit_ack_timeout} {}
+          commit_ack_timeout_{commit_ack_timeout},
+          wal_io_{wal_io} {}
 
     [[nodiscard]] Result<void> check_durable_data() const {
         if (primary_storage_ == PrimaryStorage::wal_only) {
@@ -1445,6 +1447,7 @@ private:
     PrimaryStorage primary_storage_{PrimaryStorage::full};
     CommitAckPolicy commit_ack_policy_{CommitAckPolicy::local_wal};
     std::chrono::milliseconds commit_ack_timeout_{std::chrono::seconds{5}};
+    WalIoMode wal_io_{WalIoMode::sync};
     bool data_replica_seen_{false};
     // Id da transação corrente e o próximo a atribuir (monotônico por sessão).
     std::uint64_t current_tx_id_{0};

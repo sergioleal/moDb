@@ -8,6 +8,7 @@
 #include "scenarios/graph_traversal.hpp"
 #include "scenarios/object_store_lifecycle.hpp"
 #include "scenarios/object_store_read_hotpath.hpp"
+#include "scenarios/storage_async_io.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -261,7 +262,9 @@ CampaignResult run_campaign(const CampaignOptions& options) {
         }
         if (scenario.scenario_id != "object_store.lifecycle" &&
             scenario.scenario_id != "storage.buffer_pool.oversubscribed" &&
-            scenario.scenario_id != "object_store.read_hotpath") {
+            scenario.scenario_id != "object_store.read_hotpath" &&
+            scenario.scenario_id != "storage.async_io.sync" &&
+            scenario.scenario_id != "storage.async_io.async") {
             std::ostringstream note;
             note << "{\"schema\":\"modb.benchmark\",\"schema_version\":1,\"record\":\"run_note\","
                     "\"run_id\":"
@@ -317,6 +320,18 @@ CampaignResult run_campaign(const CampaignOptions& options) {
                 params.read_rounds = scenario.read_rounds == 0 ? 1 : scenario.read_rounds;
                 params.work_dir = work_dir.string();
                 return run_object_store_read_hotpath(params);
+            }
+            if (scenario.scenario_id == "storage.async_io.sync" ||
+                scenario.scenario_id == "storage.async_io.async") {
+                StorageAsyncIoParams params;
+                params.seed = options.seed;
+                params.object_count = scenario.object_count;
+                params.stride = static_cast<std::uint32_t>(scenario.stride == 0 ? 4
+                                                                                 : scenario.stride);
+                params.wal_io =
+                    scenario.scenario_id == "storage.async_io.async" ? "async" : "sync";
+                params.work_dir = work_dir.string();
+                return run_storage_async_io(params);
             }
             if (scenario.scenario_id == "graph.traversal.warm" ||
                 scenario.scenario_id == "graph.traversal.cold") {

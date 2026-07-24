@@ -86,7 +86,8 @@ Result<Database> Database::create(const std::filesystem::path& path, const Datab
         auto wal_path = wal_path_for(path);
         std::filesystem::remove(wal_path, remove_error);
         Database db{std::move(file), std::move(*store), std::move(wal_path), path,
-                    PrimaryStorage::wal_only, opts.commit_ack, opts.commit_ack_timeout};
+                    PrimaryStorage::wal_only, opts.commit_ack, opts.commit_ack_timeout,
+                    opts.wal_io};
         if (auto persisted = db.persist_instance_control(); !persisted) {
             return std::unexpected(persisted.error());
         }
@@ -106,7 +107,7 @@ Result<Database> Database::create(const std::filesystem::path& path, const Datab
     std::error_code remove_error;
     std::filesystem::remove(wal_path, remove_error);
     return Database{std::move(file), std::move(*store), std::move(wal_path), path,
-                    PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout};
+                    PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout, opts.wal_io};
 }
 
 Result<Database> Database::open(const std::filesystem::path& path, std::size_t cache_capacity) {
@@ -190,7 +191,8 @@ Result<Database> Database::open(const std::filesystem::path& path, const Databas
             }
         }
         Database db{std::move(file), std::move(store), std::move(wal_path), path,
-                    PrimaryStorage::wal_only, opts.commit_ack, opts.commit_ack_timeout};
+                    PrimaryStorage::wal_only, opts.commit_ack, opts.commit_ack_timeout,
+                    opts.wal_io};
         db.data_replica_seen_ = control->follower_ack_lsn > 0;
         if (auto persisted = db.persist_instance_control(); !persisted) {
             return std::unexpected(persisted.error());
@@ -248,7 +250,7 @@ Result<Database> Database::open(const std::filesystem::path& path, const Databas
         }
     }
     return Database{std::move(file), std::move(*store), std::move(wal_path), path,
-                    PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout};
+                    PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout, opts.wal_io};
 }
 
 Result<void> Database::persist_instance_control() {
@@ -388,6 +390,9 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
             if (custom_wal_factory_) {
                 // Failpoint: recria por commit (comportamento efêmero dos testes).
                 return tx::Wal::create(wal_path_, wal_factory_);
+            }
+            if (wal_io_ == WalIoMode::async) {
+                return tx::Wal::open_durable(wal_path_, store_.next_lsn(), tx::open_async_wal_sink);
             }
             return tx::Wal::open_durable(wal_path_, store_.next_lsn());
         }();

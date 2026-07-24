@@ -304,6 +304,7 @@ add_library(modb_bench_core STATIC
     benchmarks/scenarios/buffer_pool_oversubscribed.cpp
     benchmarks/scenarios/object_store_read_hotpath.cpp
     benchmarks/scenarios/graph_traversal.cpp
+    benchmarks/scenarios/storage_async_io.cpp
 )
 target_include_directories(modb_bench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks)
 target_link_libraries(modb_bench_core PUBLIC modb::modb)
@@ -456,6 +457,8 @@ if(BUILD_TESTING)
     target_link_libraries(modb_wal_only_commit_ack_tests PRIVATE modb::modb)
     add_executable(modb_wal_only_bootstrap_tests tests/wal_only_bootstrap_test.cpp)
     target_link_libraries(modb_wal_only_bootstrap_tests PRIVATE modb::modb)
+    add_executable(modb_wal_async_sink_tests tests/wal_async_sink_test.cpp)
+    target_link_libraries(modb_wal_async_sink_tests PRIVATE modb::modb)
 
     add_executable(modb_benchmark_runner_tests tests/benchmark_runner_test.cpp)
     target_link_libraries(modb_benchmark_runner_tests PRIVATE modb_bench_core)
@@ -560,6 +563,7 @@ if(BUILD_TESTING)
         target_link_options(modb_wal_only_primary_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_wal_only_commit_ack_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_wal_only_bootstrap_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_wal_async_sink_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -625,6 +629,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.wal_only_primary COMMAND modb_wal_only_primary_tests)
     add_test(NAME modb.wal_only_commit_ack COMMAND modb_wal_only_commit_ack_tests)
     add_test(NAME modb.wal_only_bootstrap COMMAND modb_wal_only_bootstrap_tests)
+    add_test(NAME modb.wal_async_sink COMMAND modb_wal_async_sink_tests)
     add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
