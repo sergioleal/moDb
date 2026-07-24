@@ -1,7 +1,6 @@
 # Lesson 13 (Optional, Advanced) — A Read Replica for Reporting
 
-> **Status:** 🚧 skeleton — structure and goals only, step-by-step content
-> and code not yet written.
+> **Status:** ✅ code written and verified against a real build.
 
 ## What You'll Add
 
@@ -19,31 +18,36 @@ replica instead of competing with live writes on the primary.
 
 ## Starting Point
 
-Lesson 6's payroll report (or any later lesson's directory — replication is
-independent of the graph/facade/networking material).
+Lesson 12's directory (the graph/facade/networking material from Lessons
+8-11 stays in place; replication doesn't touch any of it).
 
 ## Steps
 
-- TODO: bootstrap a follower file from the primary directory via the CLI
-  (`modb replicate bootstrap`) or the equivalent library calls.
-- TODO: apply a batch of WAL records to the follower
-  (`modb replicate apply-wal`) after making changes on the primary.
-- TODO: open the follower with `set_read_only_replica(true)` and run the
-  Lesson 6 payroll report against it instead of the primary.
-- TODO: confirm the follower rejects writes (`begin()` fails with
-  `replica_read_only`).
-- TODO: *(stretch)* recreate the primary with
-  `DatabaseOptions{.primary_storage = PrimaryStorage::wal_only}` and seed the
-  follower with `modb replicate seed-wal` instead of a file-copy bootstrap.
+- Bootstrap a follower using the library calls directly (the same calls
+  behind `modb replicate bootstrap`): `repl::create_bootstrap_snapshot(
+  primary, temp_dir)` copies the primary's data file under a brief writer
+  barrier; `repl::install_bootstrap_snapshot(snapshot, follower_path)`
+  installs it at a new path next to the main directory file.
+- Open the follower file, re-`bind()` every type, confirm its
+  `database_uuid()` matches the primary's, and call
+  `set_read_only_replica(true)`.
+- Run a Lesson-6-style payroll report (`scan<Employee>(snapshot,
+  visitor)`) against the follower's own snapshot.
+- Confirm the follower rejects writes: `follower->begin()` fails with
+  `ErrorCode::replica_read_only`.
+
+This lesson does **not** implement the `apply-wal`/streaming half of
+replication (keeping a follower continuously caught up) or the
+`wal_only` + `seed-wal` stretch goal — the bootstrap snapshot above is a
+one-time copy, current as of its `cut_lsn`. See
+[OPERACAO_REPLICACAO.md](../../OPERACAO_REPLICACAO.md) for how streaming
+apply and `wal_only` primaries extend this.
 
 ## Full Listing (End of Lesson)
 
-TODO — target: `examples/employee_directory/lesson_13_replica.cpp`, plus a
-short CLI transcript for the bootstrap/apply-wal steps.
+[examples/employee_directory/lesson_13_read_replica.cpp](../../../examples/employee_directory/lesson_13_read_replica.cpp)
 
 ## Build and Run
-
-TODO
 
 ```powershell
 cmake --build --preset debug --target employee_directory_lesson_13
@@ -52,14 +56,32 @@ cmake --build --preset debug --target employee_directory_lesson_13
 
 ## Expected Output
 
-TODO — the payroll report producing the same total when run against the
-follower, and a rejected write attempt on the follower.
+```
+Objective: bootstrap a read-only replica and query it independently.
+...
+Lesson 13: bootstrap snapshot cut at LSN 3499 (90112 bytes)
+Lesson 13: installed the follower copy at <temp-dir>\employee-directory-<timestamp>-replica.modb
+Lesson 13: follower's database_uuid matches the primary's
+Lesson 13: payroll total from the follower = 54750
+Lesson 13: follower rejected a write attempt as expected: follower rejects begin/write
+```
+
+(the `...` stands in for Lessons 1-12's output, unchanged from
+[Lesson 12](12-async-io.md#expected-output); the `cut_lsn`, byte count, and
+payroll total will match this exactly for an unmodified run of the
+lesson, since every step up to this point is deterministic)
 
 ## What to Notice
 
-- TODO: primary and follower must never share a data volume.
-- TODO: a `wal_only` primary can't donate a file-copy bootstrap
-  (`data_files_disabled`) — that's what `seed-wal` is for.
+- Primary and follower must never share a data volume — the follower here
+  is deliberately a separate file (`*-replica.modb`), not another handle
+  onto the same path.
+- `create_bootstrap_snapshot` briefly opens and rolls back a transaction
+  on the primary purely as a writer barrier — it's not a lasting lock, but
+  it does mean bootstrap can't run concurrently with another open write.
+- A `wal_only` primary can't donate a file-copy bootstrap at all
+  (`data_files_disabled` — see `create_bootstrap_snapshot`'s first check);
+  that's what `seed-wal` is for, and it's out of scope for this lesson.
 
 ## Related Reference
 

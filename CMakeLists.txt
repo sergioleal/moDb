@@ -263,6 +263,36 @@ if(MODB_BUILD_EXAMPLES)
         examples/server/by_phase/phase_12/graph_traversal.cpp)
     modb_add_server_example(ring0_server_phase_13_async_io
         examples/server/by_phase/phase_13/async_io.cpp)
+
+    # docs/training/ -- one cumulative employee-directory app, one binary per
+    # lesson; each lesson's source contains every earlier lesson's code plus
+    # that lesson's own addition (see docs/training/en/README.md).
+    modb_add_server_example(employee_directory_lesson_01
+        examples/employee_directory/lesson_01_binding.cpp)
+    modb_add_server_example(employee_directory_lesson_02
+        examples/employee_directory/lesson_02_persist_reopen.cpp)
+    modb_add_server_example(employee_directory_lesson_03
+        examples/employee_directory/lesson_03_transactions.cpp)
+    modb_add_server_example(employee_directory_lesson_04
+        examples/employee_directory/lesson_04_handles.cpp)
+    modb_add_server_example(employee_directory_lesson_05
+        examples/employee_directory/lesson_05_relationships.cpp)
+    modb_add_server_example(employee_directory_lesson_06
+        examples/employee_directory/lesson_06_snapshots.cpp)
+    modb_add_server_example(employee_directory_lesson_07
+        examples/employee_directory/lesson_07_queries.cpp)
+    modb_add_server_example(employee_directory_lesson_08
+        examples/employee_directory/lesson_08_networking.cpp)
+    modb_add_server_example(employee_directory_lesson_09
+        examples/employee_directory/lesson_09_remote_operations.cpp)
+    modb_add_server_example(employee_directory_lesson_10
+        examples/employee_directory/lesson_10_facades.cpp)
+    modb_add_server_example(employee_directory_lesson_11
+        examples/employee_directory/lesson_11_graphs.cpp)
+    modb_add_server_example(employee_directory_lesson_12
+        examples/employee_directory/lesson_12_async_io.cpp)
+    modb_add_server_example(employee_directory_lesson_13
+        examples/employee_directory/lesson_13_read_replica.cpp)
 endif()
 
 if(MODB_BUILD_TRAINING)

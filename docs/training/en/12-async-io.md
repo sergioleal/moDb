@@ -1,7 +1,6 @@
 # Lesson 12 (Optional, Advanced) — Asynchronous WAL I/O
 
-> **Status:** 🚧 skeleton — structure and goals only, step-by-step content
-> and code not yet written.
+> **Status:** ✅ code written and verified against a real build.
 
 ## What You'll Add
 
@@ -23,22 +22,24 @@ dependency for Lesson 13.
 
 ## Steps
 
-- TODO: reopen the same directory twice, once with default
-  `DatabaseOptions` (`wal_io = sync`) and once with `wal_io = async`.
-- TODO: run the same batch of N transactions (e.g. N raises) against each
-  and time them.
-- TODO: compare against the measured numbers already published in
-  [OPERACAO_IO_ASSINCRONO.md](../../OPERACAO_IO_ASSINCRONO.md) — the point
-  of this lesson is to reproduce that "no consistent win yet" finding
-  yourself, not to assume `async` helps.
+- Reopen the same employee-directory file twice: once with default
+  `DatabaseOptions{}` (`wal_io = sync`), once with
+  `DatabaseOptions{.wal_io = WalIoMode::async}`. `wal_io` is a per-open
+  runtime choice, not a persisted format decision, so the same file works
+  under either mode.
+- Run 200 committed raises against Carla under each mode, timing the
+  whole loop with `std::chrono::steady_clock`.
+- Print both timings and commits/second, and report honestly whichever
+  mode came out ahead on this run — don't assume `async` wins.
+- Settle Carla's salary back to a clean value (20000) at the end so later
+  lessons aren't left with whatever value the last timing iteration
+  happened to write.
 
 ## Full Listing (End of Lesson)
 
-TODO — target: `examples/employee_directory/lesson_12_async_io.cpp`.
+[examples/employee_directory/lesson_12_async_io.cpp](../../../examples/employee_directory/lesson_12_async_io.cpp)
 
 ## Build and Run
-
-TODO
 
 ```powershell
 cmake --build --preset debug --target employee_directory_lesson_12
@@ -47,12 +48,29 @@ cmake --build --preset debug --target employee_directory_lesson_12
 
 ## Expected Output
 
-TODO — two timings printed side by side, sync vs. async.
+The prose lines match exactly every run; the millisecond/commits-per-second
+numbers will vary by machine and disk — treat the ones below as one real
+sample, not a target to hit:
+
+```
+Objective: compare sync vs. async WAL I/O for the same workload.
+...
+Lesson 12: 200 committed raises under wal_io=sync took 907.03 ms (220.50 commits/s)
+Lesson 12: 200 committed raises under wal_io=async took 946.40 ms (211.33 commits/s)
+Lesson 12: sync was faster (or tied) on this run (1.04x)
+Lesson 12: settled Carla's salary back to 20000 for later lessons
+```
+
+(the `...` stands in for Lessons 1-11's output, unchanged from
+[Lesson 11](11-graphs.md#expected-output))
 
 ## What to Notice
 
-- TODO: this lesson is deliberately about *not* reaching for an option just
-  because it exists — measure your own workload before opting in.
+- This lesson is deliberately about *not* reaching for an option just
+  because it exists — on the run captured above, `sync` was marginally
+  faster than `async`, consistent with
+  [OPERACAO_IO_ASSINCRONO.md](../../OPERACAO_IO_ASSINCRONO.md)'s "no
+  consistent win yet" finding. Measure your own workload before opting in.
 
 ## Related Reference
 

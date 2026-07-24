@@ -1,7 +1,6 @@
 # Lesson 3 — Transactions
 
-> **Status:** 🚧 skeleton — structure and goals only, step-by-step content
-> and code not yet written.
+> **Status:** ✅ code written and verified against a real build.
 
 ## What You'll Add
 
@@ -23,23 +22,21 @@ Lesson 2's directory with a handful of persisted employees.
 
 ## Steps
 
-- TODO: add a function that raises one employee's salary inside a
-  transaction, commits, and confirms the change stuck.
-- TODO: deliberately write a second version that begins a transaction,
-  makes a change, and lets the `Transaction` go out of scope without
-  calling `commit()` — show the change did *not* survive.
-- TODO: touch two employees in one transaction (e.g. "swap" or "average"
-  their salaries) to demonstrate atomicity of multi-object changes.
-- TODO: try opening a second transaction while one is active and show the
+- Add a function that raises one employee's salary inside a transaction,
+  commits, and confirms the change stuck.
+- Deliberately write a second version that begins a transaction, makes a
+  change, and lets the `Transaction` go out of scope without calling
+  `commit()` — show the change did *not* survive.
+- Touch two employees in one transaction (average their salaries) to
+  demonstrate atomicity of multi-object changes.
+- Try opening a second transaction while one is active and show the
   `transaction_active` failure.
 
 ## Full Listing (End of Lesson)
 
-TODO — target: `examples/employee_directory/lesson_03_transactions.cpp`.
+[examples/employee_directory/lesson_03_transactions.cpp](../../../examples/employee_directory/lesson_03_transactions.cpp)
 
 ## Build and Run
-
-TODO
 
 ```powershell
 cmake --build --preset debug --target employee_directory_lesson_03
@@ -48,15 +45,28 @@ cmake --build --preset debug --target employee_directory_lesson_03
 
 ## Expected Output
 
-TODO — should show: a raise that stuck, a raise that didn't (uncommitted),
-and a rejected second `begin()`.
+```
+Objective: commit a raise properly, show an uncommitted one rolling back, and prove single-writer.
+Lesson 1: Employee type id = 16
+Lesson 2: wrote 3 employees (Ana=18, Bruno=19, Carla=20)
+Lesson 2: after reopen, employee 18 = Ana (12000)
+Lesson 3: committed raise for Bruno
+  Bruno after committed raise: Bruno = 10500
+Lesson 3: uncommitted raise for Carla (deliberately not committed)
+  Carla after scope exit (should be unchanged): Carla = 15000
+Lesson 3: averaging Ana and Bruno's salaries in one transaction
+  Ana after averaging: Ana = 11250
+  Bruno after averaging: Bruno = 11250
+Lesson 3: attempting a second transaction while one is open
+  second begin() failed as expected: a transaction is already in progress
+```
 
 ## What to Notice
 
-- TODO: forgetting `commit()` isn't a bug you need to guard against
+- Forgetting `commit()` isn't a bug you need to guard against
   defensively — it's the safety net working as intended.
-- TODO: single-writer means concurrent readers are fine, but this app
-  can't have two threads both mid-transaction at once.
+- Single-writer means concurrent readers are fine, but this app can't
+  have two threads both mid-transaction at once.
 
 ## Related Reference
 

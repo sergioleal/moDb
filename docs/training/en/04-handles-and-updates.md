@@ -1,7 +1,6 @@
 # Lesson 4 — Handles and Updates
 
-> **Status:** 🚧 skeleton — structure and goals only, step-by-step content
-> and code not yet written.
+> **Status:** ✅ code written and verified against a real build.
 
 ## What You'll Add
 
@@ -25,23 +24,21 @@ Lesson 3's directory, with transactional raise/rollback behavior in place.
 
 ## Steps
 
-- TODO: refactor the raise feature from Lesson 3 to take a `Handle<Employee>`
-  and use `set<&Employee::salary>(tx, new_salary)` instead of
-  materialize-mutate-`update()` by hand.
-- TODO: add a second, unrelated field mutation (e.g. a promotion that
-  changes a title/role field) to show batching two `set` calls vs.
-  materializing once and calling `update()` once.
-- TODO: introduce `EmployeeV2` with a new `country` field defaulted to
-  something reasonable; re-bind and read an old (v1-shaped) record through
-  the new binding.
+- Introduce `EmployeeV2` with a new `country` field defaulted to `"BR"`,
+  bound under the same catalog name `"Employee"`; the file already has
+  2-field records from Lessons 2-3, so this re-`bind()` triggers real
+  schema evolution (a divergent-shape re-`bind()`, not a simulated one).
+- Read Ana back through the new binding and confirm `country` comes from
+  the declared default, not from disk.
+- Raise Ana's salary via `Handle<Employee>::set<&Employee::salary>(tx,
+  new_salary)` instead of the manual materialize-mutate-`update()` pattern
+  from Lesson 3.
 
 ## Full Listing (End of Lesson)
 
-TODO — target: `examples/employee_directory/lesson_04_handles.cpp`.
+[examples/employee_directory/lesson_04_handles.cpp](../../../examples/employee_directory/lesson_04_handles.cpp)
 
 ## Build and Run
-
-TODO
 
 ```powershell
 cmake --build --preset debug --target employee_directory_lesson_04
@@ -50,15 +47,31 @@ cmake --build --preset debug --target employee_directory_lesson_04
 
 ## Expected Output
 
-TODO — a raise applied via `Handle::set`, and an old employee record read
-back with the new field filled from its default.
+```
+Objective: evolve the schema and update through a typed Handle.
+Lesson 1: Employee type id = 16
+Lesson 2: wrote 3 employees (Ana=18, Bruno=19, Carla=20)
+Lesson 2: after reopen, employee 18 = Ana (12000)
+Lesson 3: committed raise for Bruno
+  Bruno after committed raise: Bruno = 10500
+Lesson 3: uncommitted raise for Carla (deliberately not committed)
+  Carla after scope exit (should be unchanged): Carla = 15000
+Lesson 3: averaging Ana and Bruno's salaries in one transaction
+  Ana after averaging: Ana = 11250
+  Bruno after averaging: Bruno = 11250
+Lesson 3: attempting a second transaction while one is open
+  second begin() failed as expected: a transaction is already in progress
+Lesson 4: Ana read through the new binding = Ana (11250, country=BR) -- country came from the declared default, not from disk
+Lesson 4: raise for Ana via Handle::set (not manual materialize/update)
+  Ana after Handle::set raise: Ana (13250, country=BR) -- now physically stored in the new 3-field shape
+```
 
 ## What to Notice
 
-- TODO: `Handle<T>` is pure identity — every `get`/`set` still round-trips
+- `Handle<T>` is pure identity — every `get`/`set` still round-trips
   through the whole object; it isn't a cache.
-- TODO: the old record is not rewritten on disk just by being read with the
-  new binding — only a subsequent write physically migrates it.
+- The old record is not rewritten on disk just by being read with the new
+  binding — only a subsequent write physically migrates it.
 
 ## Related Reference
 
