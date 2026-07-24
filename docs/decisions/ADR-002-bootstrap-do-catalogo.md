@@ -41,4 +41,4 @@ recursão infinita: existe um piso fixo, conhecido em tempo de compilação, que
 ancora a decodificação. O custo é reservar 15 ids e manter as três descrições
 de meta-tipo no código, sincronizadas com o formato do catálogo persistido
 (ver [ADR-003](ADR-003-tipos-e-encoding.md) e a Fase 2 em
-[PROTOCOLO_FASES.md](../PROTOCOLO_FASES.md)).
+[PROTOCOLO_FASES.md](../../docs-process/PROTOCOLO_FASES.md)).

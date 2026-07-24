@@ -10,9 +10,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIR = ROOT / "training" / "en"
-OUTPUT_DIR = ROOT / "training" / "html"
-ASSET_SOURCE = ROOT / "training" / "assets"
+SOURCE_DIR = ROOT / "docs-process" / "training" / "en"
+OUTPUT_DIR = ROOT / "docs-process" / "training" / "html"
+ASSET_SOURCE = ROOT / "docs-process" / "training" / "assets"
 ASSET_OUTPUT = OUTPUT_DIR / "assets"
 
 LESSONS = [

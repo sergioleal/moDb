@@ -47,15 +47,15 @@ auto db = modb::object::Database::create("shop.modb");
 | Documento | Uso |
 |---|---|
 | [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | guia passo a passo para quem chega agora (EN) |
-| [docs/RASTREADOR.md](docs/RASTREADOR.md) | estado das fases |
-| [docs/PLANO_ODB.md](docs/PLANO_ODB.md) | plano Ring0 |
-| [docs/PROTOCOLO_FASES.md](docs/PROTOCOLO_FASES.md) | critérios por fase |
 | [docs/FORMATO_DE_ARQUIVO.md](docs/FORMATO_DE_ARQUIVO.md) | layout em disco |
 | [docs/API_PUBLICA.md](docs/API_PUBLICA.md) | headers instaláveis |
 | [docs/COMPATIBILIDADE.md](docs/COMPATIBILIDADE.md) | major/minor |
 | [docs/OPERACAO.md](docs/OPERACAO.md) | backup, restore, supervisor, `db check` |
-| [docs/BASELINE_DESEMPENHO.md](docs/BASELINE_DESEMPENHO.md) | runner 10A |
-| [docs/FECHAMENTO_10F.md](docs/FECHAMENTO_10F.md) | matriz final Fase 10 |
+| [docs-process/RASTREADOR.md](docs-process/RASTREADOR.md) | estado das fases (histórico de construção) |
+| [docs-process/PLANO_ODB.md](docs-process/PLANO_ODB.md) | plano Ring0 (histórico) |
+| [docs-process/PROTOCOLO_FASES.md](docs-process/PROTOCOLO_FASES.md) | critérios por fase (histórico) |
+| [docs-process/BASELINE_DESEMPENHO.md](docs-process/BASELINE_DESEMPENHO.md) | runner 10A (histórico) |
+| [docs-process/FECHAMENTO_10F.md](docs-process/FECHAMENTO_10F.md) | matriz final Fase 10 (histórico) |
 | [arquitetura.md](arquitetura.md) | modelo de objetos |
 | [codigo-local.md](codigo-local.md) | operações no servidor |
 | [streaming.md](streaming.md) | modelo de consulta |

@@ -1,7 +1,7 @@
 # Garantias transacionais — Fase 5 (Transações, WAL e recuperação)
 
 > Relatório das garantias oferecidas pelo gerenciador de transações, o WAL e a
-> recuperação. Entregável da [Fase 5](PLANO_ODB.md#fase-5--transações-wal-e-recuperação).
+> recuperação. Entregável da [Fase 5](../docs-process/PLANO_ODB.md#fase-5--transações-wal-e-recuperação).
 > A fonte de verdade sobre o que **funciona** é a suíte (`ctest`): `modb.wal`,
 > `modb.recovery`, `modb.failpoint`, mais os testes de escrita que passaram a
 > exigir transação (`modb.binding`, `modb.schema_evolution`, `modb.relationship`,

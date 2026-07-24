@@ -6,7 +6,7 @@ real. Achados que não resistiram à verificação foram descartados e estão li
 apêndice ao final.
 
 O contexto foi respeitado: o moDb é um MVP educacional, single-thread e single-process por
-decisão de escopo ([ESCOPO_MVP.md](docs/ESCOPO_MVP.md)), com WAL e transações explicitamente
+decisão de escopo ([ESCOPO_MVP.md](docs-process/ESCOPO_MVP.md)), com WAL e transações explicitamente
 fora do MVP. As propostas abaixo não pedem que o projeto vire um banco de produção; elas
 atacam (a) armadilhas latentes que vão custar caro depois, (b) desperdício estrutural de
 I/O/CPU que contradiz o propósito didático de um motor de armazenamento, e (c) lacunas de
@@ -316,7 +316,7 @@ raízes THRP do arquivo (localizadas por `classify_page`) e repara cada uma via
 `repair_table_heap`, reportando quantas foram reescritas e tolerando raízes irreparáveis sem
 abortar as demais. Validado ponta a ponta na CLI: `record_count` de raiz corrompido →
 `heap scan` falha → `db repair` reconstrói → `heap scan` volta a funcionar. Continua sendo
-reparo **estrutural**; a recuperação por WAL é a Fase 5 do [PLANO_ODB.md](docs/PLANO_ODB.md).
+reparo **estrutural**; a recuperação por WAL é a Fase 5 do [PLANO_ODB.md](docs-process/PLANO_ODB.md).
 
 **Onde:** consequências em [page_file.cpp:187](src/storage/page_file.cpp:187) (contagem vs.
 tamanho físico), [table_heap.cpp:443-448](src/storage/table_heap.cpp:443) (contadores da
@@ -782,7 +782,7 @@ link estático MinGW centralizado num alvo INTERFACE
 
 **Contexto:** o parsing é sistematicamente defensivo (o `BinaryReader` valida limites antes
 de todo acesso; não encontramos OOB óbvio) — mas fuzzing é exatamente o que dá confiança
-nessa afirmação, e o próprio [PLANO_DE_DESENVOLVIMENTO.md](docs/PLANO_DE_DESENVOLVIMENTO.md)
+nessa afirmação, e o próprio [PLANO_DE_DESENVOLVIMENTO.md](docs-process/PLANO_DE_DESENVOLVIMENTO.md)
 lista fuzzing como item pendente. Os decoders operam sobre `std::span<const std::byte>`,
 alvos triviais para libFuzzer.
 

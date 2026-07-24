@@ -53,7 +53,7 @@ mesmo código.
 **É marcado como supersedido** (não apagado, para preservar o histórico da
 decisão): `PLANO_DE_DESENVOLVIMENTO.md`, `ESCOPO_MVP.md`, `README.md` e as ADRs
 [0001](0001-formato-de-armazenamento.md)/[0002](0002-tipos-e-erros.md) —
-todos com aviso apontando para [PLANO_ODB.md](../PLANO_ODB.md).
+todos com aviso apontando para [PLANO_ODB.md](../../docs-process/PLANO_ODB.md).
 
 ## Consequências
 

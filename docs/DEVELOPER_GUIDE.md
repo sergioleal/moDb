@@ -871,9 +871,9 @@ bypass the WAL.
 
 - **[docs/USO_DA_CLI.md](USO_DA_CLI.md)** — the complete CLI reference (every
   command, every flag).
-- **`training/en/`** — one English lesson per major capability, each with a
-  standalone runnable example under `examples/server/by_phase/`; a deeper,
-  slower-paced companion to this guide.
+- **`docs-process/training/en/`** — one English lesson per major capability,
+  each with a standalone runnable example under `examples/server/by_phase/`;
+  a deeper, slower-paced companion to this guide.
 - **[docs/API_PUBLICA.md](API_PUBLICA.md)** — the exact installed-header
   contract if you're consuming Ring0 as a library from another project.
 - **[docs/GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md)** — the full
@@ -881,9 +881,10 @@ bypass the WAL.
 - **[docs/FACADES.md](FACADES.md)**, **[docs/OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md)**,
   **[docs/OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md)** — operational
   depth for Chapters 11, 13, and 14.
-- **[docs/RASTREADOR.md](RASTREADOR.md)** and **[docs/PLANO_ODB.md](PLANO_ODB.md)**
-  — the project's construction history and roadmap, if you're curious how any
-  of this was built or what's still planned.
+- **[docs-process/RASTREADOR.md](../docs-process/RASTREADOR.md)** and
+  **[docs-process/PLANO_ODB.md](../docs-process/PLANO_ODB.md)** — the
+  project's construction history and roadmap, if you're curious how any of
+  this was built or what's still planned.
 - **`docs/decisions/`** — the ADRs behind specific design choices mentioned
   throughout this guide (schema evolution, ownership/cascade semantics,
   facades, replication, async I/O, and more).

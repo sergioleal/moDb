@@ -5,7 +5,7 @@
 > - **Ring0 Orientado a Objetos, persistente** — `oo` usa classes C++ reais,
 >   `Binding`, `Handle` e `ProjectionPlan`; `type`, `baseline` e `object`
 >   inspecionam o formato genérico persistente. É o caminho vigente do produto
->   (Fase 3 do [PLANO_ODB.md](PLANO_ODB.md)).
+>   (Fase 3 do [PLANO_ODB.md](../docs-process/PLANO_ODB.md)).
 > - **Ferramentas de armazenamento cru** — `db`, `page`, `record`, `heap` e
 >   `codec` operam nas camadas físicas (páginas, slotted pages, TableHeap) e
 >   usam `Row`/`Value` como registro de exemplo. Úteis para inspeção/depuração.
@@ -158,7 +158,7 @@ modb db delete <file>
   Uma raiz irreparável (ciclo ou página de dados corrompida) é reportada sem
   impedir o reparo das demais. Não confundir com a recuperação baseada em WAL
   (recovery), um mecanismo separado previsto para a Fase 5 do
-  [plano OO](PLANO_ODB.md).
+  [plano OO](../docs-process/PLANO_ODB.md).
 - **`delete`**: remove o arquivo.
 
 ```text

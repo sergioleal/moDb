@@ -3,7 +3,7 @@
 - Estado: aceito para o MVP OO
 - Data: 2026-07-16
 - Contexto do pivô: o produto deixou de ser relacional e passou a ser um banco
-  Orientado a Objetos (ver [PLANO_ODB.md](../PLANO_ODB.md)). Esta é a primeira
+  Orientado a Objetos (ver [PLANO_ODB.md](../../docs-process/PLANO_ODB.md)). Esta é a primeira
   decisão da série OO; substitui, junto com as demais ADR-00X, o modelo das
   ADRs legadas [0001](0001-formato-de-armazenamento.md) e
   [0002](0002-tipos-e-erros.md).

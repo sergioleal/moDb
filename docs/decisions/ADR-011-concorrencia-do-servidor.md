@@ -12,7 +12,7 @@ com conexões de rede. Uma thread por conexão que faz `send` bloqueante não
 consegue, ao mesmo tempo, receber `Cancel` nem multiplexar várias consultas
 na mesma conexão.
 
-O [PROTOCOLO_FASES.md](../PROTOCOLO_FASES.md) e o
+O [PROTOCOLO_FASES.md](../../docs-process/PROTOCOLO_FASES.md) e o
 [streaming.md](../../streaming.md) exigem backpressure fim-a-fim (fila mínima),
 cancelamento cooperativo e, na Fase 8E, `co_await stream.next()`. A
 [ADR-010](ADR-010-protocolo-binario-proximo-do-armazenamento.md) já fixou o

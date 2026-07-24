@@ -2,7 +2,7 @@
 
 > O produto é o Ring0, um banco Orientado a Objetos. Os termos OO abaixo são os
 > vigentes; os termos relacionais ao final são legados, mantidos para leitura do
-> histórico. Ver [PLANO_ODB.md](PLANO_ODB.md).
+> histórico. Ver [PLANO_ODB.md](../docs-process/PLANO_ODB.md).
 
 ## Modelo Orientado a Objetos
 
