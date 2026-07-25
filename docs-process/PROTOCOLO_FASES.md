@@ -2251,6 +2251,133 @@ bootstrap/seed não depende de snapshot do primary; suítes verdes.
 
 ---
 
+# Fase 16 — Catch-up de réplica por download do WAL
+
+## Sequência de entregas verticais
+
+Permitir que uma réplica read-only sem dados, com arquivo vazio ou com dados
+incompletos baixe segmentos WAL retidos de uma fonte autorizada, aplique-os em
+ordem e alcance o estado `up_to_date`. A fase complementa o streaming da Fase 14
+e o seed `wal_only` da Fase 15: streaming continua sendo o modo online, mas o
+catch-up por download cobre criação tardia, réplica parada por muito tempo e
+recuperação após queda no meio da sincronização.
+
+Cinco entregas: 16A (ADR/estado) → 16B (manifesto) → 16C (download/spool) →
+16D (apply até `up_to_date`) → 16E (CLI/docs).
+
+## Decisões fixadas (conteúdo da ADR-020)
+
+1. **Fonte autorizada.** O WAL pode vir de primary `full`, primary `wal_only` ou
+   réplica doadora, desde que `DatabaseUuid` e `timeline_id` coincidam.
+2. **Manifesto fechado.** Cada rodada de catch-up trabalha sobre intervalo
+   `[first_lsn, last_lsn]` com hash/tamanho por segmento e
+   `oldest_available_lsn` explícito.
+3. **Gap não é inventado.** Se `applied_lsn + 1 < first_lsn`, o estado local vira
+   `requires_bootstrap`; o applier nunca pula registros.
+4. **Spool durável.** Downloads vão para arquivos temporários validados, com
+   `fsync` e rename atômico antes de serem elegíveis para apply.
+5. **Apply reaproveitado.** O mesmo applier idempotente da Fase 14 aplica os
+   segmentos baixados; `commit_lsn <= applied_lsn` é ignorado.
+6. **Estado persistente.** A réplica grava `catchup_state`, `target_lsn`,
+   `applied_lsn` e erro terminal para retomar ou diagnosticar.
+7. **Up to date é fronteira observável.** A réplica só declara `up_to_date`
+   depois de aplicar até `last_lsn` do manifesto e persistir a posição.
+
+## Fase 16A — ADR e estados da réplica
+
+Artefatos:
+
+```text
+docs/decisions/ADR-020-replica-catch-up-por-wal.md
+include/modb/repl/replication.hpp        (CatchupState / metadata)
+tests/replica_catchup_state_test.cpp
+```
+
+Estados: `empty`, `seeding`, `catching_up`, `up_to_date`,
+`requires_bootstrap`, `failed`. Transições inválidas retornam
+`invalid_replica_state`; quedas persistem o último estado confirmado.
+
+Critério: `modb.replica_catchup_state`. Tag alvo: `0.0.16a`.
+
+## Fase 16B — Manifesto de WAL baixável
+
+Artefatos:
+
+```text
+include/modb/repl/wal_manifest.hpp
+src/repl/wal_manifest.cpp
+tests/replica_wal_manifest_test.cpp
+```
+
+Manifesto: `database_uuid`, `timeline_id`, `first_lsn`, `last_lsn`,
+`oldest_available_lsn`, vetor de segmentos (`segment_id`, `first_lsn`,
+`last_lsn`, `size`, `sha256`). Validação exige continuidade, intervalo não
+vazio, hashes conhecidos, UUID/timeline compatíveis e cobertura de
+`applied_lsn + 1`.
+
+Critério: `modb.replica_wal_manifest`. Tag alvo: `0.0.16b`.
+
+## Fase 16C — Download com spool durável e retomada
+
+Artefatos:
+
+```text
+include/modb/repl/wal_downloader.hpp
+src/repl/wal_downloader.cpp
+tests/replica_wal_download_test.cpp
+```
+
+Downloader: baixa segmento para `<segment>.tmp`, valida tamanho/hash, faz
+`fsync`, renomeia para o nome final e atualiza índice local de progresso.
+Retomada lista segmentos finais já validados e rebaixa temporários incompletos.
+Falhas retornam `replica_download_failed` ou erro de I/O existente.
+
+Critério: `modb.replica_wal_download`. Tag alvo: `0.0.16c`.
+
+## Fase 16D — Apply até `up_to_date`
+
+Artefatos:
+
+```text
+src/repl/follower_apply.cpp              (modo batch/catch-up)
+tests/replica_catchup_apply_test.cpp
+tests/replication_recovery_test.cpp      (casos extras)
+```
+
+O modo batch entrega os frames baixados ao applier já existente, preservando
+locks, spool e ACK durável. Ao aplicar `last_lsn`, grava `up_to_date`; se a
+fonte informar avanço posterior, a réplica assina `last_lsn + 1` pelo streaming
+ou executa nova rodada incremental de catch-up.
+
+Critério: `modb.replica_catchup_apply`. Tag alvo: `0.0.16d`.
+
+## Fase 16E — CLI, operação e fechamento
+
+Artefatos:
+
+```text
+apps/modb_cli/main.cpp                   (replicate catch-up/status)
+docs/OPERACAO_REPLICACAO.md              (seção catch-up)
+docs/USO_DA_CLI.md
+```
+
+CLI: `modb replicate catch-up <replica.modb> <wal-source>` baixa manifesto,
+segmentos faltantes e aplica até `up_to_date`. Status mostra `catchup_state`,
+`applied_lsn`, `target_lsn`, lag, fonte e motivo de `requires_bootstrap`.
+
+Critério: fluxo CLI ponta a ponta com réplica vazia e parcial; gap além da
+retenção retorna `bootstrap_required`; docs explicam quando usar catch-up,
+bootstrap completo ou streaming. Tag alvo: `0.0.16e`.
+
+## Critério de conclusão (fase)
+
+Uma réplica read-only sem dados ou com dados incompletos descobre sua posição,
+baixa WAL retido, valida manifesto/segmentos, aplica de forma idempotente e
+alcança `up_to_date`; quedas no download ou no apply são retomáveis; gap fora
+da retenção exige bootstrap explícito; suítes `debug` e `sanitizers` verdes.
+
+---
+
 # Apêndice A — Mapa de ErrorCodes novos por fase
 
 | Fase | ErrorCode |
@@ -2265,6 +2392,7 @@ bootstrap/seed não depende de snapshot do primary; suítes verdes.
 | 12 | `invalid_edge`, `graph_limit_exceeded`, `graph_cycle`, `edge_target_not_found` |
 | 14 | `replica_read_only`, `replication_gap`, `timeline_mismatch`, `database_uuid_mismatch`, `bootstrap_required` |
 | 15 | `invalid_instance_config`, `data_files_disabled`, `no_data_replica`, `commit_await_replica_timeout` |
+| 16 | `invalid_replica_state`, `replica_download_failed`, `manifest_hash_mismatch` |
 
 # Apêndice B — Mapa de páginas do formato
 

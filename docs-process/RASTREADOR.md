@@ -56,7 +56,8 @@
 | [13](#fase-13--io-assíncrono) | I/O assíncrono | ✅ Concluída | 8/8 | Fases 5, 8, 10 |
 | [14](#fase-14--réplica-de-leitura-por-streaming-do-wal) | Réplica de leitura (WAL streaming) | ✅ Concluída | 12/12 | Fases 5, 6, 8 · 14A–14E |
 | [15](#fase-15--primary-wal_only-só-wal-dados-nas-réplicas) | Primary `wal_only` (dados nas réplicas) | ✅ Concluída | 10/10 | Fase 14 · 15A–15E |
-| **Total** | | | **127/165 (~77%)** | |
+| [16](#fase-16--catch-up-de-réplica-por-download-do-wal) | Catch-up de réplica por WAL baixável | ⬜ Não iniciada | 0/8 | Fases 14, 15 · 16A–16E |
+| **Total** | | | **127/173 (~73%)** | |
 
 **MVP OO (critério de aceite maior) = Fases 0–3.** Progresso do MVP: 39/39
 tarefas (100%).
@@ -1219,6 +1220,81 @@ Status: ✅ Concluída — tag `0.0.15e`.
 Critério de aceite: ✅ com `primary_storage=wal_only`, o primary não possui
 arquivo de dados; commits seguem no WAL e para as réplicas; seed/bootstrap não
 depende de snapshot do primary; suítes verdes.
+
+## Fase 16 — Catch-up de réplica por download do WAL
+
+Status: ⬜ Não iniciada (0/8).
+Definição completa:
+[PLANO_ODB.md §Fase 16](PLANO_ODB.md#fase-16--catch-up-de-réplica-por-download-do-wal) ·
+[PROTOCOLO_FASES.md §Fase 16](PROTOCOLO_FASES.md#fase-16--catch-up-de-réplica-por-download-do-wal)
+
+| # | Tarefa | Status | Notas |
+|---|---|---|---|
+| 16.1 | ADR do catch-up por WAL baixável | ⬜ | 16A · `docs/decisions/ADR-020-replica-catch-up-por-wal.md` |
+| 16.2 | Estados persistentes da réplica (`empty` → `up_to_date`) | ⬜ | 16A · teste alvo `modb.replica_catchup_state` |
+| 16.3 | Manifesto de WAL baixável com UUID/timeline/intervalos/hashes | ⬜ | 16B · teste alvo `modb.replica_wal_manifest` |
+| 16.4 | Validação de cobertura local, gap e retenção | ⬜ | 16B · `bootstrap_required` quando o WAL não cobre o buraco |
+| 16.5 | Downloader com spool durável, fsync, rename atômico e retomada | ⬜ | 16C · teste alvo `modb.replica_wal_download` |
+| 16.6 | Apply batch reutilizando o applier idempotente da Fase 14 | ⬜ | 16D · teste alvo `modb.replica_catchup_apply` |
+| 16.7 | CLI/status `modb replicate catch-up` | ⬜ | 16E · status com `catchup_state`, `target_lsn`, lag |
+| 16.8 | Docs operacionais e suítes verdes | ⬜ | 16E · seção em `OPERACAO_REPLICACAO.md` |
+
+### Fase 16A — ADR e estados
+
+Status: ⬜ Não iniciada.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| ADR-020 + máquina de estados persistente | ⬜ | `modb.replica_catchup_state` |
+
+### Fase 16B — Manifesto
+
+Status: ⬜ Não iniciada.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Manifesto fechado de segmentos WAL baixáveis | ⬜ | `modb.replica_wal_manifest` |
+
+### Fase 16C — Download/spool
+
+Status: ⬜ Não iniciada.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Downloader retomável com spool durável | ⬜ | `modb.replica_wal_download` |
+
+### Fase 16D — Apply até `up_to_date`
+
+Status: ⬜ Não iniciada.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| Apply batch idempotente até `target_lsn` | ⬜ | `modb.replica_catchup_apply` |
+
+### Fase 16E — CLI, operação e fechamento
+
+Status: ⬜ Não iniciada.
+
+| Entrega | Status | Aceite |
+|---|---|---|
+| CLI `replicate catch-up` + docs operacionais | ⬜ | fluxo ponta a ponta |
+
+### Testes/artefatos previstos desta fase
+
+| Item | Local | Status |
+|---|---|---|
+| ADR | `docs/decisions/ADR-020-replica-catch-up-por-wal.md` | ⬜ |
+| Estados de catch-up | `tests/replica_catchup_state_test.cpp` | ⬜ |
+| Manifesto de WAL | `tests/replica_wal_manifest_test.cpp` | ⬜ |
+| Download retomável | `tests/replica_wal_download_test.cpp` | ⬜ |
+| Apply até `up_to_date` | `tests/replica_catchup_apply_test.cpp` | ⬜ |
+| CLI/status | `apps/modb_cli/main.cpp` | ⬜ |
+| Guia | `docs/OPERACAO_REPLICACAO.md` | ⬜ |
+
+Critério de aceite: ⬜ uma réplica read-only vazia ou parcial baixa WAL retido,
+valida manifesto/segmentos, aplica sem duplicar efeitos e chega a
+`up_to_date`; queda durante download/apply é retomável; gap além da retenção
+exige bootstrap explícito.
 
 ## Histórico de fechamento de fases
 
