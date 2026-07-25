@@ -23,6 +23,10 @@ Testing/
 # Benchmark campaign outputs (kept local; selected baselines may be committed under docs/)
 /benchmark-results/
 
+# Load test raw campaign outputs (kept local; the historical series lives in
+# /load-history/, which IS versioned — see docs/PLANO_TESTES_DE_CARGA.md)
+/load-results/
+
 # Coverage report outputs (gcovr/gcov)
 /coverage-results/
 

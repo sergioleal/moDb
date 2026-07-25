@@ -1,0 +1,1383 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>moDb — série histórica de testes de carga</title>
+<style>
+/* ------------------------------------------------------------------ *
+ * Paleta de referência (docs: dataviz). Papéis, não hex, no corpo.
+ * Slots categóricos validados nos dois modos para a lista adjacente.
+ * ------------------------------------------------------------------ */
+:root {
+  color-scheme: light;
+  --page:            #f9f9f7;
+  --surface-1:       #fcfcfb;
+  --text-primary:    #0b0b0b;
+  --text-secondary:  #52514e;
+  --text-muted:      #898781;
+  --grid:            #e1e0d9;
+  --axis:            #c3c2b7;
+  --border:          rgba(11,11,11,0.10);
+  --hover-wash:      rgba(11,11,11,0.04);
+  --series-1:        #2a78d6;
+  --series-2:        #eb6834;
+  --series-3:        #1baf7a;
+  --series-4:        #eda100;
+  --series-5:        #e87ba4;
+  --series-6:        #008300;
+  --status-good:     #0ca30c;
+  --status-warning:  #fab219;
+  --status-serious:  #ec835a;
+  --status-critical: #d03b3b;
+  --delta-good:      #006300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page:           #0d0d0d;
+    --surface-1:      #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --axis:           #383835;
+    --border:         rgba(255,255,255,0.10);
+    --hover-wash:     rgba(255,255,255,0.06);
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --series-3:       #199e70;
+    --series-4:       #c98500;
+    --series-5:       #d55181;
+    --series-6:       #008300;
+    --delta-good:     #0ca30c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:           #0d0d0d;
+  --surface-1:      #1a1a19;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #898781;
+  --grid:           #2c2c2a;
+  --axis:           #383835;
+  --border:         rgba(255,255,255,0.10);
+  --hover-wash:     rgba(255,255,255,0.06);
+  --series-1:       #3987e5;
+  --series-2:       #d95926;
+  --series-3:       #199e70;
+  --series-4:       #c98500;
+  --series-5:       #d55181;
+  --series-6:       #008300;
+  --delta-good:     #0ca30c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 24px clamp(12px, 3vw, 32px) 64px;
+}
+h1 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+p  { margin: 0; }
+.sub { color: var(--text-secondary); font-size: 12.5px; }
+.muted { color: var(--text-muted); }
+code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+
+header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: baseline; margin-bottom: 18px; }
+header .spacer { flex: 1 1 auto; }
+
+button, select, input[type="search"] {
+  font: inherit; font-size: 13px; color: var(--text-primary);
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 8px; padding: 5px 9px;
+}
+button { cursor: pointer; }
+button:hover, select:hover { background: var(--hover-wash); }
+button.primary { border-color: color-mix(in srgb, var(--series-1) 55%, transparent); }
+label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+
+/* ---- barra de carga ---- */
+.loadbar {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.loadbar.drag { border-color: var(--series-1); background: color-mix(in srgb, var(--series-1) 6%, var(--surface-1)); }
+.loadbar .hint { color: var(--text-secondary); font-size: 12.5px; }
+.banner {
+  border-radius: 10px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 14px;
+  border: 1px solid var(--border); background: var(--surface-1);
+  display: flex; gap: 8px; align-items: baseline;
+}
+.banner.demo { border-color: color-mix(in srgb, var(--status-warning) 50%, var(--border)); }
+.banner.err  { border-color: color-mix(in srgb, var(--status-critical) 50%, var(--border)); }
+.banner strong { font-weight: 600; }
+
+/* ---- uma linha de filtros, acima de tudo que ela recorta ---- */
+.filters {
+  display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end;
+  margin: 0 0 16px;
+}
+.filters .f { display: flex; flex-direction: column; gap: 3px; }
+.filters .f > span { font-size: 11px; color: var(--text-muted); letter-spacing: 0.02em; text-transform: uppercase; }
+
+/* ---- cards ---- */
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-bottom: 14px; }
+.card {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px 16px;
+}
+.card.wide { grid-column: 1 / -1; }
+.card > header { margin: 0 0 10px; gap: 4px 16px; }
+
+/* ---- stat tiles / hero ---- */
+.tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 14px; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px 14px; }
+.tile .label { font-size: 12px; color: var(--text-secondary); }
+.tile .value { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; margin-top: 3px; }
+.tile .unit { font-size: 12.5px; color: var(--text-muted); font-weight: 400; margin-left: 3px; }
+.tile .foot { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.tile.hero .value { font-size: 48px; line-height: 1.05; margin-top: 6px; }
+.tile.hero { grid-column: span 2; }
+@media (max-width: 560px) { .tile.hero { grid-column: span 1; } }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600;
+  border-radius: 999px; padding: 2px 9px 2px 7px; border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.pill.good     .dot { background: var(--status-good); }
+.pill.warning  .dot { background: var(--status-warning); }
+.pill.serious  .dot { background: var(--status-serious); }
+.pill.critical .dot { background: var(--status-critical); }
+.pill.neutral  .dot { background: var(--text-muted); }
+
+.delta-good { color: var(--delta-good); }
+.delta-bad  { color: var(--status-critical); }
+
+/* ---- legendas ---- */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
+.legend .item { display: inline-flex; align-items: center; gap: 6px; }
+.legend .key { width: 14px; height: 2px; border-radius: 2px; flex: none; }
+.legend .key.rect { height: 10px; width: 10px; border-radius: 3px; }
+.legend .key.dot { height: 9px; width: 9px; border-radius: 50%; }
+.legend .key.ring { height: 9px; width: 9px; border-radius: 50%; background: transparent !important; border: 2px solid var(--text-muted); }
+.legend .key.dash { background: none !important; border-top: 2px dashed var(--text-muted); border-radius: 0; }
+
+/* ---- gráficos ---- */
+.plot { width: 100%; display: block; overflow: visible; }
+.plot text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+.plot text.lbl { fill: var(--text-secondary); font-size: 11.5px; }
+.plot .gridline { stroke: var(--grid); stroke-width: 1; }
+.plot .axisline { stroke: var(--axis); stroke-width: 1; }
+.empty { color: var(--text-muted); font-size: 12.5px; padding: 22px 2px; }
+
+/* ---- tooltip ---- */
+.tip {
+  position: fixed; z-index: 40; pointer-events: none; opacity: 0; transition: opacity .08s;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 10px; box-shadow: 0 6px 22px rgba(0,0,0,.16); min-width: 150px; max-width: 300px;
+}
+.tip .t-head { font-size: 11.5px; color: var(--text-muted); margin-bottom: 4px; }
+.tip .t-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.tip .t-row .k { width: 12px; height: 2px; border-radius: 2px; flex: none; align-self: center; }
+.tip .t-row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tip .t-row .n { color: var(--text-secondary); }
+
+/* ---- tabela ---- */
+.tablewrap { overflow: auto; max-height: 60vh; }
+.tablewrap thead th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th, td { text-align: right; padding: 6px 9px; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+th:first-child, td:first-child, th.l, td.l { text-align: left; }
+th { color: var(--text-muted); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: .02em; cursor: pointer; user-select: none; }
+th:hover { color: var(--text-secondary); }
+td { font-variant-numeric: tabular-nums; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--hover-wash); }
+tbody tr.sep td { border-top: 2px solid var(--axis); }
+.detail { margin-top: 12px; }
+.detail pre {
+  background: var(--page); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; overflow-x: auto; font-size: 11.5px; margin: 6px 0 0; max-height: 320px;
+}
+.foot { color: var(--text-muted); font-size: 12px; margin-top: 22px; }
+.foot code { background: var(--surface-1); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+</style>
+</head>
+<body data-palette="#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300">
+
+<header>
+  <div>
+    <h1>Série histórica de testes de carga</h1>
+    <p class="sub">Rollups <code>modb.loadtest.rollup</code> — nada sai desta máquina, o arquivo é lido no navegador.</p>
+  </div>
+  <div class="spacer"></div>
+  <button id="theme-toggle" title="Alternar claro/escuro">Tema</button>
+</header>
+
+<div class="loadbar" id="dropzone">
+  <input type="file" id="file" accept=".jsonl,.json,.txt" multiple hidden>
+  <button class="primary" id="pick">Abrir series.jsonl…</button>
+  <button id="demo">Carregar série de exemplo</button>
+  <span class="hint" id="loadhint">Arraste <code>load-history/series.jsonl</code> para esta área, ou sirva a pasta e use <code>?src=../../load-history/series.jsonl</code>.</span>
+</div>
+
+<div id="banners"></div>
+
+<div class="filters" id="filters" hidden>
+  <label class="f"><span>Período</span>
+    <select id="f-period">
+      <option value="0">Tudo</option>
+      <option value="30">Últimos 30 dias</option>
+      <option value="90">Últimos 90 dias</option>
+      <option value="365">Últimos 365 dias</option>
+    </select>
+  </label>
+  <label class="f"><span>Workload</span><select id="f-workload"></select></label>
+  <label class="f"><span>Alvo</span><select id="f-target"></select></label>
+  <label class="f"><span>Escala</span><select id="f-scale"></select></label>
+  <label class="f"><span>Classe de host</span><select id="f-host"></select></label>
+  <label class="f"><span>Caso da tendência</span><select id="f-case"></select></label>
+  <label class="f"><span>Fase</span><select id="f-phase"></select></label>
+  <label class="f"><span>Métrica</span><select id="f-metric"></select></label>
+  <label class="check"><input type="checkbox" id="f-comparable" checked> só comparáveis</label>
+  <label class="check"><input type="checkbox" id="f-failed" checked> incluir falhas</label>
+</div>
+
+<div id="content" hidden>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card wide">
+    <header>
+      <h2 id="trend-title">Tendência</h2>
+      <p class="sub" id="trend-sub"></p>
+    </header>
+    <div id="trend-plot"></div>
+    <div class="legend" id="trend-legend"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <header>
+        <h2>Escala — o custo por objeto se mantém?</h2>
+        <p class="sub" id="scale-sub"></p>
+      </header>
+      <div id="scale-plot"></div>
+      <div class="legend" id="scale-legend"></div>
+    </div>
+    <div class="card">
+      <header>
+        <h2>Composição por fase</h2>
+        <p class="sub" id="phase-sub"></p>
+      </header>
+      <div id="phase-plot"></div>
+      <div class="legend" id="phase-legend"></div>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <header style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <div>
+        <h2>Pontos da série</h2>
+        <p class="sub" id="table-sub"></p>
+      </div>
+      <div class="spacer" style="flex:1"></div>
+      <button id="csv" title="Exporta a seleção atual em CSV separado por ponto-e-vírgula">Exportar CSV</button>
+    </header>
+    <div class="tablewrap"><table id="table">
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+    <div class="detail" id="detail"></div>
+  </div>
+</div>
+
+<p class="foot">
+  Alimentado por <code>modb_load index</code> (§13.5) e consumível também por <code>modb_load trend</code>/<code>report</code>.
+  Especificação: <code>docs/PLANO_TESTES_DE_CARGA.md</code> §13.
+</p>
+
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+ * moDb — dashboard da série histórica de carga
+ * Sem dependências: um arquivo, abre por file:// e funciona offline.
+ * Contrato de entrada: docs/PLANO_TESTES_DE_CARGA.md §13.3
+ * ===================================================================== */
+
+const NS = "http://www.w3.org/2000/svg";
+const MiB = 1024 * 1024;
+
+/* ---------- formatação ---------- */
+const nf0 = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
+const fmtInt = v => nf0.format(v);
+const fmtOne = v => nf1.format(v);
+const fmtTwo = v => nf2.format(v);
+function fmtCompact(v) {
+  const a = Math.abs(v);
+  if (a >= 1e9) return nf1.format(v / 1e9) + " G";
+  if (a >= 1e6) return nf1.format(v / 1e6) + " M";
+  if (a >= 1e4) return nf0.format(v / 1e3) + " k";
+  return nf0.format(v);
+}
+function fmtDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+function fmtDateTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function fmtSignedPct(x) {
+  if (x === null || x === undefined || !isFinite(x)) return "—";
+  const s = (x >= 0 ? "+" : "−") + nf1.format(Math.abs(x * 100)) + "%";
+  return s;
+}
+
+/* ---------- estatística ---------- */
+function median(xs) {
+  const v = xs.filter(x => typeof x === "number" && isFinite(x)).slice().sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+/* ---------- métricas selecionáveis ---------- *
+ * scope: "phase" usa a fase escolhida; "case" usa os totais do caso.
+ * better: direção em que a métrica melhora — define o sinal do gate.
+ * alert/fail: limiares herdados de PLANO_BENCHMARKS §11.
+ */
+const METRICS = {
+  ops_per_second: {
+    label: "Objetos por segundo", unit: "obj/s", scope: "phase", better: "up",
+    alert: 0.05, fail: 0.10, get: p => p && p.ops_per_second, fmt: v => fmtCompact(v),
+  },
+  p50: {
+    label: "Latência p50", unit: "ms", scope: "phase", better: "down",
+    alert: 0.05, fail: 0.10, get: p => p && p.latency_ns && p.latency_ns.p50 / 1e6, fmt: fmtTwo,
+  },
+  p99: {
+    label: "Latência p99", unit: "ms", scope: "phase", better: "down",
+    alert: 0.10, fail: 0.15, get: p => p && p.latency_ns && p.latency_ns.p99 / 1e6, fmt: fmtTwo,
+  },
+  p999: {
+    label: "Latência p99.9", unit: "ms", scope: "phase", better: "down",
+    alert: 0.10, fail: 0.15, get: p => p && p.latency_ns && p.latency_ns.p999 / 1e6, fmt: fmtTwo,
+  },
+  phase_duration: {
+    label: "Duração da fase", unit: "s", scope: "phase", better: "down",
+    alert: 0.05, fail: 0.10, get: p => p && p.duration_ns / 1e9, fmt: fmtOne,
+  },
+  bytes_per_object: {
+    label: "Bytes por objeto", unit: "B", scope: "phase", better: "down",
+    alert: 0.05, fail: 0.10, get: p => p && p.bytes_per_object, fmt: fmtOne,
+  },
+  wal_bytes: {
+    label: "WAL ao fim da fase", unit: "MiB", scope: "phase", better: "down",
+    alert: 0.05, fail: 0.10, get: p => p && p.wal_bytes / MiB, fmt: fmtOne,
+  },
+  peak_rss: {
+    label: "RSS de pico da fase", unit: "MiB", scope: "phase", better: "down",
+    alert: 0.05, fail: 0.10, get: p => p && p.peak_rss_bytes / MiB, fmt: fmtOne,
+  },
+  total_duration: {
+    label: "Duração total do caso", unit: "s", scope: "case", better: "down",
+    alert: 0.05, fail: 0.10, get: (p, r) => r.totals && r.totals.duration_ns / 1e9, fmt: fmtOne,
+  },
+  peak_disk: {
+    label: "Disco de pico", unit: "MiB", scope: "case", better: "down",
+    alert: 0.05, fail: 0.10, get: (p, r) => r.totals && r.totals.peak_disk_bytes / MiB, fmt: fmtOne,
+  },
+  write_amplification: {
+    label: "Write amplification", unit: "×", scope: "case", better: "down",
+    alert: 0.05, fail: 0.10, get: (p, r) => r.totals && r.totals.write_amplification, fmt: fmtTwo,
+  },
+};
+const PHASE_ORDER = ["create", "read", "update_inplace", "update_grow", "update_shrink", "delete"];
+const PHASE_LABEL = {
+  create: "create", read: "read", update_inplace: "update in-place",
+  update_grow: "update maior", update_shrink: "update menor", delete: "delete",
+};
+const SERIES_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6"];
+
+/* ---------- estado ---------- */
+const state = {
+  rows: [],          // rollups válidos, ordenados por started_at
+  demo: false,
+  sort: { key: "started_at", dir: -1 },
+  selectedRun: null,
+};
+
+/* =====================================================================
+ * Entrada de dados
+ * ===================================================================== */
+function parseJsonl(text, srcName) {
+  const out = [], bad = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    const t = line.trim();
+    if (!t) return;
+    let obj;
+    try { obj = JSON.parse(t); } catch (e) { bad.push(`${srcName}:${i + 1} JSON inválido`); return; }
+    if (obj && obj.schema === "modb.loadtest.rollup") out.push(obj);
+    else if (obj && obj.record) { /* linha de campanha bruta: ignorada em silêncio */ }
+    else bad.push(`${srcName}:${i + 1} schema desconhecido`);
+  });
+  return { rows: out, bad };
+}
+
+function ingest(rows, bad, note) {
+  const seen = new Map();
+  for (const r of state.rows.concat(rows)) {
+    const key = [r.run_id, r.case_id, r.repeat_index || 0].join("|");
+    if (!seen.has(key)) seen.set(key, r);           // idempotente, como o `index`
+  }
+  state.rows = Array.from(seen.values())
+    .filter(r => r.started_at && r.case_id)
+    .sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
+
+  const missing = state.rows.filter(r => !r.commit || !r.series_key || !r.env || !r.env.host_class || !r.status);
+  banners([
+    state.demo ? { cls: "demo", strong: "Série de exemplo.", text: "Dados sintéticos para demonstrar as leituras do painel — nenhuma medição real. Carregue seu series.jsonl para substituir." } : null,
+    bad && bad.length ? { cls: "err", strong: `${bad.length} linha(s) ignorada(s).`, text: bad.slice(0, 4).join(" · ") } : null,
+    missing.length ? { cls: "err", strong: `${missing.length} rollup(s) sem procedência completa.`, text: "Falta commit, series_key, host_class ou status — o indexador deve rejeitar (§13.3)." } : null,
+    note ? { cls: "", strong: note, text: "" } : null,
+  ].filter(Boolean));
+
+  if (!state.rows.length) { document.getElementById("content").hidden = true; document.getElementById("filters").hidden = true; return; }
+  buildFilters();
+  render();
+}
+
+function banners(list) {
+  const el = document.getElementById("banners");
+  el.textContent = "";
+  for (const b of list) {
+    const d = document.createElement("div");
+    d.className = "banner " + (b.cls || "");
+    const s = document.createElement("strong"); s.textContent = b.strong;
+    const t = document.createElement("span"); t.textContent = b.text ? " " + b.text : "";
+    d.append(s, t);
+    el.appendChild(d);
+  }
+}
+
+function readFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  let pending = files.length, rows = [], bad = [];
+  files.forEach(f => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const r = parseJsonl(String(fr.result), f.name);
+      rows = rows.concat(r.rows); bad = bad.concat(r.bad);
+      if (--pending === 0) { state.demo = false; state.rows = []; ingest(rows, bad, `${rows.length} ponto(s) de ${files.length} arquivo(s).`); }
+    };
+    fr.onerror = () => { if (--pending === 0) ingest(rows, bad.concat([`falha ao ler ${f.name}`])); };
+    fr.readAsText(f);
+  });
+}
+
+/* =====================================================================
+ * Filtros
+ * ===================================================================== */
+function uniq(xs) { return Array.from(new Set(xs.filter(x => x !== undefined && x !== null && x !== ""))).sort(); }
+function fill(sel, values, allLabel) {
+  const prev = sel.value;
+  sel.textContent = "";
+  const opts = [{ v: "*", t: allLabel }].concat(values.map(v => ({ v, t: v })));
+  for (const o of opts) {
+    const el = document.createElement("option");
+    el.value = o.v; el.textContent = o.t;
+    sel.appendChild(el);
+  }
+  sel.value = opts.some(o => o.v === prev) ? prev : "*";
+}
+function buildFilters() {
+  document.getElementById("filters").hidden = false;
+  fill(document.getElementById("f-workload"), uniq(state.rows.map(r => r.workload)), "Todos");
+  fill(document.getElementById("f-target"), uniq(state.rows.map(r => r.target)), "Todos");
+  fill(document.getElementById("f-scale"), uniqScales(), "Todas");
+  fill(document.getElementById("f-host"), uniq(state.rows.map(r => r.env && r.env.host_class)), "Todas");
+  const m = document.getElementById("f-metric");
+  if (!m.options.length) {
+    for (const [k, def] of Object.entries(METRICS)) {
+      const o = document.createElement("option"); o.value = k; o.textContent = def.label; m.appendChild(o);
+    }
+    m.value = "ops_per_second";
+  }
+  refreshDependentFilters();
+}
+function uniqScales() {
+  const seen = new Map();
+  for (const r of state.rows) if (r.scale) seen.set(r.scale, r.objects || 0);
+  return Array.from(seen.entries()).sort((a, b) => a[1] - b[1]).map(e => e[0]);
+}
+function refreshDependentFilters() {
+  const scoped = applyFilters({ ignoreCase: true });
+  const caseSel = document.getElementById("f-case");
+  const counts = new Map();
+  for (const r of scoped) counts.set(r.case_id, (counts.get(r.case_id) || 0) + 1);
+  const cases = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const prev = caseSel.value;
+  caseSel.textContent = "";
+  for (const [id, n] of cases) {
+    const o = document.createElement("option");
+    o.value = id; o.textContent = `${id}  (${n})`;
+    caseSel.appendChild(o);
+  }
+  if (cases.some(c => c[0] === prev)) caseSel.value = prev;
+  else if (cases.length) caseSel.value = cases[0][0];
+
+  const phases = uniq(scoped.flatMap(r => (r.phases || []).map(p => p.phase)))
+    .sort((a, b) => PHASE_ORDER.indexOf(a) - PHASE_ORDER.indexOf(b));
+  const ph = document.getElementById("f-phase");
+  const prevPh = ph.value;
+  ph.textContent = "";
+  for (const p of phases) {
+    const o = document.createElement("option"); o.value = p; o.textContent = PHASE_LABEL[p] || p; ph.appendChild(o);
+  }
+  if (phases.includes(prevPh)) ph.value = prevPh; else if (phases.length) ph.value = phases[0];
+}
+
+function applyFilters(opts) {
+  const o = opts || {};
+  const g = id => document.getElementById(id).value;
+  const period = Number(g("f-period"));
+  const onlyComparable = document.getElementById("f-comparable").checked;
+  const includeFailed = document.getElementById("f-failed").checked;
+  // "hoje" é o ponto mais recente da série, não o relógio: histórico velho continua legível.
+  const newest = state.rows.length ? new Date(state.rows[state.rows.length - 1].started_at).getTime() : 0;
+  const floor = period ? newest - period * 86400000 : -Infinity;
+  return state.rows.filter(r => {
+    if (new Date(r.started_at).getTime() < floor) return false;
+    if (g("f-workload") !== "*" && r.workload !== g("f-workload")) return false;
+    if (g("f-target") !== "*" && r.target !== g("f-target")) return false;
+    if (g("f-scale") !== "*" && r.scale !== g("f-scale")) return false;
+    if (g("f-host") !== "*" && (!r.env || r.env.host_class !== g("f-host"))) return false;
+    if (onlyComparable && r.comparable === false) return false;
+    if (!includeFailed && r.status !== "completed") return false;
+    if (!o.ignoreCase && o.caseOnly && r.case_id !== o.caseOnly) return false;
+    return true;
+  });
+}
+
+/* ---------- extração de valor ---------- */
+function phaseOf(row, name) { return (row.phases || []).find(p => p.phase === name) || null; }
+function valueOf(row, metricKey, phaseName) {
+  const def = METRICS[metricKey];
+  if (!def) return null;
+  const v = def.scope === "phase" ? def.get(phaseOf(row, phaseName), row) : def.get(null, row);
+  return (typeof v === "number" && isFinite(v)) ? v : null;
+}
+
+/* ---------- gate e deriva (§13.7) ---------- */
+function trailingRef(values, i) {                 // mediana dos até 5 pontos anteriores
+  const prev = values.slice(Math.max(0, i - 5), i).filter(v => v !== null);
+  return prev.length >= 3 ? median(prev) : null;
+}
+function worseRatio(value, ref, better) {         // > 0 = pior que a referência
+  if (ref === null || !ref) return null;
+  const rel = (value - ref) / ref;
+  return better === "up" ? -rel : rel;
+}
+function verdictFor(value, ref, def) {
+  const w = worseRatio(value, ref, def.better);
+  if (w === null) return { verdict: "insufficient", worse: null };
+  if (w >= def.fail) return { verdict: "fail", worse: w };
+  if (w >= def.alert) return { verdict: "alert", worse: w };
+  return { verdict: "ok", worse: w };
+}
+function driftFor(values, def) {                  // mediana das 5 últimas × mediana de 20 atrás
+  const v = values.filter(x => x !== null);
+  if (v.length < 12) return { verdict: "insufficient" };
+  const recent = median(v.slice(-5));
+  const oldSlice = v.length >= 25 ? v.slice(-25, -20) : v.slice(0, 5);
+  const old = median(oldSlice);
+  const w = worseRatio(recent, old, def.better);
+  return { verdict: w >= 0.15 ? "fail" : (w >= 0.075 ? "alert" : "ok"), worse: w, recent, old, span: v.length };
+}
+
+/* =====================================================================
+ * SVG util
+ * ===================================================================== */
+function svg(tag, attrs, parent) {
+  const el = document.createElementNS(NS, tag);
+  for (const k in attrs) if (attrs[k] !== null && attrs[k] !== undefined) el.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+function text(parent, x, y, str, attrs) {
+  const t = svg("text", Object.assign({ x, y }, attrs || {}), parent);
+  t.textContent = str;
+  return t;
+}
+function niceTicks(min, max, count) {
+  if (!isFinite(min) || !isFinite(max)) return [0];
+  if (min === max) { const p = Math.abs(min) || 1; min -= p * 0.1; max += p * 0.1; }
+  const raw = (max - min) / Math.max(1, count);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm >= 5 ? 10 : norm >= 2 ? 5 : norm >= 1 ? 2 : 1) * mag;
+  const out = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + step * 0.001; v += step) out.push(Number(v.toFixed(10)));
+  return out;
+}
+function cssVar(name) { return getComputedStyle(document.body).getPropertyValue(name).trim(); }
+
+/* ---------- tooltip ---------- */
+const tip = document.getElementById("tip");
+function showTip(evt, head, rows) {
+  tip.textContent = "";
+  const h = document.createElement("div"); h.className = "t-head"; h.textContent = head; tip.appendChild(h);
+  for (const r of rows) {
+    const row = document.createElement("div"); row.className = "t-row";
+    if (r.color) { const k = document.createElement("span"); k.className = "k"; k.style.background = r.color; row.appendChild(k); }
+    const v = document.createElement("span"); v.className = "v"; v.textContent = r.value;
+    const n = document.createElement("span"); n.className = "n"; n.textContent = r.name;
+    row.append(v, n); tip.appendChild(row);
+  }
+  tip.style.opacity = "1";
+  moveTip(evt);
+}
+function moveTip(evt) {
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+  if (y + h > innerHeight - 8) y = evt.clientY - h - pad;
+  tip.style.left = Math.max(8, x) + "px";
+  tip.style.top = Math.max(8, y) + "px";
+}
+function hideTip() { tip.style.opacity = "0"; }
+
+/* =====================================================================
+ * Gráfico 1 — tendência no tempo (uma série, com gate desenhado)
+ * ===================================================================== */
+function renderTrend(rows, metricKey, phaseName) {
+  const host = document.getElementById("trend-plot");
+  host.textContent = "";
+  const def = METRICS[metricKey];
+  const pts = rows.map(r => ({ row: r, v: valueOf(r, metricKey, phaseName) })).filter(p => p.v !== null);
+
+  const legend = document.getElementById("trend-legend");
+  legend.textContent = "";
+  if (pts.length < 2) {
+    const d = document.createElement("p");
+    d.className = "empty";
+    d.textContent = pts.length ? "Um único ponto nesta série: nada a comparar ainda (o gate exige 3)." : "Sem pontos para o caso, fase e métrica selecionados.";
+    host.appendChild(d);
+    return;
+  }
+
+  const W = Math.max(520, host.clientWidth || 720), H = 300;
+  const M = { t: 14, r: 62, b: 34, l: 62 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+
+  const values = pts.map(p => p.v);
+  const refs = pts.map((p, i) => trailingRef(values, i));
+  const bad = def.better === "up" ? -1 : 1;
+  const edges = refs.map(r => r === null ? null : ({ alert: r * (1 + bad * def.alert), fail: r * (1 + bad * def.fail) }));
+  const all = values.concat(refs.filter(Boolean), edges.filter(Boolean).flatMap(e => [e.alert, e.fail]));
+  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  const pad = (hi - lo) * 0.12 || Math.abs(hi) * 0.1 || 1;
+  lo = def.better === "up" ? Math.max(0, lo - pad) : Math.max(0, lo - pad);
+  hi = hi + pad;
+  const x = i => M.l + (pts.length === 1 ? iw / 2 : (i * iw) / (pts.length - 1));
+  const y = v => M.t + ih - ((v - lo) / (hi - lo)) * ih;
+
+  // grade + eixo y
+  for (const t of niceTicks(lo, hi, 5)) {
+    if (t < lo || t > hi) continue;
+    svg("line", { class: "gridline", x1: M.l, x2: M.l + iw, y1: y(t), y2: y(t) }, s);
+    text(s, M.l - 8, y(t) + 4, def.fmt(t), { "text-anchor": "end" });
+  }
+  svg("line", { class: "axisline", x1: M.l, x2: M.l + iw, y1: M.t + ih, y2: M.t + ih }, s);
+  text(s, M.l - 8, M.t - 2, def.unit, { "text-anchor": "end", class: "lbl" });
+
+  // eixo x: rótulos esparsos + quebras de série
+  const stride = Math.max(1, Math.ceil(pts.length / 7));
+  const lastTick = pts.length - 1;
+  const tickAt = i => i === lastTick || (i % stride === 0 && lastTick - i >= Math.ceil(stride / 2));
+  pts.forEach((p, i) => {
+    if (tickAt(i)) text(s, x(i), M.t + ih + 16, fmtDate(p.row.started_at), { "text-anchor": "middle" });
+    if (i > 0 && p.row.series_key !== pts[i - 1].row.series_key) {
+      const bx = (x(i) + x(i - 1)) / 2;
+      svg("line", { x1: bx, x2: bx, y1: M.t, y2: M.t + ih, stroke: cssVar("--axis"), "stroke-width": 1 }, s);
+      text(s, bx + 4, M.t + 11, "nova série", { class: "lbl" });
+    }
+  });
+
+  // segmentos contínuos por series_key (mediana e limiares não atravessam quebra)
+  const segs = [];
+  let cur = [];
+  pts.forEach((p, i) => {
+    if (i > 0 && p.row.series_key !== pts[i - 1].row.series_key) { segs.push(cur); cur = []; }
+    cur.push(i);
+  });
+  segs.push(cur);
+
+  const line = (idxs, valFn, attrs) => {
+    const d = idxs.filter(i => valFn(i) !== null && valFn(i) !== undefined)
+      .map((i, k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(valFn(i)).toFixed(1)}`).join("");
+    if (d) svg("path", Object.assign({ d, fill: "none", "stroke-linejoin": "round", "stroke-linecap": "round" }, attrs), s);
+  };
+  for (const seg of segs) {
+    line(seg, i => edges[i] && edges[i].fail, { stroke: cssVar("--status-critical"), "stroke-width": 1.5, "stroke-dasharray": "5 4", opacity: 0.85 });
+    line(seg, i => edges[i] && edges[i].alert, { stroke: cssVar("--status-warning"), "stroke-width": 1.5, "stroke-dasharray": "5 4", opacity: 0.9 });
+    line(seg, i => refs[i], { stroke: cssVar("--text-muted"), "stroke-width": 2, opacity: 0.65 });
+    line(seg, i => values[i], { stroke: cssVar("--series-1"), "stroke-width": 2 });
+  }
+
+  // rótulos diretos, só nas bordas (nunca um número por ponto)
+  const last = pts.length - 1;
+  const lastEdge = edges[last];
+  if (lastEdge) {
+    text(s, M.l + iw + 6, y(lastEdge.fail) + 4, `falha ${fmtSignedPct(bad * def.fail)}`, { class: "lbl" });
+    text(s, M.l + iw + 6, y(lastEdge.alert) + 4, `alerta ${fmtSignedPct(bad * def.alert)}`, { class: "lbl" });
+  }
+  text(s, M.l + iw + 6, y(values[last]) + 4, def.fmt(values[last]), { class: "lbl", "font-weight": "600" });
+
+  // pontos: cor por veredito, anel de superfície, alvo de toque generoso
+  pts.forEach((p, i) => {
+    const st = p.row.status !== "completed" ? "failed" : verdictFor(p.v, refs[i], def).verdict;
+    const color = st === "failed" ? cssVar("--status-critical")
+      : st === "fail" ? cssVar("--status-critical")
+        : st === "alert" ? cssVar("--status-warning")
+          : cssVar("--series-1");
+    const hollow = p.row.comparable === false;
+    const g = svg("g", {}, s);
+    svg("circle", { cx: x(i), cy: y(p.v), r: 5.5, fill: cssVar("--surface-1") }, g);
+    svg("circle", {
+      cx: x(i), cy: y(p.v), r: 4.5,
+      fill: hollow ? cssVar("--surface-1") : color,
+      stroke: hollow ? color : "none", "stroke-width": hollow ? 2 : 0,
+    }, g);
+    const hit = svg("circle", { cx: x(i), cy: y(p.v), r: 13, fill: "transparent", tabindex: 0, role: "button" }, g);
+    const ref = refs[i];
+    const rows2 = [
+      { value: def.fmt(p.v) + " " + def.unit, name: def.label, color: color },
+      { value: ref === null ? "—" : def.fmt(ref) + " " + def.unit, name: "mediana das 5 anteriores" },
+      { value: ref ? fmtSignedPct((p.v - ref) / ref) : "—", name: "vs mediana" },
+      { value: p.row.commit_short || (p.row.commit || "").slice(0, 7), name: p.row.branch || "" },
+      { value: p.row.status, name: (p.row.env && p.row.env.host_class) || "" },
+    ];
+    const head = fmtDateTime(p.row.started_at);
+    const show = e => showTip(e, head, rows2);
+    hit.addEventListener("pointerenter", show);
+    hit.addEventListener("pointermove", moveTip);
+    hit.addEventListener("pointerleave", hideTip);
+    hit.addEventListener("focus", () => {
+      const r = hit.getBoundingClientRect();
+      showTip({ clientX: r.left + r.width / 2, clientY: r.top }, head, rows2);
+    });
+    hit.addEventListener("blur", hideTip);
+    hit.addEventListener("click", () => selectRun(p.row));
+  });
+
+  legendInto(legend, [
+    { kind: "line", color: cssVar("--series-1"), label: METRICS[metricKey].label },
+    { kind: "line", color: cssVar("--text-muted"), label: "mediana móvel (5)" },
+    { kind: "dash", color: cssVar("--status-warning"), label: `alerta ${nf0.format(def.alert * 100)}%` },
+    { kind: "dash", color: cssVar("--status-critical"), label: `falha ${nf0.format(def.fail * 100)}%` },
+    { kind: "dot", color: cssVar("--status-critical"), label: "execução com falha ou reprovada" },
+    { kind: "ring", color: cssVar("--text-muted"), label: "comparable=false" },
+  ]);
+}
+
+function legendInto(el, items) {
+  el.textContent = "";
+  for (const it of items) {
+    const s = document.createElement("span"); s.className = "item";
+    const k = document.createElement("span");
+    k.className = "key" + (it.kind === "rect" ? " rect" : it.kind === "dot" ? " dot" : it.kind === "ring" ? " ring" : it.kind === "dash" ? " dash" : "");
+    if (it.kind === "dash") k.style.borderTopColor = it.color;
+    else if (it.kind === "ring") k.style.borderColor = it.color;
+    else k.style.background = it.color;
+    const t = document.createElement("span"); t.textContent = it.label;
+    s.append(k, t); el.appendChild(s);
+  }
+}
+
+/* =====================================================================
+ * Gráfico 2 — escala: throughput por volume (linearidade)
+ * ===================================================================== */
+function renderScale(scaleRows, metricKey, phaseName, ctxLabel) {
+  const host = document.getElementById("scale-plot");
+  host.textContent = "";
+  const legend = document.getElementById("scale-legend");
+  legend.textContent = "";
+  const def = METRICS[metricKey];
+
+  // último ponto de cada escala — só do mesmo workload e alvo, senão a linha
+  // compararia coisas diferentes (crud_full em 100k contra create_only em 10k).
+  const byScale = new Map();
+  for (const r of scaleRows) {
+    if (!r.objects) continue;
+    const v = valueOf(r, metricKey, phaseName);
+    if (v === null) continue;
+    const cur = byScale.get(r.scale);
+    if (!cur || new Date(r.started_at) > new Date(cur.row.started_at)) byScale.set(r.scale, { row: r, v });
+  }
+  const pts = Array.from(byScale.values()).sort((a, b) => a.row.objects - b.row.objects);
+  document.getElementById("scale-sub").textContent = pts.length
+    ? `${ctxLabel} · execução mais recente de cada escala · fase ${PHASE_LABEL[phaseName] || phaseName}`
+    : "";
+  if (pts.length < 2) {
+    const p = document.createElement("p"); p.className = "empty";
+    p.textContent = `Só há uma escala de ${ctxLabel} no recorte atual — ponha o filtro de escala em "Todas" para comparar volumes.`;
+    host.appendChild(p);
+    return;
+  }
+
+  const W = Math.max(320, host.clientWidth || 420), H = 250;
+  const M = { t: 16, r: 22, b: 34, l: 58 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+
+  const lx = v => Math.log10(v);
+  const xmin = lx(pts[0].row.objects), xmax = lx(pts[pts.length - 1].row.objects);
+  const x = o => M.l + ((lx(o) - xmin) / (xmax - xmin || 1)) * iw;
+  const vals = pts.map(p => p.v);
+  let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  const pad = (hi - lo) * 0.18 || hi * 0.2 || 1;
+  lo = Math.max(0, lo - pad); hi = hi + pad;
+  const y = v => M.t + ih - ((v - lo) / (hi - lo)) * ih;
+
+  for (const t of niceTicks(lo, hi, 4)) {
+    if (t < lo || t > hi) continue;
+    svg("line", { class: "gridline", x1: M.l, x2: M.l + iw, y1: y(t), y2: y(t) }, s);
+    text(s, M.l - 8, y(t) + 4, def.fmt(t), { "text-anchor": "end" });
+  }
+  svg("line", { class: "axisline", x1: M.l, x2: M.l + iw, y1: M.t + ih, y2: M.t + ih }, s);
+  text(s, M.l - 8, M.t - 3, def.unit, { "text-anchor": "end", class: "lbl" });
+  pts.forEach(p => text(s, x(p.row.objects), M.t + ih + 16, p.row.scale, { "text-anchor": "middle" }));
+
+  // referência: manter o valor da menor escala = custo por objeto constante
+  const base = pts[0].v;
+  svg("line", {
+    x1: M.l, x2: M.l + iw, y1: y(base), y2: y(base),
+    stroke: cssVar("--text-muted"), "stroke-width": 2, "stroke-dasharray": "5 4", opacity: 0.75,
+  }, s);
+  text(s, M.l + 4, y(base) - 7, "custo por objeto constante", { class: "lbl" });
+
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p.row.objects).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+  svg("path", { d, fill: "none", stroke: cssVar("--series-1"), "stroke-width": 2, "stroke-linejoin": "round" }, s);
+
+  pts.forEach(p => {
+    const g = svg("g", {}, s);
+    svg("circle", { cx: x(p.row.objects), cy: y(p.v), r: 6, fill: cssVar("--surface-1") }, g);
+    svg("circle", { cx: x(p.row.objects), cy: y(p.v), r: 4.5, fill: cssVar("--series-1") }, g);
+    const hit = svg("circle", { cx: x(p.row.objects), cy: y(p.v), r: 14, fill: "transparent", tabindex: 0, role: "button" }, g);
+    const rel = (p.v - base) / base;
+    const rows = [
+      { value: def.fmt(p.v) + " " + def.unit, name: def.label, color: cssVar("--series-1") },
+      { value: fmtInt(p.row.objects), name: "objetos" },
+      { value: fmtSignedPct(rel), name: `vs escala ${pts[0].row.scale}` },
+      { value: fmtDate(p.row.started_at), name: p.row.commit_short || "" },
+    ];
+    const head = p.row.case_id;
+    hit.addEventListener("pointerenter", e => showTip(e, head, rows));
+    hit.addEventListener("pointermove", moveTip);
+    hit.addEventListener("pointerleave", hideTip);
+    hit.addEventListener("focus", () => { const r = hit.getBoundingClientRect(); showTip({ clientX: r.left, clientY: r.top }, head, rows); });
+    hit.addEventListener("blur", hideTip);
+    hit.addEventListener("click", () => selectRun(p.row));
+  });
+
+  const worst = pts[pts.length - 1];
+  const drop = (worst.v - base) / base;
+  legendInto(legend, [
+    { kind: "line", color: cssVar("--series-1"), label: def.label },
+    { kind: "dash", color: cssVar("--text-muted"), label: `referência = escala ${pts[0].row.scale}` },
+  ]);
+  const note = document.createElement("span");
+  note.className = "item";
+  note.textContent = def.better === "up"
+    ? `${worst.row.scale} rende ${fmtSignedPct(drop)} do piso — ${drop < -0.1 ? "custo por objeto cresce com o volume" : "escala praticamente linear"}.`
+    : `${worst.row.scale} está ${fmtSignedPct(drop)} vs ${pts[0].row.scale}.`;
+  legend.appendChild(note);
+}
+
+/* =====================================================================
+ * Gráfico 3 — composição por fase (barras empilhadas, gap de 2px)
+ * ===================================================================== */
+function renderPhases(rows) {
+  const host = document.getElementById("phase-plot");
+  host.textContent = "";
+  const legend = document.getElementById("phase-legend");
+  legend.textContent = "";
+  const runs = rows.slice(-10);
+  const phases = PHASE_ORDER.filter(p => runs.some(r => phaseOf(r, p)));
+  // Com uma única fase, "share" seria sempre 100% e não diria nada: nesse caso as
+  // barras passam a mostrar duração absoluta, comparável entre execuções.
+  const single = phases.length === 1;
+  document.getElementById("phase-sub").textContent = runs.length
+    ? (single
+      ? `Duração da fase ${PHASE_LABEL[phases[0]] || phases[0]} nas últimas ${runs.length} execuções do caso`
+      : `Duração relativa das fases nas últimas ${runs.length} execuções do caso`)
+    : "";
+  if (!runs.length || !phases.length) {
+    const p = document.createElement("p"); p.className = "empty";
+    p.textContent = "Sem fases registradas para este caso.";
+    host.appendChild(p);
+    return;
+  }
+
+  const W = Math.max(320, host.clientWidth || 420);
+  const rowH = 22, H = runs.length * rowH + 40;
+  const M = { t: 8, r: 14, b: 26, l: 58 };
+  const iw = W - M.l - M.r;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+  const GAP = 2;
+
+  const maxTotal = Math.max.apply(null, runs.map(r =>
+    phases.reduce((a, p) => a + ((phaseOf(r, p) || {}).duration_ns || 0), 0)));
+
+  runs.forEach((r, ri) => {
+    const yTop = M.t + ri * rowH;
+    const barH = Math.min(14, rowH - 8);
+    const total = phases.reduce((a, p) => a + ((phaseOf(r, p) || {}).duration_ns || 0), 0);
+    text(s, M.l - 8, yTop + barH / 2 + 4, fmtDate(r.started_at), { "text-anchor": "end" });
+    if (!total) return;
+    const span = single ? (total / maxTotal) * (iw - 46) : iw;   // reserva o fim para o rótulo
+    let xc = M.l;
+    phases.forEach((pname, pi) => {
+      const p = phaseOf(r, pname);
+      if (!p || !p.duration_ns) return;
+      const w = (p.duration_ns / total) * span;
+      const drawW = Math.max(1, w - (single ? 0 : GAP));
+      const color = cssVar(SERIES_VARS[pi % SERIES_VARS.length]);
+      const rect = svg("rect", { x: xc, y: yTop, width: drawW, height: barH, rx: 3, fill: color }, s);
+      const share = p.duration_ns / total;
+      const rows2 = [
+        { value: fmtOne(p.duration_ns / 1e9) + " s", name: PHASE_LABEL[pname] || pname, color },
+        { value: p.ops_per_second ? fmtCompact(p.ops_per_second) + " obj/s" : "—", name: "throughput da fase" },
+      ];
+      if (!single) rows2.splice(1, 0, { value: nf0.format(share * 100) + "%", name: "da duração do caso" });
+      const head = fmtDateTime(r.started_at) + " · " + (r.commit_short || "");
+      rect.addEventListener("pointerenter", e => showTip(e, head, rows2));
+      rect.addEventListener("pointermove", moveTip);
+      rect.addEventListener("pointerleave", hideTip);
+      rect.addEventListener("click", () => selectRun(r));
+      xc += w;
+    });
+    // valor na ponta da barra — só no modo absoluto, onde cabe e significa algo
+    if (single) text(s, xc + 6, yTop + barH / 2 + 4, fmtOne(total / 1e9) + " s", { class: "lbl" });
+  });
+  if (single) {
+    text(s, M.l, H - 8, "0 s", {});
+    text(s, M.l + iw - 46, H - 8, fmtOne(maxTotal / 1e9) + " s", { "text-anchor": "end" });
+  } else {
+    text(s, M.l, H - 8, "0%", {});
+    text(s, M.l + iw, H - 8, "100%", { "text-anchor": "end" });
+  }
+
+  // uma fase só = uma cor: o subtítulo já a nomeia, legenda seria redundante
+  if (!single) legendInto(legend, phases.map((p, i) => ({ kind: "rect", color: cssVar(SERIES_VARS[i % SERIES_VARS.length]), label: PHASE_LABEL[p] || p })));
+}
+
+/* =====================================================================
+ * Tiles
+ * ===================================================================== */
+function renderTiles(caseRows, scoped, metricKey, phaseName) {
+  const el = document.getElementById("tiles");
+  el.textContent = "";
+  const def = METRICS[metricKey];
+  const values = caseRows.map(r => valueOf(r, metricKey, phaseName));
+  const clean = values.filter(v => v !== null);
+  const lastIdx = (() => { for (let i = values.length - 1; i >= 0; i--) if (values[i] !== null) return i; return -1; })();
+  const lastRow = lastIdx >= 0 ? caseRows[lastIdx] : null;
+  const lastVal = lastIdx >= 0 ? values[lastIdx] : null;
+  const ref = lastIdx >= 0 ? trailingRef(values, lastIdx) : null;
+  const gate = lastVal === null ? { verdict: "insufficient", worse: null } : verdictFor(lastVal, ref, def);
+  const drift = driftFor(values, def);
+
+  const tile = (opts) => {
+    const d = document.createElement("div");
+    d.className = "tile" + (opts.hero ? " hero" : "");
+    const l = document.createElement("div"); l.className = "label"; l.textContent = opts.label;
+    const v = document.createElement("div"); v.className = "value"; v.textContent = opts.value;
+    if (opts.unit) { const u = document.createElement("span"); u.className = "unit"; u.textContent = opts.unit; v.appendChild(u); }
+    d.append(l, v);
+    if (opts.pill) d.appendChild(pill(opts.pill.cls, opts.pill.text));
+    if (opts.foot) { const f = document.createElement("div"); f.className = "foot"; f.textContent = opts.foot; d.appendChild(f); }
+    if (opts.delta) {
+      const f = document.createElement("div"); f.className = "foot " + opts.delta.cls;
+      f.textContent = opts.delta.text; d.appendChild(f);
+    }
+    el.appendChild(d);
+  };
+
+  // O delta mostra a variação real da métrica; a cor diz se essa direção é boa.
+  const rawRel = (lastVal !== null && ref) ? (lastVal - ref) / ref : null;
+  tile({
+    hero: true, label: `${def.label} — última execução`,
+    value: lastVal === null ? "—" : def.fmt(lastVal), unit: def.unit,
+    delta: ref === null ? { cls: "", text: "histórico insuficiente para comparar (mínimo 3 pontos)" }
+      : { cls: gate.worse > 0 ? "delta-bad" : "delta-good", text: `${fmtSignedPct(rawRel)} vs mediana das 5 anteriores` },
+    foot: lastRow ? `${fmtDateTime(lastRow.started_at)} · ${lastRow.commit_short || (lastRow.commit || "").slice(0, 7)} · ${(lastRow.env && lastRow.env.host_class) || ""}` : "",
+  });
+
+  const gateMap = { ok: ["good", "aprovado"], alert: ["warning", "alerta"], fail: ["critical", "reprovado"], insufficient: ["neutral", "histórico insuficiente"] };
+  const gm = gateMap[gate.verdict] || gateMap.insufficient;
+  tile({ label: "Gate por execução", value: gm[1] === "histórico insuficiente" ? "—" : "", pill: { cls: gm[0], text: gm[1] }, foot: `limiares ${nf0.format(def.alert * 100)}% alerta · ${nf0.format(def.fail * 100)}% falha` });
+
+  const dm = { ok: ["good", "estável"], alert: ["warning", "atenção"], fail: ["critical", "deriva"], insufficient: ["neutral", "insuficiente"] }[drift.verdict];
+  tile({
+    label: "Deriva lenta", value: "", pill: { cls: dm[0], text: dm[1] },
+    foot: drift.verdict === "insufficient" ? "precisa de 12+ pontos na série"
+      : `${fmtSignedPct(drift.old ? (drift.recent - drift.old) / drift.old : null)} entre medianas (${drift.span} pontos)`,
+  });
+
+  const failed = scoped.filter(r => r.status !== "completed").length;
+  tile({ label: "Execuções com falha", value: fmtInt(failed), foot: failed ? "corrigir antes de ler as taxas" : "nenhuma no recorte" });
+  tile({ label: "Pontos no recorte", value: fmtInt(scoped.length), foot: `${new Set(scoped.map(r => r.case_id)).size} caso(s) · ${new Set(scoped.map(r => r.series_key)).size} série(s)` });
+  tile({ label: "Pontos deste caso", value: fmtInt(clean.length), foot: caseRows.length ? `desde ${fmtDate(caseRows[0].started_at)}` : "" });
+}
+function pill(cls, txt) {
+  const p = document.createElement("span");
+  p.className = "pill " + cls;
+  const d = document.createElement("span"); d.className = "dot";
+  const t = document.createElement("span"); t.textContent = txt;
+  p.append(d, t);
+  return p;
+}
+
+/* =====================================================================
+ * Tabela + detalhe + CSV
+ * ===================================================================== */
+const COLUMNS = [
+  { key: "started_at", label: "Data", left: true, get: r => fmtDateTime(r.started_at), sort: r => new Date(r.started_at).getTime() },
+  { key: "case_id", label: "Caso", left: true, get: r => r.case_id, sort: r => r.case_id },
+  { key: "commit", label: "Commit", left: true, get: r => r.commit_short || (r.commit || "").slice(0, 7), sort: r => r.commit || "" },
+  { key: "host", label: "Host", left: true, get: r => (r.env && r.env.host_class) || "", sort: r => (r.env && r.env.host_class) || "" },
+  { key: "build", label: "Build", left: true, get: r => (r.env && r.env.build_type) || "", sort: r => (r.env && r.env.build_type) || "" },
+  { key: "value", label: "Valor", get: (r, ctx) => { const v = valueOf(r, ctx.metric, ctx.phase); return v === null ? "—" : ctx.def.fmt(v); }, sort: (r, ctx) => valueOf(r, ctx.metric, ctx.phase) },
+  { key: "dprev", label: "Δ anterior", get: (r, ctx) => fmtSignedPct(ctx.dprev.get(r)), sort: (r, ctx) => ctx.dprev.get(r) },
+  { key: "dmed", label: "Δ mediana", get: (r, ctx) => fmtSignedPct(ctx.dmed.get(r)), sort: (r, ctx) => ctx.dmed.get(r) },
+  { key: "status", label: "Status", left: true, get: r => r.status + (r.comparable === false ? " · não comparável" : ""), sort: r => r.status },
+  { key: "series", label: "Série", left: true, get: r => (r.series_key || "").slice(0, 8), sort: r => r.series_key || "" },
+];
+
+function renderTable(rows, ctx) {
+  const thead = document.getElementById("thead");
+  thead.textContent = "";
+  for (const c of COLUMNS) {
+    const th = document.createElement("th");
+    th.className = c.left ? "l" : "";
+    th.textContent = c.label + (state.sort.key === c.key ? (state.sort.dir > 0 ? " ↑" : " ↓") : "");
+    th.addEventListener("click", () => {
+      if (state.sort.key === c.key) state.sort.dir *= -1;
+      else state.sort = { key: c.key, dir: 1 };
+      render();
+    });
+    thead.appendChild(th);
+  }
+  const col = COLUMNS.find(c => c.key === state.sort.key) || COLUMNS[0];
+  const sorted = rows.slice().sort((a, b) => {
+    const va = col.sort(a, ctx), vb = col.sort(b, ctx);
+    if (va === null || va === undefined) return 1;
+    if (vb === null || vb === undefined) return -1;
+    return (va > vb ? 1 : va < vb ? -1 : 0) * state.sort.dir;
+  });
+
+  const tbody = document.getElementById("tbody");
+  tbody.textContent = "";
+  let prevSeries = null;
+  for (const r of sorted) {
+    const tr = document.createElement("tr");
+    if (prevSeries !== null && r.series_key !== prevSeries && state.sort.key === "started_at") tr.className = "sep";
+    prevSeries = r.series_key;
+    for (const c of COLUMNS) {
+      const td = document.createElement("td");
+      td.className = c.left ? "l" : "";
+      td.textContent = c.get(r, ctx);
+      if (c.key === "dprev" || c.key === "dmed") {
+        const w = c.key === "dprev" ? ctx.dprev.get(r) : ctx.dmed.get(r);
+        if (w !== null && w !== undefined && isFinite(w)) {
+          const good = ctx.def.better === "up" ? w > 0 : w < 0;
+          td.className += good ? " delta-good" : " delta-bad";
+        }
+      }
+      tr.appendChild(td);
+    }
+    tr.addEventListener("click", () => selectRun(r));
+    tbody.appendChild(tr);
+  }
+  document.getElementById("table-sub").textContent =
+    `${rows.length} ponto(s) · métrica ${ctx.def.label.toLowerCase()} (${ctx.def.unit}) · clique numa linha para ver o rollup completo`;
+}
+
+function selectRun(row) {
+  state.selectedRun = row;
+  const el = document.getElementById("detail");
+  el.textContent = "";
+  const h = document.createElement("div");
+  h.className = "sub";
+  h.textContent = `${row.case_id} · ${fmtDateTime(row.started_at)} · bruto: ${row.raw_file || "—"}`;
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(row, null, 2);
+  el.append(h, pre);
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function exportCsv(rows, ctx) {
+  const head = ["started_at", "case_id", "workload", "target", "scale", "objects", "commit", "branch",
+    "host_class", "build_type", "series_key", "status", "comparable", "phase", "metric", "value", "unit"];
+  const lines = [head.join(";")];
+  for (const r of rows) {
+    const v = valueOf(r, ctx.metric, ctx.phase);
+    lines.push([
+      r.started_at, r.case_id, r.workload, r.target, r.scale, r.objects,
+      r.commit, r.branch, (r.env || {}).host_class, (r.env || {}).build_type,
+      r.series_key, r.status, r.comparable, ctx.phase, ctx.metric,
+      v === null ? "" : String(v).replace(".", ","), ctx.def.unit,
+    ].map(x => x === undefined || x === null ? "" : String(x)).join(";"));
+  }
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "modb-load-series.csv";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/* =====================================================================
+ * Render
+ * ===================================================================== */
+let renderPending = false;
+function render() {
+  if (!state.rows.length) return;
+  document.getElementById("content").hidden = false;
+  const metric = document.getElementById("f-metric").value;
+  const phase = document.getElementById("f-phase").value;
+  const caseId = document.getElementById("f-case").value;
+  const def = METRICS[metric];
+
+  const scoped = applyFilters({});
+  const caseRows = scoped.filter(r => r.case_id === caseId);
+
+  // Δs pré-computados por caso, respeitando quebras de série
+  const dprev = new Map(), dmed = new Map();
+  const byCase = new Map();
+  for (const r of scoped) {
+    if (!byCase.has(r.case_id)) byCase.set(r.case_id, []);
+    byCase.get(r.case_id).push(r);
+  }
+  for (const list of byCase.values()) {
+    const vals = list.map(r => valueOf(r, metric, phase));
+    list.forEach((r, i) => {
+      const v = vals[i];
+      const sameSeries = i > 0 && list[i - 1].series_key === r.series_key;
+      const p = sameSeries ? vals[i - 1] : null;
+      dprev.set(r, (v !== null && p !== null && p) ? (v - p) / p : null);
+      const segStart = (() => { let k = i; while (k > 0 && list[k - 1].series_key === r.series_key) k--; return k; })();
+      const refWindow = vals.slice(Math.max(segStart, i - 5), i).filter(x => x !== null);
+      const ref = refWindow.length >= 3 ? median(refWindow) : null;
+      dmed.set(r, (v !== null && ref) ? (v - ref) / ref : null);
+    });
+  }
+
+  const ctx = { metric, phase, def, dprev, dmed };
+  document.getElementById("trend-title").textContent = `Tendência — ${def.label}`;
+  document.getElementById("trend-sub").textContent =
+    `${caseId} · fase ${PHASE_LABEL[phase] || phase} · ${caseRows.length} ponto(s)` +
+    (caseRows.length ? ` · ${fmtDate(caseRows[0].started_at)} → ${fmtDate(caseRows[caseRows.length - 1].started_at)}` : "");
+
+  // O gráfico de escala só pode variar o volume: workload e alvo vêm do caso
+  // selecionado, senão a linha compara medições de naturezas diferentes.
+  const anchor = caseRows[0] || scoped.find(r => r.case_id === caseId) || null;
+  const scaleRows = anchor
+    ? state.rows.filter(r => r.workload === anchor.workload && r.target === anchor.target &&
+        r.comparable !== false && (document.getElementById("f-failed").checked || r.status === "completed"))
+    : [];
+  const ctxLabel = anchor ? `${anchor.workload} · ${anchor.target}` : "";
+
+  renderTiles(caseRows, scoped, metric, phase);
+  renderTrend(caseRows, metric, phase);
+  renderScale(scaleRows, metric, phase, ctxLabel);
+  renderPhases(caseRows);
+  renderTable(scoped, ctx);
+}
+function scheduleRender() {
+  if (renderPending) return;
+  renderPending = true;
+  requestAnimationFrame(() => { renderPending = false; render(); });
+}
+
+/* =====================================================================
+ * Série de exemplo — sintética, determinística, rotulada como tal
+ * ===================================================================== */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function demoSeries() {
+  const rnd = mulberry32(20260725);
+  const rows = [];
+  const cases = [
+    { workload: "create_only", target: "embedded", scale: "10k", objects: 1e4, base: 148000, runs: 26, drift: 0, step: null },
+    { workload: "create_only", target: "embedded", scale: "100k", objects: 1e5, base: 131000, runs: 26, drift: 0.0018, step: null },
+    { workload: "create_only", target: "embedded", scale: "1M", objects: 1e6, base: 96000, runs: 7, drift: 0, step: null },
+    { workload: "create_only", target: "loopback", scale: "100k", objects: 1e5, base: 74000, runs: 18, drift: 0, step: null },
+    { workload: "create_delete_reverse", target: "embedded", scale: "100k", objects: 1e5, base: 118000, runs: 22, drift: 0, step: { at: 15, factor: 0.87 } },
+    { workload: "crud_full", target: "embedded", scale: "100k", objects: 1e5, base: 61000, runs: 20, drift: 0, step: null },
+  ];
+  const t0 = Date.parse("2026-01-09T02:10:00Z");
+  const week = 7 * 86400000;
+  const commits = "0123456789abcdef";
+  const mkCommit = () => { let s = ""; for (let i = 0; i < 40; i++) s += commits[Math.floor(rnd() * 16)]; return s; };
+
+  for (const c of cases) {
+    const phases = c.workload === "crud_full"
+      ? ["create", "read", "update_inplace", "update_grow", "update_shrink", "delete"]
+      : c.workload === "create_only" ? ["create"] : ["create", "delete"];
+    for (let i = 0; i < c.runs; i++) {
+      const commit = mkCommit();
+      // troca de compilador na metade das séries longas => nova série
+      const era = c.runs > 20 && i >= 12 ? 2 : 1;
+      const compiler = era === 1 ? "gcc 13.2" : "gcc 14.2";
+      let factor = 1 + (rnd() - 0.5) * 0.035;                  // ruído de ±1,7%
+      factor *= 1 - c.drift * i;                               // deriva lenta
+      if (c.step && i >= c.step.at) factor *= c.step.factor;   // regressão em degrau
+      if (era === 2) factor *= 1.04;                           // ganho real ao trocar toolchain
+      const failed = c.workload === "crud_full" && i === 11;
+      const ops = c.base * factor;
+      const started = new Date(t0 + i * week + Math.floor(rnd() * 6) * 3600000).toISOString();
+      const phaseRecs = phases.map((p, pi) => {
+        const share = phases.length === 1 ? 1 : (p === "create" ? 0.42 : p === "delete" ? 0.24 : 0.34 / (phases.length - 2 || 1));
+        const opsPhase = ops * (p === "create" ? 1 : p === "read" ? 3.1 : p === "delete" ? 1.35 : 0.82);
+        const dur = (c.objects / opsPhase) * 1e9;
+        const p50 = (1e9 / opsPhase) * 0.72, p99 = (1e9 / opsPhase) * (p === "create" ? 4.4 : 3.1);
+        return {
+          phase: p, operations: c.objects, duration_ns: Math.round(dur * (phases.length === 1 ? 1 : share * phases.length / 1.6)),
+          ops_per_second: Math.round(opsPhase),
+          latency_ns: { p50: Math.round(p50), p95: Math.round(p99 * 0.7), p99: Math.round(p99), p999: Math.round(p99 * 2.3) },
+          bytes_per_object: Math.round(268 + (era === 2 ? 0 : 6) + rnd() * 4),
+          db_bytes: Math.round(c.objects * 268 * 1.35), wal_bytes: Math.round(c.objects * 268 * (p === "create" ? 1.1 : 1.8)),
+          peak_rss_bytes: Math.round((92 + c.objects / 1e4 * 3.4) * MiB), pages_read: Math.round(c.objects * 0.31),
+          pages_written: Math.round(c.objects * 0.42), pages_reused: p === "delete" ? Math.round(c.objects * 0.28) : 0,
+          errors: failed ? 3 : 0,
+        };
+      });
+      const totalNs = phaseRecs.reduce((a, p) => a + p.duration_ns, 0);
+      rows.push({
+        schema: "modb.loadtest.rollup", schema_version: 1,
+        series_key: `${c.workload}|${c.target}|${c.scale}|${compiler}`.replace(/[^a-z0-9]/g, "").slice(0, 16) + era,
+        series_key_version: 1,
+        case_id: `load.${c.workload}.${c.target}.${c.scale}`,
+        workload: c.workload, target: c.target, scale: c.scale, objects: c.objects, variant: "",
+        run_id: `019f${i.toString(16).padStart(4, "0")}${c.scale}${c.workload.slice(0, 3)}`,
+        started_at: started, repeat_index: 0,
+        commit, commit_short: commit.slice(0, 7), branch: "master", tree_dirty: false, diff_hash: null,
+        workload_version: 1, dataset_id: "user_v1", dataset_version: 1, seed: "123456",
+        env: {
+          host_id: "h7c1a2", host_class: c.target === "embedded" ? "bench-linux-01" : "bench-linux-01",
+          os: "Linux 6.8.0", arch: "x86_64", cpu_model: "AMD EPYC 7443P", cores_physical: 8, cores_logical: 16,
+          ram_gb: 32, fs: "ext4", device_class: "nvme", build_type: "Release", compiler,
+          sanitizers: "none", page_size: 4096, format_version: 1, protocol_version: 1,
+        },
+        params: {
+          payload: "normal", batch: 1000, concurrency: 1, readers: 0,
+          durability: "sync_real", cache: "warm", primary_storage: "full",
+        },
+        phases: phaseRecs,
+        totals: {
+          duration_ns: totalNs, peak_disk_bytes: Math.round(c.objects * 268 * 2.6),
+          peak_rss_bytes: Math.max.apply(null, phaseRecs.map(p => p.peak_rss_bytes)),
+          reclaimed_bytes: phases.includes("delete") ? Math.round(c.objects * 268 * 0.92) : 0,
+          write_amplification: Number((2.4 + rnd() * 0.12).toFixed(2)),
+          space_amplification: Number((1.32 + rnd() * 0.05).toFixed(2)),
+        },
+        windows: {
+          first_ops_per_second: Math.round(ops * 1.03), last_ops_per_second: Math.round(ops * (c.scale === "1M" ? 0.88 : 0.98)),
+          slope_ops_per_second_per_min: Math.round(-ops * (c.scale === "1M" ? 0.02 : 0.003)),
+          first_p99_ns: Math.round(1e9 / ops * 3.0), last_p99_ns: Math.round(1e9 / ops * (c.scale === "1M" ? 4.6 : 3.2)),
+        },
+        status: failed ? "failed" : "completed",
+        comparable: !(c.scale === "1M" && i === 3),
+        validations: ["count", "logical_hash", "reopen"].concat(c.objects >= 1e5 ? ["database_check"] : []),
+        raw_file: `modb-load-${started.replace(/[-:.]/g, "").slice(0, 15)}Z-${commit.slice(0, 7)}-bench01.jsonl`,
+        raw_sha256: Array.from({ length: 8 }, () => commits[Math.floor(rnd() * 16)]).join("") + "…",
+      });
+    }
+  }
+  return rows;
+}
+
+/* =====================================================================
+ * Ligações
+ * ===================================================================== */
+document.getElementById("pick").addEventListener("click", () => document.getElementById("file").click());
+document.getElementById("file").addEventListener("change", e => readFiles(e.target.files));
+document.getElementById("demo").addEventListener("click", () => {
+  state.demo = true; state.rows = [];
+  ingest(demoSeries(), []);
+});
+const dz = document.getElementById("dropzone");
+["dragenter", "dragover"].forEach(t => dz.addEventListener(t, e => { e.preventDefault(); dz.classList.add("drag"); }));
+["dragleave", "drop"].forEach(t => dz.addEventListener(t, e => { e.preventDefault(); dz.classList.remove("drag"); }));
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  dz.classList.remove("drag");
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) readFiles(e.dataTransfer.files);
+});
+for (const id of ["f-period", "f-workload", "f-target", "f-scale", "f-host", "f-comparable", "f-failed"]) {
+  document.getElementById(id).addEventListener("change", () => { refreshDependentFilters(); render(); });
+}
+for (const id of ["f-case", "f-phase", "f-metric"]) {
+  document.getElementById(id).addEventListener("change", render);
+}
+document.getElementById("csv").addEventListener("click", () => {
+  const metric = document.getElementById("f-metric").value;
+  const phase = document.getElementById("f-phase").value;
+  exportCsv(applyFilters({}), { metric, phase, def: METRICS[metric] });
+});
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const cur = root.getAttribute("data-theme") || (dark ? "dark" : "light");
+  root.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+  scheduleRender();
+});
+addEventListener("resize", scheduleRender);
+
+/* ?src=... : funciona quando a pasta é servida por HTTP (file:// bloqueia fetch) */
+(function boot() {
+  const src = new URLSearchParams(location.search).get("src");
+  if (!src) return;
+  fetch(src).then(r => {
+    if (!r.ok) throw new Error(r.status + " " + r.statusText);
+    return r.text();
+  }).then(t => {
+    const p = parseJsonl(t, src);
+    state.demo = false;
+    ingest(p.rows, p.bad, `${p.rows.length} ponto(s) de ${src}.`);
+  }).catch(err => {
+    banners([{
+      cls: "err", strong: `Não foi possível ler ${src}:`,
+      text: `${err.message}. Em file:// o fetch é bloqueado — use o botão acima, ou sirva a pasta (python -m http.server).`,
+    }]);
+  });
+})();
+</script>
+</body>
+</html>

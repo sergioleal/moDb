@@ -71,6 +71,7 @@ pontual.
 | Operação de arquivo (backup/restore) | [OPERACAO.md](OPERACAO.md) | ✅ |
 | Modelo de falhas de módulos | [OPERACAO_MODULOS.md](OPERACAO_MODULOS.md) | ✅ |
 | Metodologia de benchmarks | [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md) | ✅ |
+| Testes de carga (10k–1M usuários) e série histórica | [PLANO_TESTES_DE_CARGA.md](PLANO_TESTES_DE_CARGA.md) | 📝 especificação |
 | Fuzzing | [FUZZING.md](FUZZING.md) | ✅ |
 | Glossário | [GLOSSARIO.md](GLOSSARIO.md) | ✅ |
 | Constituição Ring0 | [CONSTITUTION_RING0.md](CONSTITUTION_RING0.md) | ✅ |
