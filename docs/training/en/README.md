@@ -52,31 +52,44 @@ and a `README.md` with the exact build/run commands.
 
 Each lesson is a folder — `01-binding-your-first-type/`,
 `02-persist-and-reopen/`, ... `13-read-replica/` — holding three things:
-the lesson doc (`<slug>.md`), one self-contained cumulative source file
+the lesson doc (`<slug>.md`), one **self-contained** source file
 (`lesson_01_binding.cpp`, `lesson_02_persist_reopen.cpp`, ...
-`lesson_13_read_replica.cpp`), and a `README.md` with that lesson's build
-command. Every source file's `main()` replays every earlier lesson's
-function in order, on one continuously-reopened temp database file, and
-then runs that lesson's own new function. Concretely:
-`05-relationships/lesson_05_relationships.cpp` contains
-`lesson_01_bind_type`, `lesson_02_persist_and_reopen`, ... through
-`lesson_05_relationships`, called in that order from `main()`. This means:
+`lesson_13_read_replica.cpp`, each containing only *that* lesson's own new
+code), and a `README.md` with that lesson's build command.
 
-- Running `lesson_NN.exe` prints the *entire story* from Lesson 1 through
-  lesson `NN`, not just that lesson's new output.
-- Diffing `lesson_04_handles.cpp` against `lesson_05_relationships.cpp`
-  shows *exactly* what Lesson 5 added — nothing more.
-- Object ids, salaries, and other printed values are deterministic across
-  runs of the same lesson (the same sequence of creates/removes always
-  produces the same ids), except where a lesson explicitly measures wall-clock
-  time (Lesson 12).
+The lessons chain to each other through one real, persistent database
+file — `docs/training/en/employee-directory.modb` (git-ignored, like
+every other `*.modb` in this repo) — instead of through shared in-process
+state:
+
+- **Lesson 1** deletes any old copy and creates this file fresh. Every
+  other lesson only ever *opens* it.
+- **Every lesson from 2 onward is a separate program run** that opens the
+  same file, does its own work, and exits. Nothing is held in memory
+  between lessons — the file on disk *is* the hand-off.
+- Since each lesson is a separate binary, there's no shared struct to
+  carry object ids forward (like an in-memory "here's Ana's id" value).
+  Instead, Lesson 2 creates an **index on `Employee.name`**
+  (`create_index<Employee>(FieldId{1})`), and every later lesson looks
+  employees up by name (`indexed_object_ids<Employee>(...)`) instead of
+  remembering ids across runs. Lesson 5 does the same for
+  `Department.name`, needed starting at Lesson 9.
+- Because of this, **lessons must be run in order, once each**, starting
+  from Lesson 1 — running Lesson 5 before Lesson 2 fails with a clear
+  "have you run the earlier lessons first?" message, since the records
+  and indexes it expects don't exist yet.
+- Object ids, salaries, and other printed values are still deterministic
+  given a full, in-order run — the same sequence of creates/removes
+  always produces the same ids — except where a lesson explicitly
+  measures wall-clock time (Lesson 12).
+- To restart the whole course, just re-run Lesson 1 — it wipes the file
+  and starts over.
 
 Lessons 8, 9, and 10 (networking, remote operations, facades) keep the
 server and the client in **one binary**: a background thread runs the
 server's accept loop while the main thread drives the client connection.
 A real deployment would split these into separate processes, but nothing
-in `Server`/`ServerConnection` requires it, and keeping them together
-preserves the single-cumulative-file story.
+in `Server`/`ServerConnection` requires it.
 
 ## Build the Exercises
 
@@ -90,9 +103,19 @@ cmake --build --preset debug --target employee_directory_lesson_01
 .\build\debug\employee_directory_lesson_01.exe
 ```
 
-Swap `01` for any lesson number 01-13. Building a later lesson's target
-does not require building earlier ones first — each `.cpp` file is fully
-self-contained.
+Swap `01` for any lesson number 01-13. *Building* a later lesson's target
+does not require building earlier ones first — each `.cpp` file compiles
+on its own. *Running* them, though, is in order: Lesson `NN` expects
+Lessons 1 through `NN-1` to have already run against the same persistent
+file. To go through the whole course from scratch:
+
+```powershell
+cmake --preset debug
+cmake --build --preset debug
+foreach ($n in 1..13) {
+    & ".\build\debug\employee_directory_lesson_$('{0:D2}' -f $n).exe"
+}
+```
 
 ## Conventions Used in Every Lesson
 

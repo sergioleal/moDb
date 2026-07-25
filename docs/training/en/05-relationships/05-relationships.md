@@ -20,13 +20,17 @@ several projects.
 
 ## Starting Point
 
-Lesson 4's directory with `EmployeeV2` (name, salary, country).
+The persistent database file after Lessons 1-4 have run, with `Employee`
+in its `EmployeeV2` shape (name, salary, country).
 
 ## Steps
 
+- Look Ana/Bruno/Carla up by name.
 - Add `Department` (name) and bind it.
 - Add `department: Ref<Department>` to `Employee`; create a couple of
-  departments and assign employees to them.
+  departments and assign employees to them. Also index `Department.name`
+  (same reasoning as Lesson 2's `Employee.name` index) — Lesson 9 needs to
+  find "Engineering" by name as a separate program run.
 - Add `EmergencyContact` (name, phone) as an `OwnedRef` field on
   `Employee`; remove an employee and show the contact is cascade-deleted.
 - Add `Project` (name) and a `projects: BlobId` field on `Employee` backed
@@ -51,27 +55,12 @@ cmake --build --preset debug --target employee_directory_lesson_05
 
 ```
 Objective: model departments, an owned emergency contact, and a project list.
-Lesson 1: Employee type id = 16
-Lesson 2: wrote 3 employees (Ana=18, Bruno=19, Carla=20)
-Lesson 2: after reopen, employee 18 = Ana (12000)
-Lesson 3: committed raise for Bruno
-  Bruno after committed raise: Bruno = 10500
-Lesson 3: uncommitted raise for Carla (deliberately not committed)
-  Carla after scope exit (should be unchanged): Carla = 15000
-Lesson 3: averaging Ana and Bruno's salaries in one transaction
-  Ana after averaging: Ana = 11250
-  Bruno after averaging: Bruno = 11250
-Lesson 3: attempting a second transaction while one is open
-  second begin() failed as expected: a transaction is already in progress
-Lesson 4: Ana read through the new binding = Ana (11250, country=BR) -- country came from the declared default, not from disk
-Lesson 4: raise for Ana via Handle::set (not manual materialize/update)
-  Ana after Handle::set raise: Ana (13250, country=BR) -- now physically stored in the new 3-field shape
-Lesson 5: created departments Engineering=31, Sales=32
-Lesson 5: assigned Ana -> Engineering, Bruno -> Sales
-Lesson 5: Diego=34 has emergency contact 33
-Lesson 5: after removing Diego, his emergency contact is gone too (cascade-deleted): no object with id 33
-Lesson 5: Carla's projects: Phoenix Atlas
-Lesson 5: after removing Sales, resolving it directly fails as expected: no object with id 32 -- Bruno's `department` field still holds that (now dangling) id
+Created departments Engineering=31, Sales=32
+Assigned Ana -> Engineering, Bruno -> Sales
+Diego=34 has emergency contact 33
+After removing Diego, his emergency contact is gone too (cascade-deleted): no object with id 33
+Carla's projects: Phoenix Atlas
+After removing Sales, resolving it directly fails as expected: no object with id 32 -- Bruno's `department` field still holds that (now dangling) id
 ```
 
 ## What to Notice

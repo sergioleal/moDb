@@ -16,8 +16,7 @@ thread runs `serve_one()` while the main thread drives the connection) —
 the same single-process convention every later networking lesson
 (9 and 10) also uses. A real deployment would split them into separate
 processes, but nothing about `Server`/`ServerConnection` requires that
-split, and keeping them together here keeps the cumulative-file story
-intact.
+split.
 
 ## New Concepts
 
@@ -29,7 +28,8 @@ intact.
 
 ## Starting Point
 
-Lesson 7's directory with an indexed salary search.
+The persistent database file after Lessons 1-7 have run, with an indexed
+salary search already in place.
 
 ## Steps
 
@@ -65,42 +65,9 @@ local lesson on a first run — give it a few seconds.
 
 ```
 Objective: serve the directory and query it remotely with ServerConnection.
-Lesson 1: Employee type id = 16
-Lesson 2: wrote 3 employees (Ana=18, Bruno=19, Carla=20)
-Lesson 2: after reopen, employee 18 = Ana (12000)
-Lesson 3: committed raise for Bruno
-  Bruno after committed raise: Bruno = 10500
-Lesson 3: uncommitted raise for Carla (deliberately not committed)
-  Carla after scope exit (should be unchanged): Carla = 15000
-Lesson 3: averaging Ana and Bruno's salaries in one transaction
-  Ana after averaging: Ana = 11250
-  Bruno after averaging: Bruno = 11250
-Lesson 3: attempting a second transaction while one is open
-  second begin() failed as expected: a transaction is already in progress
-Lesson 4: Ana read through the new binding = Ana (11250, country=BR) -- country came from the declared default, not from disk
-Lesson 4: raise for Ana via Handle::set (not manual materialize/update)
-  Ana after Handle::set raise: Ana (13250, country=BR) -- now physically stored in the new 3-field shape
-Lesson 5: created departments Engineering=31, Sales=32
-Lesson 5: assigned Ana -> Engineering, Bruno -> Sales
-Lesson 5: Diego=34 has emergency contact 33
-Lesson 5: after removing Diego, his emergency contact is gone too (cascade-deleted): no object with id 33
-Lesson 5: Carla's projects: Phoenix Atlas
-Lesson 5: after removing Sales, resolving it directly fails as expected: no object with id 32 -- Bruno's `department` field still holds that (now dangling) id
-Lesson 6: payroll total at the snapshot's epoch = 39500
-Lesson 6: payroll total at the SAME snapshot after Carla's raise = 39500 (unchanged -- the snapshot doesn't see it)
-Lesson 6: second raise while the snapshot is open failed as expected: object 20 already has a previous version visible to an older open snapshot
-Lesson 6: retried raise for Carla succeeded once the snapshot closed
-Lesson 6: payroll total on a fresh snapshot = 44500
-Lesson 6: collect_garbage() reclaimed 12 record(s)
-  employees earning >= 15000 (no index yet): access=table_scan index_available=false
-  results: Carla
-Lesson 7: created an index on Employee.salary
-  employees earning >= 15000 (indexed): access=index_scan index_available=true
-  results: Carla
-Lesson 7: top 2 earners: Carla(20000) Ana(13250)
-Lesson 8: handshake ok, protocol 1.0, max_concurrent_streams=4
-Lesson 8: remote query returned 3 employees
-Lesson 8: remote search for salary == 20000 returned 1 match(es): Carla
+Handshake ok, protocol 1.0, max_concurrent_streams=4
+Remote query returned 3 employees
+Remote search for salary == 20000 returned 1 match(es): Carla
 ```
 
 ## What to Notice

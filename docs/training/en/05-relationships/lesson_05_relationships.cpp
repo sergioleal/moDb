@@ -1,50 +1,26 @@
 // Lesson 5 -- Relationships: Departments and Projects.
-// Builds on Lesson 4 (lesson_04_handles.cpp).
+// Builds on Lesson 4 (lesson_04_handles.cpp) -- opens the SAME database
+// file and adds new relationship fields to Employee.
 // See docs/training/en/05-relationships/05-relationships.md.
 
 #include "modb/object/collection.hpp"
 #include "modb/object/database.hpp"
 
-#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <system_error>
+#include <string_view>
 
+using modb::object::AttributeValue;
 using modb::object::BlobId;
-using modb::object::Embedded;
+using modb::object::FieldId;
 using modb::object::ObjectId;
 using modb::object::OwnedRef;
 using modb::object::PersistentVector;
 using modb::object::Ref;
 
 namespace {
-
-struct Employee {
-    std::string name;
-    std::int64_t salary{};
-};
-
-modb::object::BindingBuilder<Employee> employee_binding() {
-    modb::object::BindingBuilder<Employee> builder{"Employee"};
-    builder.field<1>("name", &Employee::name).field<2>("salary", &Employee::salary);
-    return builder;
-}
-
-struct EmployeeV2 {
-    std::string name;
-    std::int64_t salary{};
-    std::string country;
-};
-
-modb::object::BindingBuilder<EmployeeV2> employee_v2_binding() {
-    modb::object::BindingBuilder<EmployeeV2> builder{"Employee"};
-    builder.field<1>("name", &EmployeeV2::name)
-        .field<2>("salary", &EmployeeV2::salary)
-        .field<3>("country", &EmployeeV2::country, "BR");
-    return builder;
-}
 
 struct Department {
     std::string name;
@@ -77,10 +53,9 @@ modb::object::BindingBuilder<Project> project_binding() {
     return builder;
 }
 
-// This lesson's Employee shape: department (association), an owned
-// emergency contact (cascade-deleted with the employee), and a project
-// list. Ids 1-3 are unchanged from Lesson 4; 4-6 are new, each defaulted so
-// records written before this lesson project cleanly.
+// The Lesson 4 shape plus three relationship fields, each zero-valued by
+// default so Ana/Bruno/Carla's existing 3-field records still project
+// cleanly.
 struct EmployeeV3 {
     std::string name;
     std::int64_t salary{};
@@ -101,343 +76,57 @@ modb::object::BindingBuilder<EmployeeV3> employee_v3_binding() {
     return builder;
 }
 
-struct DirectoryIds {
-    ObjectId ana{};
-    ObjectId bruno{};
-    ObjectId carla{};
-    ObjectId engineering{};
-    ObjectId sales{};
-};
+constexpr FieldId kEmployeeNameField{1};
+constexpr FieldId kDepartmentNameField{1};
 
-std::filesystem::path temp_path() {
-    return std::filesystem::temp_directory_path() /
-           ("employee-directory-" +
-            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".modb");
+std::filesystem::path db_path() {
+    return std::filesystem::path{MODB_TRAINING_DIR} / "employee-directory.modb";
 }
 
-void cleanup(const std::filesystem::path& path) {
-    std::error_code ignored;
-    std::filesystem::remove(path, ignored);
-    std::filesystem::remove(path.string() + ".wal", ignored);
+modb::Result<ObjectId> find_employee_id(modb::object::Database& database, std::string_view name) {
+    auto matches = database.indexed_object_ids<EmployeeV3>(kEmployeeNameField,
+                                                           AttributeValue{std::string{name}});
+    if (!matches) {
+        return std::unexpected(matches.error());
+    }
+    if (matches->empty()) {
+        return std::unexpected(
+            modb::Error{modb::ErrorCode::record_not_found, "no employee named " + std::string{name}});
+    }
+    return (*matches)[0];
 }
 
-int lesson_01_bind_type(const std::filesystem::path& path) {
-    auto created = modb::object::Database::create(path);
-    if (!created) {
-        std::cerr << created.error().message << '\n';
-        return 1;
-    }
-    auto database = std::make_shared<modb::object::Database>(std::move(*created));
-    auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-    if (!attached || !database->bind(employee_binding())) {
-        std::cerr << "failed to bind Employee\n";
-        return 1;
-    }
-    auto type_id = database->type_id_of<Employee>();
-    if (!type_id) {
-        std::cerr << type_id.error().message << '\n';
-        return 1;
-    }
-    std::cout << "Lesson 1: Employee type id = " << type_id->value << '\n';
-    modb::object::DatabaseRegistry::instance().detach(*attached);
-    return 0;
-}
+} // namespace
 
-int lesson_02_persist_and_reopen(const std::filesystem::path& path, DirectoryIds& ids) {
-    {
-        auto opened = modb::object::Database::open(path);
-        if (!opened) {
-            std::cerr << opened.error().message << '\n';
-            return 1;
-        }
-        auto database = std::make_shared<modb::object::Database>(std::move(*opened));
-        auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-        if (!attached || !database->bind(employee_binding())) {
-            std::cerr << "failed to bind Employee\n";
-            return 1;
-        }
-        auto tx = database->begin();
-        if (!tx) {
-            std::cerr << tx.error().message << '\n';
-            return 1;
-        }
-        auto ana = database->create(*tx, Employee{"Ana", 12000});
-        auto bruno = database->create(*tx, Employee{"Bruno", 9500});
-        auto carla = database->create(*tx, Employee{"Carla", 15000});
-        if (!ana || !bruno || !carla) {
-            std::cerr << "failed to create employees\n";
-            return 1;
-        }
-        if (!tx->commit()) {
-            std::cerr << "failed to commit employees\n";
-            return 1;
-        }
-        ids.ana = ana->id();
-        ids.bruno = bruno->id();
-        ids.carla = carla->id();
-        std::cout << "Lesson 2: wrote 3 employees (Ana=" << ids.ana.value
-                  << ", Bruno=" << ids.bruno.value << ", Carla=" << ids.carla.value << ")\n";
-        modb::object::DatabaseRegistry::instance().detach(*attached);
-    }
-    {
-        auto opened = modb::object::Database::open(path);
-        if (!opened) {
-            std::cerr << opened.error().message << '\n';
-            return 1;
-        }
-        auto database = std::make_shared<modb::object::Database>(std::move(*opened));
-        auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-        if (!attached || !database->bind(employee_binding())) {
-            std::cerr << "failed to re-bind Employee after reopen\n";
-            return 1;
-        }
-        auto handle = database->get<Employee>(ids.ana);
-        if (!handle) {
-            std::cerr << handle.error().message << '\n';
-            return 1;
-        }
-        auto value = database->materialize(*handle);
-        if (!value) {
-            std::cerr << value.error().message << '\n';
-            return 1;
-        }
-        std::cout << "Lesson 2: after reopen, employee " << ids.ana.value << " = "
-                  << value->name << " (" << value->salary << ")\n";
-        modb::object::DatabaseRegistry::instance().detach(*attached);
-    }
-    return 0;
-}
+int main() {
+    std::cout << "Objective: model departments, an owned emergency contact, and a project list.\n";
+    const auto path = db_path();
 
-int print_salary(modb::object::Database& database, ObjectId id, std::string_view label) {
-    auto handle = database.get<Employee>(id);
-    if (!handle) {
-        std::cerr << handle.error().message << '\n';
-        return 1;
-    }
-    auto value = database.materialize(*handle);
-    if (!value) {
-        std::cerr << value.error().message << '\n';
-        return 1;
-    }
-    std::cout << "  " << label << ": " << value->name << " = " << value->salary << '\n';
-    return 0;
-}
-
-int lesson_03_transactions(const std::filesystem::path& path, const DirectoryIds& ids) {
     auto opened = modb::object::Database::open(path);
     if (!opened) {
-        std::cerr << opened.error().message << '\n';
+        std::cerr << opened.error().message
+                  << " -- have you run Lessons 1-4 first? Expected a database at " << path.string()
+                  << '\n';
         return 1;
     }
     auto database = std::make_shared<modb::object::Database>(std::move(*opened));
     auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-    if (!attached || !database->bind(employee_binding())) {
-        std::cerr << "failed to bind Employee\n";
-        return 1;
-    }
-
-    std::cout << "Lesson 3: committed raise for Bruno\n";
-    {
-        auto tx = database->begin();
-        if (!tx) {
-            std::cerr << tx.error().message << '\n';
-            return 1;
-        }
-        auto handle = database->get<Employee>(ids.bruno);
-        if (!handle) {
-            std::cerr << handle.error().message << '\n';
-            return 1;
-        }
-        auto value = database->materialize(*handle);
-        if (!value) {
-            std::cerr << value.error().message << '\n';
-            return 1;
-        }
-        value->salary += 1000;
-        if (auto updated = database->update(*tx, *handle, *value); !updated) {
-            std::cerr << updated.error().message << '\n';
-            return 1;
-        }
-        if (!tx->commit()) {
-            std::cerr << "failed to commit Bruno's raise\n";
-            return 1;
-        }
-    }
-    if (print_salary(*database, ids.bruno, "Bruno after committed raise") != 0) {
-        return 1;
-    }
-
-    std::cout << "Lesson 3: uncommitted raise for Carla (deliberately not committed)\n";
-    {
-        auto tx = database->begin();
-        if (!tx) {
-            std::cerr << tx.error().message << '\n';
-            return 1;
-        }
-        auto handle = database->get<Employee>(ids.carla);
-        if (!handle) {
-            std::cerr << handle.error().message << '\n';
-            return 1;
-        }
-        auto value = database->materialize(*handle);
-        if (!value) {
-            std::cerr << value.error().message << '\n';
-            return 1;
-        }
-        value->salary += 5000;
-        if (auto updated = database->update(*tx, *handle, *value); !updated) {
-            std::cerr << updated.error().message << '\n';
-            return 1;
-        }
-    }
-    if (print_salary(*database, ids.carla, "Carla after scope exit (should be unchanged)") != 0) {
-        return 1;
-    }
-
-    std::cout << "Lesson 3: averaging Ana and Bruno's salaries in one transaction\n";
-    {
-        auto tx = database->begin();
-        if (!tx) {
-            std::cerr << tx.error().message << '\n';
-            return 1;
-        }
-        auto ana_handle = database->get<Employee>(ids.ana);
-        auto bruno_handle = database->get<Employee>(ids.bruno);
-        if (!ana_handle || !bruno_handle) {
-            std::cerr << "failed to read Ana/Bruno\n";
-            return 1;
-        }
-        auto ana_value = database->materialize(*ana_handle);
-        auto bruno_value = database->materialize(*bruno_handle);
-        if (!ana_value || !bruno_value) {
-            std::cerr << "failed to materialize Ana/Bruno\n";
-            return 1;
-        }
-        const auto average = (ana_value->salary + bruno_value->salary) / 2;
-        ana_value->salary = average;
-        bruno_value->salary = average;
-        if (auto updated = database->update(*tx, *ana_handle, *ana_value); !updated) {
-            std::cerr << updated.error().message << '\n';
-            return 1;
-        }
-        if (auto updated = database->update(*tx, *bruno_handle, *bruno_value); !updated) {
-            std::cerr << updated.error().message << '\n';
-            return 1;
-        }
-        if (!tx->commit()) {
-            std::cerr << "failed to commit the average\n";
-            return 1;
-        }
-    }
-    if (print_salary(*database, ids.ana, "Ana after averaging") != 0) {
-        return 1;
-    }
-    if (print_salary(*database, ids.bruno, "Bruno after averaging") != 0) {
-        return 1;
-    }
-
-    std::cout << "Lesson 3: attempting a second transaction while one is open\n";
-    {
-        auto first = database->begin();
-        if (!first) {
-            std::cerr << first.error().message << '\n';
-            return 1;
-        }
-        auto second = database->begin();
-        if (second) {
-            std::cerr << "expected the second begin() to fail, but it succeeded\n";
-            return 1;
-        }
-        std::cout << "  second begin() failed as expected: " << second.error().message << '\n';
-    }
-
-    modb::object::DatabaseRegistry::instance().detach(*attached);
-    return 0;
-}
-
-int lesson_04_handles(const std::filesystem::path& path, const DirectoryIds& ids) {
-    auto opened = modb::object::Database::open(path);
-    if (!opened) {
-        std::cerr << opened.error().message << '\n';
-        return 1;
-    }
-    auto database = std::make_shared<modb::object::Database>(std::move(*opened));
-    auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-    if (!attached) {
-        std::cerr << "failed to attach database\n";
-        return 1;
-    }
-    if (!database->bind(employee_v2_binding())) {
-        std::cerr << "failed to bind EmployeeV2\n";
-        return 1;
-    }
-
-    auto ana_handle = database->get<EmployeeV2>(ids.ana);
-    if (!ana_handle) {
-        std::cerr << ana_handle.error().message << '\n';
-        return 1;
-    }
-    auto ana_value = database->materialize(*ana_handle);
-    if (!ana_value) {
-        std::cerr << ana_value.error().message << '\n';
-        return 1;
-    }
-    std::cout << "Lesson 4: Ana read through the new binding = " << ana_value->name << " ("
-              << ana_value->salary << ", country=" << ana_value->country
-              << ") -- country came from the declared default, not from disk\n";
-
-    std::cout << "Lesson 4: raise for Ana via Handle::set (not manual materialize/update)\n";
-    {
-        auto tx = database->begin();
-        if (!tx) {
-            std::cerr << tx.error().message << '\n';
-            return 1;
-        }
-        if (auto updated = ana_handle->set<&EmployeeV2::salary>(*tx, ana_value->salary + 2000);
-            !updated) {
-            std::cerr << updated.error().message << '\n';
-            return 1;
-        }
-        if (!tx->commit()) {
-            std::cerr << "failed to commit Ana's raise\n";
-            return 1;
-        }
-    }
-    auto ana_after = database->materialize(*ana_handle);
-    if (!ana_after) {
-        std::cerr << ana_after.error().message << '\n';
-        return 1;
-    }
-    std::cout << "  Ana after Handle::set raise: " << ana_after->name << " ("
-              << ana_after->salary << ", country=" << ana_after->country
-              << ") -- now physically stored in the new 3-field shape\n";
-
-    modb::object::DatabaseRegistry::instance().detach(*attached);
-    return 0;
-}
-
-// Lesson 5: departments (Ref), an owned emergency contact (cascade-delete),
-// a project list (PersistentVector<Ref<Project>>), and a deliberate
-// dangling Ref.
-int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids) {
-    auto opened = modb::object::Database::open(path);
-    if (!opened) {
-        std::cerr << opened.error().message << '\n';
-        return 1;
-    }
-    auto database = std::make_shared<modb::object::Database>(std::move(*opened));
-    auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-    if (!attached) {
-        std::cerr << "failed to attach database\n";
-        return 1;
-    }
-    if (!database->bind(employee_v3_binding()) || !database->bind(department_binding()) ||
+    if (!attached || !database->bind(employee_v3_binding()) || !database->bind(department_binding()) ||
         !database->bind(emergency_contact_binding()) || !database->bind(project_binding())) {
         std::cerr << "failed to bind Lesson 5 types\n";
         return 1;
     }
 
-    // --- Departments, assigned via Ref<Department>. ---
+    auto ana_id = find_employee_id(*database, "Ana");
+    auto bruno_id = find_employee_id(*database, "Bruno");
+    auto carla_id = find_employee_id(*database, "Carla");
+    if (!ana_id || !bruno_id || !carla_id) {
+        std::cerr << "failed to look up Ana/Bruno/Carla\n";
+        return 1;
+    }
+
+    ObjectId engineering_id{};
+    ObjectId sales_id{};
     {
         auto tx = database->begin();
         if (!tx) {
@@ -450,33 +139,41 @@ int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids
             std::cerr << "failed to create departments\n";
             return 1;
         }
-        ids.engineering = engineering->id();
-        ids.sales = sales->id();
+        engineering_id = engineering->id();
+        sales_id = sales->id();
         if (!tx->commit()) {
             std::cerr << "failed to commit departments\n";
             return 1;
         }
+        // Lesson 9's remote operation needs to find "Engineering" by name,
+        // as a separate program run -- same reasoning as Lesson 2's name
+        // index on Employee.
+        if (auto created = database->create_index<Department>(kDepartmentNameField); !created) {
+            std::cerr << created.error().message << '\n';
+            return 1;
+        }
     }
-    std::cout << "Lesson 5: created departments Engineering=" << ids.engineering.value
-              << ", Sales=" << ids.sales.value << '\n';
+    std::cout << "Created departments Engineering=" << engineering_id.value
+              << ", Sales=" << sales_id.value << '\n';
+
     {
         auto tx = database->begin();
         if (!tx) {
             std::cerr << tx.error().message << '\n';
             return 1;
         }
-        auto ana_handle = database->get<EmployeeV3>(ids.ana);
-        auto bruno_handle = database->get<EmployeeV3>(ids.bruno);
+        auto ana_handle = database->get<EmployeeV3>(*ana_id);
+        auto bruno_handle = database->get<EmployeeV3>(*bruno_id);
         if (!ana_handle || !bruno_handle) {
             std::cerr << "failed to look up Ana/Bruno\n";
             return 1;
         }
-        if (auto set = ana_handle->set<&EmployeeV3::department>(*tx, Ref<Department>{ids.engineering});
+        if (auto set = ana_handle->set<&EmployeeV3::department>(*tx, Ref<Department>{engineering_id});
             !set) {
             std::cerr << set.error().message << '\n';
             return 1;
         }
-        if (auto set = bruno_handle->set<&EmployeeV3::department>(*tx, Ref<Department>{ids.sales});
+        if (auto set = bruno_handle->set<&EmployeeV3::department>(*tx, Ref<Department>{sales_id});
             !set) {
             std::cerr << set.error().message << '\n';
             return 1;
@@ -486,9 +183,8 @@ int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids
             return 1;
         }
     }
-    std::cout << "Lesson 5: assigned Ana -> Engineering, Bruno -> Sales\n";
+    std::cout << "Assigned Ana -> Engineering, Bruno -> Sales\n";
 
-    // --- An owned emergency contact, cascade-deleted with its employee. ---
     ObjectId diego_id{};
     ObjectId contact_id{};
     {
@@ -516,8 +212,7 @@ int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids
             return 1;
         }
     }
-    std::cout << "Lesson 5: Diego=" << diego_id.value << " has emergency contact "
-              << contact_id.value << '\n';
+    std::cout << "Diego=" << diego_id.value << " has emergency contact " << contact_id.value << '\n';
     {
         auto tx = database->begin();
         if (!tx) {
@@ -535,15 +230,12 @@ int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids
     }
     auto contact_after = database->get<EmergencyContact>(contact_id);
     if (contact_after) {
-        std::cout << "Lesson 5: after removing Diego, his emergency contact still resolves "
-                     "(unexpected)\n";
+        std::cout << "After removing Diego, his emergency contact still resolves (unexpected)\n";
     } else {
-        std::cout << "Lesson 5: after removing Diego, his emergency contact is gone too "
-                     "(cascade-deleted): "
+        std::cout << "After removing Diego, his emergency contact is gone too (cascade-deleted): "
                   << contact_after.error().message << '\n';
     }
 
-    // --- Projects, via PersistentVector<Ref<Project>>. ---
     {
         auto tx = database->begin();
         if (!tx) {
@@ -570,7 +262,7 @@ int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids
             std::cerr << pushed.error().message << '\n';
             return 1;
         }
-        auto carla_handle = database->get<EmployeeV3>(ids.carla);
+        auto carla_handle = database->get<EmployeeV3>(*carla_id);
         if (!carla_handle) {
             std::cerr << carla_handle.error().message << '\n';
             return 1;
@@ -580,12 +272,12 @@ int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids
             return 1;
         }
         if (!tx->commit()) {
-            std::cerr << "failed to commit Carla's project assignments\n";
+            std::cerr << "failed to commit Carla's projects\n";
             return 1;
         }
     }
     {
-        auto carla_handle = database->get<EmployeeV3>(ids.carla);
+        auto carla_handle = database->get<EmployeeV3>(*carla_id);
         if (!carla_handle) {
             std::cerr << carla_handle.error().message << '\n';
             return 1;
@@ -597,17 +289,17 @@ int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids
         }
         auto blobs = database->blobs();
         PersistentVector<Ref<Project>> projects{blobs, carla_value->projects};
-        std::cout << "Lesson 5: Carla's projects:";
+        std::cout << "Carla's projects:";
         auto listed = projects.for_each([&](const Ref<Project>& ref) -> modb::Result<void> {
             auto project = database->get<Project>(ref.target);
             if (!project) {
                 return std::unexpected(project.error());
             }
-            auto project_value = database->materialize(*project);
-            if (!project_value) {
-                return std::unexpected(project_value.error());
+            auto value = database->materialize(*project);
+            if (!value) {
+                return std::unexpected(value.error());
             }
-            std::cout << ' ' << project_value->name;
+            std::cout << ' ' << value->name;
             return {};
         });
         if (!listed) {
@@ -617,62 +309,30 @@ int lesson_05_relationships(const std::filesystem::path& path, DirectoryIds& ids
         std::cout << '\n';
     }
 
-    // --- A dangling Ref: remove Sales while Bruno still points to it. ---
     {
         auto tx = database->begin();
         if (!tx) {
             std::cerr << tx.error().message << '\n';
             return 1;
         }
-        if (auto removed = database->remove(*tx, ids.sales); !removed) {
+        if (auto removed = database->remove(*tx, sales_id); !removed) {
             std::cerr << removed.error().message << '\n';
             return 1;
         }
         if (!tx->commit()) {
-            std::cerr << "failed to commit Sales's removal\n";
+            std::cerr << "failed to commit Sales' removal\n";
             return 1;
         }
     }
-    auto sales_after = database->get<Department>(ids.sales);
+    auto sales_after = database->get<Department>(sales_id);
     if (sales_after) {
-        std::cout << "Lesson 5: after removing Sales, resolving it directly still works "
-                     "(unexpected)\n";
+        std::cout << "After removing Sales, resolving it directly still succeeds (unexpected)\n";
     } else {
-        std::cout << "Lesson 5: after removing Sales, resolving it directly fails as expected: "
+        std::cout << "After removing Sales, resolving it directly fails as expected: "
                   << sales_after.error().message
                   << " -- Bruno's `department` field still holds that (now dangling) id\n";
     }
 
     modb::object::DatabaseRegistry::instance().detach(*attached);
     return 0;
-}
-
-} // namespace
-
-int main() {
-    std::cout << "Objective: model departments, an owned emergency contact, and a project list.\n";
-    const auto path = temp_path();
-    cleanup(path);
-
-    if (const auto status = lesson_01_bind_type(path); status != 0) {
-        cleanup(path);
-        return status;
-    }
-    DirectoryIds ids;
-    if (const auto status = lesson_02_persist_and_reopen(path, ids); status != 0) {
-        cleanup(path);
-        return status;
-    }
-    if (const auto status = lesson_03_transactions(path, ids); status != 0) {
-        cleanup(path);
-        return status;
-    }
-    if (const auto status = lesson_04_handles(path, ids); status != 0) {
-        cleanup(path);
-        return status;
-    }
-    const auto status = lesson_05_relationships(path, ids);
-
-    cleanup(path);
-    return status;
 }

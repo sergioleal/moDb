@@ -21,6 +21,8 @@ cmake --build --preset debug --target employee_directory_lesson_10
 .\build\debug\employee_directory_lesson_10.exe
 ```
 
-Running it replays every earlier lesson's code first (on one
-continuously-reopened temp database file), then this lesson's own new
-part — see [../README.md](../README.md#how-the-code-is-organized) for why.
+This lesson only contains its own new code — it opens the persistent
+database file Lessons 1-9 built up and continues from there, so run
+Lessons 1-9 first, in order. See
+[../README.md](../README.md#how-the-code-is-organized) for how the chain
+works.

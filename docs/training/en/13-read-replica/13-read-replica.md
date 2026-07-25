@@ -18,16 +18,20 @@ replica instead of competing with live writes on the primary.
 
 ## Starting Point
 
-Lesson 12's directory (the graph/facade/networking material from Lessons
-8-11 stays in place; replication doesn't touch any of it).
+The persistent database file after Lessons 1-12 have run.
 
 ## Steps
 
+- Open the primary (the same `employee-directory.modb` every earlier
+  lesson used) and bind every type.
 - Bootstrap a follower using the library calls directly (the same calls
   behind `modb replicate bootstrap`): `repl::create_bootstrap_snapshot(
   primary, temp_dir)` copies the primary's data file under a brief writer
   barrier; `repl::install_bootstrap_snapshot(snapshot, follower_path)`
-  installs it at a new path next to the main directory file.
+  installs it at `employee-directory-replica.modb`, next to the main
+  file. Unlike every earlier lesson's artifact, this follower is *this
+  lesson's own*, removed again at the end of the run — Lesson 13 is the
+  last lesson, so there's no Lesson 14 to chain it forward to.
 - Open the follower file, re-`bind()` every type, confirm its
   `database_uuid()` matches the primary's, and call
   `set_read_only_replica(true)`.
@@ -58,18 +62,17 @@ cmake --build --preset debug --target employee_directory_lesson_13
 
 ```
 Objective: bootstrap a read-only replica and query it independently.
-...
-Lesson 13: bootstrap snapshot cut at LSN 3499 (90112 bytes)
-Lesson 13: installed the follower copy at <temp-dir>\employee-directory-<timestamp>-replica.modb
-Lesson 13: follower's database_uuid matches the primary's
-Lesson 13: payroll total from the follower = 54750
-Lesson 13: follower rejected a write attempt as expected: follower rejects begin/write
+Bootstrap snapshot cut at LSN 3926 (98304 bytes)
+Installed the follower copy at .../docs/training/en/employee-directory-replica.modb
+Follower's database_uuid matches the primary's
+Payroll total from the follower = 54750
+Follower rejected a write attempt as expected: follower rejects begin/write
 ```
 
-(the `...` stands in for Lessons 1-12's output, unchanged from
-[Lesson 12](../12-async-io/12-async-io.md#expected-output); the `cut_lsn`, byte count, and
-payroll total will match this exactly for an unmodified run of the
-lesson, since every step up to this point is deterministic)
+The `cut_lsn`, byte count, and payroll total (Ana 14500 + Bruno 11250 +
+Carla 20000 + Gustavo 9000) will match this exactly for a full,
+unmodified, in-order run of the whole course, since every step up to
+this point is deterministic.
 
 ## What to Notice
 
