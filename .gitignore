@@ -23,3 +23,6 @@ Testing/
 # Benchmark campaign outputs (kept local; selected baselines may be committed under docs/)
 /benchmark-results/
 
+# Coverage report outputs (gcovr/gcov)
+/coverage-results/
+

@@ -69,6 +69,14 @@
       }
     },
     {
+      "name": "coverage",
+      "displayName": "Debug with gcov coverage instrumentation",
+      "inherits": "debug",
+      "cacheVariables": {
+        "MODB_ENABLE_COVERAGE": "ON"
+      }
+    },
+    {
       "name": "fuzz",
       "displayName": "Fuzzing (libFuzzer when Clang; else corpus replay)",
       "inherits": "debug",
@@ -105,6 +113,10 @@
       "configurePreset": "sanitizers"
     },
     {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
       "name": "fuzz",
       "configurePreset": "fuzz"
     }
@@ -134,6 +146,13 @@
     {
       "name": "sanitizers",
       "configurePreset": "sanitizers",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage",
       "output": {
         "outputOnFailure": true
       }

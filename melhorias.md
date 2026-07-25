@@ -858,6 +858,26 @@ config-file via `CMakePackageConfigHelpers` — hoje o `$<INSTALL_INTERFACE:incl
 código morto e `find_package(modb)` é impossível; guardar os testes com
 `if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)` para consumo limpo via FetchContent.
 
+**Status do item (b):** ✅ Feito. `option(MODB_ENABLE_COVERAGE)` adicionada ao
+[CMakeLists.txt](CMakeLists.txt) (liga `--coverage` no compile+link quando GCC/Clang;
+MSVC recebe aviso e é ignorado), preset `coverage` em [CMakePresets.json](CMakePresets.json)
+e script [scripts/run-coverage.ps1](scripts/run-coverage.ps1) /
+[scripts/run-coverage.sh](scripts/run-coverage.sh) que builda, roda o CTest e gera o
+relatório com `gcovr` quando disponível (fallback para `gcov` bruto caso contrário).
+Validado localmente nesta máquina: `cmake --preset coverage` ativa a instrumentação e
+`gcov` sobre os `.gcda` gerados por `modb_tests`/`modb_model_tests` produz cobertura
+linha-a-linha real (ex.: `model_test.cpp.gcov`). `gcovr` em si não pôde ser testado
+aqui porque não há Python instalado na máquina — instale com `pip install gcovr` para
+o relatório HTML agregado; sem ele o script cai para saída `.gcov` por arquivo. Itens
+(a) e (c) continuam pendentes.
+
+Medição real feita com a suíte completa (128/128 testes) e agregação manual do
+`gcov --json-format` (equivalente ao que `gcovr` faria): `src/**/*.cpp` está em
+78,2% de linhas / **44,6% de branches**; `include/modb/**/*.hpp` em 83,9% de
+linhas / 31,9% de branches. Branch coverage é o gargalo real do projeto, não
+linhas. Ranking completo de prioridade por arquivo em
+[docs-process/RELATORIO_COBERTURA_TESTES.md](docs-process/RELATORIO_COBERTURA_TESTES.md).
+
 ### B8. `.gitignore` não cobre `*.db` — **P3**, esforço mínimo — ✅ Feito
 
 **Status:** implementado. Adicionados `*.db` e `*.db-wal` ao [.gitignore](.gitignore);

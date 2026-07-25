@@ -11,6 +11,7 @@ include(CTest)
 
 option(MODB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(MODB_ENABLE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
+option(MODB_ENABLE_COVERAGE "Instrument modb with --coverage for gcov/gcovr reports (requires GCC or Clang)" OFF)
 option(MODB_ENABLE_LIBFUZZER "Build fuzz targets with Clang libFuzzer (requires Clang)" OFF)
 option(MODB_ALLOW_CXX23_FALLBACK "Allow a local C++23 build when C++26 is unavailable" ON)
 # Link estático do runtime MinGW gera binários portáteis (sem DLLs), mas a
@@ -217,6 +218,20 @@ if(MODB_ENABLE_SANITIZERS)
         message(WARNING
             "moDb: MODB_ENABLE_SANITIZERS ignorado — nenhum sanitizer conhecido para "
             "o toolchain '${CMAKE_CXX_COMPILER_ID}'.")
+    endif()
+endif()
+
+if(MODB_ENABLE_COVERAGE)
+    # --coverage é suportado por GCC e Clang (gera .gcno/.gcda lidos por gcov/gcovr).
+    # MSVC não tem equivalente direto; nesse caso a opção é ignorada com aviso.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(modb PUBLIC --coverage -fno-inline -fno-inline-small-functions -fno-default-inline)
+        target_link_options(modb PUBLIC --coverage)
+        message(STATUS "moDb: instrumentação de cobertura ativada (--coverage / gcov).")
+    else()
+        message(WARNING
+            "moDb: MODB_ENABLE_COVERAGE ignorado — requer GCC ou Clang "
+            "(toolchain atual: '${CMAKE_CXX_COMPILER_ID}'). MSVC não suporta --coverage.")
     endif()
 endif()
 
