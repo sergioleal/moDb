@@ -85,23 +85,18 @@ Three traversals of that same broken edge, back to back, show what each `Danglin
 <p>A <code>manager: Ref&lt;Employee&gt;</code> field (an employee pointing at another employee) and an org-chart feature: &quot;list everyone who (directly or indirectly) reports to X,&quot; implemented as a lazy BFS instead of hand-written recursive queries.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>GraphView</code>/<code>open_graph_view</code>, <code>EdgeHandle</code>, <code>graph::bfs</code>/<code>dfs</code>,</li>
-<p><code>TraversalOptions</code>/<code>DanglingPolicy</code> — see <a href="../../../reference/graphs.md">docs/reference/graphs.md</a>.</p>
-<li>Why <code>incoming()</code> (find an employee&#x27;s direct reports) needs an index on</li>
-<p><code>manager</code>.</p>
+<li><code>GraphView</code>/<code>open_graph_view</code>, <code>EdgeHandle</code>, <code>graph::bfs</code>/<code>dfs</code>, <code>TraversalOptions</code>/<code>DanglingPolicy</code> — see <a href="../../../reference/graphs.md">docs/reference/graphs.md</a>.</li>
+<li>Why <code>incoming()</code> (find an employee&#x27;s direct reports) needs an index on <code>manager</code>.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-10 have run.</p>
 <h2>Steps</h2>
 <ul>
 <li>Look Ana, Bruno, and Carla up by name.</li>
-<li>Add <code>manager: Ref&lt;Employee&gt;</code> (field 7) to <code>Employee</code>, defaulted to a</li>
-<p>zero-valued <code>Ref&lt;Employee&gt;{}</code> — the fourth schema evolution this run (after Lesson 4&#x27;s <code>country</code> and Lesson 5&#x27;s three relationship fields) — and <code>create_index&lt;Employee&gt;(manager_field)</code>, a prerequisite for <code>incoming()</code>.</p>
+<li>Add <code>manager: Ref&lt;Employee&gt;</code> (field 7) to <code>Employee</code>, defaulted to a zero-valued <code>Ref&lt;Employee&gt;{}</code> — the fourth schema evolution this run (after Lesson 4&#x27;s <code>country</code> and Lesson 5&#x27;s three relationship fields) — and <code>create_index&lt;Employee&gt;(manager_field)</code>, a prerequisite for <code>incoming()</code>.</li>
 <li>Assign Ana and Bruno&#x27;s <code>manager</code> to Carla via <code>Handle::set</code>.</li>
-<li>Open a <code>Snapshot</code>, <code>graph::open_graph_view(database, snapshot)</code>, and</li>
-<p>build an <code>AdjacencyFn</code> that wraps <code>GraphView::incoming</code> (an employee&#x27;s direct reports). Run <code>graph::bfs(carla_id, adjacency_down)</code> and print the org chart with depths.</p>
-<li>Create a temporary employee reporting to another temporary employee,</li>
-<p>remove the manager, and walk *upward* from the report (this direction uses <code>graph::edge()</code> over the single <code>manager</code> field, not <code>incoming()</code> — <code>incoming()</code> only ever surfaces reports that still resolve). Run the same walk three times with <code>DanglingPolicy::fail</code>, <code>skip</code>, and <code>yield_error</code> and compare what each one does with the now-dangling edge.</p>
+<li>Open a <code>Snapshot</code>, <code>graph::open_graph_view(database, snapshot)</code>, and build an <code>AdjacencyFn</code> that wraps <code>GraphView::incoming</code> (an employee&#x27;s direct reports). Run <code>graph::bfs(carla_id, adjacency_down)</code> and print the org chart with depths.</li>
+<li>Create a temporary employee reporting to another temporary employee, remove the manager, and walk <em>upward</em> from the report (this direction uses <code>graph::edge()</code> over the single <code>manager</code> field, not <code>incoming()</code> — <code>incoming()</code> only ever surfaces reports that still resolve). Run the same walk three times with <code>DanglingPolicy::fail</code>, <code>skip</code>, and <code>yield_error</code> and compare what each one does with the now-dangling edge.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_11_graphs.cpp">lesson_11_graphs.cpp</a> — embedded, no server/client split needed to demonstrate the graph API itself.</p>
@@ -128,12 +123,9 @@ Walking up from Gustavo with DanglingPolicy::yield_error
   (unlike fail, yield_error would have let the walk continue into any other, unrelated branch -- Gustavo only had the one dangling edge, so the visible output matches fail&#x27;s here)</code></pre>
 <h2>What to Notice</h2>
 <ul>
-<li><code>GraphView</code> doesn&#x27;t own its <code>Snapshot</code> — it holds a pointer, so the</li>
-<p>snapshot must outlive any view or edge handle derived from it.</p>
-<li><code>incoming()</code> has no reverse-scan fallback; without an index on the <code>Ref</code></li>
-<p>field it fails outright (<code>invalid_edge</code>) rather than silently scanning everything. It also can&#x27;t produce a &quot;dangling&quot; result — a stale or missing source is just skipped, which is why the dangling-policy demo above walks *upward* via <code>graph::edge()</code> on the single <code>manager</code> field instead.</p>
-<li>With a singular <code>manager</code> field, <code>fail</code> and <code>yield_error</code> look identical</li>
-<p>in this particular run: both surface the same error for Gustavo&#x27;s one dangling edge. The difference only becomes visible when a node has multiple neighbors and only some of them are dangling — <code>yield_error</code> keeps exploring the others, <code>fail</code> aborts the whole traversal.</p>
+<li><code>GraphView</code> doesn&#x27;t own its <code>Snapshot</code> — it holds a pointer, so the snapshot must outlive any view or edge handle derived from it.</li>
+<li><code>incoming()</code> has no reverse-scan fallback; without an index on the <code>Ref</code> field it fails outright (<code>invalid_edge</code>) rather than silently scanning everything. It also can&#x27;t produce a &quot;dangling&quot; result — a stale or missing source is just skipped, which is why the dangling-policy demo above walks <em>upward</em> via <code>graph::edge()</code> on the single <code>manager</code> field instead.</li>
+<li>With a singular <code>manager</code> field, <code>fail</code> and <code>yield_error</code> look identical in this particular run: both surface the same error for Gustavo&#x27;s one dangling edge. The difference only becomes visible when a node has multiple neighbors and only some of them are dangling — <code>yield_error</code> keeps exploring the others, <code>fail</code> aborts the whole traversal.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

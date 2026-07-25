@@ -558,6 +558,7 @@ def inline_markup(text: str, current_relpath: str) -> str:
     escaped = html.escape(text)
     escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
     escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", escaped)
     escaped = re.sub(
         r"\[([^\]]+)\]\(([^)]+)\)",
         lambda match: replace_link(match, current_relpath),
@@ -602,6 +603,8 @@ def render_markdown(markdown: str, current_relpath: str) -> str:
     lines = markdown.splitlines()
     parts: list[str] = []
     paragraph: list[str] = []
+    blockquote_lines: list[str] = []
+    list_item_lines: list[str] = []
     in_code = False
     code_lang = ""
     code_lines: list[str] = []
@@ -615,8 +618,27 @@ def render_markdown(markdown: str, current_relpath: str) -> str:
             parts.append(f"<p>{inline_markup(' '.join(paragraph), current_relpath)}</p>")
             paragraph = []
 
+    def flush_blockquote() -> None:
+        nonlocal blockquote_lines
+        if blockquote_lines:
+            parts.append(
+                f"<blockquote><p>{inline_markup(' '.join(blockquote_lines), current_relpath)}</p></blockquote>"
+            )
+            blockquote_lines = []
+
+    def close_list_item() -> None:
+        # A markdown list item's text often soft-wraps across several
+        # source lines, each continuation indented with no `-`/`1.`
+        # marker of its own -- those all belong to ONE <li>, not one
+        # stray <p> per line.
+        nonlocal list_item_lines
+        if list_item_lines:
+            parts.append(f"<li>{inline_markup(' '.join(list_item_lines), current_relpath)}</li>")
+            list_item_lines = []
+
     def close_list() -> None:
         nonlocal in_list, in_ordered_list
+        close_list_item()
         if in_list:
             parts.append("</ol>" if in_ordered_list else "</ul>")
             in_list = False
@@ -633,6 +655,7 @@ def render_markdown(markdown: str, current_relpath: str) -> str:
                 code_lines = []
             else:
                 flush_paragraph()
+                flush_blockquote()
                 close_list()
                 in_code = True
                 code_lang = line[3:].strip()
@@ -644,17 +667,20 @@ def render_markdown(markdown: str, current_relpath: str) -> str:
 
         if not line.strip():
             flush_paragraph()
+            flush_blockquote()
             close_list()
             continue
 
         blockquote = re.match(r"^>\s?(.*)$", line)
         if blockquote:
+            # Same soft-wrap concern as list items: consecutive `> ` lines
+            # are one blockquote paragraph, not one <blockquote> each.
             flush_paragraph()
             close_list()
-            parts.append(
-                f"<blockquote><p>{inline_markup(blockquote.group(1), current_relpath)}</p></blockquote>"
-            )
+            blockquote_lines.append(blockquote.group(1))
             continue
+        if blockquote_lines:
+            flush_blockquote()
 
         heading = re.match(r"^(#{1,3})\s+(.+)$", line)
         if heading:
@@ -679,13 +705,18 @@ def render_markdown(markdown: str, current_relpath: str) -> str:
                 parts.append("<ol>" if ordered_item else "<ul>")
                 in_list = True
                 in_ordered_list = ordered_item
-            item_text = ordered.group(1) if ordered else unordered.group(1)
-            parts.append(f"<li>{inline_markup(item_text, current_relpath)}</li>")
+            else:
+                close_list_item()
+            list_item_lines = [ordered.group(1) if ordered else unordered.group(1)]
             continue
 
-        paragraph.append(line.strip())
+        if in_list:
+            list_item_lines.append(line.strip())
+        else:
+            paragraph.append(line.strip())
 
     flush_paragraph()
+    flush_blockquote()
     close_list()
     return "\n".join(parts)
 

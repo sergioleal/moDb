@@ -85,25 +85,18 @@ What this lesson does not implement is the streaming half of replication -- keep
 <p>A second copy of the directory — a read-only follower — kept caught up from the primary&#x27;s WAL, so the payroll report from Lesson 6 can run against the replica instead of competing with live writes on the primary.</p>
 <h2>New Concepts</h2>
 <ul>
-<li>Primary/follower model, <code>modb replicate bootstrap</code>/<code>apply-wal</code>/<code>status</code>,</li>
-<p><code>set_read_only_replica</code> — see <a href="../../../OPERACAO_REPLICACAO.md">OPERACAO_REPLICACAO.md</a>.</p>
-<li>*(Stretch goal)* <code>PrimaryStorage::wal_only</code> — a primary with no local data</li>
-<p>files at all, and <code>modb replicate seed-wal</code>.</p>
+<li>Primary/follower model, <code>modb replicate bootstrap</code>/<code>apply-wal</code>/<code>status</code>, <code>set_read_only_replica</code> — see <a href="../../../OPERACAO_REPLICACAO.md">OPERACAO_REPLICACAO.md</a>.</li>
+<li><em>(Stretch goal)</em> <code>PrimaryStorage::wal_only</code> — a primary with no local data files at all, and <code>modb replicate seed-wal</code>.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-12 have run.</p>
 <h2>Steps</h2>
 <ul>
-<li>Open the primary (the same <code>employee-directory.modb</code> every earlier</li>
-<p>lesson used) and bind every type.</p>
-<li>Bootstrap a follower using the library calls directly (the same calls</li>
-<p>behind <code>modb replicate bootstrap</code>): <code>repl::create_bootstrap_snapshot( primary, temp_dir)</code> copies the primary&#x27;s data file under a brief writer barrier; <code>repl::install_bootstrap_snapshot(snapshot, follower_path)</code> installs it at <code>employee-directory-replica.modb</code>, next to the main file. Unlike every earlier lesson&#x27;s artifact, this follower is *this lesson&#x27;s own*, removed again at the end of the run — Lesson 13 is the last lesson, so there&#x27;s no Lesson 14 to chain it forward to.</p>
-<li>Open the follower file, re-<code>bind()</code> every type, confirm its</li>
-<p><code>database_uuid()</code> matches the primary&#x27;s, and call <code>set_read_only_replica(true)</code>.</p>
-<li>Run a Lesson-6-style payroll report (`scan&lt;Employee&gt;(snapshot,</li>
-<p>visitor)`) against the follower&#x27;s own snapshot.</p>
-<li>Confirm the follower rejects writes: <code>follower-&gt;begin()</code> fails with</li>
-<p><code>ErrorCode::replica_read_only</code>.</p>
+<li>Open the primary (the same <code>employee-directory.modb</code> every earlier lesson used) and bind every type.</li>
+<li>Bootstrap a follower using the library calls directly (the same calls behind <code>modb replicate bootstrap</code>): <code>repl::create_bootstrap_snapshot( primary, temp_dir)</code> copies the primary&#x27;s data file under a brief writer barrier; <code>repl::install_bootstrap_snapshot(snapshot, follower_path)</code> installs it at <code>employee-directory-replica.modb</code>, next to the main file. Unlike every earlier lesson&#x27;s artifact, this follower is <em>this lesson&#x27;s own</em>, removed again at the end of the run — Lesson 13 is the last lesson, so there&#x27;s no Lesson 14 to chain it forward to.</li>
+<li>Open the follower file, re-<code>bind()</code> every type, confirm its <code>database_uuid()</code> matches the primary&#x27;s, and call <code>set_read_only_replica(true)</code>.</li>
+<li>Run a Lesson-6-style payroll report (<code>scan&lt;Employee&gt;(snapshot, visitor)</code>) against the follower&#x27;s own snapshot.</li>
+<li>Confirm the follower rejects writes: <code>follower-&gt;begin()</code> fails with <code>ErrorCode::replica_read_only</code>.</li>
 </ul>
 <p>This lesson does <strong>not</strong> implement the <code>apply-wal</code>/streaming half of replication (keeping a follower continuously caught up) or the <code>wal_only</code> + <code>seed-wal</code> stretch goal — the bootstrap snapshot above is a one-time copy, current as of its <code>cut_lsn</code>. See <a href="../../../OPERACAO_REPLICACAO.md">OPERACAO_REPLICACAO.md</a> for how streaming apply and <code>wal_only</code> primaries extend this.</p>
 <h2>Full Listing (End of Lesson)</h2>
@@ -121,12 +114,9 @@ Follower rejected a write attempt as expected: follower rejects begin/write</cod
 <p>The <code>cut_lsn</code>, byte count, and payroll total (Ana 14500 + Bruno 11250 + Carla 20000 + Gustavo 9000) will match this exactly for a full, unmodified, in-order run of the whole course, since every step up to this point is deterministic.</p>
 <h2>What to Notice</h2>
 <ul>
-<li>Primary and follower must never share a data volume — the follower here</li>
-<p>is deliberately a separate file (<code>*-replica.modb</code>), not another handle onto the same path.</p>
-<li><code>create_bootstrap_snapshot</code> briefly opens and rolls back a transaction</li>
-<p>on the primary purely as a writer barrier — it&#x27;s not a lasting lock, but it does mean bootstrap can&#x27;t run concurrently with another open write.</p>
-<li>A <code>wal_only</code> primary can&#x27;t donate a file-copy bootstrap at all</li>
-<p>(<code>data_files_disabled</code> — see <code>create_bootstrap_snapshot</code>&#x27;s first check); that&#x27;s what <code>seed-wal</code> is for, and it&#x27;s out of scope for this lesson.</p>
+<li>Primary and follower must never share a data volume — the follower here is deliberately a separate file (<code>*-replica.modb</code>), not another handle onto the same path.</li>
+<li><code>create_bootstrap_snapshot</code> briefly opens and rolls back a transaction on the primary purely as a writer barrier — it&#x27;s not a lasting lock, but it does mean bootstrap can&#x27;t run concurrently with another open write.</li>
+<li>A <code>wal_only</code> primary can&#x27;t donate a file-copy bootstrap at all (<code>data_files_disabled</code> — see <code>create_bootstrap_snapshot</code>&#x27;s first check); that&#x27;s what <code>seed-wal</code> is for, and it&#x27;s out of scope for this lesson.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

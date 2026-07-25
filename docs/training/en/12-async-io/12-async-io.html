@@ -85,23 +85,17 @@ Carla&#x27;s salary is reset to a clean value at the end, so the timing loop&#x2
 <p>Nothing user-facing — this lesson is about <strong>measuring</strong> an internal option: reopening the directory with <code>DatabaseOptions::wal_io = WalIoMode::async</code> and comparing commit throughput for a batch of employee updates against the default synchronous WAL.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>DatabaseOptions::wal_io</code>, <code>AsyncWalSink</code>, why this is opt-in and</li>
-<p>currently unproven — see <a href="../../../OPERACAO_IO_ASSINCRONO.md">OPERACAO_IO_ASSINCRONO.md</a>.</p>
+<li><code>DatabaseOptions::wal_io</code>, <code>AsyncWalSink</code>, why this is opt-in and currently unproven — see <a href="../../../OPERACAO_IO_ASSINCRONO.md">OPERACAO_IO_ASSINCRONO.md</a>.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file with Carla already in it (from Lesson 2 onward) — this lesson is a side-quest measuring an internal option, not a required dependency for Lesson 13&#x27;s mechanics. The course still expects you to have run Lessons 1-11 first, same as every other lesson.</p>
 <h2>Steps</h2>
 <ul>
-<li>Look Carla up by name (inside the timing helper itself, once per</li>
-<p>reopen, outside the timed loop).</p>
-<li>Reopen the same employee-directory file twice: once with default</li>
-<p><code>DatabaseOptions{}</code> (<code>wal_io = sync</code>), once with <code>DatabaseOptions{.wal_io = WalIoMode::async}</code>. <code>wal_io</code> is a per-open runtime choice, not a persisted format decision, so the same file works under either mode.</p>
-<li>Run 200 committed raises against Carla under each mode, timing the</li>
-<p>whole loop with <code>std::chrono::steady_clock</code>.</p>
-<li>Print both timings and commits/second, and report honestly whichever</li>
-<p>mode came out ahead on this run — don&#x27;t assume <code>async</code> wins.</p>
-<li>Settle Carla&#x27;s salary back to a clean value (20000) at the end so later</li>
-<p>lessons aren&#x27;t left with whatever value the last timing iteration happened to write.</p>
+<li>Look Carla up by name (inside the timing helper itself, once per reopen, outside the timed loop).</li>
+<li>Reopen the same employee-directory file twice: once with default <code>DatabaseOptions{}</code> (<code>wal_io = sync</code>), once with <code>DatabaseOptions{.wal_io = WalIoMode::async}</code>. <code>wal_io</code> is a per-open runtime choice, not a persisted format decision, so the same file works under either mode.</li>
+<li>Run 200 committed raises against Carla under each mode, timing the whole loop with <code>std::chrono::steady_clock</code>.</li>
+<li>Print both timings and commits/second, and report honestly whichever mode came out ahead on this run — don&#x27;t assume <code>async</code> wins.</li>
+<li>Settle Carla&#x27;s salary back to a clean value (20000) at the end so later lessons aren&#x27;t left with whatever value the last timing iteration happened to write.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_12_async_io.cpp">lesson_12_async_io.cpp</a></p>
@@ -117,8 +111,7 @@ Sync was faster (or tied) on this run (1.10x)
 Settled Carla&#x27;s salary back to 20000 for later lessons</code></pre>
 <h2>What to Notice</h2>
 <ul>
-<li>This lesson is deliberately about *not* reaching for an option just</li>
-<p>because it exists — on the run captured above, <code>sync</code> was marginally faster than <code>async</code>, consistent with <a href="../../../OPERACAO_IO_ASSINCRONO.md">OPERACAO_IO_ASSINCRONO.md</a>&#x27;s &quot;no consistent win yet&quot; finding. Measure your own workload before opting in.</p>
+<li>This lesson is deliberately about <em>not</em> reaching for an option just because it exists — on the run captured above, <code>sync</code> was marginally faster than <code>async</code>, consistent with <a href="../../../OPERACAO_IO_ASSINCRONO.md">OPERACAO_IO_ASSINCRONO.md</a>&#x27;s &quot;no consistent win yet&quot; finding. Measure your own workload before opting in.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

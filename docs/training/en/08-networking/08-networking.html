@@ -80,27 +80,21 @@ Only after that does the client collect every employee remotely, then repeat Les
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
 <h2>What You&#x27;ll Add</h2>
-<p>The directory starts serving itself over TCP: one process opens a <code>Server</code>, binds <code>Employee</code>, and accepts a single connection on a background thread, while the main thread acts as the client — connecting, running a capability handshake, and re-running the &quot;search&quot; queries from Lesson 7 *remotely* via <code>QueryDescription</code> instead of the local <code>Query&lt;T&gt;</code> builder.</p>
+<p>The directory starts serving itself over TCP: one process opens a <code>Server</code>, binds <code>Employee</code>, and accepts a single connection on a background thread, while the main thread acts as the client — connecting, running a capability handshake, and re-running the &quot;search&quot; queries from Lesson 7 <em>remotely</em> via <code>QueryDescription</code> instead of the local <code>Query&lt;T&gt;</code> builder.</p>
 <p>This lesson keeps server and client in <strong>one binary</strong> (a background thread runs <code>serve_one()</code> while the main thread drives the connection) — the same single-process convention every later networking lesson (9 and 10) also uses. A real deployment would split them into separate processes, but nothing about <code>Server</code>/<code>ServerConnection</code> requires that split.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>Server::listen</code>/<code>serve_one</code>/<code>serve_forever</code>, <code>ServerConnection::connect</code>/</li>
-<p><code>handshake</code>, <code>QueryDescription</code> — see <a href="../../../reference/networking-protocol.md">docs/reference/networking-protocol.md</a>.</p>
-<li>Protocol limits, backpressure (<code>max_in_flight_objects</code>), cooperative</li>
-<p>cancellation and connection reuse.</p>
+<li><code>Server::listen</code>/<code>serve_one</code>/<code>serve_forever</code>, <code>ServerConnection::connect</code>/ <code>handshake</code>, <code>QueryDescription</code> — see <a href="../../../reference/networking-protocol.md">docs/reference/networking-protocol.md</a>.</li>
+<li>Protocol limits, backpressure (<code>max_in_flight_objects</code>), cooperative cancellation and connection reuse.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-7 have run, with an indexed salary search already in place.</p>
 <h2>Steps</h2>
 <ul>
-<li><code>Server::listen(path, &quot;127.0.0.1&quot;, 0)</code> (port <code>0</code> = &quot;pick any free port&quot;),</li>
-<p>bind <code>Employee</code>, and start a background <code>std::thread</code> running <code>server-&gt;serve_one()</code> (accepts exactly one connection, then returns).</p>
-<li><code>ServerConnection::connect({.host, .port, .database_name})</code> from the main</li>
-<p>thread; print the negotiated protocol version and <code>max_concurrent_streams</code> from <code>connection-&gt;info()</code>.</p>
-<li>Run `connection-&gt;collect(QueryDescription{.type = employee_type, .limit</li>
-<p>= 10})` to fetch every employee remotely.</p>
-<li>Run a second <code>collect()</code> with `QueryDescription{.equals =</li>
-<p>EqualityFilter{salary_field, AttributeValue{20000}}}<code> to find one employee by exact salary match — this is the wire protocol&#x27;s search primitive; unlike the local </code>Query&lt;T&gt;<code> builder, it only supports equality, not </code>.between()`.</p>
+<li><code>Server::listen(path, &quot;127.0.0.1&quot;, 0)</code> (port <code>0</code> = &quot;pick any free port&quot;), bind <code>Employee</code>, and start a background <code>std::thread</code> running <code>server-&gt;serve_one()</code> (accepts exactly one connection, then returns).</li>
+<li><code>ServerConnection::connect({.host, .port, .database_name})</code> from the main thread; print the negotiated protocol version and <code>max_concurrent_streams</code> from <code>connection-&gt;info()</code>.</li>
+<li>Run <code>connection-&gt;collect(QueryDescription{.type = employee_type, .limit = 10})</code> to fetch every employee remotely.</li>
+<li>Run a second <code>collect()</code> with <code>QueryDescription{.equals = EqualityFilter{salary_field, AttributeValue{20000}}}</code> to find one employee by exact salary match — this is the wire protocol&#x27;s search primitive; unlike the local <code>Query&lt;T&gt;</code> builder, it only supports equality, not <code>.between()</code>.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_08_networking.cpp">lesson_08_networking.cpp</a></p>
@@ -115,10 +109,8 @@ Remote query returned 3 employees
 Remote search for salary == 20000 returned 1 match(es): Carla</code></pre>
 <h2>What to Notice</h2>
 <ul>
-<li>Single-writer still applies — the network doesn&#x27;t add concurrent</li>
-<p>writers, only a connection through which one client streams queries.</p>
-<li><code>QueryDescription</code> is deliberately narrower than the local <code>Query&lt;T&gt;</code></li>
-<p>builder: it carries a type, an optional <code>limit</code>, and an optional single <code>EqualityFilter</code> — no <code>.between()</code>, no <code>top_k</code>, no composition. If you need those over the wire, that&#x27;s what Lesson 9&#x27;s domain operations and Lesson 10&#x27;s facades are for.</p>
+<li>Single-writer still applies — the network doesn&#x27;t add concurrent writers, only a connection through which one client streams queries.</li>
+<li><code>QueryDescription</code> is deliberately narrower than the local <code>Query&lt;T&gt;</code> builder: it carries a type, an optional <code>limit</code>, and an optional single <code>EqualityFilter</code> — no <code>.between()</code>, no <code>top_k</code>, no composition. If you need those over the wire, that&#x27;s what Lesson 9&#x27;s domain operations and Lesson 10&#x27;s facades are for.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

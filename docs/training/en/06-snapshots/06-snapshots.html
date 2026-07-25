@@ -85,8 +85,7 @@ A fresh snapshot afterward reports the new, higher total. Finally, `collect_garb
 <p>A &quot;total payroll by department&quot; report that takes a <code>Snapshot</code> before running, so it reflects one consistent instant even if raises are being applied to other employees while the report iterates. You&#x27;ll also add a manual &quot;compact the directory&quot; maintenance command wired to <code>collect_garbage()</code>.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>Database::snapshot()</code>, epoch-based reads (<code>get</code>/<code>scan</code> with a</li>
-<p><code>Snapshot</code>), single retained <code>previous</code> version, <code>snapshot_conflict</code> — see <a href="../../../reference/snapshots-mvcc.md">docs/reference/snapshots-mvcc.md</a>.</p>
+<li><code>Database::snapshot()</code>, epoch-based reads (<code>get</code>/<code>scan</code> with a <code>Snapshot</code>), single retained <code>previous</code> version, <code>snapshot_conflict</code> — see <a href="../../../reference/snapshots-mvcc.md">docs/reference/snapshots-mvcc.md</a>.</li>
 <li>Explicit garbage collection.</li>
 </ul>
 <h2>Starting Point</h2>
@@ -95,10 +94,8 @@ A fresh snapshot afterward reports the new, higher total. Finally, `collect_garb
 <ul>
 <li>Look Carla up by name.</li>
 <li>Implement the payroll report using <code>database-&gt;scan&lt;Employee&gt;(snapshot, visitor)</code>.</li>
-<li>Interleave the report with a concurrent raise (in the same process,</li>
-<p>sequenced to simulate &quot;meanwhile&quot;) and show the report&#x27;s total doesn&#x27;t include the raise, while a fresh snapshot taken afterward does.</p>
-<li>Force a <code>snapshot_conflict</code> on purpose (hold a snapshot open, try to</li>
-<p>edit the same employee a second time) and handle it with a retry once the snapshot closes.</p>
+<li>Interleave the report with a concurrent raise (in the same process, sequenced to simulate &quot;meanwhile&quot;) and show the report&#x27;s total doesn&#x27;t include the raise, while a fresh snapshot taken afterward does.</li>
+<li>Force a <code>snapshot_conflict</code> on purpose (hold a snapshot open, try to edit the same employee a second time) and handle it with a retry once the snapshot closes.</li>
 <li>Call <code>collect_garbage()</code> and print how many records it reclaimed.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
@@ -116,10 +113,8 @@ Payroll total on a fresh snapshot = 44500
 collect_garbage() reclaimed 12 record(s)</code></pre>
 <h2>What to Notice</h2>
 <ul>
-<li>A snapshot is an epoch number, not a data copy — cheap to open, but</li>
-<p>every one you leave open blocks GC from reclaiming what it protects (the single retained <code>previous</code> version).</p>
-<li><code>snapshot_conflict</code> is a signal to retry once the blocking snapshot</li>
-<p>closes, not a hard failure.</p>
+<li>A snapshot is an epoch number, not a data copy — cheap to open, but every one you leave open blocks GC from reclaiming what it protects (the single retained <code>previous</code> version).</li>
+<li><code>snapshot_conflict</code> is a signal to retry once the blocking snapshot closes, not a hard failure.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>
