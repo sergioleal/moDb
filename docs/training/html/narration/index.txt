@@ -1,0 +1,17 @@
+Think of this course as watching one small, real application grow, one commit-sized capability at a time, instead of reading thirteen disconnected demos.
+
+Every lesson lives in its own folder: the lesson document, one self-contained C++ source file, and a short README explaining exactly how to build and run it. "Self-contained" is a specific claim here -- each source file contains only that lesson's own new code, nothing copy-pasted forward from earlier lessons.
+
+What makes the lessons a course rather than thirteen unrelated examples is a single, real, persistent database file. Lesson 1 creates it. Every lesson after that is a separate program run that opens the very same file and continues exactly where the previous run left off. Ana, Bruno, and Carla, once created in Lesson 2, are still there in Lesson 13.
+
+Because each lesson is a genuinely separate process with no shared memory, you will also see a recurring pattern: instead of remembering an employee's numeric id across runs, later lessons look employees up by name through an index. That is not a toy simplification -- it is closer to how a real client actually finds a record after restarting.
+
+Run the lessons in order, once each, starting from Lesson 1. If you want to start over, just re-run Lesson 1 -- it deletes any old copy of the file and creates it fresh.
+
+Most tutorials show independent snippets: a query example here, a networking example there, each starting from a clean slate. That is easy to write but does not resemble how software actually accumulates. This course instead commits to one persistent artifact -- a single database file -- and every lesson's code must cope with whatever state the file already holds, the same constraint a real production system lives under permanently. Object identity recovered by name lookup, not by remembered ids, is a direct consequence of taking that constraint seriously: a real client restarting cannot remember an id either.
+
+The context for this lesson is that This course is the project-based companion to docs/DEVELOPER_GUIDE.md. Instead of a fast narrative tour, you build one real application -- an employee directory -- one capability at a time, and every lesson's code is real, compiling code, not pseudocode.
+
+What we are trying to achieve is this: Set expectations for the whole arc -- binding, persistence, transactions, schema evolution, relationships, snapshots, queries, networking, remote operations, facades, graphs, async I/O, and replication -- and explain how the 13 lessons chain together.
+
+By the end of this lesson, the learner should be able to understand why each lesson is a separate, self-contained program that opens the same persistent file the previous lesson left behind. See how object identity is recovered across separate runs through name-based lookups instead of shared in-process state. Know where each lesson's source and build instructions live.

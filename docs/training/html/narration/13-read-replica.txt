@@ -1,0 +1,15 @@
+This is the last lesson, and its follower is deliberately not part of the chain the way the primary file has been for the previous twelve. It is created fresh, used, and removed again before the run ends -- there is no Lesson 14 to hand it forward to.
+
+`create_bootstrap_snapshot(primary, temp_dir)` briefly opens and rolls back a transaction on the primary purely as a writer barrier, then copies its data file. `install_bootstrap_snapshot` moves that copy into place as a separate file, `employee-directory-replica.modb`, next to the main directory file -- never the same path, never the same handle.
+
+Opening the follower, confirming its `database_uuid()` matches the primary's, and calling `set_read_only_replica(true)` sets up the rest of the lesson: a payroll report -- the exact same `scan<Employee>(snapshot, visitor)` pattern from Lesson 6 -- run against the follower's own snapshot instead of the primary's, and a `begin()` call on the follower that fails immediately with `replica_read_only`.
+
+What this lesson does not implement is the streaming half of replication -- keeping a follower continuously caught up after its initial bootstrap -- or a `wal_only` primary, which cannot donate a file-copy bootstrap at all and needs `seed-wal` instead. Both extend naturally from what is here, but they are out of this lesson's scope.
+
+A read-only replica is valuable precisely because it competes with nothing: no write traffic touches it, so a reporting workload running against it cannot be slowed down by, or slow down, the primary's live writes. The bootstrap's writer barrier is a brief, necessary compromise -- copying a consistent data file requires the primary to hold still for a moment -- but it is not a lasting lock, and it is the only point at which primary and follower ever interact in this lesson. Everything after that, the payroll report and the rejected write, happens entirely on the follower's own terms.
+
+The context for this lesson is that The whole course has run against one file that both reads and writes. Reporting workloads often want to run somewhere that cannot compete with live writes -- a read-only follower.
+
+What we are trying to achieve is this: Bootstrap a follower from the primary using the same library calls behind `modb replicate bootstrap`, confirm its identity matches the primary, run a Lesson-6-style payroll report against it, and confirm it refuses writes.
+
+By the end of this lesson, the learner should be able to describe what `create_bootstrap_snapshot`'s writer barrier is, and is not. Explain why the follower here is this lesson's own throwaway artifact, unlike every earlier lesson's persistent file. State what a `wal_only` primary cannot do, and what would be needed instead.

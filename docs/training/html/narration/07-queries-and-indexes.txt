@@ -1,0 +1,15 @@
+This lesson runs the identical query twice, and the interesting part is precisely that it is identical both times.
+
+The first run -- `.between(salary_field, 15000, max_int64)` -- has no index to work with, so `.plan()` reports `access=table_scan`. Nothing about the query itself asked for a scan; there was simply nothing better available yet.
+
+`create_index<Employee>(salary_field)` changes exactly one thing: whether an index exists. Running the *same* query again reports `access=index_scan`. The planner did not need a hint, a rewritten query, or a different API call -- it is rule-based, and an index appearing is, on its own, enough to change the chosen access path.
+
+A `top_k(2, comparator)` query closes the lesson, returning the two highest earners with their salaries. `top_k` gets its own access path rather than sorting the entire table and taking the first two -- which is why it is worth learning as a distinct tool, not a shorthand for `order_by` plus `limit`.
+
+Ring0's planner is rule-based, not cost-based: the same query shape always produces the same plan, and only the presence or absence of an index changes the outcome. That determinism is what lets this lesson demonstrate the effect of `create_index` so cleanly -- nothing about the query changed between the two `.plan()` calls, only what the planner had available. `top_k` earning its own access path, rather than being sugar over a full sort, is the same idea applied to a different question: give the planner a shape it can recognize, and it can choose a better strategy for it.
+
+The context for this lesson is that Scanning every employee by hand does not scale, and it is not how a real directory would answer "who earns at least this much?" This lesson replaces hand-written loops with `Database::query<T>()`.
+
+What we are trying to achieve is this: Run the same salary search first as a table scan, then again after `create_index<Employee>(salary_field)`, and compare `.plan()` output both times before running a `top_k` query for the highest earners.
+
+By the end of this lesson, the learner should be able to read a `QueryPlan`'s `access_name()` and `index_available` fields. Explain why the exact same query can report `table_scan` and, later, `index_scan`. Distinguish `top_k` from sorting the whole result set.

@@ -1,0 +1,17 @@
+This is the lesson where the directory stops being three isolated salary records and starts looking like an organization.
+
+`Department` is the simplest new type here: just a name, referenced from `Employee` through `Ref<Department>`. Ana and Bruno get assigned to Engineering and Sales respectively, and -- quietly, as infrastructure rather than as this lesson's topic -- `Department.name` gets its own index, for the same reason `Employee.name` got one back in Lesson 2.
+
+Next comes a temporary employee, Diego, with an `OwnedRef<EmergencyContact>` pointing at his contact, Elena. Removing Diego removes Elena too, automatically -- that is what `OwnedRef` means. Trying to resolve her afterward fails with `record_not_found`, and that failure is the proof, not a side note.
+
+Carla is assigned two projects through a `PersistentVector<Ref<Project>>` -- a collection stored as a separate blob, referenced from `Employee` by a `BlobId` field that has to be re-stored on Carla every time the vector's identity changes underneath it.
+
+Finally, Sales is removed while Bruno's `department` field still points at it. Nothing prevents the removal and nothing auto-repairs Bruno's reference. Resolving Sales directly afterward fails cleanly -- and Bruno's field keeps pointing at a department that no longer exists, a loose end this course does not tie up until Lesson 9.
+
+An object database earns its keep when the domain has relationships, not just isolated records. `Ref` and `OwnedRef` are wire-identical -- both are stored as an `ObjectId` -- but they encode different intent: association versus ownership, which is why only one of them cascades on delete. The dangling reference left behind when Sales is removed is not a bug this lesson works around; it is shown deliberately, because a real system has to decide what "still points at something gone" means, and silently preventing or auto-repairing it would hide that decision rather than make it.
+
+The context for this lesson is that An employee directory with no departments, no emergency contacts, and no projects is not really a directory yet. This lesson introduces the relationships that make it one.
+
+What we are trying to achieve is this: Add `Department` (via `Ref`), an owned `EmergencyContact` (via `OwnedRef`, cascade-deleted with its owner), and a `PersistentVector<Ref<Project>>` -- then watch a dangling reference happen and resolve to a clear error.
+
+By the end of this lesson, the learner should be able to distinguish `Ref<T>` (association) from `OwnedRef<T>` (ownership) by their delete behavior. Explain why a `PersistentVector`'s `BlobId` must be re-stored on its owner after every mutation. Describe what happens when you remove an object something else still points to.

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 2 — Persist and Reopen - Ring0 Training</title>
+  <link rel="stylesheet" href="assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="index.html">
+        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">Employee directory, lesson by lesson</span>
+        </span>
+      </a>
+      <nav class="topnav"><a class="nav-button" href="01-binding-your-first-type.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="03-transactions.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Lessons</p>
+        <ol class="lesson-list">
+          <li><a href="index.html">Index</a></li>
+<li><a href="01-binding-your-first-type.html">Lesson 1</a></li>
+<li><a href="02-persist-and-reopen.html" aria-current="page">Lesson 2</a></li>
+<li><a href="03-transactions.html">Lesson 3</a></li>
+<li><a href="04-handles-and-updates.html">Lesson 4</a></li>
+<li><a href="05-relationships.html">Lesson 5</a></li>
+<li><a href="06-snapshots.html">Lesson 6</a></li>
+<li><a href="07-queries-and-indexes.html">Lesson 7</a></li>
+<li><a href="08-networking.html">Lesson 8</a></li>
+<li><a href="09-remote-operations.html">Lesson 9</a></li>
+<li><a href="10-facades.html">Lesson 10</a></li>
+<li><a href="11-graphs.html">Lesson 11</a></li>
+<li><a href="12-async-io.html">Lesson 12</a></li>
+<li><a href="13-read-replica.html">Lesson 13</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Lesson 2 — Persist and Reopen</h1>
+          <p>Learn one capability, run the lesson&#x27;s own binary, then carry the idea into the next lesson.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>audio/02-persist-and-reopen.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="audio/02-persist-and-reopen.mp3"></audio>
+          <a class="script-link" href="narration/02-persist-and-reopen.txt">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Lesson</h2>
+          <p>A binding only describes a shape. The next question is whether a real record survives closing and reopening the file Lesson 1 created.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Write three employees in one transaction, then reopen the file in a second block and read one of them back -- found by name, not by a remembered id.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Understand `Database::open` versus `Database::create`, and why this lesson only ever opens. See why reopening is a stronger persistence proof than reading data still in memory. Explain why an index on `Employee.name` becomes necessary the moment lessons stop sharing a process.</p>
+          <h3>Conceptual Layer</h3>
+          <p>Reading data back immediately after writing it only proves that memory allocation and an API call succeeded. Reopening the file proves a longer chain: the record was encoded, written, committed, made findable by identity, found again, and decoded through a binding registered fresh in a new process. The name index that appears here for the first time exists precisely because that chain, across genuinely separate program runs, has no shared memory to fall back on -- identity has to be recoverable from the data itself.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>This lesson is two scoped blocks inside one `main()`, and the boundary between them matters more than it looks.</p>
+<p>The first block opens the file Lesson 1 created -- never creates one of its own -- begins a transaction, and commits three `Employee` records: Ana, Bruno, and Carla. Right after that commit, it also creates an index on `Employee.name`. That index is not this lesson&#x27;s teaching topic; it is infrastructure every later lesson depends on, because every later lesson is a genuinely separate program run with no access to the `ObjectId`s this run just produced.</p>
+<p>The second block reopens the file again, as if it were a fresh process starting up, and looks Ana up by name through that index rather than by remembering her id. It then confirms the id it found matches the one this same run captured earlier, proving the lookup is not just plausible but correct.</p>
+<p>The object ids you will see (18, 19, 20) are deterministic for this exact sequence of operations, but they are not &quot;1, 2, 3&quot; -- the catalog itself consumes a few ids first, for its own type definitions and baselines, before your first real record.</p>
+        </section>
+
+        <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
+<h2>What You&#x27;ll Add</h2>
+<p>Real employee records that survive closing and reopening the directory. The program now writes a handful of employees in one run, and a second run (simulating a restart) reads them back by id.</p>
+<h2>New Concepts</h2>
+<ul>
+<li><code>Database::create</code> vs <code>Database::open</code>, the <code>shared_ptr</code> +</li>
+<p><code>DatabaseRegistry</code> attach/detach pattern — see <a href="../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a>.</p>
+<li>Why bindings must be repeated on every process start (they don&#x27;t persist</li>
+<p>themselves).</p>
+</ul>
+<h2>Starting Point</h2>
+<p>The persistent database file Lesson 1 created (see the course <a href="index.html#how-the-code-is-organized">README</a>) — this lesson is a separate program run that opens it.</p>
+<h2>Steps</h2>
+<ul>
+<li>Two scoped blocks simulate two separate program runs, both inside this</li>
+<p>one lesson&#x27;s <code>main()</code>, against the SAME file Lesson 1 created.</p>
+<li>First block: open (never create — Lesson 1 already did that), bind,</li>
+<p>begin a transaction, create three <code>Employee</code> records, commit.</p>
+<li>Also in the first block: <code>create_index&lt;Employee&gt;(FieldId{1})</code> on</li>
+<p><code>name</code> — every lesson from here on is a genuinely separate binary with no shared in-process state, so this index is what lets them find &quot;Ana&quot; again without remembering an <code>ObjectId</code> across runs.</p>
+<li>Second block: open again (a fresh <code>Database</code> instance, simulating a</li>
+<p>restart), re-bind, look Ana up <strong>by name</strong> through the new index, then read her record back by the resulting id.</p>
+</ul>
+<h2>Full Listing (End of Lesson)</h2>
+<p><a href="../en/02-persist-and-reopen/lesson_02_persist_reopen.cpp">lesson_02_persist_reopen.cpp</a></p>
+<h2>Build and Run</h2>
+<pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_02
+.\build\debug\employee_directory_lesson_02.exe</code></pre>
+<h2>Expected Output</h2>
+<pre><code>Objective: persist real employees and read them back after a restart.
+Wrote 3 employees (Ana=18, Bruno=19, Carla=20)
+After reopen, found &quot;Ana&quot; as employee 18 = Ana (12000)</code></pre>
+<p>The object ids (18/19/20) are deterministic for this exact sequence of operations, but they&#x27;re not &quot;1, 2, 3&quot; — the catalog itself consumes a few ids first (type definitions, baselines) before your first real record.</p>
+<h2>What to Notice</h2>
+<ul>
+<li>Forgetting to re-<code>bind()</code> after <code>open()</code> is the most common mistake at</li>
+<p>this stage — every lesson in this course re-binds every type it touches, every single time it opens the file, for exactly this reason.</p>
+<li>The <code>shared_ptr</code>/registry attach isn&#x27;t ceremony — it&#x27;s why a <code>Handle</code></li>
+<p>obtained in the first block would be meaningless in the second (different registry id, even same file).</p>
+<li>The name index exists purely as course infrastructure, introduced here</li>
+<p>because this is the first lesson that needs to find a record again after &quot;restarting.&quot; Lesson 7 is where indexes and query planning are actually taught as a topic.</p>
+</ul>
+<h2>Related Reference</h2>
+<ul>
+<li><a href="../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a></li>
+<li><a href="../../DEVELOPER_GUIDE.md#3-create-persist-reopen">DEVELOPER_GUIDE.md, Chapter 3</a></li>
+</ul>
+        <nav class="bottomnav"><a class="nav-button" href="01-binding-your-first-type.html">Previous</a><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="03-transactions.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

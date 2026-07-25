@@ -1,0 +1,15 @@
+This is the first lesson, so it starts from nothing: no file, no schema, no records.
+
+The `Employee` struct is ordinary C++ -- a `name` and a `salary`, nothing framework-specific. The interesting part is `employee_binding()`, which maps field id 1 to `name` and field id 2 to `salary` through a `BindingBuilder<Employee>`. Those small integers are what actually get persisted alongside every record; the field names exist for the reader's benefit, not the database's.
+
+The lesson creates the database file at a fixed, permanent location -- `docs/training/en/employee-directory.modb` -- deletes any old copy first, binds `Employee`, and prints the `TypeDefinitionId` the catalog assigned. Nothing is written as a durable record yet; that is Lesson 2's job.
+
+What this lesson establishes, more than any specific API, is the starting point for the whole course: one file, on disk, that every subsequent lesson will reopen. Detaching from the registry at the end does not delete that file -- it stays exactly where it is, waiting for Lesson 2.
+
+A binding is Ring0's answer to the gap between C++ memory layout and a durable schema. The struct compiles into one program; the bytes it produces may be read years later by a different build. The binding is what tells Ring0 which fields belong to the persistent contract, and stable field ids -- not field names, not member order -- are the coordinate system that makes old bytes interpretable with intent long after the code that wrote them has changed.
+
+The context for this lesson is that Before an employee directory can store anything, Ring0 needs to know what an Employee looks like. That mapping between a plain C++ struct and the catalog is called a binding.
+
+What we are trying to achieve is this: Define `Employee`, bind it with `BindingBuilder<Employee>`, create the database file that every later lesson will keep reopening, and confirm the type is registered.
+
+By the end of this lesson, the learner should be able to read a `BindingBuilder` definition and identify the persistent field ids. Explain why field ids, not field names, are the durable contract. Understand that binding a type is a separate step from writing any record of it.

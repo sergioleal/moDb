@@ -1,0 +1,15 @@
+This lesson is two scoped blocks inside one `main()`, and the boundary between them matters more than it looks.
+
+The first block opens the file Lesson 1 created -- never creates one of its own -- begins a transaction, and commits three `Employee` records: Ana, Bruno, and Carla. Right after that commit, it also creates an index on `Employee.name`. That index is not this lesson's teaching topic; it is infrastructure every later lesson depends on, because every later lesson is a genuinely separate program run with no access to the `ObjectId`s this run just produced.
+
+The second block reopens the file again, as if it were a fresh process starting up, and looks Ana up by name through that index rather than by remembering her id. It then confirms the id it found matches the one this same run captured earlier, proving the lookup is not just plausible but correct.
+
+The object ids you will see (18, 19, 20) are deterministic for this exact sequence of operations, but they are not "1, 2, 3" -- the catalog itself consumes a few ids first, for its own type definitions and baselines, before your first real record.
+
+Reading data back immediately after writing it only proves that memory allocation and an API call succeeded. Reopening the file proves a longer chain: the record was encoded, written, committed, made findable by identity, found again, and decoded through a binding registered fresh in a new process. The name index that appears here for the first time exists precisely because that chain, across genuinely separate program runs, has no shared memory to fall back on -- identity has to be recoverable from the data itself.
+
+The context for this lesson is that A binding only describes a shape. The next question is whether a real record survives closing and reopening the file Lesson 1 created.
+
+What we are trying to achieve is this: Write three employees in one transaction, then reopen the file in a second block and read one of them back -- found by name, not by a remembered id.
+
+By the end of this lesson, the learner should be able to understand `Database::open` versus `Database::create`, and why this lesson only ever opens. See why reopening is a stronger persistence proof than reading data still in memory. Explain why an index on `Employee.name` becomes necessary the moment lessons stop sharing a process.
