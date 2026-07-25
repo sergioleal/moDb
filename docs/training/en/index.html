@@ -16,26 +16,26 @@
           <span class="brand-subtitle">Employee directory, lesson by lesson</span>
         </span>
       </a>
-      <nav class="topnav"><span class="nav-button nav-disabled">Previous</span><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="01-binding-your-first-type.html">Next</a></nav>
+      <nav class="topnav"><span class="nav-button nav-disabled">Previous</span><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="01-binding-your-first-type/01-binding-your-first-type.html">Next</a></nav>
     </header>
     <div class="layout">
       <aside class="sidebar">
         <p class="sidebar-title">Course Lessons</p>
         <ol class="lesson-list">
           <li><a href="index.html" aria-current="page">Index</a></li>
-<li><a href="01-binding-your-first-type.html">Lesson 1</a></li>
-<li><a href="02-persist-and-reopen.html">Lesson 2</a></li>
-<li><a href="03-transactions.html">Lesson 3</a></li>
-<li><a href="04-handles-and-updates.html">Lesson 4</a></li>
-<li><a href="05-relationships.html">Lesson 5</a></li>
-<li><a href="06-snapshots.html">Lesson 6</a></li>
-<li><a href="07-queries-and-indexes.html">Lesson 7</a></li>
-<li><a href="08-networking.html">Lesson 8</a></li>
-<li><a href="09-remote-operations.html">Lesson 9</a></li>
-<li><a href="10-facades.html">Lesson 10</a></li>
-<li><a href="11-graphs.html">Lesson 11</a></li>
-<li><a href="12-async-io.html">Lesson 12</a></li>
-<li><a href="13-read-replica.html">Lesson 13</a></li>
+<li><a href="01-binding-your-first-type/01-binding-your-first-type.html">Lesson 1</a></li>
+<li><a href="02-persist-and-reopen/02-persist-and-reopen.html">Lesson 2</a></li>
+<li><a href="03-transactions/03-transactions.html">Lesson 3</a></li>
+<li><a href="04-handles-and-updates/04-handles-and-updates.html">Lesson 4</a></li>
+<li><a href="05-relationships/05-relationships.html">Lesson 5</a></li>
+<li><a href="06-snapshots/06-snapshots.html">Lesson 6</a></li>
+<li><a href="07-queries-and-indexes/07-queries-and-indexes.html">Lesson 7</a></li>
+<li><a href="08-networking/08-networking.html">Lesson 8</a></li>
+<li><a href="09-remote-operations/09-remote-operations.html">Lesson 9</a></li>
+<li><a href="10-facades/10-facades.html">Lesson 10</a></li>
+<li><a href="11-graphs/11-graphs.html">Lesson 11</a></li>
+<li><a href="12-async-io/12-async-io.html">Lesson 12</a></li>
+<li><a href="13-read-replica/13-read-replica.html">Lesson 13</a></li>
         </ol>
       </aside>
       <article class="content">
@@ -48,10 +48,10 @@
         <section class="audio-panel">
           <div>
             <p class="audio-label">Instructor Audio</p>
-            <p class="audio-copy">Place your generated narration file at <code>audio/index.mp3</code>, then use the player below.</p>
+            <p class="audio-copy">Place your generated narration file at <code>index.mp3</code>, then use the player below.</p>
           </div>
-          <audio controls preload="none" src="audio/index.mp3"></audio>
-          <a class="script-link" href="narration/index.txt">Open narration script</a>
+          <audio controls preload="none" src="index.mp3"></audio>
+          <a class="script-link" href="index-narration.txt">Open narration script</a>
         </section>
 
         
@@ -71,15 +71,19 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>Think of this course as watching one small, real application grow, one commit-sized capability at a time, instead of reading thirteen disconnected demos.</p>
-<p>Every lesson lives in its own folder: the lesson document, one self-contained C++ source file, and a short README explaining exactly how to build and run it. &quot;Self-contained&quot; is a specific claim here -- each source file contains only that lesson&#x27;s own new code, nothing copy-pasted forward from earlier lessons.</p>
-<p>What makes the lessons a course rather than thirteen unrelated examples is a single, real, persistent database file. Lesson 1 creates it. Every lesson after that is a separate program run that opens the very same file and continues exactly where the previous run left off. Ana, Bruno, and Carla, once created in Lesson 2, are still there in Lesson 13.</p>
-<p>Because each lesson is a genuinely separate process with no shared memory, you will also see a recurring pattern: instead of remembering an employee&#x27;s numeric id across runs, later lessons look employees up by name through an index. That is not a toy simplification -- it is closer to how a real client actually finds a record after restarting.</p>
-<p>Run the lessons in order, once each, starting from Lesson 1. If you want to start over, just re-run Lesson 1 -- it deletes any old copy of the file and creates it fresh.</p>
+          <p>Think of this course as watching one small, real application grow, one commit-sized capability at a time, instead of reading thirteen disconnected demos.
+
+Every lesson lives in its own folder: the lesson document, one self-contained C++ source file, and a short README explaining exactly how to build and run it. &quot;Self-contained&quot; is a specific claim here -- each source file contains only that lesson&#x27;s own new code, nothing copy-pasted forward from earlier lessons.
+
+What makes the lessons a course rather than thirteen unrelated examples is a single, real, persistent database file. Lesson 1 creates it. Every lesson after that is a separate program run that opens the very same file and continues exactly where the previous run left off. Ana, Bruno, and Carla, once created in Lesson 2, are still there in Lesson 13.
+
+Because each lesson is a genuinely separate process with no shared memory, you will also see a recurring pattern: instead of remembering an employee&#x27;s numeric id across runs, later lessons look employees up by name through an index. That is not a toy simplification -- it is closer to how a real client actually finds a record after restarting.
+
+Run the lessons in order, once each, starting from Lesson 1. If you want to start over, just re-run Lesson 1 -- it deletes any old copy of the file and creates it fresh.</p>
         </section>
 
         <p>A project-based course: you build one application, an employee directory, from an empty file to a networked, multi-client system with remote operations, versioned facades, and an org-chart graph — one capability at a time. Each lesson assumes you completed the previous one and starts from that lesson&#x27;s ending code.</p>
-<p>This assumes you&#x27;re comfortable with modern C++ (structs, templates, lambdas, RAII, smart pointers, <code>std::filesystem</code>) and have already skimmed <a href="../DEVELOPER_GUIDE.md">docs/DEVELOPER_GUIDE.md</a> or at least Chapter 0-1 of it (what Ring0 is, how to build it).</p>
+<p>This assumes you&#x27;re comfortable with modern C++ (structs, templates, lambdas, RAII, smart pointers, <code>std::filesystem</code>) and have already skimmed <a href="../../DEVELOPER_GUIDE.md">docs/DEVELOPER_GUIDE.md</a> or at least Chapter 0-1 of it (what Ring0 is, how to build it).</p>
 <blockquote><p><strong>Status:</strong> ✅ complete — all 13 lessons have real, compiling code, one</p></blockquote>
 <blockquote><p>self-contained folder per lesson, verified against an actual build and</p></blockquote>
 <blockquote><p>run. Each lesson names its target reference doc(s) in <code>docs/reference/</code></p></blockquote>
@@ -87,31 +91,31 @@
 <h2>Lessons</h2>
 <p>Each lesson lives in its own folder: the lesson doc, its <code>.cpp</code> source, and a <code>README.md</code> with the exact build/run commands.</p>
 <ol>
-<li><a href="01-binding-your-first-type.html">Binding Your First Type</a> — define</li>
+<li><a href="01-binding-your-first-type/01-binding-your-first-type.html">Binding Your First Type</a> — define</li>
 <p><code>Employee</code>, bind it, create the database.</p>
-<li><a href="02-persist-and-reopen.html">Persist and Reopen</a> — real records that</li>
+<li><a href="02-persist-and-reopen/02-persist-and-reopen.html">Persist and Reopen</a> — real records that</li>
 <p>survive a restart.</p>
-<li><a href="03-transactions.html">Transactions</a> — the commit/rollback contract, done</li>
+<li><a href="03-transactions/03-transactions.html">Transactions</a> — the commit/rollback contract, done</li>
 <p>properly.</p>
-<li><a href="04-handles-and-updates.html">Handles and Updates</a> — give an employee a</li>
+<li><a href="04-handles-and-updates/04-handles-and-updates.html">Handles and Updates</a> — give an employee a</li>
 <p>raise.</p>
-<li><a href="05-relationships.html">Relationships: Departments and Projects</a> —</li>
+<li><a href="05-relationships/05-relationships.html">Relationships: Departments and Projects</a> —</li>
 <p><code>Ref&lt;Department&gt;</code>, an owned record, and a collection of projects.</p>
-<li><a href="06-snapshots.html">Consistent Reports with Snapshots</a> — a payroll report</li>
+<li><a href="06-snapshots/06-snapshots.html">Consistent Reports with Snapshots</a> — a payroll report</li>
 <p>that doesn&#x27;t see half-finished edits.</p>
-<li><a href="07-queries-and-indexes.html">Searching with Queries and Indexes</a> — find</li>
+<li><a href="07-queries-and-indexes/07-queries-and-indexes.html">Searching with Queries and Indexes</a> — find</li>
 <p>employees by department and salary, fast.</p>
-<li><a href="08-networking.html">Serving the Directory Over the Network</a> — split into</li>
+<li><a href="08-networking/08-networking.html">Serving the Directory Over the Network</a> — split into</li>
 <p>a server and a separate client.</p>
-<li><a href="09-remote-operations.html">Remote Operations: Transferring an Employee</a> —</li>
+<li><a href="09-remote-operations/09-remote-operations.html">Remote Operations: Transferring an Employee</a> —</li>
 <p>business logic that runs on the server.</p>
-<li><a href="10-facades.html">Facades: A Stable HR API</a> — a versioned surface the</li>
+<li><a href="10-facades/10-facades.html">Facades: A Stable HR API</a> — a versioned surface the</li>
 <p>client calls without knowing server internals.</p>
-<li><a href="11-graphs.html">The Org Chart: Graphs</a> — model and traverse</li>
+<li><a href="11-graphs/11-graphs.html">The Org Chart: Graphs</a> — model and traverse</li>
 <p>manager/report relationships.</p>
-<li>*(Optional, advanced)* <a href="12-async-io.html">Asynchronous WAL I/O</a> — measure</li>
+<li>*(Optional, advanced)* <a href="12-async-io/12-async-io.html">Asynchronous WAL I/O</a> — measure</li>
 <p>it before you reach for it.</p>
-<li>*(Optional, advanced)* <a href="13-read-replica.html">A Read Replica for Reporting</a></li>
+<li>*(Optional, advanced)* <a href="13-read-replica/13-read-replica.html">A Read Replica for Reporting</a></li>
 <p>— offload reports to a follower.</p>
 </ol>
 <h2>How the Code Is Organized</h2>
@@ -157,7 +161,7 @@ foreach ($n in 1..13) {
 <li><strong>Build and Run</strong> — the exact command and expected output.</li>
 <li><strong>What to Notice</strong> — the one or two things worth remembering afterward.</li>
 </ul>
-        <nav class="bottomnav"><span class="nav-button nav-disabled">Previous</span><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="01-binding-your-first-type.html">Next</a></nav>
+        <nav class="bottomnav"><span class="nav-button nav-disabled">Previous</span><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="01-binding-your-first-type/01-binding-your-first-type.html">Next</a></nav>
       </article>
     </div>
   </main>
