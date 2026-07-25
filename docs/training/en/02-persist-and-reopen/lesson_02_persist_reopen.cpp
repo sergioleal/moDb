@@ -1,22 +1,15 @@
 // Lesson 2 -- Persist and Reopen.
-// Builds on Lesson 1 (lesson_01_binding.cpp).
+// Builds on Lesson 1 (lesson_01_binding.cpp) -- opens the SAME database
+// file Lesson 1 created; this lesson never creates or deletes it.
 // See docs/training/en/02-persist-and-reopen/02-persist-and-reopen.md.
-//
-// The whole program operates on ONE directory file across all lessons --
-// Lesson 1 creates it, every later lesson reopens and extends it. That's
-// what "each lesson takes the previous one's result as a starting point"
-// means literally here. `DirectoryIds` accumulates the ids later lessons
-// need to refer back to specific employees.
 
 #include "modb/object/database.hpp"
 
-#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <system_error>
-#include <vector>
+#include <string_view>
 
 namespace {
 
@@ -31,61 +24,43 @@ modb::object::BindingBuilder<Employee> employee_binding() {
     return builder;
 }
 
-// Ids handed from one lesson to the next; grows as later lessons introduce
-// more employees, departments, etc.
-struct DirectoryIds {
-    modb::object::ObjectId ana{};
-    modb::object::ObjectId bruno{};
-    modb::object::ObjectId carla{};
-};
+constexpr modb::object::FieldId kNameField{1};
 
-std::filesystem::path temp_path() {
-    return std::filesystem::temp_directory_path() /
-           ("employee-directory-" +
-            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".modb");
+std::filesystem::path db_path() {
+    return std::filesystem::path{MODB_TRAINING_DIR} / "employee-directory.modb";
 }
 
-void cleanup(const std::filesystem::path& path) {
-    std::error_code ignored;
-    std::filesystem::remove(path, ignored);
-    std::filesystem::remove(path.string() + ".wal", ignored);
+// Every lesson from here on is a SEPARATE binary with no shared in-process
+// state, so instead of passing ObjectIds forward, each one looks employees
+// up by name -- which is exactly why the index below exists.
+modb::Result<modb::object::ObjectId> find_employee_id(modb::object::Database& database,
+                                                       std::string_view name) {
+    auto matches = database.indexed_object_ids<Employee>(
+        kNameField, modb::object::AttributeValue{std::string{name}});
+    if (!matches) {
+        return std::unexpected(matches.error());
+    }
+    if (matches->empty()) {
+        return std::unexpected(
+            modb::Error{modb::ErrorCode::record_not_found, "no employee named " + std::string{name}});
+    }
+    return (*matches)[0];
 }
 
-// Lesson 1: create the directory file and bind Employee. Nothing is
-// persisted yet -- that's this lesson.
-int lesson_01_bind_type(const std::filesystem::path& path) {
-    auto created = modb::object::Database::create(path);
-    if (!created) {
-        std::cerr << created.error().message << '\n';
-        return 1;
-    }
-    auto database = std::make_shared<modb::object::Database>(std::move(*created));
-    auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-    if (!attached || !database->bind(employee_binding())) {
-        std::cerr << "failed to bind Employee\n";
-        return 1;
-    }
+} // namespace
 
-    auto type_id = database->type_id_of<Employee>();
-    if (!type_id) {
-        std::cerr << type_id.error().message << '\n';
-        return 1;
-    }
-    std::cout << "Lesson 1: Employee type id = " << type_id->value << '\n';
+int main() {
+    std::cout << "Objective: persist real employees and read them back after a restart.\n";
+    const auto path = db_path();
 
-    modb::object::DatabaseRegistry::instance().detach(*attached);
-    return 0;
-}
-
-// Lesson 2: real records that survive closing and reopening the directory.
-// Two scoped blocks simulate two separate program runs against the same
-// file Lesson 1 created.
-int lesson_02_persist_and_reopen(const std::filesystem::path& path, DirectoryIds& ids) {
     // --- "First run": open the file Lesson 1 created, write employees. ---
+    modb::object::ObjectId ana_id{};
     {
         auto opened = modb::object::Database::open(path);
         if (!opened) {
-            std::cerr << opened.error().message << '\n';
+            std::cerr << opened.error().message
+                      << " -- have you run Lesson 1 first? Expected a database at "
+                      << path.string() << '\n';
             return 1;
         }
         auto database = std::make_shared<modb::object::Database>(std::move(*opened));
@@ -111,18 +86,24 @@ int lesson_02_persist_and_reopen(const std::filesystem::path& path, DirectoryIds
             std::cerr << "failed to commit employees\n";
             return 1;
         }
-        ids.ana = ana->id();
-        ids.bruno = bruno->id();
-        ids.carla = carla->id();
-        std::cout << "Lesson 2: wrote 3 employees (Ana=" << ids.ana.value
-                  << ", Bruno=" << ids.bruno.value << ", Carla=" << ids.carla.value << ")\n";
+        ana_id = ana->id();
+        std::cout << "Wrote 3 employees (Ana=" << ana_id.value << ", Bruno=" << bruno->id().value
+                  << ", Carla=" << carla->id().value << ")\n";
+
+        // An index on `name` -- not on this lesson's own topic, but every
+        // lesson from here on needs a way to find "Ana" again without a
+        // shared in-process id, since each one is a separate program run.
+        if (auto created = database->create_index<Employee>(kNameField); !created) {
+            std::cerr << created.error().message << '\n';
+            return 1;
+        }
 
         modb::object::DatabaseRegistry::instance().detach(*attached);
         // `database` (the shared_ptr) drops here -- nothing else references
         // it, so the file is closed at the end of this scope.
     }
 
-    // --- "Second run": reopen and read a record back. ---
+    // --- "Second run": reopen and read a record back, found by name. ---
     {
         auto opened = modb::object::Database::open(path);
         if (!opened) {
@@ -136,7 +117,12 @@ int lesson_02_persist_and_reopen(const std::filesystem::path& path, DirectoryIds
             return 1;
         }
 
-        auto handle = database->get<Employee>(ids.ana);
+        auto found_id = find_employee_id(*database, "Ana");
+        if (!found_id) {
+            std::cerr << found_id.error().message << '\n';
+            return 1;
+        }
+        auto handle = database->get<Employee>(*found_id);
         if (!handle) {
             std::cerr << handle.error().message << '\n';
             return 1;
@@ -146,30 +132,15 @@ int lesson_02_persist_and_reopen(const std::filesystem::path& path, DirectoryIds
             std::cerr << value.error().message << '\n';
             return 1;
         }
-        std::cout << "Lesson 2: after reopen, employee " << ids.ana.value << " = "
+        std::cout << "After reopen, found \"Ana\" as employee " << found_id->value << " = "
                   << value->name << " (" << value->salary << ")\n";
+        if (*found_id != ana_id) {
+            std::cerr << "looked-up id does not match the id from the first run\n";
+            return 1;
+        }
 
         modb::object::DatabaseRegistry::instance().detach(*attached);
     }
 
     return 0;
-}
-
-} // namespace
-
-int main() {
-    std::cout << "Objective: persist real employees and read them back after a restart.\n";
-    const auto path = temp_path();
-    cleanup(path);
-
-    if (const auto status = lesson_01_bind_type(path); status != 0) {
-        cleanup(path);
-        return status;
-    }
-
-    DirectoryIds ids;
-    const auto status = lesson_02_persist_and_reopen(path, ids);
-
-    cleanup(path);
-    return status;
 }

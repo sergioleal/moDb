@@ -1,15 +1,15 @@
 // Lesson 3 -- Transactions.
-// Builds on Lesson 2 (lesson_02_persist_reopen.cpp).
+// Builds on Lesson 2 (lesson_02_persist_reopen.cpp) -- opens the SAME
+// database file, now containing Ana/Bruno/Carla.
 // See docs/training/en/03-transactions/03-transactions.md.
 
 #include "modb/object/database.hpp"
 
-#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <system_error>
+#include <string_view>
 
 namespace {
 
@@ -24,136 +24,50 @@ modb::object::BindingBuilder<Employee> employee_binding() {
     return builder;
 }
 
-struct DirectoryIds {
-    modb::object::ObjectId ana{};
-    modb::object::ObjectId bruno{};
-    modb::object::ObjectId carla{};
-};
+constexpr modb::object::FieldId kNameField{1};
 
-std::filesystem::path temp_path() {
-    return std::filesystem::temp_directory_path() /
-           ("employee-directory-" +
-            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".modb");
+std::filesystem::path db_path() {
+    return std::filesystem::path{MODB_TRAINING_DIR} / "employee-directory.modb";
 }
 
-void cleanup(const std::filesystem::path& path) {
-    std::error_code ignored;
-    std::filesystem::remove(path, ignored);
-    std::filesystem::remove(path.string() + ".wal", ignored);
+modb::Result<modb::object::ObjectId> find_employee_id(modb::object::Database& database,
+                                                       std::string_view name) {
+    auto matches = database.indexed_object_ids<Employee>(
+        kNameField, modb::object::AttributeValue{std::string{name}});
+    if (!matches) {
+        return std::unexpected(matches.error());
+    }
+    if (matches->empty()) {
+        return std::unexpected(
+            modb::Error{modb::ErrorCode::record_not_found, "no employee named " + std::string{name}});
+    }
+    return (*matches)[0];
 }
 
-// Lesson 1: create the directory file and bind Employee.
-int lesson_01_bind_type(const std::filesystem::path& path) {
-    auto created = modb::object::Database::create(path);
-    if (!created) {
-        std::cerr << created.error().message << '\n';
-        return 1;
-    }
-    auto database = std::make_shared<modb::object::Database>(std::move(*created));
-    auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-    if (!attached || !database->bind(employee_binding())) {
-        std::cerr << "failed to bind Employee\n";
-        return 1;
-    }
-    auto type_id = database->type_id_of<Employee>();
-    if (!type_id) {
-        std::cerr << type_id.error().message << '\n';
-        return 1;
-    }
-    std::cout << "Lesson 1: Employee type id = " << type_id->value << '\n';
-    modb::object::DatabaseRegistry::instance().detach(*attached);
-    return 0;
-}
-
-// Lesson 2: real records that survive closing and reopening the directory.
-int lesson_02_persist_and_reopen(const std::filesystem::path& path, DirectoryIds& ids) {
-    {
-        auto opened = modb::object::Database::open(path);
-        if (!opened) {
-            std::cerr << opened.error().message << '\n';
-            return 1;
-        }
-        auto database = std::make_shared<modb::object::Database>(std::move(*opened));
-        auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-        if (!attached || !database->bind(employee_binding())) {
-            std::cerr << "failed to bind Employee\n";
-            return 1;
-        }
-        auto tx = database->begin();
-        if (!tx) {
-            std::cerr << tx.error().message << '\n';
-            return 1;
-        }
-        auto ana = database->create(*tx, Employee{"Ana", 12000});
-        auto bruno = database->create(*tx, Employee{"Bruno", 9500});
-        auto carla = database->create(*tx, Employee{"Carla", 15000});
-        if (!ana || !bruno || !carla) {
-            std::cerr << "failed to create employees\n";
-            return 1;
-        }
-        if (!tx->commit()) {
-            std::cerr << "failed to commit employees\n";
-            return 1;
-        }
-        ids.ana = ana->id();
-        ids.bruno = bruno->id();
-        ids.carla = carla->id();
-        std::cout << "Lesson 2: wrote 3 employees (Ana=" << ids.ana.value
-                  << ", Bruno=" << ids.bruno.value << ", Carla=" << ids.carla.value << ")\n";
-        modb::object::DatabaseRegistry::instance().detach(*attached);
-    }
-    {
-        auto opened = modb::object::Database::open(path);
-        if (!opened) {
-            std::cerr << opened.error().message << '\n';
-            return 1;
-        }
-        auto database = std::make_shared<modb::object::Database>(std::move(*opened));
-        auto attached = modb::object::DatabaseRegistry::instance().attach(database);
-        if (!attached || !database->bind(employee_binding())) {
-            std::cerr << "failed to re-bind Employee after reopen\n";
-            return 1;
-        }
-        auto handle = database->get<Employee>(ids.ana);
-        if (!handle) {
-            std::cerr << handle.error().message << '\n';
-            return 1;
-        }
-        auto value = database->materialize(*handle);
-        if (!value) {
-            std::cerr << value.error().message << '\n';
-            return 1;
-        }
-        std::cout << "Lesson 2: after reopen, employee " << ids.ana.value << " = "
-                  << value->name << " (" << value->salary << ")\n";
-        modb::object::DatabaseRegistry::instance().detach(*attached);
-    }
-    return 0;
-}
-
-// Prints one employee's current salary. Opens its own attach/detach so it
-// can be called freely between demonstrations without leaking state.
-int print_salary(modb::object::Database& database, modb::object::ObjectId id,
-                 std::string_view label) {
+modb::Result<std::int64_t> salary_of(modb::object::Database& database, modb::object::ObjectId id) {
     auto handle = database.get<Employee>(id);
     if (!handle) {
-        std::cerr << handle.error().message << '\n';
-        return 1;
+        return std::unexpected(handle.error());
     }
     auto value = database.materialize(*handle);
     if (!value) {
-        std::cerr << value.error().message << '\n';
-        return 1;
+        return std::unexpected(value.error());
     }
-    std::cout << "  " << label << ": " << value->name << " = " << value->salary << '\n';
-    return 0;
+    return value->salary;
 }
 
-// Lesson 3: the commit/rollback contract, done properly.
-int lesson_03_transactions(const std::filesystem::path& path, const DirectoryIds& ids) {
+} // namespace
+
+int main() {
+    std::cout << "Objective: commit a raise properly, show an uncommitted one rolling back, "
+                 "and prove single-writer.\n";
+    const auto path = db_path();
+
     auto opened = modb::object::Database::open(path);
     if (!opened) {
-        std::cerr << opened.error().message << '\n';
+        std::cerr << opened.error().message
+                  << " -- have you run Lessons 1-2 first? Expected a database at " << path.string()
+                  << '\n';
         return 1;
     }
     auto database = std::make_shared<modb::object::Database>(std::move(*opened));
@@ -163,15 +77,22 @@ int lesson_03_transactions(const std::filesystem::path& path, const DirectoryIds
         return 1;
     }
 
-    // --- A committed raise: materialize, mutate, update, commit. ---
-    std::cout << "Lesson 3: committed raise for Bruno\n";
+    auto bruno_id = find_employee_id(*database, "Bruno");
+    auto carla_id = find_employee_id(*database, "Carla");
+    auto ana_id = find_employee_id(*database, "Ana");
+    if (!bruno_id || !carla_id || !ana_id) {
+        std::cerr << "failed to look up Ana/Bruno/Carla\n";
+        return 1;
+    }
+
+    // --- A committed raise. ---
     {
         auto tx = database->begin();
         if (!tx) {
             std::cerr << tx.error().message << '\n';
             return 1;
         }
-        auto handle = database->get<Employee>(ids.bruno);
+        auto handle = database->get<Employee>(*bruno_id);
         if (!handle) {
             std::cerr << handle.error().message << '\n';
             return 1;
@@ -191,20 +112,21 @@ int lesson_03_transactions(const std::filesystem::path& path, const DirectoryIds
             return 1;
         }
     }
-    if (print_salary(*database, ids.bruno, "Bruno after committed raise") != 0) {
+    auto bruno_after_commit = salary_of(*database, *bruno_id);
+    if (!bruno_after_commit) {
+        std::cerr << bruno_after_commit.error().message << '\n';
         return 1;
     }
+    std::cout << "Committed raise for Bruno: salary = " << *bruno_after_commit << '\n';
 
-    // --- An uncommitted raise: the Transaction goes out of scope without
-    //     commit() and rolls back automatically. ---
-    std::cout << "Lesson 3: uncommitted raise for Carla (deliberately not committed)\n";
+    // --- A deliberately uncommitted raise. ---
     {
         auto tx = database->begin();
         if (!tx) {
             std::cerr << tx.error().message << '\n';
             return 1;
         }
-        auto handle = database->get<Employee>(ids.carla);
+        auto handle = database->get<Employee>(*carla_id);
         if (!handle) {
             std::cerr << handle.error().message << '\n';
             return 1;
@@ -219,25 +141,27 @@ int lesson_03_transactions(const std::filesystem::path& path, const DirectoryIds
             std::cerr << updated.error().message << '\n';
             return 1;
         }
-        // No tx->commit() here on purpose -- `tx` rolls back when it goes
-        // out of scope at the end of this block.
+        // `tx` goes out of scope here without commit() -- rollback-on-scope-exit.
     }
-    if (print_salary(*database, ids.carla, "Carla after scope exit (should be unchanged)") != 0) {
+    auto carla_after_scope = salary_of(*database, *carla_id);
+    if (!carla_after_scope) {
+        std::cerr << carla_after_scope.error().message << '\n';
         return 1;
     }
+    std::cout << "Uncommitted raise for Carla (deliberately not committed): salary is still "
+              << *carla_after_scope << '\n';
 
-    // --- One transaction touching two employees atomically. ---
-    std::cout << "Lesson 3: averaging Ana and Bruno's salaries in one transaction\n";
+    // --- One transaction touching two employees: average their salaries. ---
     {
         auto tx = database->begin();
         if (!tx) {
             std::cerr << tx.error().message << '\n';
             return 1;
         }
-        auto ana_handle = database->get<Employee>(ids.ana);
-        auto bruno_handle = database->get<Employee>(ids.bruno);
+        auto ana_handle = database->get<Employee>(*ana_id);
+        auto bruno_handle = database->get<Employee>(*bruno_id);
         if (!ana_handle || !bruno_handle) {
-            std::cerr << "failed to read Ana/Bruno\n";
+            std::cerr << "failed to look up Ana/Bruno\n";
             return 1;
         }
         auto ana_value = database->materialize(*ana_handle);
@@ -246,7 +170,7 @@ int lesson_03_transactions(const std::filesystem::path& path, const DirectoryIds
             std::cerr << "failed to materialize Ana/Bruno\n";
             return 1;
         }
-        const auto average = (ana_value->salary + bruno_value->salary) / 2;
+        const std::int64_t average = (ana_value->salary + bruno_value->salary) / 2;
         ana_value->salary = average;
         bruno_value->salary = average;
         if (auto updated = database->update(*tx, *ana_handle, *ana_value); !updated) {
@@ -262,15 +186,16 @@ int lesson_03_transactions(const std::filesystem::path& path, const DirectoryIds
             return 1;
         }
     }
-    if (print_salary(*database, ids.ana, "Ana after averaging") != 0) {
+    auto ana_after_average = salary_of(*database, *ana_id);
+    auto bruno_after_average = salary_of(*database, *bruno_id);
+    if (!ana_after_average || !bruno_after_average) {
+        std::cerr << "failed to read back the averaged salaries\n";
         return 1;
     }
-    if (print_salary(*database, ids.bruno, "Bruno after averaging") != 0) {
-        return 1;
-    }
+    std::cout << "Averaged Ana and Bruno's salaries in one transaction: Ana = "
+              << *ana_after_average << ", Bruno = " << *bruno_after_average << '\n';
 
-    // --- Single-writer: a second begin() while one is still open fails. ---
-    std::cout << "Lesson 3: attempting a second transaction while one is open\n";
+    // --- A second transaction while one is already open. ---
     {
         auto first = database->begin();
         if (!first) {
@@ -279,36 +204,13 @@ int lesson_03_transactions(const std::filesystem::path& path, const DirectoryIds
         }
         auto second = database->begin();
         if (second) {
-            std::cerr << "expected the second begin() to fail, but it succeeded\n";
+            std::cerr << "expected a second begin() to fail, but it succeeded\n";
             return 1;
         }
-        std::cout << "  second begin() failed as expected: " << second.error().message << '\n';
-        // Let `first` roll back at scope exit; nothing was written through it.
+        std::cout << "A second begin() while one is already open failed as expected: "
+                  << second.error().message << '\n';
     }
 
     modb::object::DatabaseRegistry::instance().detach(*attached);
     return 0;
-}
-
-} // namespace
-
-int main() {
-    std::cout << "Objective: commit a raise properly, show an uncommitted one rolling back, "
-                 "and demonstrate single-writer.\n";
-    const auto path = temp_path();
-    cleanup(path);
-
-    if (const auto status = lesson_01_bind_type(path); status != 0) {
-        cleanup(path);
-        return status;
-    }
-    DirectoryIds ids;
-    if (const auto status = lesson_02_persist_and_reopen(path, ids); status != 0) {
-        cleanup(path);
-        return status;
-    }
-    const auto status = lesson_03_transactions(path, ids);
-
-    cleanup(path);
-    return status;
 }

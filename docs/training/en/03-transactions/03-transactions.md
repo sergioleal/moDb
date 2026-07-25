@@ -18,10 +18,14 @@ transaction, to show atomicity actually matters.
 
 ## Starting Point
 
-Lesson 2's directory with a handful of persisted employees.
+The persistent database file after Lessons 1-2 have run — Ana, Bruno, and
+Carla already exist, findable by name through Lesson 2's index.
 
 ## Steps
 
+- Open the file, bind, and look up Ana/Bruno/Carla's ids by name (the
+  same `find_employee_id` helper Lesson 2 introduced — every lesson from
+  here on starts this way).
 - Add a function that raises one employee's salary inside a transaction,
   commits, and confirms the change stuck.
 - Deliberately write a second version that begins a transaction, makes a
@@ -47,18 +51,10 @@ cmake --build --preset debug --target employee_directory_lesson_03
 
 ```
 Objective: commit a raise properly, show an uncommitted one rolling back, and prove single-writer.
-Lesson 1: Employee type id = 16
-Lesson 2: wrote 3 employees (Ana=18, Bruno=19, Carla=20)
-Lesson 2: after reopen, employee 18 = Ana (12000)
-Lesson 3: committed raise for Bruno
-  Bruno after committed raise: Bruno = 10500
-Lesson 3: uncommitted raise for Carla (deliberately not committed)
-  Carla after scope exit (should be unchanged): Carla = 15000
-Lesson 3: averaging Ana and Bruno's salaries in one transaction
-  Ana after averaging: Ana = 11250
-  Bruno after averaging: Bruno = 11250
-Lesson 3: attempting a second transaction while one is open
-  second begin() failed as expected: a transaction is already in progress
+Committed raise for Bruno: salary = 10500
+Uncommitted raise for Carla (deliberately not committed): salary is still 15000
+Averaged Ana and Bruno's salaries in one transaction: Ana = 11250, Bruno = 11250
+A second begin() while one is already open failed as expected: a transaction is already in progress
 ```
 
 ## What to Notice

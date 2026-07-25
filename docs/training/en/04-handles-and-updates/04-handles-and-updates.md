@@ -20,10 +20,11 @@ touching existing records.
 
 ## Starting Point
 
-Lesson 3's directory, with transactional raise/rollback behavior in place.
+The persistent database file after Lessons 1-3 have run.
 
 ## Steps
 
+- Look Ana up by name (via Lesson 2's index).
 - Introduce `EmployeeV2` with a new `country` field defaulted to `"BR"`,
   bound under the same catalog name `"Employee"`; the file already has
   2-field records from Lessons 2-3, so this re-`bind()` triggers real
@@ -49,21 +50,8 @@ cmake --build --preset debug --target employee_directory_lesson_04
 
 ```
 Objective: evolve the schema and update through a typed Handle.
-Lesson 1: Employee type id = 16
-Lesson 2: wrote 3 employees (Ana=18, Bruno=19, Carla=20)
-Lesson 2: after reopen, employee 18 = Ana (12000)
-Lesson 3: committed raise for Bruno
-  Bruno after committed raise: Bruno = 10500
-Lesson 3: uncommitted raise for Carla (deliberately not committed)
-  Carla after scope exit (should be unchanged): Carla = 15000
-Lesson 3: averaging Ana and Bruno's salaries in one transaction
-  Ana after averaging: Ana = 11250
-  Bruno after averaging: Bruno = 11250
-Lesson 3: attempting a second transaction while one is open
-  second begin() failed as expected: a transaction is already in progress
-Lesson 4: Ana read through the new binding = Ana (11250, country=BR) -- country came from the declared default, not from disk
-Lesson 4: raise for Ana via Handle::set (not manual materialize/update)
-  Ana after Handle::set raise: Ana (13250, country=BR) -- now physically stored in the new 3-field shape
+Ana read through the new binding = Ana (11250, country=BR) -- country came from the declared default, not from disk
+Raise for Ana via Handle::set: Ana (13250, country=BR) -- now physically stored in the new 3-field shape
 ```
 
 ## What to Notice

@@ -27,9 +27,12 @@ None — this is the first lesson. You start from an empty `.cpp` file.
 - Write `employee_binding()` returning a `BindingBuilder<Employee>`.
 - `Database::create`, wrap in `shared_ptr`, attach to the registry.
 - Call `bind()`, print the resulting `TypeDefinitionId`.
-- Detach from the registry — but leave the file itself in place. Every
-  later lesson keeps reopening this same file, so nothing gets deleted
-  until the very end of the whole run.
+- Detach from the registry — but leave the file itself in place, at a
+  fixed path (`docs/training/en/employee-directory.modb`). Every later
+  lesson is a *separate program run* that reopens this same file and
+  continues from wherever the previous one left off; see the course
+  [README](../README.md#how-the-code-is-organized) for how that chain
+  works.
 
 ## Full Listing (End of Lesson)
 
@@ -46,7 +49,8 @@ cmake --build --preset debug --target employee_directory_lesson_01
 
 ```
 Objective: bind an Employee type and register it in the catalog.
-Lesson 1: Employee type id = 16
+Employee type id = 16
+Database created at .../docs/training/en/employee-directory.modb
 ```
 
 The exact id depends on how many catalog-internal types are registered

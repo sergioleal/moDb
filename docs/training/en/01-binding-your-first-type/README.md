@@ -21,6 +21,9 @@ cmake --build --preset debug --target employee_directory_lesson_01
 .\build\debug\employee_directory_lesson_01.exe
 ```
 
-Running it replays every earlier lesson's code first (on one
-continuously-reopened temp database file), then this lesson's own new
-part — see [../README.md](../README.md#how-the-code-is-organized) for why.
+This is the first lesson, so running it starts the whole course fresh:
+it (re)creates the persistent database file at
+`docs/training/en/employee-directory.modb` and every later lesson opens
+that SAME file and continues from there — see
+[../README.md](../README.md#how-the-code-is-organized) for how the chain
+works.

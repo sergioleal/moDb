@@ -18,25 +18,27 @@ program now writes a handful of employees in one run, and a second run
 
 ## Starting Point
 
-Lesson 1's `Employee` binding and database creation.
+The persistent database file Lesson 1 created (see the course
+[README](../README.md#how-the-code-is-organized)) — this lesson is a
+separate program run that opens it.
 
 ## Steps
 
-- Split `main()` into two lifetimes ("first run" / "second run") in the
-  same process, mirroring two separate program invocations.
-- First lifetime: create, bind, begin a transaction, create a few
-  `Employee` records, commit, detach.
-- Second lifetime: open (not create), re-bind, read one record back by
-  the `ObjectId` captured earlier.
-- Print before/after to make the round-trip visible.
+- Two scoped blocks simulate two separate program runs, both inside this
+  one lesson's `main()`, against the SAME file Lesson 1 created.
+- First block: open (never create — Lesson 1 already did that), bind,
+  begin a transaction, create three `Employee` records, commit.
+- Also in the first block: `create_index<Employee>(FieldId{1})` on
+  `name` — every lesson from here on is a genuinely separate binary with
+  no shared in-process state, so this index is what lets them find "Ana"
+  again without remembering an `ObjectId` across runs.
+- Second block: open again (a fresh `Database` instance, simulating a
+  restart), re-bind, look Ana up **by name** through the new index, then
+  read her record back by the resulting id.
 
 ## Full Listing (End of Lesson)
 
 [lesson_02_persist_reopen.cpp](lesson_02_persist_reopen.cpp)
-— note this file also carries Lesson 1's `lesson_01_bind_type` function
-forward and calls it first, since `main()` replays every lesson up to the
-current one against one continuously-reopened file (see the course
-[README](../README.md#how-the-code-is-organized)).
 
 ## Build and Run
 
@@ -49,24 +51,26 @@ cmake --build --preset debug --target employee_directory_lesson_02
 
 ```
 Objective: persist real employees and read them back after a restart.
-Lesson 1: Employee type id = 16
-Lesson 2: wrote 3 employees (Ana=18, Bruno=19, Carla=20)
-Lesson 2: after reopen, employee 18 = Ana (12000)
+Wrote 3 employees (Ana=18, Bruno=19, Carla=20)
+After reopen, found "Ana" as employee 18 = Ana (12000)
 ```
 
 The object ids (18/19/20) are deterministic for this exact sequence of
-operations, but they're not "2, 3, 4" — the catalog itself consumes a few
+operations, but they're not "1, 2, 3" — the catalog itself consumes a few
 ids first (type definitions, baselines) before your first real record.
 
 ## What to Notice
 
 - Forgetting to re-`bind()` after `open()` is the most common mistake at
-  this stage — every lesson function in this course re-binds every type
-  it touches, every single time it opens the file, for exactly this
-  reason.
+  this stage — every lesson in this course re-binds every type it
+  touches, every single time it opens the file, for exactly this reason.
 - The `shared_ptr`/registry attach isn't ceremony — it's why a `Handle`
-  obtained in the first lifetime would be meaningless in the second
+  obtained in the first block would be meaningless in the second
   (different registry id, even same file).
+- The name index exists purely as course infrastructure, introduced here
+  because this is the first lesson that needs to find a record again
+  after "restarting." Lesson 7 is where indexes and query planning are
+  actually taught as a topic.
 
 ## Related Reference
 

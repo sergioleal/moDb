@@ -17,11 +17,15 @@ default synchronous WAL.
 
 ## Starting Point
 
-Any earlier lesson's directory — this one is a side-quest, not a required
-dependency for Lesson 13.
+The persistent database file with Carla already in it (from Lesson 2
+onward) — this lesson is a side-quest measuring an internal option, not a
+required dependency for Lesson 13's mechanics. The course still expects
+you to have run Lessons 1-11 first, same as every other lesson.
 
 ## Steps
 
+- Look Carla up by name (inside the timing helper itself, once per
+  reopen, outside the timed loop).
 - Reopen the same employee-directory file twice: once with default
   `DatabaseOptions{}` (`wal_io = sync`), once with
   `DatabaseOptions{.wal_io = WalIoMode::async}`. `wal_io` is a per-open
@@ -54,15 +58,11 @@ sample, not a target to hit:
 
 ```
 Objective: compare sync vs. async WAL I/O for the same workload.
-...
-Lesson 12: 200 committed raises under wal_io=sync took 907.03 ms (220.50 commits/s)
-Lesson 12: 200 committed raises under wal_io=async took 946.40 ms (211.33 commits/s)
-Lesson 12: sync was faster (or tied) on this run (1.04x)
-Lesson 12: settled Carla's salary back to 20000 for later lessons
+200 committed raises under wal_io=sync took 604.64 ms (330.78 commits/s)
+200 committed raises under wal_io=async took 666.99 ms (299.86 commits/s)
+Sync was faster (or tied) on this run (1.10x)
+Settled Carla's salary back to 20000 for later lessons
 ```
-
-(the `...` stands in for Lessons 1-11's output, unchanged from
-[Lesson 11](../11-graphs/11-graphs.md#expected-output))
 
 ## What to Notice
 
