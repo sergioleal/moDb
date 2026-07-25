@@ -7,8 +7,13 @@ Unlike that older course, this one's lessons live one-per-folder
 (docs/training/en/<NN-slug>/<NN-slug>.md, plus that folder's own
 lesson_NN_*.cpp and README.md build guide) instead of one flat
 directory, and each lesson's source is self-contained -- no cumulative
-copy-paste -- chained through one persistent database file. Output is a
-flat docs/training/html/ directory, mirroring docs-process/training/html/.
+copy-paste -- chained through one persistent database file. Each
+lesson's rendered HTML (and its narration script) is written into that
+SAME lesson folder, right next to its .md/.cpp/README.md, rather than
+into a separate flat html/ tree -- one more thing keeping every lesson
+folder self-contained. Only the course-level index.html and the shared
+CSS/logo assets live at the course root, docs/training/en/, alongside
+README.md.
 
 This script does NOT produce narration audio (.mp3) files -- only the
 textual narration script per lesson, exactly like the older course's own
@@ -19,16 +24,16 @@ audio/ directory for a human to fill in later.
 from __future__ import annotations
 
 import html
+import os
 import re
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "docs" / "training" / "en"
-OUTPUT_DIR = ROOT / "docs" / "training" / "html"
 ASSET_SOURCE = ROOT / "docs-process" / "training" / "assets"
-ASSET_OUTPUT = OUTPUT_DIR / "assets"
+ASSET_OUTPUT = SOURCE_DIR / "assets"
 
 # (path relative to SOURCE_DIR, fallback title)
 LESSONS = [
@@ -50,8 +55,8 @@ LESSONS = [
 
 # Basenames of markdown files that are part of THIS rendered set -- used to
 # decide whether a `.md` link should become a sibling `.html` link, or stay
-# a markdown link (just re-based one directory shallower) because it points
-# outside the rendered set (docs/reference/, DEVELOPER_GUIDE.md, etc.).
+# a markdown link (external references keep pointing at their real .md
+# file, since output now lives at the same depth as the source).
 RENDERED_BASENAMES = {Path(name).name for name, _ in LESSONS}
 
 LESSON_NOTES = {
@@ -514,14 +519,32 @@ CONCEPT_DEEP_DIVE = {
 }
 
 
-def output_name(markdown_relpath: str) -> str:
+def output_relpath(markdown_relpath: str) -> str:
+    """The rendered .html file's path, relative to SOURCE_DIR -- e.g.
+    "index.html" for the course README, or
+    "01-binding-your-first-type/01-binding-your-first-type.html" for a
+    lesson. This lives in the SAME folder as the lesson's own .md/.cpp
+    source, one more thing keeping that folder self-contained."""
     if markdown_relpath == "README.md":
         return "index.html"
-    return Path(markdown_relpath).with_suffix(".html").name
+    return str(PurePosixPath(markdown_relpath).with_suffix(".html"))
 
 
-def page_stem(markdown_relpath: str) -> str:
-    return Path(output_name(markdown_relpath)).stem
+def narration_relpath(markdown_relpath: str) -> str:
+    out = PurePosixPath(output_relpath(markdown_relpath))
+    return str(out.with_name(out.stem + "-narration.txt"))
+
+
+def audio_relpath(markdown_relpath: str) -> str:
+    return str(PurePosixPath(output_relpath(markdown_relpath)).with_suffix(".mp3"))
+
+
+def relative_href(from_relpath: str, to_relpath: str) -> str:
+    """A relative href from the page at `from_relpath` to the page/asset
+    at `to_relpath`, both given relative to SOURCE_DIR."""
+    from_dir = str(PurePosixPath(from_relpath).parent)
+    rel = os.path.relpath(to_relpath, start=from_dir)
+    return PurePosixPath(rel).as_posix()
 
 
 def notes_key(markdown_relpath: str) -> str:
@@ -554,32 +577,24 @@ def replace_link(match: re.Match[str], current_relpath: str) -> str:
     basename = Path(path_part).name
 
     if path_part.endswith(".md") and basename in RENDERED_BASENAMES:
-        # Another page in THIS rendered set -- point at the flat sibling
-        # .html file, keeping any #fragment.
-        rewritten = output_name(basename)
+        # Another page in THIS rendered set -- point at its real sibling
+        # .html file (which may live in a different lesson folder), keeping
+        # any #fragment.
+        target_markdown_relpath = "README.md" if basename == "README.md" else next(
+            name for name, _ in LESSONS if Path(name).name == basename
+        )
+        rewritten = relative_href(
+            output_relpath(current_relpath), output_relpath(target_markdown_relpath)
+        )
         if fragment:
             rewritten += f"#{fragment}"
         return f'<a href="{html.escape(rewritten, quote=True)}">{label}</a>'
 
-    if path_part.endswith(".md"):
-        # A markdown file OUTSIDE this rendered set (docs/reference/,
-        # DEVELOPER_GUIDE.md, ...). The source lives one directory deeper
-        # (docs/training/en/<slug>/) than this script's flat html output
-        # (docs/training/html/), so strip exactly one leading "../".
-        rewritten = path_part
-        if rewritten.startswith("../"):
-            rewritten = rewritten[len("../"):]
-        if fragment:
-            rewritten += f"#{fragment}"
-        return f'<a href="{html.escape(rewritten, quote=True)}">{label}</a>'
-
-    if not path_part.startswith("../") and current_relpath != "README.md":
-        # A same-folder link (e.g. the lesson's own lesson_NN_*.cpp source)
-        # -- rebase it into the real source folder under docs/training/en/.
-        slug_dir = Path(current_relpath).parent.as_posix()
-        rewritten = f"../en/{slug_dir}/{path_part}"
-        return f'<a href="{html.escape(rewritten, quote=True)}">{label}</a>'
-
+    # Everything else -- an external reference doc (docs/reference/,
+    # DEVELOPER_GUIDE.md, ...) or a same-folder source file
+    # (lesson_NN_*.cpp) -- needs no rebasing at all: the rendered .html
+    # lives in the exact same folder as the .md it was rendered from, so
+    # every other relative link in that .md already resolves correctly.
     return f'<a href="{html.escape(href, quote=True)}">{label}</a>'
 
 
@@ -688,11 +703,12 @@ def nav_link(label: str, href: str | None) -> str:
     return f'<a class="nav-button" href="{html.escape(href, quote=True)}">{html.escape(label)}</a>'
 
 
-def lesson_sidebar(current_output: str) -> str:
+def lesson_sidebar(current_relpath: str) -> str:
     items = []
+    current_output = output_relpath(current_relpath)
     for markdown_relpath, label in LESSONS:
-        href = output_name(markdown_relpath)
-        current = ' aria-current="page"' if href == current_output else ""
+        href = relative_href(current_output, output_relpath(markdown_relpath))
+        current = ' aria-current="page"' if markdown_relpath == current_relpath else ""
         items.append(f'<li><a href="{href}"{current}>{html.escape(label)}</a></li>')
     return "\n".join(items)
 
@@ -704,9 +720,9 @@ def hero_intro(title: str) -> str:
 
 
 def audio_panel(markdown_relpath: str) -> str:
-    stem = page_stem(markdown_relpath)
-    audio_href = f"audio/{stem}.mp3"
-    script_href = f"narration/{stem}.txt"
+    current_output = output_relpath(markdown_relpath)
+    audio_href = relative_href(current_output, audio_relpath(markdown_relpath))
+    script_href = relative_href(current_output, narration_relpath(markdown_relpath))
     return f"""
         <section class="audio-panel">
           <div>
@@ -775,33 +791,42 @@ def instructor_narrative_panel(markdown_relpath: str) -> str:
 def wrap_page(
     title: str,
     body: str,
-    previous_href: str | None,
-    next_href: str | None,
-    current_output: str,
+    previous_relpath: str | None,
+    next_relpath: str | None,
     markdown_relpath: str,
 ) -> str:
+    current_output = output_relpath(markdown_relpath)
+    index_href = relative_href(current_output, output_relpath("README.md"))
+    previous_href = (
+        relative_href(current_output, output_relpath(previous_relpath)) if previous_relpath else None
+    )
+    next_href = (
+        relative_href(current_output, output_relpath(next_relpath)) if next_relpath else None
+    )
+    css_href = relative_href(current_output, "assets/training.css")
+    logo_href = relative_href(current_output, "assets/ring0-logo.svg")
     nav = (
         f'<nav class="topnav">'
         f'{nav_link("Previous", previous_href)}'
-        f'{nav_link("Index", "index.html")}'
+        f'{nav_link("Index", index_href)}'
         f'{nav_link("Next", next_href)}'
         f"</nav>"
     )
     bottom_nav = nav.replace('class="topnav"', 'class="bottomnav"')
-    sidebar = lesson_sidebar(current_output)
+    sidebar = lesson_sidebar(markdown_relpath)
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)} - Ring0 Training</title>
-  <link rel="stylesheet" href="assets/training.css">
+  <link rel="stylesheet" href="{css_href}">
 </head>
 <body>
   <main class="page">
     <header class="brandbar">
-      <a class="brand" href="index.html">
-        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+      <a class="brand" href="{index_href}">
+        <img src="{logo_href}" alt="Ring0 Training logo">
         <span>
           <span class="brand-name">Ring0 Training</span>
           <span class="brand-subtitle">Employee directory, lesson by lesson</span>
@@ -836,12 +861,8 @@ def wrap_page(
 
 
 def main() -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    SOURCE_DIR.mkdir(parents=True, exist_ok=True)
     ASSET_OUTPUT.mkdir(parents=True, exist_ok=True)
-    narration_dir = OUTPUT_DIR / "narration"
-    audio_dir = OUTPUT_DIR / "audio"
-    narration_dir.mkdir(parents=True, exist_ok=True)
-    audio_dir.mkdir(parents=True, exist_ok=True)
     for asset in ASSET_SOURCE.iterdir():
         if asset.is_file():
             shutil.copy2(asset, ASSET_OUTPUT / asset.name)
@@ -850,19 +871,20 @@ def main() -> None:
         source = SOURCE_DIR / markdown_relpath
         markdown = source.read_text(encoding="utf-8")
         title = page_title(markdown, fallback_title)
-        previous_href = output_name(LESSONS[index - 1][0]) if index > 0 else None
-        next_href = output_name(LESSONS[index + 1][0]) if index + 1 < len(LESSONS) else None
+        previous_relpath = LESSONS[index - 1][0] if index > 0 else None
+        next_relpath = LESSONS[index + 1][0] if index + 1 < len(LESSONS) else None
         body = render_markdown(markdown, markdown_relpath)
-        output = OUTPUT_DIR / output_name(markdown_relpath)
-        narration_path = narration_dir / f"{page_stem(markdown_relpath)}.txt"
+        output = SOURCE_DIR / output_relpath(markdown_relpath)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        narration_path = SOURCE_DIR / narration_relpath(markdown_relpath)
         narration_path.write_text(rich_narration(markdown_relpath), encoding="utf-8")
         output.write_text(
-            wrap_page(title, body, previous_href, next_href, output.name, markdown_relpath),
+            wrap_page(title, body, previous_relpath, next_relpath, markdown_relpath),
             encoding="utf-8",
         )
 
-    print(f"Rendered {len(LESSONS)} training pages into {OUTPUT_DIR}")
-    print("Narration scripts (text only, no audio) written under", narration_dir)
+    print(f"Rendered {len(LESSONS)} training pages, each into its own lesson folder under {SOURCE_DIR}")
+    print("Narration scripts (text only, no audio) written alongside each lesson's own .html")
 
 
 if __name__ == "__main__":
