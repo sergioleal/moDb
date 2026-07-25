@@ -17,9 +17,10 @@ option(MODB_ALLOW_CXX23_FALLBACK "Allow a local C++23 build when C++26 is unavai
 # Link estático do runtime MinGW gera binários portáteis (sem DLLs), mas a
 # toolchain do CLion migrou de GCC 13 para GCC 15.2, cujo libwinpthread.a
 # estático deixa `__intrinsic_setjmpex`/`__ms_vsnprintf` sem definição no
-# link `-static`. Por isso o padrão é OFF (link dinâmico, que resolve as DLLs
-# pelo PATH). Reative com -DMODB_STATIC_MINGW_RUNTIME=ON numa toolchain onde o
-# link totalmente estático funcione (ex.: GCC 13).
+# link `-static`. Por isso o padrão é OFF. Com ON usamos só
+# -static-libgcc/-static-libstdc++, que linkam nessa toolchain e absorvem
+# libstdc++-6 e libgcc_s_seh-1 -- libwinpthread-1 continua sendo DLL, então a
+# portabilidade real vem da cópia do runtime logo abaixo, não desta opção.
 option(MODB_STATIC_MINGW_RUNTIME "Link the MinGW runtime statically into executables" OFF)
 option(MODB_BUILD_TRAINING "Build the Ring0 Markdown training as static HTML" ON)
 set(MODB_PYTHON_EXECUTABLE "" CACHE FILEPATH "Python interpreter used to render training HTML")
@@ -28,9 +29,32 @@ set(MODB_CHURN_RECORD_TOTAL 10000 CACHE STRING "Record count used by churn tests
 
 # Opções de link do runtime MinGW, vazias quando o link estático está desligado.
 if(MINGW AND MODB_STATIC_MINGW_RUNTIME)
-    set(MODB_MINGW_LINK_OPTS ${MODB_MINGW_LINK_OPTS})
+    set(MODB_MINGW_LINK_OPTS -static-libgcc -static-libstdc++)
 else()
     set(MODB_MINGW_LINK_OPTS)
+endif()
+
+# Com link dinâmico os .exe importam libstdc++-6/libgcc_s_seh-1/libwinpthread-1
+# e só rodam num shell que tenha o bin da toolchain no PATH; fora dele o processo
+# morre em STATUS_DLL_NOT_FOUND (0xC0000135) antes do main(), sem imprimir nada
+# -- inclusive as lições de docs/training, que o aluno roda direto no terminal.
+# O Windows procura DLL no diretório do próprio .exe antes do PATH, então copiar
+# o runtime para junto dos binários os torna executáveis de qualquer lugar.
+if(MINGW)
+    get_filename_component(modb_mingw_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(modb_mingw_runtime)
+    foreach(modb_dll libstdc++-6 libgcc_s_seh-1 libwinpthread-1)
+        if(EXISTS "${modb_mingw_bin}/${modb_dll}.dll")
+            list(APPEND modb_mingw_runtime "${modb_mingw_bin}/${modb_dll}.dll")
+        endif()
+    endforeach()
+    if(modb_mingw_runtime)
+        add_custom_target(modb_mingw_runtime_dlls ALL
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${modb_mingw_runtime} "${CMAKE_BINARY_DIR}"
+            COMMENT "Copiando o runtime MinGW para ${CMAKE_BINARY_DIR}"
+            VERBATIM)
+    endif()
 endif()
 
 add_library(modb
@@ -246,6 +270,11 @@ if(MODB_BUILD_EXAMPLES)
         target_link_libraries(${target} PRIVATE modb::app_client)
         if(MINGW)
             target_link_options(${target} PRIVATE ${MODB_MINGW_LINK_OPTS})
+            # `--target <lição>` não passa pelo ALL, então a dependência
+            # explícita é o que garante o runtime ao lado do .exe.
+            if(TARGET modb_mingw_runtime_dlls)
+                add_dependencies(${target} modb_mingw_runtime_dlls)
+            endif()
         endif()
     endfunction()
 

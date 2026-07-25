@@ -24,7 +24,7 @@ audio/ directory for a human to fill in later.
 from __future__ import annotations
 
 import html
-import os
+import posixpath
 import re
 import shutil
 from pathlib import Path, PurePosixPath
@@ -543,8 +543,11 @@ def relative_href(from_relpath: str, to_relpath: str) -> str:
     """A relative href from the page at `from_relpath` to the page/asset
     at `to_relpath`, both given relative to SOURCE_DIR."""
     from_dir = str(PurePosixPath(from_relpath).parent)
-    rel = os.path.relpath(to_relpath, start=from_dir)
-    return PurePosixPath(rel).as_posix()
+    # posixpath.relpath, not os.path.relpath: hrefs must use "/" regardless
+    # of which OS renders this course. os.path.relpath emits "\" on
+    # Windows, and PurePosixPath doesn't treat "\" as a separator, so it
+    # would pass a literal backslash straight into the href.
+    return posixpath.relpath(to_relpath, start=from_dir)
 
 
 def notes_key(markdown_relpath: str) -> str:
@@ -567,12 +570,25 @@ def inline_markup(text: str, current_relpath: str) -> str:
     return escaped
 
 
+# Inline links -- i.e. everything replace_link() renders, all of it inside
+# lesson prose -- open in a new tab so a reader following a reference
+# (another lesson, DEVELOPER_GUIDE.md, a .cpp source) doesn't lose their
+# place in the current lesson. Course navigation (Previous/Next/Index, the
+# sidebar, the narration-script link) is unrelated code and stays same-tab.
+NEW_TAB_ATTRS = ' target="_blank" rel="noopener noreferrer"'
+
+
 def replace_link(match: re.Match[str], current_relpath: str) -> str:
     label = match.group(1)
     href = match.group(2)
 
-    if href.startswith(("http://", "https://", "#")):
+    if href.startswith("#"):
+        # A same-page anchor -- a new tab would just show the top of a
+        # duplicate page instead of jumping to the anchor.
         return f'<a href="{html.escape(href, quote=True)}">{label}</a>'
+
+    if href.startswith(("http://", "https://")):
+        return f'<a href="{html.escape(href, quote=True)}"{NEW_TAB_ATTRS}>{label}</a>'
 
     path_part, _, fragment = href.partition("#")
     basename = Path(path_part).name
@@ -589,14 +605,14 @@ def replace_link(match: re.Match[str], current_relpath: str) -> str:
         )
         if fragment:
             rewritten += f"#{fragment}"
-        return f'<a href="{html.escape(rewritten, quote=True)}">{label}</a>'
+        return f'<a href="{html.escape(rewritten, quote=True)}"{NEW_TAB_ATTRS}>{label}</a>'
 
     # Everything else -- an external reference doc (docs/reference/,
     # DEVELOPER_GUIDE.md, ...) or a same-folder source file
     # (lesson_NN_*.cpp) -- needs no rebasing at all: the rendered .html
     # lives in the exact same folder as the .md it was rendered from, so
     # every other relative link in that .md already resolves correctly.
-    return f'<a href="{html.escape(href, quote=True)}">{label}</a>'
+    return f'<a href="{html.escape(href, quote=True)}"{NEW_TAB_ATTRS}>{label}</a>'
 
 
 def render_markdown(markdown: str, current_relpath: str) -> str:

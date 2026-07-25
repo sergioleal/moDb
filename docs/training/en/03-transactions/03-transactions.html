@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This lesson opens by looking Ana, Bruno, and Carla up by name -- the same pattern Lesson 2 introduced, now used for real work instead of just proving it works.
-
-Bruno&#x27;s raise is unremarkable and that is the point: begin a transaction, materialize, mutate the salary field, update, commit. Carla&#x27;s raise looks almost identical, except the transaction is deliberately allowed to go out of scope without ever calling `commit()`. Nothing crashes. Nothing throws. The change simply never becomes durable, and reading Carla back afterward proves it.
-
-The third scenario touches two employees, Ana and Bruno, inside one transaction -- averaging their salaries -- to make atomicity concrete rather than abstract: either both salaries change together, or neither does.
-
-The last scenario is the sharpest one: opening a second transaction while the first is still active fails immediately, with a message that says exactly that. This application, like the database underneath it, has one writer at a time. Concurrent readers are unaffected; concurrent writers are not.</p>
+          <p>This lesson opens by looking Ana, Bruno, and Carla up by name -- the same pattern Lesson 2 introduced, now used for real work instead of just proving it works.</p>
+<p>Bruno&#x27;s raise is unremarkable and that is the point: begin a transaction, materialize, mutate the salary field, update, commit. Carla&#x27;s raise looks almost identical, except the transaction is deliberately allowed to go out of scope without ever calling `commit()`. Nothing crashes. Nothing throws. The change simply never becomes durable, and reading Carla back afterward proves it.</p>
+<p>The third scenario touches two employees, Ana and Bruno, inside one transaction -- averaging their salaries -- to make atomicity concrete rather than abstract: either both salaries change together, or neither does.</p>
+<p>The last scenario is the sharpest one: opening a second transaction while the first is still active fails immediately, with a message that says exactly that. This application, like the database underneath it, has one writer at a time. Concurrent readers are unaffected; concurrent writers are not.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,7 +82,7 @@ The last scenario is the sharpest one: opening a second transaction while the fi
 <p>A &quot;give a raise&quot; operation that does it properly: one transaction, an explicit commit, and a deliberate demonstration of what happens when you <em>don&#x27;t</em> commit (rollback-on-scope-exit). You&#x27;ll also add a small &quot;transfer department budget&quot; style operation touching two records in one transaction, to show atomicity actually matters.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>begin()</code>/<code>commit()</code>/<code>rollback()</code>, single-writer, RAII rollback-on-scope-exit, the WAL-before-pages commit protocol — see <a href="../../../GARANTIAS_TRANSACIONAIS.md">GARANTIAS_TRANSACIONAIS.md</a> §1-2/4/6.</li>
+<li><code>begin()</code>/<code>commit()</code>/<code>rollback()</code>, single-writer, RAII rollback-on-scope-exit, the WAL-before-pages commit protocol — see <a href="../../../GARANTIAS_TRANSACIONAIS.md" target="_blank" rel="noopener noreferrer">GARANTIAS_TRANSACIONAIS.md</a> §1-2/4/6.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-2 have run — Ana, Bruno, and Carla already exist, findable by name through Lesson 2&#x27;s index.</p>
@@ -98,7 +95,7 @@ The last scenario is the sharpest one: opening a second transaction while the fi
 <li>Try opening a second transaction while one is active and show the <code>transaction_active</code> failure.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_03_transactions.cpp">lesson_03_transactions.cpp</a></p>
+<p><a href="lesson_03_transactions.cpp" target="_blank" rel="noopener noreferrer">lesson_03_transactions.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_03
 .\build\debug\employee_directory_lesson_03.exe</code></pre>
@@ -115,8 +112,8 @@ A second begin() while one is already open failed as expected: a transaction is 
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../GARANTIAS_TRANSACIONAIS.md">GARANTIAS_TRANSACIONAIS.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#4-transactions">DEVELOPER_GUIDE.md, Chapter 4</a></li>
+<li><a href="../../../GARANTIAS_TRANSACIONAIS.md" target="_blank" rel="noopener noreferrer">GARANTIAS_TRANSACIONAIS.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#4-transactions" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 4</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../02-persist-and-reopen/02-persist-and-reopen.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../04-handles-and-updates/04-handles-and-updates.html">Next</a></nav>
       </article>

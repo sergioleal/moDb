@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This lesson starts by looking up two things by name: Bruno, and the department this lesson is finally going to move him to, Engineering -- found through the `Department.name` index Lesson 5 quietly set up for exactly this moment.
-
-`TransferDepartment` is a small `Operation` class: an id string, argument encoding for an employee id and a department id, and an `execute()` that checks the target department exists *before* it materializes or mutates the employee. That ordering is the whole design: validate first, mutate second, so a rejected call never leaves a half-applied change behind.
-
-Registering it is a short but specific sequence -- build a `ModuleManifest`, compute its hash, admit that hash on a `ModuleLoader`, load it into an `OperationRegistry`, and attach that registry to the server. The client, meanwhile, never links against `TransferDepartment`&#x27;s implementation at all. It only knows the operation&#x27;s id string and how to encode its arguments.
-
-The successful call moves Bruno to Engineering, closing the dangling reference Lesson 5 left open. The second call, aimed at a department id that does not exist, fails with a clear message -- and leaves Bruno&#x27;s `department` field exactly as the first call left it.</p>
+          <p>This lesson starts by looking up two things by name: Bruno, and the department this lesson is finally going to move him to, Engineering -- found through the `Department.name` index Lesson 5 quietly set up for exactly this moment.</p>
+<p>`TransferDepartment` is a small `Operation` class: an id string, argument encoding for an employee id and a department id, and an `execute()` that checks the target department exists *before* it materializes or mutates the employee. That ordering is the whole design: validate first, mutate second, so a rejected call never leaves a half-applied change behind.</p>
+<p>Registering it is a short but specific sequence -- build a `ModuleManifest`, compute its hash, admit that hash on a `ModuleLoader`, load it into an `OperationRegistry`, and attach that registry to the server. The client, meanwhile, never links against `TransferDepartment`&#x27;s implementation at all. It only knows the operation&#x27;s id string and how to encode its arguments.</p>
+<p>The successful call moves Bruno to Engineering, closing the dangling reference Lesson 5 left open. The second call, aimed at a department id that does not exist, fails with a clear message -- and leaves Bruno&#x27;s `department` field exactly as the first call left it.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,7 +82,7 @@ The successful call moves Bruno to Engineering, closing the dangling reference L
 <p>A <code>department.transfer</code> operation that runs <strong>on the server</strong>, callable by id from the client: move an employee to a new department, validating the target department exists before making any change, all inside the server&#x27;s own transaction.</p>
 <h2>New Concepts</h2>
 <ul>
-<li>The <code>Operation</code> contract, <code>OperationRegistry::register_operation</code>/ <code>dispatch</code>, <code>ExecutionContext</code>, <code>ModuleManifest</code> + hash allowlist — see <a href="../../../reference/domain-operations.md">docs/reference/domain-operations.md</a>.</li>
+<li>The <code>Operation</code> contract, <code>OperationRegistry::register_operation</code>/ <code>dispatch</code>, <code>ExecutionContext</code>, <code>ModuleManifest</code> + hash allowlist — see <a href="../../../reference/domain-operations.md" target="_blank" rel="noopener noreferrer">docs/reference/domain-operations.md</a>.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-8 have run.</p>
@@ -99,7 +96,7 @@ The successful call moves Bruno to Engineering, closing the dangling reference L
 <li>Demonstrate the rejection path: call with a nonexistent department id (<code>ObjectId{999999}</code>) and confirm it fails with &quot;target department does not exist&quot; rather than partially mutating the employee.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_09_remote_operations.cpp">lesson_09_remote_operations.cpp</a></p>
+<p><a href="lesson_09_remote_operations.cpp" target="_blank" rel="noopener noreferrer">lesson_09_remote_operations.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_09
 .\build\debug\employee_directory_lesson_09.exe</code></pre>
@@ -116,9 +113,9 @@ Attempting a transfer to a department that doesn&#x27;t exist
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../reference/domain-operations.md">docs/reference/domain-operations.md</a></li>
-<li><a href="../../../OPERACAO_MODULOS.md">OPERACAO_MODULOS.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#10-remote-domain-operations">DEVELOPER_GUIDE.md, Chapter 10</a></li>
+<li><a href="../../../reference/domain-operations.md" target="_blank" rel="noopener noreferrer">docs/reference/domain-operations.md</a></li>
+<li><a href="../../../OPERACAO_MODULOS.md" target="_blank" rel="noopener noreferrer">OPERACAO_MODULOS.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#10-remote-domain-operations" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 10</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../08-networking/08-networking.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../10-facades/10-facades.html">Next</a></nav>
       </article>

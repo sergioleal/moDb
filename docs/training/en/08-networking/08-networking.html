@@ -71,11 +71,9 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This lesson keeps the server and the client in one binary: a background thread runs `serve_one()`, accepting exactly one connection, while the main thread plays the client. A real deployment would split these into separate processes, but nothing about `Server` or `ServerConnection` requires that split, and keeping them together here keeps the lesson&#x27;s code easy to read top to bottom.
-
-`Server::listen(path, &quot;127.0.0.1&quot;, 0)` opens the same persistent file every earlier lesson has been building up -- port zero means &quot;pick any free port.&quot; The client connects, and the first thing it does is not query anything at all -- it reads the negotiated protocol version and `max_concurrent_streams` from the handshake, the network-level version of the compatibility habit that runs through this whole product.
-
-Only after that does the client collect every employee remotely, then repeat Lesson 7&#x27;s exact-salary search -- but now through `QueryDescription`&#x27;s `EqualityFilter`, not the local `Query&lt;T&gt;` builder&#x27;s `.between()`. That is a deliberate narrowing: the wire protocol supports a type, an optional limit, and one equality filter, nothing richer. If you need `.between()`, `top_k`, or composed conditions over the network, that gap is exactly what Lessons 9 and 10 exist to close.</p>
+          <p>This lesson keeps the server and the client in one binary: a background thread runs `serve_one()`, accepting exactly one connection, while the main thread plays the client. A real deployment would split these into separate processes, but nothing about `Server` or `ServerConnection` requires that split, and keeping them together here keeps the lesson&#x27;s code easy to read top to bottom.</p>
+<p>`Server::listen(path, &quot;127.0.0.1&quot;, 0)` opens the same persistent file every earlier lesson has been building up -- port zero means &quot;pick any free port.&quot; The client connects, and the first thing it does is not query anything at all -- it reads the negotiated protocol version and `max_concurrent_streams` from the handshake, the network-level version of the compatibility habit that runs through this whole product.</p>
+<p>Only after that does the client collect every employee remotely, then repeat Lesson 7&#x27;s exact-salary search -- but now through `QueryDescription`&#x27;s `EqualityFilter`, not the local `Query&lt;T&gt;` builder&#x27;s `.between()`. That is a deliberate narrowing: the wire protocol supports a type, an optional limit, and one equality filter, nothing richer. If you need `.between()`, `top_k`, or composed conditions over the network, that gap is exactly what Lessons 9 and 10 exist to close.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -84,7 +82,7 @@ Only after that does the client collect every employee remotely, then repeat Les
 <p>This lesson keeps server and client in <strong>one binary</strong> (a background thread runs <code>serve_one()</code> while the main thread drives the connection) — the same single-process convention every later networking lesson (9 and 10) also uses. A real deployment would split them into separate processes, but nothing about <code>Server</code>/<code>ServerConnection</code> requires that split.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>Server::listen</code>/<code>serve_one</code>/<code>serve_forever</code>, <code>ServerConnection::connect</code>/ <code>handshake</code>, <code>QueryDescription</code> — see <a href="../../../reference/networking-protocol.md">docs/reference/networking-protocol.md</a>.</li>
+<li><code>Server::listen</code>/<code>serve_one</code>/<code>serve_forever</code>, <code>ServerConnection::connect</code>/ <code>handshake</code>, <code>QueryDescription</code> — see <a href="../../../reference/networking-protocol.md" target="_blank" rel="noopener noreferrer">docs/reference/networking-protocol.md</a>.</li>
 <li>Protocol limits, backpressure (<code>max_in_flight_objects</code>), cooperative cancellation and connection reuse.</li>
 </ul>
 <h2>Starting Point</h2>
@@ -97,7 +95,7 @@ Only after that does the client collect every employee remotely, then repeat Les
 <li>Run a second <code>collect()</code> with <code>QueryDescription{.equals = EqualityFilter{salary_field, AttributeValue{20000}}}</code> to find one employee by exact salary match — this is the wire protocol&#x27;s search primitive; unlike the local <code>Query&lt;T&gt;</code> builder, it only supports equality, not <code>.between()</code>.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_08_networking.cpp">lesson_08_networking.cpp</a></p>
+<p><a href="lesson_08_networking.cpp" target="_blank" rel="noopener noreferrer">lesson_08_networking.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_08
 .\build\debug\employee_directory_lesson_08.exe</code></pre>
@@ -114,8 +112,8 @@ Remote search for salary == 20000 returned 1 match(es): Carla</code></pre>
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../reference/networking-protocol.md">docs/reference/networking-protocol.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#9-server-and-client">DEVELOPER_GUIDE.md, Chapter 9</a></li>
+<li><a href="../../../reference/networking-protocol.md" target="_blank" rel="noopener noreferrer">docs/reference/networking-protocol.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#9-server-and-client" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 9</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../07-queries-and-indexes/07-queries-and-indexes.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../09-remote-operations/09-remote-operations.html">Next</a></nav>
       </article>

@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>`GiveRaise` is built exactly like `TransferDepartment` was -- an id, argument encoding, an `execute()` that materializes, mutates, and updates. Nothing about individual operations changes in this lesson.
-
-What is new is `HRFacade`: a tag type naming a facade id and a version, backed by a `FacadeDescriptor` that lists both `TransferDepartment` and `GiveRaise` as its methods. The server registers this facade in a `FacadeCatalog` alongside the operation registry it already had. The client opens the facade once, gets back a typed handle, and calls `invoke&lt;TransferDepartment&gt;(...)` and `invoke&lt;GiveRaise&gt;(...)` through it -- moving Bruno back to Engineering and giving Ana a raise, both through the same handle.
-
-The version-mismatch demonstration is the sharpest part of the lesson: a second tag, `HRFacadeV2`, asks for a version of &quot;hr&quot; the server never registered. It is rejected -- not because &quot;hr&quot; is unknown, but because no version 2 of it exists. Identity here is the pair, facade id plus version, never a position in a list or an assumption about what the newest version must be.
-
-A facade is a naming and versioning layer, not a second execution engine. Everything `invoke&lt;Method&gt;` does still travels through the exact same operation dispatch Lesson 9 introduced.</p>
+          <p>`GiveRaise` is built exactly like `TransferDepartment` was -- an id, argument encoding, an `execute()` that materializes, mutates, and updates. Nothing about individual operations changes in this lesson.</p>
+<p>What is new is `HRFacade`: a tag type naming a facade id and a version, backed by a `FacadeDescriptor` that lists both `TransferDepartment` and `GiveRaise` as its methods. The server registers this facade in a `FacadeCatalog` alongside the operation registry it already had. The client opens the facade once, gets back a typed handle, and calls `invoke&lt;TransferDepartment&gt;(...)` and `invoke&lt;GiveRaise&gt;(...)` through it -- moving Bruno back to Engineering and giving Ana a raise, both through the same handle.</p>
+<p>The version-mismatch demonstration is the sharpest part of the lesson: a second tag, `HRFacadeV2`, asks for a version of &quot;hr&quot; the server never registered. It is rejected -- not because &quot;hr&quot; is unknown, but because no version 2 of it exists. Identity here is the pair, facade id plus version, never a position in a list or an assumption about what the newest version must be.</p>
+<p>A facade is a naming and versioning layer, not a second execution engine. Everything `invoke&lt;Method&gt;` does still travels through the exact same operation dispatch Lesson 9 introduced.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,7 +82,7 @@ A facade is a naming and versioning layer, not a second execution engine. Everyt
 <p>An <code>HRFacade</code> grouping <code>TransferDepartment</code> (from Lesson 9) and a new <code>GiveRaise</code> operation behind one versioned, typed surface. The client opens the facade once and calls both methods through it, without knowing the server&#x27;s concrete operation classes.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>FacadeHandle&lt;TFacade&gt;::invoke&lt;Method&gt;</code>, <code>FacadeCatalog</code>, id+version identity (not array index), embedded vs. remote invoker — see <a href="../../../FACADES.md">FACADES.md</a>.</li>
+<li><code>FacadeHandle&lt;TFacade&gt;::invoke&lt;Method&gt;</code>, <code>FacadeCatalog</code>, id+version identity (not array index), embedded vs. remote invoker — see <a href="../../../FACADES.md" target="_blank" rel="noopener noreferrer">FACADES.md</a>.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-9 have run.</p>
@@ -99,7 +96,7 @@ A facade is a naming and versioning layer, not a second execution engine. Everyt
 <li>Demonstrate a version mismatch: define a second tag <code>HRFacadeV2</code> with <code>k_version = 2</code> (a version the server never registered) and show <code>connection-&gt;open_facade&lt;HRFacadeV2&gt;()</code> fails.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_10_facades.cpp">lesson_10_facades.cpp</a></p>
+<p><a href="lesson_10_facades.cpp" target="_blank" rel="noopener noreferrer">lesson_10_facades.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_10
 .\build\debug\employee_directory_lesson_10.exe</code></pre>
@@ -119,9 +116,9 @@ A client compiled against &quot;hr&quot; version 2 asks for a version the server
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../FACADES.md">FACADES.md</a></li>
-<li><a href="../../../reference/domain-operations.md">docs/reference/domain-operations.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#11-facades-versioned-remote-surfaces">DEVELOPER_GUIDE.md, Chapter 11</a></li>
+<li><a href="../../../FACADES.md" target="_blank" rel="noopener noreferrer">FACADES.md</a></li>
+<li><a href="../../../reference/domain-operations.md" target="_blank" rel="noopener noreferrer">docs/reference/domain-operations.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#11-facades-versioned-remote-surfaces" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 11</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../09-remote-operations/09-remote-operations.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../11-graphs/11-graphs.html">Next</a></nav>
       </article>

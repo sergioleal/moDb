@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>Adding `manager: Ref&lt;Employee&gt;` is this run&#x27;s fourth schema evolution, after Lesson 4&#x27;s `country` and Lesson 5&#x27;s three relationship fields -- and, like every field before it, its default is a zero-valued `Ref`, so existing records keep projecting cleanly.
-
-Walking the org chart downward from a manager uses `GraphView::incoming`, wrapped in an `AdjacencyFn` that `graph::bfs` drives: given a manager, find every employee whose `manager` field points back at them. That direction needs an index on the field, which this lesson creates right alongside the schema change, and it can never report a &quot;dangling&quot; result -- a source that no longer resolves is just silently skipped.
-
-To see dangling handled deliberately, the lesson walks the *other* direction instead: a temporary employee, Gustavo, reports to another temporary employee, Felipe, using `graph::edge()` directly over the single `manager` field. Felipe is then removed, and walking up from Gustavo hits a target that no longer exists.
-
-Three traversals of that same broken edge, back to back, show what each `DanglingPolicy` actually does: `fail` stops the walk with an error, `skip` ends quietly with nothing reported, and `yield_error` surfaces the error but would have kept exploring any other, unrelated branch -- a difference this particular one-edge case cannot show, since Gustavo only has the one dangling edge to walk.</p>
+          <p>Adding `manager: Ref&lt;Employee&gt;` is this run&#x27;s fourth schema evolution, after Lesson 4&#x27;s `country` and Lesson 5&#x27;s three relationship fields -- and, like every field before it, its default is a zero-valued `Ref`, so existing records keep projecting cleanly.</p>
+<p>Walking the org chart downward from a manager uses `GraphView::incoming`, wrapped in an `AdjacencyFn` that `graph::bfs` drives: given a manager, find every employee whose `manager` field points back at them. That direction needs an index on the field, which this lesson creates right alongside the schema change, and it can never report a &quot;dangling&quot; result -- a source that no longer resolves is just silently skipped.</p>
+<p>To see dangling handled deliberately, the lesson walks the *other* direction instead: a temporary employee, Gustavo, reports to another temporary employee, Felipe, using `graph::edge()` directly over the single `manager` field. Felipe is then removed, and walking up from Gustavo hits a target that no longer exists.</p>
+<p>Three traversals of that same broken edge, back to back, show what each `DanglingPolicy` actually does: `fail` stops the walk with an error, `skip` ends quietly with nothing reported, and `yield_error` surfaces the error but would have kept exploring any other, unrelated branch -- a difference this particular one-edge case cannot show, since Gustavo only has the one dangling edge to walk.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,7 +82,7 @@ Three traversals of that same broken edge, back to back, show what each `Danglin
 <p>A <code>manager: Ref&lt;Employee&gt;</code> field (an employee pointing at another employee) and an org-chart feature: &quot;list everyone who (directly or indirectly) reports to X,&quot; implemented as a lazy BFS instead of hand-written recursive queries.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>GraphView</code>/<code>open_graph_view</code>, <code>EdgeHandle</code>, <code>graph::bfs</code>/<code>dfs</code>, <code>TraversalOptions</code>/<code>DanglingPolicy</code> — see <a href="../../../reference/graphs.md">docs/reference/graphs.md</a>.</li>
+<li><code>GraphView</code>/<code>open_graph_view</code>, <code>EdgeHandle</code>, <code>graph::bfs</code>/<code>dfs</code>, <code>TraversalOptions</code>/<code>DanglingPolicy</code> — see <a href="../../../reference/graphs.md" target="_blank" rel="noopener noreferrer">docs/reference/graphs.md</a>.</li>
 <li>Why <code>incoming()</code> (find an employee&#x27;s direct reports) needs an index on <code>manager</code>.</li>
 </ul>
 <h2>Starting Point</h2>
@@ -99,7 +96,7 @@ Three traversals of that same broken edge, back to back, show what each `Danglin
 <li>Create a temporary employee reporting to another temporary employee, remove the manager, and walk <em>upward</em> from the report (this direction uses <code>graph::edge()</code> over the single <code>manager</code> field, not <code>incoming()</code> — <code>incoming()</code> only ever surfaces reports that still resolve). Run the same walk three times with <code>DanglingPolicy::fail</code>, <code>skip</code>, and <code>yield_error</code> and compare what each one does with the now-dangling edge.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_11_graphs.cpp">lesson_11_graphs.cpp</a> — embedded, no server/client split needed to demonstrate the graph API itself.</p>
+<p><a href="lesson_11_graphs.cpp" target="_blank" rel="noopener noreferrer">lesson_11_graphs.cpp</a> — embedded, no server/client split needed to demonstrate the graph API itself.</p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_11
 .\build\debug\employee_directory_lesson_11.exe</code></pre>
@@ -129,9 +126,9 @@ Walking up from Gustavo with DanglingPolicy::yield_error
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../reference/graphs.md">docs/reference/graphs.md</a></li>
-<li><a href="../../../reference/relationships-collections.md">docs/reference/relationships-collections.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#12-graphs">DEVELOPER_GUIDE.md, Chapter 12</a></li>
+<li><a href="../../../reference/graphs.md" target="_blank" rel="noopener noreferrer">docs/reference/graphs.md</a></li>
+<li><a href="../../../reference/relationships-collections.md" target="_blank" rel="noopener noreferrer">docs/reference/relationships-collections.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#12-graphs" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 12</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../10-facades/10-facades.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../12-async-io/12-async-io.html">Next</a></nav>
       </article>

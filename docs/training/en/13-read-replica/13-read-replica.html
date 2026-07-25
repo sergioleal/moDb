@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This is the last lesson, and its follower is deliberately not part of the chain the way the primary file has been for the previous twelve. It is created fresh, used, and removed again before the run ends -- there is no Lesson 14 to hand it forward to.
-
-`create_bootstrap_snapshot(primary, temp_dir)` briefly opens and rolls back a transaction on the primary purely as a writer barrier, then copies its data file. `install_bootstrap_snapshot` moves that copy into place as a separate file, `employee-directory-replica.modb`, next to the main directory file -- never the same path, never the same handle.
-
-Opening the follower, confirming its `database_uuid()` matches the primary&#x27;s, and calling `set_read_only_replica(true)` sets up the rest of the lesson: a payroll report -- the exact same `scan&lt;Employee&gt;(snapshot, visitor)` pattern from Lesson 6 -- run against the follower&#x27;s own snapshot instead of the primary&#x27;s, and a `begin()` call on the follower that fails immediately with `replica_read_only`.
-
-What this lesson does not implement is the streaming half of replication -- keeping a follower continuously caught up after its initial bootstrap -- or a `wal_only` primary, which cannot donate a file-copy bootstrap at all and needs `seed-wal` instead. Both extend naturally from what is here, but they are out of this lesson&#x27;s scope.</p>
+          <p>This is the last lesson, and its follower is deliberately not part of the chain the way the primary file has been for the previous twelve. It is created fresh, used, and removed again before the run ends -- there is no Lesson 14 to hand it forward to.</p>
+<p>`create_bootstrap_snapshot(primary, temp_dir)` briefly opens and rolls back a transaction on the primary purely as a writer barrier, then copies its data file. `install_bootstrap_snapshot` moves that copy into place as a separate file, `employee-directory-replica.modb`, next to the main directory file -- never the same path, never the same handle.</p>
+<p>Opening the follower, confirming its `database_uuid()` matches the primary&#x27;s, and calling `set_read_only_replica(true)` sets up the rest of the lesson: a payroll report -- the exact same `scan&lt;Employee&gt;(snapshot, visitor)` pattern from Lesson 6 -- run against the follower&#x27;s own snapshot instead of the primary&#x27;s, and a `begin()` call on the follower that fails immediately with `replica_read_only`.</p>
+<p>What this lesson does not implement is the streaming half of replication -- keeping a follower continuously caught up after its initial bootstrap -- or a `wal_only` primary, which cannot donate a file-copy bootstrap at all and needs `seed-wal` instead. Both extend naturally from what is here, but they are out of this lesson&#x27;s scope.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,7 +82,7 @@ What this lesson does not implement is the streaming half of replication -- keep
 <p>A second copy of the directory — a read-only follower — kept caught up from the primary&#x27;s WAL, so the payroll report from Lesson 6 can run against the replica instead of competing with live writes on the primary.</p>
 <h2>New Concepts</h2>
 <ul>
-<li>Primary/follower model, <code>modb replicate bootstrap</code>/<code>apply-wal</code>/<code>status</code>, <code>set_read_only_replica</code> — see <a href="../../../OPERACAO_REPLICACAO.md">OPERACAO_REPLICACAO.md</a>.</li>
+<li>Primary/follower model, <code>modb replicate bootstrap</code>/<code>apply-wal</code>/<code>status</code>, <code>set_read_only_replica</code> — see <a href="../../../OPERACAO_REPLICACAO.md" target="_blank" rel="noopener noreferrer">OPERACAO_REPLICACAO.md</a>.</li>
 <li><em>(Stretch goal)</em> <code>PrimaryStorage::wal_only</code> — a primary with no local data files at all, and <code>modb replicate seed-wal</code>.</li>
 </ul>
 <h2>Starting Point</h2>
@@ -98,9 +95,9 @@ What this lesson does not implement is the streaming half of replication -- keep
 <li>Run a Lesson-6-style payroll report (<code>scan&lt;Employee&gt;(snapshot, visitor)</code>) against the follower&#x27;s own snapshot.</li>
 <li>Confirm the follower rejects writes: <code>follower-&gt;begin()</code> fails with <code>ErrorCode::replica_read_only</code>.</li>
 </ul>
-<p>This lesson does <strong>not</strong> implement the <code>apply-wal</code>/streaming half of replication (keeping a follower continuously caught up) or the <code>wal_only</code> + <code>seed-wal</code> stretch goal — the bootstrap snapshot above is a one-time copy, current as of its <code>cut_lsn</code>. See <a href="../../../OPERACAO_REPLICACAO.md">OPERACAO_REPLICACAO.md</a> for how streaming apply and <code>wal_only</code> primaries extend this.</p>
+<p>This lesson does <strong>not</strong> implement the <code>apply-wal</code>/streaming half of replication (keeping a follower continuously caught up) or the <code>wal_only</code> + <code>seed-wal</code> stretch goal — the bootstrap snapshot above is a one-time copy, current as of its <code>cut_lsn</code>. See <a href="../../../OPERACAO_REPLICACAO.md" target="_blank" rel="noopener noreferrer">OPERACAO_REPLICACAO.md</a> for how streaming apply and <code>wal_only</code> primaries extend this.</p>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_13_read_replica.cpp">lesson_13_read_replica.cpp</a></p>
+<p><a href="lesson_13_read_replica.cpp" target="_blank" rel="noopener noreferrer">lesson_13_read_replica.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_13
 .\build\debug\employee_directory_lesson_13.exe</code></pre>
@@ -120,9 +117,9 @@ Follower rejected a write attempt as expected: follower rejects begin/write</cod
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../OPERACAO_REPLICACAO.md">OPERACAO_REPLICACAO.md</a></li>
-<li><a href="../../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#14-background-read-replicas-and-wal_only">DEVELOPER_GUIDE.md, Chapter 14</a></li>
+<li><a href="../../../OPERACAO_REPLICACAO.md" target="_blank" rel="noopener noreferrer">OPERACAO_REPLICACAO.md</a></li>
+<li><a href="../../../reference/database-lifecycle.md" target="_blank" rel="noopener noreferrer">docs/reference/database-lifecycle.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#14-background-read-replicas-and-wal_only" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 14</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../12-async-io/12-async-io.html">Previous</a><a class="nav-button" href="../index.html">Index</a><span class="nav-button nav-disabled">Next</span></nav>
       </article>

@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This lesson is two scoped blocks inside one `main()`, and the boundary between them matters more than it looks.
-
-The first block opens the file Lesson 1 created -- never creates one of its own -- begins a transaction, and commits three `Employee` records: Ana, Bruno, and Carla. Right after that commit, it also creates an index on `Employee.name`. That index is not this lesson&#x27;s teaching topic; it is infrastructure every later lesson depends on, because every later lesson is a genuinely separate program run with no access to the `ObjectId`s this run just produced.
-
-The second block reopens the file again, as if it were a fresh process starting up, and looks Ana up by name through that index rather than by remembering her id. It then confirms the id it found matches the one this same run captured earlier, proving the lookup is not just plausible but correct.
-
-The object ids you will see (18, 19, 20) are deterministic for this exact sequence of operations, but they are not &quot;1, 2, 3&quot; -- the catalog itself consumes a few ids first, for its own type definitions and baselines, before your first real record.</p>
+          <p>This lesson is two scoped blocks inside one `main()`, and the boundary between them matters more than it looks.</p>
+<p>The first block opens the file Lesson 1 created -- never creates one of its own -- begins a transaction, and commits three `Employee` records: Ana, Bruno, and Carla. Right after that commit, it also creates an index on `Employee.name`. That index is not this lesson&#x27;s teaching topic; it is infrastructure every later lesson depends on, because every later lesson is a genuinely separate program run with no access to the `ObjectId`s this run just produced.</p>
+<p>The second block reopens the file again, as if it were a fresh process starting up, and looks Ana up by name through that index rather than by remembering her id. It then confirms the id it found matches the one this same run captured earlier, proving the lookup is not just plausible but correct.</p>
+<p>The object ids you will see (18, 19, 20) are deterministic for this exact sequence of operations, but they are not &quot;1, 2, 3&quot; -- the catalog itself consumes a few ids first, for its own type definitions and baselines, before your first real record.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,11 +82,11 @@ The object ids you will see (18, 19, 20) are deterministic for this exact sequen
 <p>Real employee records that survive closing and reopening the directory. The program now writes a handful of employees in one run, and a second run (simulating a restart) reads them back by id.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>Database::create</code> vs <code>Database::open</code>, the <code>shared_ptr</code> + <code>DatabaseRegistry</code> attach/detach pattern — see <a href="../../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a>.</li>
+<li><code>Database::create</code> vs <code>Database::open</code>, the <code>shared_ptr</code> + <code>DatabaseRegistry</code> attach/detach pattern — see <a href="../../../reference/database-lifecycle.md" target="_blank" rel="noopener noreferrer">docs/reference/database-lifecycle.md</a>.</li>
 <li>Why bindings must be repeated on every process start (they don&#x27;t persist themselves).</li>
 </ul>
 <h2>Starting Point</h2>
-<p>The persistent database file Lesson 1 created (see the course <a href="../index.html#how-the-code-is-organized">README</a>) — this lesson is a separate program run that opens it.</p>
+<p>The persistent database file Lesson 1 created (see the course <a href="../index.html#how-the-code-is-organized" target="_blank" rel="noopener noreferrer">README</a>) — this lesson is a separate program run that opens it.</p>
 <h2>Steps</h2>
 <ul>
 <li>Two scoped blocks simulate two separate program runs, both inside this one lesson&#x27;s <code>main()</code>, against the SAME file Lesson 1 created.</li>
@@ -98,7 +95,7 @@ The object ids you will see (18, 19, 20) are deterministic for this exact sequen
 <li>Second block: open again (a fresh <code>Database</code> instance, simulating a restart), re-bind, look Ana up <strong>by name</strong> through the new index, then read her record back by the resulting id.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_02_persist_reopen.cpp">lesson_02_persist_reopen.cpp</a></p>
+<p><a href="lesson_02_persist_reopen.cpp" target="_blank" rel="noopener noreferrer">lesson_02_persist_reopen.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_02
 .\build\debug\employee_directory_lesson_02.exe</code></pre>
@@ -115,8 +112,8 @@ After reopen, found &quot;Ana&quot; as employee 18 = Ana (12000)</code></pre>
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#3-create-persist-reopen">DEVELOPER_GUIDE.md, Chapter 3</a></li>
+<li><a href="../../../reference/database-lifecycle.md" target="_blank" rel="noopener noreferrer">docs/reference/database-lifecycle.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#3-create-persist-reopen" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 3</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../01-binding-your-first-type/01-binding-your-first-type.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../03-transactions/03-transactions.html">Next</a></nav>
       </article>

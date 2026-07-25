@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This lesson opens a `Snapshot`, sums every employee&#x27;s salary through it, then -- deliberately, while that same snapshot is still open -- commits a raise for Carla in a fresh transaction.
-
-Reading the payroll total again through the *same* snapshot returns the exact same number as before. That is not a bug or a timing accident; it is the entire point of a snapshot. It answers questions as of the moment it was opened, no matter what commits afterward.
-
-A second raise attempt for Carla, still with that snapshot open, fails outright with `snapshot_conflict`. The message names the object and explains why: an older open snapshot still needs to see its previous version. The fix is not to fight the conflict -- it is to let the blocking snapshot close and retry, which is exactly what this lesson does next, successfully.
-
-A fresh snapshot afterward reports the new, higher total. Finally, `collect_garbage()` reclaims the old, now-unreferenced versions that the earlier snapshot had been protecting -- object versions this lesson&#x27;s own history had accumulated all the way back to Lesson 3.</p>
+          <p>This lesson opens a `Snapshot`, sums every employee&#x27;s salary through it, then -- deliberately, while that same snapshot is still open -- commits a raise for Carla in a fresh transaction.</p>
+<p>Reading the payroll total again through the *same* snapshot returns the exact same number as before. That is not a bug or a timing accident; it is the entire point of a snapshot. It answers questions as of the moment it was opened, no matter what commits afterward.</p>
+<p>A second raise attempt for Carla, still with that snapshot open, fails outright with `snapshot_conflict`. The message names the object and explains why: an older open snapshot still needs to see its previous version. The fix is not to fight the conflict -- it is to let the blocking snapshot close and retry, which is exactly what this lesson does next, successfully.</p>
+<p>A fresh snapshot afterward reports the new, higher total. Finally, `collect_garbage()` reclaims the old, now-unreferenced versions that the earlier snapshot had been protecting -- object versions this lesson&#x27;s own history had accumulated all the way back to Lesson 3.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,7 +82,7 @@ A fresh snapshot afterward reports the new, higher total. Finally, `collect_garb
 <p>A &quot;total payroll by department&quot; report that takes a <code>Snapshot</code> before running, so it reflects one consistent instant even if raises are being applied to other employees while the report iterates. You&#x27;ll also add a manual &quot;compact the directory&quot; maintenance command wired to <code>collect_garbage()</code>.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>Database::snapshot()</code>, epoch-based reads (<code>get</code>/<code>scan</code> with a <code>Snapshot</code>), single retained <code>previous</code> version, <code>snapshot_conflict</code> — see <a href="../../../reference/snapshots-mvcc.md">docs/reference/snapshots-mvcc.md</a>.</li>
+<li><code>Database::snapshot()</code>, epoch-based reads (<code>get</code>/<code>scan</code> with a <code>Snapshot</code>), single retained <code>previous</code> version, <code>snapshot_conflict</code> — see <a href="../../../reference/snapshots-mvcc.md" target="_blank" rel="noopener noreferrer">docs/reference/snapshots-mvcc.md</a>.</li>
 <li>Explicit garbage collection.</li>
 </ul>
 <h2>Starting Point</h2>
@@ -99,7 +96,7 @@ A fresh snapshot afterward reports the new, higher total. Finally, `collect_garb
 <li>Call <code>collect_garbage()</code> and print how many records it reclaimed.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_06_snapshots.cpp">lesson_06_snapshots.cpp</a></p>
+<p><a href="lesson_06_snapshots.cpp" target="_blank" rel="noopener noreferrer">lesson_06_snapshots.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_06
 .\build\debug\employee_directory_lesson_06.exe</code></pre>
@@ -118,9 +115,9 @@ collect_garbage() reclaimed 12 record(s)</code></pre>
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../reference/snapshots-mvcc.md">docs/reference/snapshots-mvcc.md</a></li>
-<li><a href="../../../GARANTIAS_TRANSACIONAIS.md">GARANTIAS_TRANSACIONAIS.md</a> §8-9</li>
-<li><a href="../../../DEVELOPER_GUIDE.md#7-snapshots-mvcc">DEVELOPER_GUIDE.md, Chapter 7</a></li>
+<li><a href="../../../reference/snapshots-mvcc.md" target="_blank" rel="noopener noreferrer">docs/reference/snapshots-mvcc.md</a></li>
+<li><a href="../../../GARANTIAS_TRANSACIONAIS.md" target="_blank" rel="noopener noreferrer">GARANTIAS_TRANSACIONAIS.md</a> §8-9</li>
+<li><a href="../../../DEVELOPER_GUIDE.md#7-snapshots-mvcc" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 7</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../05-relationships/05-relationships.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../07-queries-and-indexes/07-queries-and-indexes.html">Next</a></nav>
       </article>

@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This lesson runs the identical query twice, and the interesting part is precisely that it is identical both times.
-
-The first run -- `.between(salary_field, 15000, max_int64)` -- has no index to work with, so `.plan()` reports `access=table_scan`. Nothing about the query itself asked for a scan; there was simply nothing better available yet.
-
-`create_index&lt;Employee&gt;(salary_field)` changes exactly one thing: whether an index exists. Running the *same* query again reports `access=index_scan`. The planner did not need a hint, a rewritten query, or a different API call -- it is rule-based, and an index appearing is, on its own, enough to change the chosen access path.
-
-A `top_k(2, comparator)` query closes the lesson, returning the two highest earners with their salaries. `top_k` gets its own access path rather than sorting the entire table and taking the first two -- which is why it is worth learning as a distinct tool, not a shorthand for `order_by` plus `limit`.</p>
+          <p>This lesson runs the identical query twice, and the interesting part is precisely that it is identical both times.</p>
+<p>The first run -- `.between(salary_field, 15000, max_int64)` -- has no index to work with, so `.plan()` reports `access=table_scan`. Nothing about the query itself asked for a scan; there was simply nothing better available yet.</p>
+<p>`create_index&lt;Employee&gt;(salary_field)` changes exactly one thing: whether an index exists. Running the *same* query again reports `access=index_scan`. The planner did not need a hint, a rewritten query, or a different API call -- it is rule-based, and an index appearing is, on its own, enough to change the chosen access path.</p>
+<p>A `top_k(2, comparator)` query closes the lesson, returning the two highest earners with their salaries. `top_k` gets its own access path rather than sorting the entire table and taking the first two -- which is why it is worth learning as a distinct tool, not a shorthand for `order_by` plus `limit`.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,7 +82,7 @@ A `top_k(2, comparator)` query closes the lesson, returning the two highest earn
 <p>A search feature: find every employee in a department, or every employee earning above some salary threshold, using <code>Database::query&lt;Employee&gt;()</code> instead of hand-rolled loops. You&#x27;ll add an index on <code>salary</code> and confirm (via <code>.plan()</code>) that the search actually uses it.</p>
 <h2>New Concepts</h2>
 <ul>
-<li>The fluent <code>Query&lt;T&gt;</code> builder, lazy streaming via <code>.stream()</code>, <code>.where()</code>/<code>.limit()</code>/<code>.equals()</code>/<code>.between()</code> — see <a href="../../../reference/queries-indexes.md">docs/reference/queries-indexes.md</a>.</li>
+<li>The fluent <code>Query&lt;T&gt;</code> builder, lazy streaming via <code>.stream()</code>, <code>.where()</code>/<code>.limit()</code>/<code>.equals()</code>/<code>.between()</code> — see <a href="../../../reference/queries-indexes.md" target="_blank" rel="noopener noreferrer">docs/reference/queries-indexes.md</a>.</li>
 <li><code>create_index&lt;T&gt;(field)</code> and the deterministic planner (<code>.plan()</code>/<code>first_result_cost</code>).</li>
 </ul>
 <h2>Starting Point</h2>
@@ -97,7 +94,7 @@ A `top_k(2, comparator)` query closes the lesson, returning the two highest earn
 <li>Add a <code>top_k(2, comparator)</code> &quot;top 2 earners&quot; query and print the results with their salaries.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_07_queries.cpp">lesson_07_queries.cpp</a></p>
+<p><a href="lesson_07_queries.cpp" target="_blank" rel="noopener noreferrer">lesson_07_queries.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_07
 .\build\debug\employee_directory_lesson_07.exe</code></pre>
@@ -116,9 +113,9 @@ Top 2 earners: Carla(20000) Ana(13250)</code></pre>
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../reference/queries-indexes.md">docs/reference/queries-indexes.md</a></li>
-<li><a href="../../../USO_DA_CLI.md">USO_DA_CLI.md</a> — <code>modb query ... --explain</code></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#8-indexes-and-streaming-queries">DEVELOPER_GUIDE.md, Chapter 8</a></li>
+<li><a href="../../../reference/queries-indexes.md" target="_blank" rel="noopener noreferrer">docs/reference/queries-indexes.md</a></li>
+<li><a href="../../../USO_DA_CLI.md" target="_blank" rel="noopener noreferrer">USO_DA_CLI.md</a> — <code>modb query ... --explain</code></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#8-indexes-and-streaming-queries" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 8</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../06-snapshots/06-snapshots.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../08-networking/08-networking.html">Next</a></nav>
       </article>

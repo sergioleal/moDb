@@ -71,13 +71,10 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This is the first lesson, so it starts from nothing: no file, no schema, no records.
-
-The `Employee` struct is ordinary C++ -- a `name` and a `salary`, nothing framework-specific. The interesting part is `employee_binding()`, which maps field id 1 to `name` and field id 2 to `salary` through a `BindingBuilder&lt;Employee&gt;`. Those small integers are what actually get persisted alongside every record; the field names exist for the reader&#x27;s benefit, not the database&#x27;s.
-
-The lesson creates the database file at a fixed, permanent location -- `docs/training/en/employee-directory.modb` -- deletes any old copy first, binds `Employee`, and prints the `TypeDefinitionId` the catalog assigned. Nothing is written as a durable record yet; that is Lesson 2&#x27;s job.
-
-What this lesson establishes, more than any specific API, is the starting point for the whole course: one file, on disk, that every subsequent lesson will reopen. Detaching from the registry at the end does not delete that file -- it stays exactly where it is, waiting for Lesson 2.</p>
+          <p>This is the first lesson, so it starts from nothing: no file, no schema, no records.</p>
+<p>The `Employee` struct is ordinary C++ -- a `name` and a `salary`, nothing framework-specific. The interesting part is `employee_binding()`, which maps field id 1 to `name` and field id 2 to `salary` through a `BindingBuilder&lt;Employee&gt;`. Those small integers are what actually get persisted alongside every record; the field names exist for the reader&#x27;s benefit, not the database&#x27;s.</p>
+<p>The lesson creates the database file at a fixed, permanent location -- `docs/training/en/employee-directory.modb` -- deletes any old copy first, binds `Employee`, and prints the `TypeDefinitionId` the catalog assigned. Nothing is written as a durable record yet; that is Lesson 2&#x27;s job.</p>
+<p>What this lesson establishes, more than any specific API, is the starting point for the whole course: one file, on disk, that every subsequent lesson will reopen. Detaching from the registry at the end does not delete that file -- it stays exactly where it is, waiting for Lesson 2.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -85,8 +82,8 @@ What this lesson establishes, more than any specific API, is the starting point 
 <p>The very first piece of the employee directory: an <code>Employee</code> struct and the <code>BindingBuilder</code> that maps it into Ring0&#x27;s catalog. By the end of this lesson the program does nothing more than prove the type is known to a database — no records exist yet (that&#x27;s Lesson 2).</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>BindingBuilder&lt;T&gt;</code>, field ids as the durable contract — see <a href="../../../reference/object-model.md">docs/reference/object-model.md</a>.</li>
-<li><code>Database::create</code>, attaching to <code>DatabaseRegistry</code> — see <a href="../../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a> (this lesson only needs the very first section of it).</li>
+<li><code>BindingBuilder&lt;T&gt;</code>, field ids as the durable contract — see <a href="../../../reference/object-model.md" target="_blank" rel="noopener noreferrer">docs/reference/object-model.md</a>.</li>
+<li><code>Database::create</code>, attaching to <code>DatabaseRegistry</code> — see <a href="../../../reference/database-lifecycle.md" target="_blank" rel="noopener noreferrer">docs/reference/database-lifecycle.md</a> (this lesson only needs the very first section of it).</li>
 </ul>
 <h2>Starting Point</h2>
 <p>None — this is the first lesson. You start from an empty <code>.cpp</code> file.</p>
@@ -96,10 +93,10 @@ What this lesson establishes, more than any specific API, is the starting point 
 <li>Write <code>employee_binding()</code> returning a <code>BindingBuilder&lt;Employee&gt;</code>.</li>
 <li><code>Database::create</code>, wrap in <code>shared_ptr</code>, attach to the registry.</li>
 <li>Call <code>bind()</code>, print the resulting <code>TypeDefinitionId</code>.</li>
-<li>Detach from the registry — but leave the file itself in place, at a fixed path (<code>docs/training/en/employee-directory.modb</code>). Every later lesson is a <em>separate program run</em> that reopens this same file and continues from wherever the previous one left off; see the course <a href="../index.html#how-the-code-is-organized">README</a> for how that chain works.</li>
+<li>Detach from the registry — but leave the file itself in place, at a fixed path (<code>docs/training/en/employee-directory.modb</code>). Every later lesson is a <em>separate program run</em> that reopens this same file and continues from wherever the previous one left off; see the course <a href="../index.html#how-the-code-is-organized" target="_blank" rel="noopener noreferrer">README</a> for how that chain works.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_01_binding.cpp">lesson_01_binding.cpp</a></p>
+<p><a href="lesson_01_binding.cpp" target="_blank" rel="noopener noreferrer">lesson_01_binding.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_01
 .\build\debug\employee_directory_lesson_01.exe</code></pre>
@@ -115,8 +112,8 @@ Database created at .../docs/training/en/employee-directory.modb</code></pre>
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../reference/object-model.md">docs/reference/object-model.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#2-your-first-type-bindingbuildert">DEVELOPER_GUIDE.md, Chapter 2</a></li>
+<li><a href="../../../reference/object-model.md" target="_blank" rel="noopener noreferrer">docs/reference/object-model.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#2-your-first-type-bindingbuildert" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 2</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../index.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../02-persist-and-reopen/02-persist-and-reopen.html">Next</a></nav>
       </article>

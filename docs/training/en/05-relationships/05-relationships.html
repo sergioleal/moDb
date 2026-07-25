@@ -71,15 +71,11 @@
         <section class="narrative-panel">
           <p class="eyebrow-dark">Instructor Narrative</p>
           <h2>What This Lesson Means</h2>
-          <p>This is the lesson where the directory stops being three isolated salary records and starts looking like an organization.
-
-`Department` is the simplest new type here: just a name, referenced from `Employee` through `Ref&lt;Department&gt;`. Ana and Bruno get assigned to Engineering and Sales respectively, and -- quietly, as infrastructure rather than as this lesson&#x27;s topic -- `Department.name` gets its own index, for the same reason `Employee.name` got one back in Lesson 2.
-
-Next comes a temporary employee, Diego, with an `OwnedRef&lt;EmergencyContact&gt;` pointing at his contact, Elena. Removing Diego removes Elena too, automatically -- that is what `OwnedRef` means. Trying to resolve her afterward fails with `record_not_found`, and that failure is the proof, not a side note.
-
-Carla is assigned two projects through a `PersistentVector&lt;Ref&lt;Project&gt;&gt;` -- a collection stored as a separate blob, referenced from `Employee` by a `BlobId` field that has to be re-stored on Carla every time the vector&#x27;s identity changes underneath it.
-
-Finally, Sales is removed while Bruno&#x27;s `department` field still points at it. Nothing prevents the removal and nothing auto-repairs Bruno&#x27;s reference. Resolving Sales directly afterward fails cleanly -- and Bruno&#x27;s field keeps pointing at a department that no longer exists, a loose end this course does not tie up until Lesson 9.</p>
+          <p>This is the lesson where the directory stops being three isolated salary records and starts looking like an organization.</p>
+<p>`Department` is the simplest new type here: just a name, referenced from `Employee` through `Ref&lt;Department&gt;`. Ana and Bruno get assigned to Engineering and Sales respectively, and -- quietly, as infrastructure rather than as this lesson&#x27;s topic -- `Department.name` gets its own index, for the same reason `Employee.name` got one back in Lesson 2.</p>
+<p>Next comes a temporary employee, Diego, with an `OwnedRef&lt;EmergencyContact&gt;` pointing at his contact, Elena. Removing Diego removes Elena too, automatically -- that is what `OwnedRef` means. Trying to resolve her afterward fails with `record_not_found`, and that failure is the proof, not a side note.</p>
+<p>Carla is assigned two projects through a `PersistentVector&lt;Ref&lt;Project&gt;&gt;` -- a collection stored as a separate blob, referenced from `Employee` by a `BlobId` field that has to be re-stored on Carla every time the vector&#x27;s identity changes underneath it.</p>
+<p>Finally, Sales is removed while Bruno&#x27;s `department` field still points at it. Nothing prevents the removal and nothing auto-repairs Bruno&#x27;s reference. Resolving Sales directly afterward fails cleanly -- and Bruno&#x27;s field keeps pointing at a department that no longer exists, a loose end this course does not tie up until Lesson 9.</p>
         </section>
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
@@ -87,7 +83,7 @@ Finally, Sales is removed while Bruno&#x27;s `department` field still points at 
 <p>The directory grows a <code>Department</code> type and links each <code>Employee</code> to one via <code>Ref&lt;Department&gt;</code>. You&#x27;ll also add an owned sub-record (e.g. an <code>EmergencyContact</code> via <code>OwnedRef</code>, deleted automatically with the employee) and a <code>PersistentVector&lt;Ref&lt;Project&gt;&gt;</code> so an employee can be assigned to several projects.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>Ref&lt;T&gt;</code> (association) vs <code>OwnedRef&lt;T&gt;</code> (composition/cascade-delete) vs <code>Embedded&lt;T&gt;</code> — see <a href="../../../reference/relationships-collections.md">docs/reference/relationships-collections.md</a>.</li>
+<li><code>Ref&lt;T&gt;</code> (association) vs <code>OwnedRef&lt;T&gt;</code> (composition/cascade-delete) vs <code>Embedded&lt;T&gt;</code> — see <a href="../../../reference/relationships-collections.md" target="_blank" rel="noopener noreferrer">docs/reference/relationships-collections.md</a>.</li>
 <li>Persistent collections (<code>PersistentVector&lt;Ref&lt;T&gt;&gt;</code>) as a <code>BlobId</code> field, not a native member.</li>
 </ul>
 <h2>Starting Point</h2>
@@ -102,7 +98,7 @@ Finally, Sales is removed while Bruno&#x27;s `department` field still points at 
 <li>Remove a <code>Department</code> that still has an employee pointing at it via <code>Ref</code>, and show the dangling reference fails with <code>record_not_found</code> on resolution rather than being silently prevented or cascaded.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
-<p><a href="lesson_05_relationships.cpp">lesson_05_relationships.cpp</a></p>
+<p><a href="lesson_05_relationships.cpp" target="_blank" rel="noopener noreferrer">lesson_05_relationships.cpp</a></p>
 <h2>Build and Run</h2>
 <pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_05
 .\build\debug\employee_directory_lesson_05.exe</code></pre>
@@ -121,8 +117,8 @@ After removing Sales, resolving it directly fails as expected: no object with id
 </ul>
 <h2>Related Reference</h2>
 <ul>
-<li><a href="../../../reference/relationships-collections.md">docs/reference/relationships-collections.md</a></li>
-<li><a href="../../../DEVELOPER_GUIDE.md#6-relationships-and-collections">DEVELOPER_GUIDE.md, Chapter 6</a></li>
+<li><a href="../../../reference/relationships-collections.md" target="_blank" rel="noopener noreferrer">docs/reference/relationships-collections.md</a></li>
+<li><a href="../../../DEVELOPER_GUIDE.md#6-relationships-and-collections" target="_blank" rel="noopener noreferrer">DEVELOPER_GUIDE.md, Chapter 6</a></li>
 </ul>
         <nav class="bottomnav"><a class="nav-button" href="../04-handles-and-updates/04-handles-and-updates.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../06-snapshots/06-snapshots.html">Next</a></nav>
       </article>
