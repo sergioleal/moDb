@@ -435,6 +435,7 @@ add_library(modb_load_core STATIC
     loadtests/budget.cpp
     loadtests/environments.cpp
     loadtests/dataset_user.cpp
+    loadtests/process_metrics.cpp
     loadtests/target_embedded.cpp
     loadtests/workloads/create_only.cpp
     loadtests/campaign.cpp

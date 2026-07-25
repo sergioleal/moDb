@@ -43,7 +43,13 @@ std::string phase_json(const PhaseMetrics& p) {
         << ",\"duration_ns\":" << json_uint(p.duration_ns)
         << ",\"ops_per_second\":" << p.ops_per_second
         << ",\"bytes_per_object\":" << json_uint(p.bytes_per_object)
-        << ",\"errors\":" << json_uint(p.errors);
+        << ",\"errors\":" << json_uint(p.errors) << ",\"latency_ns\":{\"p50\":" << p.latency_ns.p50
+        << ",\"p95\":" << p.latency_ns.p95 << ",\"p99\":" << p.latency_ns.p99
+        << ",\"p999\":" << p.latency_ns.p999 << "}"
+        << ",\"peak_rss_bytes\":" << json_uint(p.peak_rss_bytes)
+        << ",\"db_bytes\":" << json_uint(p.db_bytes) << ",\"wal_bytes\":" << json_uint(p.wal_bytes)
+        << ",\"pages_read\":" << json_uint(p.pages_read)
+        << ",\"pages_written_estimated\":" << json_uint(p.pages_written_estimated);
     return oss.str();
 }
 
@@ -345,6 +351,8 @@ CampaignResult run_campaign(const CampaignOptions& options) {
             << ",\"expected_hash\":" << json_string(run_result.expected_hash)
             << ",\"actual_hash\":" << json_string(run_result.actual_hash)
             << ",\"hash_match\":" << json_bool(run_result.hash_match)
+            << ",\"write_amplification\":" << run_result.write_amplification
+            << ",\"space_amplification\":" << run_result.space_amplification
             << ",\"db_path\":" << json_string(db_path.string()) << "}";
         if (!write_or_fail(oss.str())) {
             return result;

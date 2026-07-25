@@ -1,10 +1,14 @@
 #include "target_embedded.hpp"
 
 #include "dataset_user.hpp"
+#include "process_metrics.hpp"
+#include "runner/json_util.hpp"
 #include "runner/sha256.hpp"
 
 #include "modb/object/database.hpp"
+#include "modb/storage/page.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -13,6 +17,7 @@
 
 using namespace modb;
 using namespace modb::object;
+using modb::bench::percentile_sorted;
 using modb::bench::sha256_hex;
 using modb::bench::sha256_text;
 
@@ -73,6 +78,15 @@ std::uint64_t ns_between(std::chrono::steady_clock::time_point a,
         std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count());
 }
 
+// Bytes lógicos de um GeneratedUser: os campos como o chamador os vê, não
+// como o motor os codifica em página (usado para write/space amplification,
+// §8) -- deliberadamente diferente de `canonical_line`, que serve só ao hash
+// e carrega separadores decorativos que inflariam a contagem.
+std::uint64_t logical_size_bytes(const GeneratedUser& u) {
+    return sizeof(u.id) + u.login.size() + u.email.size() + u.display_name.size() +
+          sizeof(u.created_at) + sizeof(u.status) + u.filler.size();
+}
+
 // Garante detach do registro e destruição correta do Database mesmo em
 // caminho de erro (RAII, igual ao AttachedDatabase do benchmark).
 struct AttachedDatabase {
@@ -99,6 +113,7 @@ CaseRunResult run_create_only_embedded(const WorkloadParams& params,
         ("modb_load-create_only-" + std::to_string(params.seed) + "-" + std::to_string(unique) +
          ".modb");
     out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
     auto created = Database::create(db_path);
@@ -122,10 +137,21 @@ CaseRunResult run_create_only_embedded(const WorkloadParams& params,
         return result;
     }
 
+    // Tamanho antes de qualquer objeto de usuário (cabeçalho/catálogo) --
+    // referência para estimar páginas escritas pela fase (§8: pages_written
+    // não tem contador real no motor hoje, só esta estimativa por bytes).
+    std::error_code size_error;
+    const auto initial_bytes = std::filesystem::file_size(db_path, size_error);
+    const std::uint64_t db_bytes_before = size_error ? 0 : initial_bytes;
+    const auto pages_read_before = attached.database->data_pages_read();
+
     const auto batch = params.batch == 0 ? params.object_count : params.batch;
     std::vector<ObjectId> ids;
     ids.reserve(params.object_count);
     std::ostringstream expected;
+    std::vector<double> latencies_ns;
+    latencies_ns.reserve(params.object_count);
+    std::uint64_t logical_bytes = 0;
     std::uint64_t errors = 0;
 
     // `Transaction` só tem construtor de movimento (a atribuição de movimento é
@@ -143,7 +169,13 @@ CaseRunResult run_create_only_embedded(const WorkloadParams& params,
     for (std::uint64_t i = 1; i <= params.object_count; ++i) {
         const auto generated = generate_user(params.seed, i, params.payload);
         expected << canonical_line(generated) << '\n';
+        logical_bytes += logical_size_bytes(generated);
+
+        const auto op_start = std::chrono::steady_clock::now();
         auto created_handle = attached.database->create(*tx, to_engine_user(generated));
+        const auto op_end = std::chrono::steady_clock::now();
+        latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+
         if (!created_handle) {
             ++errors;
             result.status = "failed";
@@ -171,10 +203,26 @@ CaseRunResult run_create_only_embedded(const WorkloadParams& params,
         }
     }
     const auto create_end = std::chrono::steady_clock::now();
+    const auto pages_read_after = attached.database->data_pages_read();
 
-    std::error_code size_error;
     const auto file_bytes = std::filesystem::file_size(db_path, size_error);
     result.peak_disk_bytes = size_error ? 0 : file_bytes;
+
+    std::error_code wal_size_error;
+    const auto wal_bytes = std::filesystem::file_size(wal_path, wal_size_error);
+
+    std::sort(latencies_ns.begin(), latencies_ns.end());
+    LatencyPercentilesNs latency;
+    if (!latencies_ns.empty()) {
+        latency.p50 = percentile_sorted(latencies_ns, 0.50);
+        latency.p95 = percentile_sorted(latencies_ns, 0.95);
+        latency.p99 = percentile_sorted(latencies_ns, 0.99);
+        latency.p999 = percentile_sorted(latencies_ns, 0.999);
+    }
+
+    const auto bytes_written = result.peak_disk_bytes > db_bytes_before
+                                  ? result.peak_disk_bytes - db_bytes_before
+                                  : 0;
 
     const auto create_ns = ns_between(create_start, create_end);
     PhaseMetrics create_phase;
@@ -188,6 +236,12 @@ CaseRunResult run_create_only_embedded(const WorkloadParams& params,
     create_phase.bytes_per_object =
         params.object_count > 0 ? result.peak_disk_bytes / params.object_count : 0;
     create_phase.errors = errors;
+    create_phase.latency_ns = latency;
+    create_phase.peak_rss_bytes = peak_rss_bytes();
+    create_phase.db_bytes = result.peak_disk_bytes;
+    create_phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
+    create_phase.pages_read = pages_read_after - pages_read_before;
+    create_phase.pages_written_estimated = bytes_written / modb::storage::page_size;
     result.phases.push_back(create_phase);
 
     // Validação (§9): reler todos os objetos criados e comparar o hash lógico
@@ -222,6 +276,14 @@ CaseRunResult run_create_only_embedded(const WorkloadParams& params,
     }
 
     result.total_duration_ns = create_ns;
+    result.write_amplification = logical_bytes > 0
+                                    ? static_cast<double>(bytes_written) /
+                                          static_cast<double>(logical_bytes)
+                                    : 0.0;
+    result.space_amplification = logical_bytes > 0
+                                    ? static_cast<double>(result.peak_disk_bytes) /
+                                          static_cast<double>(logical_bytes)
+                                    : 0.0;
     result.status = "completed";
     result.ok = true;
     return result;
