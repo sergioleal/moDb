@@ -131,6 +131,55 @@ que o fuzz de truncamento já cobre parcialmente (um corte por vez força uma
 falha por vez), mas não exaustivamente para as 13 combinações de cada
 mensagem — diminishing returns, não perseguido nesta rodada.
 
+**Itens #4 (`src/object/object_store.cpp`) e #5 (`src/storage/table_heap.cpp`)
+— feitos em 2026-07-25.** Diferente dos três primeiros itens, a maior parte
+dos gaps remanescentes aqui já era da categoria "exige injeção de falha de
+I/O" (mesmo padrão do que sobrou em `btree.cpp`). Ainda assim, `gcov -b`
+revelou lacunas reais e alcançáveis por teste de caixa-preta:
+
+- **`object_store.cpp`**: os métodos de indexação inteiros (`create_index`,
+  `has_index`, `index_equal`, `index_range`, `index_maintain`) tinham **0%**
+  de cobertura — nenhum teste de `object_store_test.cpp` jamais criava um
+  índice. Também faltavam as guardas de transação de `update`/`remove`/
+  `create_index` (só `create_object` tinha o caso espelho) e o erro de
+  "criar objeto de tipo não registrado". Adicionado: round-trip completo de
+  indexação (criar índice, `index_equal`/`index_range`, manutenção
+  incremental via `update`/`remove` retirando/inserindo chaves), as 3 guardas
+  de transação que faltavam, e o caso de tipo não registrado.
+- **`table_heap.cpp`**: o fallback `page_full` de `update()` (quando o novo
+  conteúdo não cabe no lugar e a operação precisa virar `insert()`+`erase()`
+  internamente) nunca disparava — só havia teste do caminho "cabe no lugar".
+  `erase()` também tem as mesmas guardas de `update()` (RecordId de página
+  fora do heap, geração obsoleta) em código duplicado próprio, nunca
+  exercitado diretamente (só as guardas de `update()` tinham teste espelho).
+  Adicionados os três casos.
+
+**Resultado medido** (suíte completa, 128/128 testes, antes/depois limpos):
+
+| Arquivo | Linhas antes → depois | Branches antes → depois |
+|---|---|---|
+| `src/object/object_store.cpp` | 77,2% → **79,5%** | 44,7% → **46,3%** |
+| `src/storage/table_heap.cpp` | 78,6% → **81,5%** | 46,4% → **48,4%** |
+| Total `src/**/*.cpp` (cumulativo, itens #1 a #5) | 78,2% → **82,9%** | 44,6% → **49,2%** |
+
+Ganho mais modesto que os itens #1-#3, como esperado: a maior parte do que
+resta em ambos os arquivos é validação defensiva contra falha de I/O
+(`file.read()`/`file.write()` retornando erro) ou corrupção estrutural
+(`corrupt_page`), que exigiria o mecanismo de failpoint (já usado em
+[tests/failpoint_test.cpp](../tests/failpoint_test.cpp)) para ser alcançada —
+não foi feito nesta rodada, mesma pendência anotada para `btree.cpp`.
+
+**Achado à parte, fora do escopo de cobertura:** durante a medição, o teste
+`modb.server_streaming` mostrou-se instável — falha ~50% das vezes mesmo
+rodado isoladamente (fora do CTest), com `STATUS_HEAP_CORRUPTION`
+(`0xC0000374`) e mensagens como "stream B error"/"stream B received all
+objects" antes do crash. Não tem relação com as mudanças deste relatório
+(nenhum arquivo de rede foi tocado); parece uma condição de corrida real
+envolvendo streams concorrentes em `src/net/server.cpp`. Sinalizado
+separadamente para investigação; não bloqueou a medição deste item porque
+afeta apenas o `.gcda` do próprio `server_streaming`, não os de
+`object_store.cpp`/`table_heap.cpp`.
+
 ## Metodologia
 
 1. `option(MODB_ENABLE_COVERAGE)` adicionada ao [CMakeLists.txt](../CMakeLists.txt)

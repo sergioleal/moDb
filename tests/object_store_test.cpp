@@ -237,5 +237,151 @@ int main() {
         }
     }
 
+    // --- transação exigida em update/remove/create_index; tipo não registrado ---
+    {
+        TemporaryDatabase database{"guards"};
+        auto file = PageFile::create(database.path());
+        suite.check(file.has_value(), "guards: database created");
+        if (!file) {
+            return suite.finish();
+        }
+        auto store = ObjectStore::create(*file);
+        suite.check(store.has_value(), "guards: object store created");
+        if (!store) {
+            return suite.finish();
+        }
+        auto type_id = define_employee(*store);
+        suite.check(type_id.has_value(), "guards: type registered");
+        if (!type_id) {
+            return suite.finish();
+        }
+        auto type = store->find_type(*type_id);
+        if (!type) {
+            suite.check(false, "guards: type found");
+            return suite.finish();
+        }
+
+        // Um objeto de um tipo NUNCA registrado neste store: id() fica
+        // invalid_object_id, então create_object rejeita antes de tocar o heap.
+        auto unregistered = TypeDefinition::create(
+            "Ghost", std::vector<AttributeDefinition>{AttributeDefinition{
+                        .id = FieldId{1}, .name = "x", .type = AttributeType::int64, .nullable = false}});
+        suite.check(unregistered.has_value(), "guards: unregistered type builds");
+        if (unregistered) {
+            file->begin_transaction();
+            suite.check_error(
+                store->create_object(*unregistered, FieldValues{{FieldId{1}, AttributeValue{std::int64_t{1}}}}),
+                ErrorCode::type_not_found,
+                "guards: creating an object of an unregistered type is rejected");
+            static_cast<void>(file->apply_transaction());
+        }
+
+        file->begin_transaction();
+        auto dave = store->create_object(type->get(), employee("Dave", 12000.0));
+        suite.check(dave.has_value(), "guards: object created for guard checks");
+        static_cast<void>(file->apply_transaction());
+        static_cast<void>(file->flush());
+
+        if (dave) {
+            suite.check_error(store->update(*dave, type->get(), employee("Dave", 13000.0), std::nullopt),
+                              ErrorCode::transaction_required,
+                              "guards: update outside a transaction is rejected");
+            suite.check_error(store->remove(*dave, std::nullopt), ErrorCode::transaction_required,
+                              "guards: remove outside a transaction is rejected");
+        }
+        suite.check_error(store->create_index(type->get(), FieldId{2}), ErrorCode::transaction_required,
+                          "guards: create_index outside a transaction is rejected");
+
+        // Sem nenhum índice criado ainda: index_equal/index_range falham com
+        // "no index on this field" (indexes_ ainda é nullopt).
+        suite.check_error(store->index_equal("Employee", 2, AttributeValue{12000.0}),
+                          ErrorCode::type_not_found,
+                          "guards: index_equal with no indexes at all is rejected");
+    }
+
+    // --- índices: create_index, has_index, index_equal/index_range, e
+    // manutenção incremental via update/remove (Fase 7B) ---
+    {
+        TemporaryDatabase database{"index"};
+        auto file = PageFile::create(database.path());
+        auto store = file ? ObjectStore::create(*file)
+                          : Result<ObjectStore>{std::unexpected(Error{ErrorCode::io_error, "no file"})};
+        suite.check(file.has_value() && store.has_value(), "index: object store created");
+        if (!file || !store) {
+            return suite.finish();
+        }
+        auto type_id = define_employee(*store);
+        auto type = type_id ? store->find_type(*type_id)
+                            : Result<std::reference_wrapper<const TypeDefinition>>{
+                                  std::unexpected(Error{ErrorCode::type_not_found, "no type"})};
+        suite.check(type.has_value(), "index: type registered");
+        if (!type) {
+            return suite.finish();
+        }
+
+        file->begin_transaction();
+        // create_index rejeita um campo que não existe no tipo.
+        suite.check_error(store->create_index(type->get(), FieldId{99}), ErrorCode::invalid_argument,
+                          "index: create_index rejects a field the type doesn't have");
+        suite.check(store->create_index(type->get(), FieldId{2}).has_value(),
+                    "index: index on salary created");
+        suite.check(store->has_index("Employee", 2), "index: has_index reports the new index");
+        suite.check(!store->has_index("Employee", 1), "index: has_index is false for an unindexed field");
+
+        auto ana = store->create_object(type->get(), employee("Ana", 15000.0));
+        auto bia = store->create_object(type->get(), employee("Beatriz", 20000.0));
+        auto cid = store->create_object(type->get(), employee("Carol", 15000.0));  // mesmo salário de Ana
+        suite.check(ana.has_value() && bia.has_value() && cid.has_value(),
+                    "index: objects created after the index exists (index_maintain insert path)");
+        static_cast<void>(file->apply_transaction());
+        static_cast<void>(file->flush());
+
+        if (ana && bia && cid) {
+            auto equal_15000 = store->index_equal("Employee", 2, AttributeValue{15000.0});
+            suite.check(equal_15000.has_value() && equal_15000->size() == 2,
+                        "index: index_equal finds both objects sharing a salary");
+
+            auto ranged = store->index_range("Employee", 2, AttributeValue{14000.0}, AttributeValue{16000.0});
+            suite.check(ranged.has_value() && ranged->size() == 2,
+                        "index: index_range finds salaries within the window");
+            auto out_of_range =
+                store->index_range("Employee", 2, AttributeValue{1.0}, AttributeValue{2.0});
+            suite.check(out_of_range.has_value() && out_of_range->empty(),
+                        "index: index_range is empty outside the window");
+
+            // Campo sem índice: "no index on this field" com indexes_ já existente.
+            suite.check_error(store->index_equal("Employee", 1, AttributeValue{"Ana"}),
+                              ErrorCode::type_not_found,
+                              "index: index_equal on an unindexed field is rejected");
+
+            // update muda o salário de Ana: a chave antiga sai do índice, a
+            // nova entra (index_maintain remove+insert).
+            file->begin_transaction();
+            suite.check(store->update(*ana, type->get(), employee("Ana", 30000.0), std::nullopt)
+                            .has_value(),
+                        "index: salary updated");
+            static_cast<void>(file->apply_transaction());
+            static_cast<void>(file->flush());
+
+            auto after_update = store->index_equal("Employee", 2, AttributeValue{15000.0});
+            suite.check(after_update.has_value() && after_update->size() == 1 &&
+                            after_update->front() == *cid,
+                        "index: only Carol remains at the old salary after Ana's update");
+            auto moved = store->index_equal("Employee", 2, AttributeValue{30000.0});
+            suite.check(moved.has_value() && moved->size() == 1 && moved->front() == *ana,
+                        "index: Ana is found at her new salary");
+
+            // remove tira Carol do índice (index_maintain remove path).
+            file->begin_transaction();
+            suite.check(store->remove(*cid, std::nullopt).has_value(), "index: Carol removed");
+            static_cast<void>(file->apply_transaction());
+            static_cast<void>(file->flush());
+
+            auto after_remove = store->index_equal("Employee", 2, AttributeValue{15000.0});
+            suite.check(after_remove.has_value() && after_remove->empty(),
+                        "index: no one is left at the old salary after removal");
+        }
+    }
+
     return suite.finish();
 }

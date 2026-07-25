@@ -427,6 +427,71 @@ int main() {
         }
     }
 
+    // update quando o registro novo não cabe na página atual: precisa cair no
+    // fallback insert()+erase() (realocação), não só no caminho "cabe no lugar"
+    // já coberto acima com "small update preserves the RecordId".
+    {
+        TemporaryDatabase relocate_db;
+        auto file = PageFile::create(relocate_db.path());
+        auto heap = file ? TableHeap::create(*file)
+                         : Result<TableHeap>{std::unexpected(Error{ErrorCode::io_error, "no file"})};
+        suite.check(file.has_value() && heap.has_value(), "relocate: heap created");
+        if (file && heap) {
+            // Duas inserções ocupam a maior parte da primeira página.
+            const std::vector<std::byte> filler(page_size / 2, std::byte{0x11U});
+            const std::vector<std::byte> victim_bytes(page_size / 3, std::byte{0x22U});
+            auto filler_id = heap->insert(filler);
+            auto victim_id = heap->insert(victim_bytes);
+            suite.check(filler_id.has_value() && victim_id.has_value(),
+                        "relocate: filler and victim share the first page");
+            if (filler_id && victim_id) {
+                suite.check(filler_id->page == victim_id->page,
+                            "relocate: victim lands on the same page as the filler");
+                // Um update bem maior do que a capacidade restante da página
+                // força page_full no update in-place -> insert()+erase().
+                const std::vector<std::byte> giant(page_size - page_size / 8, std::byte{0x33U});
+                auto relocated = heap->update(*victim_id, giant);
+                suite.check(relocated.has_value() && *relocated != *victim_id,
+                            "relocate: oversized update returns a NEW RecordId (page_full fallback)");
+                if (relocated) {
+                    suite.check_error(heap->read(*victim_id), ErrorCode::record_not_found,
+                                      "relocate: the old address no longer resolves");
+                    auto moved = heap->read(*relocated);
+                    suite.check(moved.has_value() && *moved == giant,
+                                "relocate: the new address holds the relocated content");
+                }
+            }
+        }
+    }
+
+    // erase() tem as mesmas guardas de update() (RecordId de outro heap /
+    // geração obsoleta), mas em código próprio — não coberto pelos testes de
+    // update() acima.
+    {
+        TemporaryDatabase erase_guards_db;
+        auto file = PageFile::create(erase_guards_db.path());
+        auto heap = file ? TableHeap::create(*file)
+                         : Result<TableHeap>{std::unexpected(Error{ErrorCode::io_error, "no file"})};
+        suite.check(file.has_value() && heap.has_value(), "erase guards: heap created");
+        if (file && heap) {
+            const std::vector<std::byte> payload(64, std::byte{0x44U});
+            auto id = heap->insert(payload);
+            suite.check(id.has_value(), "erase guards: record inserted");
+            if (id) {
+                suite.check_error(heap->erase(RecordId{PageId{999}, SlotId{0}, std::uint16_t{1}}),
+                                  ErrorCode::record_not_found,
+                                  "erase rejects a page outside the heap");
+                auto stale_id = *id;
+                stale_id.generation = static_cast<std::uint16_t>(stale_id.generation + 1);
+                suite.check_error(heap->erase(stale_id), ErrorCode::record_not_found,
+                                  "erase rejects a stale generation");
+                // As rejeições não tocam o registro real.
+                suite.check(heap->read(*id).has_value(),
+                            "erase guards: the real record survives the rejected calls");
+            }
+        }
+    }
+
     // Encerra o processo com o resultado acumulado.
     return suite.finish();
 }
