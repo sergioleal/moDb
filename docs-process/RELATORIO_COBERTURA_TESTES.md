@@ -5,6 +5,47 @@ Data: 2026-07-25. Gerado a partir de uma execução real e completa da suíte
 ponta-a-ponta, 5 alvos de fuzz replay, 1 teste de consumo da lib instalada),
 com o binário instrumentado por `--coverage` (GCC/gcov).
 
+## Progresso de execução do ranking
+
+**Item #1 (`src/index/btree.cpp` + `include/modb/index/key_codec.hpp`) — feito
+em 2026-07-25.** Adicionadas duas seções novas a [tests/btree_test.cpp](../tests/btree_test.cpp):
+
+- **Seção H:** remoção pelas duas pontas (drena da esquerda *e* da direita em
+  direção ao meio) numa árvore de chaves longas com altura ≥ 3. A suíte
+  anterior (teste D2) só drenava pela esquerda, então o nó que ficava abaixo
+  do mínimo nunca tinha irmão esquerdo — `has_left`/`try_borrow_left`/merge-
+  com-esquerda e `sibling_at()` nunca rodavam (0 chamadas). Drenar dos dois
+  lados força ambas as direções de borrow/merge, inclusive em nós internos
+  (não só na raiz), conforme a altura encolhe de 3 para 1.
+- **Seção I:** `encode_key()` para `boolean`/`ref`/`blob` (tipos indexáveis
+  que nenhum teste exercitava) e o erro dedicado para `null`/`bytes`/
+  `embedded` (tipos não indexáveis).
+
+**Resultado medido** (suíte completa, 128/128 testes, antes/depois limpos —
+`.gcda` zerados e suíte inteira reexecutada em cada medição):
+
+| Arquivo | Linhas antes → depois | Branches antes → depois |
+|---|---|---|
+| `src/index/btree.cpp` | 69,1% → **88,0%** | 38,7% → **52,5%** |
+| `include/modb/index/key_codec.hpp` | 63,9% → **90,2%** | 8,8% → **11,6%** |
+| Total `src/**/*.cpp` | 78,2% → **79,7%** | 44,6% → **45,6%** |
+
+`key_codec.hpp` teve o branch % pouco alterado porque a maioria dos 560
+branches contados vem de cópias inline de `encode_key()` em dezenas de
+pontos de chamada diferentes dentro de `btree.cpp`; cobrir um tipo de
+atributo no teste só ativa as cópias inline realmente alcançadas por aquele
+caminho de execução, não todas as 560 de uma vez.
+
+**O que ainda falta em `btree.cpp`** (77 linhas remanescentes, revisadas
+manualmente via `gcov -b`): quase todas são caminhos defensivos de erro que
+exigem injeção de falha para serem alcançados — `file.read()`/`file.write()`
+retornando erro, `corrupt_page` na validação estrutural, e o fallback de
+`split_point()` (matematicamente inatingível dado que `insert()` já rejeita
+chaves maiores que `node_capacity/2`). Cobrir os caminhos de I/O exigiria o
+mecanismo de failpoint já usado em [tests/failpoint_test.cpp](../tests/failpoint_test.cpp)
+aplicado a `PageFile` dentro do B-tree — não foi feito nesta rodada; fica
+como próximo passo se o item for revisitado.
+
 ## Metodologia
 
 1. `option(MODB_ENABLE_COVERAGE)` adicionada ao [CMakeLists.txt](../CMakeLists.txt)

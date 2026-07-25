@@ -221,6 +221,8 @@ int main() {
         suite.check(removed, "D: even keys removed");
         suite.check_error(tree->remove(int_key(0), 1), ErrorCode::record_not_found,
                           "D: removing an absent key fails cleanly");
+        suite.check_error(tree->remove(int_key(100000), 1), ErrorCode::record_not_found,
+                          "D: removing a key past the largest one fails cleanly");
         auto gone = tree->find(int_key(2));
         auto kept = tree->find(int_key(3));
         suite.check(gone.has_value() && gone->empty(), "D: a removed key is no longer found");
@@ -358,6 +360,143 @@ int main() {
         const std::vector<std::uint64_t> expected{2, 4, 3, 5, 1};
         suite.check(ordered.has_value() && *ordered == expected,
                     "G: doubles come back in numeric order (sign-flip encoding)");
+    }
+
+    // === H. remoção pelas duas pontas: sobe o rebalanceamento a nós internos e
+    // exercita o irmão ESQUERDO. D2 só drena pela esquerda (remove sempre a
+    // menor chave), então o nó que fica abaixo do mínimo é sempre o filho mais
+    // à esquerda do seu nível — nunca tem irmão esquerdo (`has_left` nunca é
+    // verdadeiro, `try_borrow_left`/merge-com-esquerda nunca rodam). Drenando
+    // as duas pontas em direção ao meio, o lado direito também esvazia e força
+    // borrow/merge com o irmão esquerdo — e, com uma árvore de 3+ níveis, o
+    // encolhimento cascateia até nós internos (não só a raiz).
+    {
+        TemporaryFile temp{"rm-both-ends"};
+        auto file = PageFile::create(temp.path());
+        auto tree = file ? BTree::create(*file)
+                         : Result<BTree>{std::unexpected(Error{ErrorCode::io_error, "no file"})};
+        suite.check(file.has_value() && tree.has_value(), "H: tree created");
+        if (!file || !tree) {
+            return suite.finish();
+        }
+        constexpr int total = 4000;
+        const std::string pad(180, 'x');  // chaves grandes: poucas por página, como no teste B.
+        auto padded_key = [&](int i) {
+            return pad + "-" + std::string(6 - std::to_string(i).size(), '0') + std::to_string(i);
+        };
+        bool inserted = true;
+        for (int i = 0; i < total; ++i) {
+            inserted = inserted &&
+                      tree->insert(str_key(padded_key(i)), static_cast<std::uint64_t>(i) + 1).has_value();
+        }
+        suite.check(inserted, "H: 4000 long keys inserted");
+        auto tall = tree->validate();
+        suite.check(tall.has_value() && *tall >= 3, "H: tree grew at least 3 levels deep");
+
+        // Drena as duas pontas em direção ao meio, deixando uma janela viva.
+        constexpr int keep_lo = total / 2 - 4;
+        constexpr int keep_hi = total / 2 + 4;
+        bool removed = true;
+        for (int i = 0; i < keep_lo; ++i) {
+            removed = removed &&
+                     tree->remove(str_key(padded_key(i)), static_cast<std::uint64_t>(i) + 1).has_value();
+        }
+        for (int i = total - 1; i >= keep_hi; --i) {
+            removed = removed &&
+                     tree->remove(str_key(padded_key(i)), static_cast<std::uint64_t>(i) + 1).has_value();
+        }
+        suite.check(removed, "H: draining from both ends toward the middle succeeds");
+
+        auto shrunk = tree->validate();
+        suite.check(shrunk.has_value(),
+                    "H: structure stays valid (min fill) while shrinking from both sides");
+
+        bool survivors_found = true;
+        for (int i = keep_lo; i < keep_hi; ++i) {
+            auto hits = tree->find(str_key(padded_key(i)));
+            if (!hits || hits->size() != 1 || hits->front() != static_cast<std::uint64_t>(i) + 1) {
+                survivors_found = false;
+                break;
+            }
+        }
+        suite.check(survivors_found, "H: the surviving middle window remains findable");
+
+        auto gone_lo = tree->find(str_key(padded_key(0)));
+        auto gone_hi = tree->find(str_key(padded_key(total - 1)));
+        suite.check(gone_lo.has_value() && gone_lo->empty() && gone_hi.has_value() && gone_hi->empty(),
+                    "H: keys drained from either end are no longer found");
+    }
+
+    // === I. key_codec: cobre boolean/ref/blob (tipos indexáveis ainda não
+    // exercitados por nenhum teste) e o erro para os tipos não indexáveis
+    // (null/bytes/embedded). Cada tipo usa sua PRÓPRIA árvore: ref e blob
+    // compartilham o mesmo encoding big-endian de u64, então misturar os dois
+    // na mesma árvore faria os intervalos numéricos se sobreporem.
+    {
+        // boolean: false ordena antes de true.
+        TemporaryFile temp_bool{"key-codec-bool"};
+        auto file_bool = PageFile::create(temp_bool.path());
+        auto tree_bool = file_bool
+                            ? BTree::create(*file_bool)
+                            : Result<BTree>{std::unexpected(Error{ErrorCode::io_error, "no file"})};
+        suite.check(file_bool.has_value() && tree_bool.has_value(), "I: boolean tree created");
+        auto enc_false = encode_key(AttributeValue{false});
+        auto enc_true = encode_key(AttributeValue{true});
+        suite.check(enc_false.has_value() && enc_true.has_value(), "I: boolean values encode");
+        if (tree_bool && enc_false && enc_true) {
+            static_cast<void>(tree_bool->insert(*enc_true, 1));
+            static_cast<void>(tree_bool->insert(*enc_false, 2));
+            auto ordered = tree_bool->range(*enc_false, *enc_true);
+            const std::vector<std::uint64_t> expected{2, 1};
+            suite.check(ordered.has_value() && *ordered == expected, "I: false sorts before true");
+        }
+
+        // ref: ObjectId ordena numericamente (big-endian sem sinal).
+        TemporaryFile temp_ref{"key-codec-ref"};
+        auto file_ref = PageFile::create(temp_ref.path());
+        auto tree_ref = file_ref
+                            ? BTree::create(*file_ref)
+                            : Result<BTree>{std::unexpected(Error{ErrorCode::io_error, "no file"})};
+        suite.check(file_ref.has_value() && tree_ref.has_value(), "I: ref tree created");
+        auto enc_ref_lo = encode_key(AttributeValue{modb::object::ObjectId{5}});
+        auto enc_ref_hi = encode_key(AttributeValue{modb::object::ObjectId{500}});
+        suite.check(enc_ref_lo.has_value() && enc_ref_hi.has_value(), "I: ref values encode");
+        if (tree_ref && enc_ref_lo && enc_ref_hi) {
+            static_cast<void>(tree_ref->insert(*enc_ref_hi, 10));
+            static_cast<void>(tree_ref->insert(*enc_ref_lo, 20));
+            auto ordered = tree_ref->range(*enc_ref_lo, *enc_ref_hi);
+            const std::vector<std::uint64_t> expected{20, 10};
+            suite.check(ordered.has_value() && *ordered == expected,
+                        "I: ref (ObjectId) values sort numerically");
+        }
+
+        // blob: BlobId usa o mesmo encoding big-endian do ref, em árvore própria.
+        TemporaryFile temp_blob{"key-codec-blob"};
+        auto file_blob = PageFile::create(temp_blob.path());
+        auto tree_blob = file_blob
+                             ? BTree::create(*file_blob)
+                             : Result<BTree>{std::unexpected(Error{ErrorCode::io_error, "no file"})};
+        suite.check(file_blob.has_value() && tree_blob.has_value(), "I: blob tree created");
+        auto enc_blob_lo = encode_key(AttributeValue{modb::object::BlobId{7}});
+        auto enc_blob_hi = encode_key(AttributeValue{modb::object::BlobId{700}});
+        suite.check(enc_blob_lo.has_value() && enc_blob_hi.has_value(), "I: blob values encode");
+        if (tree_blob && enc_blob_lo && enc_blob_hi) {
+            static_cast<void>(tree_blob->insert(*enc_blob_hi, 30));
+            static_cast<void>(tree_blob->insert(*enc_blob_lo, 40));
+            auto ordered = tree_blob->range(*enc_blob_lo, *enc_blob_hi);
+            const std::vector<std::uint64_t> expected{40, 30};
+            suite.check(ordered.has_value() && *ordered == expected, "I: blob values sort numerically");
+        }
+
+        // Tipos não indexáveis devolvem o erro dedicado, não um valor qualquer.
+        suite.check_error(encode_key(AttributeValue{modb::object::AttributeNull{}}),
+                          ErrorCode::invalid_argument, "I: null is rejected as a non-indexable type");
+        suite.check_error(
+            encode_key(AttributeValue{std::vector<std::byte>{std::byte{1}, std::byte{2}}}),
+            ErrorCode::invalid_argument, "I: bytes is rejected as a non-indexable type");
+        suite.check_error(encode_key(AttributeValue{modb::object::EmbeddedValue{}}),
+                          ErrorCode::invalid_argument,
+                          "I: embedded is rejected as a non-indexable type");
     }
 
     return suite.finish();
