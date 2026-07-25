@@ -35,6 +35,15 @@ struct GeneratedUser {
 [[nodiscard]] GeneratedUser generate_user(std::uint64_t seed, std::uint64_t index,
                                           std::string_view payload);
 
+// Mesma função pura de (seed, index), mas com tamanho de filler e status
+// explícitos em vez de derivados de `payload` -- usada por crud_full (§4.2)
+// para gerar o valor esperado de update_inplace/update_grow/update_shrink
+// sem inventar um novo dataset. `generate_user(seed, index, payload)` é um
+// atalho que resolve `filler_bytes` via `filler_bytes_for_payload` e usa o
+// status padrão (index % 3).
+[[nodiscard]] GeneratedUser generate_user_ex(std::uint64_t seed, std::uint64_t index,
+                                             std::size_t filler_bytes, std::int32_t status);
+
 // Linha canônica usada para o hash lógico do dataset (§9): concatenação
 // estável dos campos, em texto, sem depender de como o valor foi
 // codificado/decodificado pelo motor.

@@ -441,6 +441,7 @@ add_library(modb_load_core STATIC
     loadtests/workloads/create_delete_forward.cpp
     loadtests/workloads/create_delete_reverse.cpp
     loadtests/workloads/create_delete_interleaved.cpp
+    loadtests/workloads/crud_full.cpp
     loadtests/campaign.cpp
     loadtests/history/series_key.cpp
     loadtests/history/rollup.cpp

@@ -862,7 +862,8 @@ loadtests/
     create_delete_reverse.hpp/.cpp  implementado
     create_delete_interleaved.hpp/.cpp implementado -- stride=7, mesmo padrão de
                                        benchmarks/scenarios/object_store_lifecycle.cpp
-    crud_full.cpp
+    crud_full.hpp/.cpp              implementado -- 6 fases, amostra determinística
+                                   por update (§9 item 4), não o conjunto inteiro
     read_hotspot.cpp                comportamento (§4.2.1)
     range_scan_sweep.cpp            comportamento; formaliza o antigo crud_query
     mixed_oltp.cpp                  comportamento; concorrência como workload, não só dimensão

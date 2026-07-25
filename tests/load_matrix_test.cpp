@@ -234,8 +234,14 @@ void test_known_catalogs(TestSuite& suite) {
                "catálogo de alvos");
     suite.check(is_workload_implemented("create_only"),
                "create_only deve estar marcado como implementado (Subfase B)");
-    suite.check(!is_workload_implemented("crud_full"),
-               "crud_full ainda não deveria estar marcado como implementado");
+    suite.check(is_workload_implemented("create_delete_forward") &&
+                   is_workload_implemented("create_delete_reverse") &&
+                   is_workload_implemented("create_delete_interleaved"),
+               "a escada create_delete_* deve estar marcada como implementada (Subfase D)");
+    suite.check(is_workload_implemented("crud_full"),
+               "crud_full deve estar marcado como implementado (Subfase E)");
+    suite.check(!is_workload_implemented("read_hotspot"),
+               "read_hotspot (§4.2.1) ainda não deveria estar marcado como implementado");
 }
 
 void test_all_profiles_listable(TestSuite& suite) {

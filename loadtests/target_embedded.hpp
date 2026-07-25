@@ -31,4 +31,11 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
                                                        std::string_view workload_tag,
                                                        std::filesystem::path& out_db_path);
 
+// crud_full (§4.2): create -> read -> update_inplace -> update_grow ->
+// update_shrink -> delete, seis PhaseMetrics separados. Cada update valida
+// uma amostra determinística campo a campo (§9 item 4), não o conjunto
+// inteiro.
+[[nodiscard]] CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
+                                                   std::filesystem::path& out_db_path);
+
 } // namespace modb::loadtest

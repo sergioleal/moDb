@@ -15,6 +15,7 @@ const std::vector<std::string> kImplementedWorkloads = {
     "create_delete_forward",
     "create_delete_reverse",
     "create_delete_interleaved",
+    "crud_full",
 };
 
 bool contains(const std::vector<std::string>& values, std::string_view target) {

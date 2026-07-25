@@ -7,6 +7,7 @@
 #include "workloads/create_delete_interleaved.hpp"
 #include "workloads/create_delete_reverse.hpp"
 #include "workloads/create_only.hpp"
+#include "workloads/crud_full.hpp"
 
 #include "runner/environment.hpp"
 #include "runner/json_util.hpp"
@@ -308,6 +309,8 @@ CampaignResult run_campaign(const CampaignOptions& options) {
             run_result = run_create_delete_reverse(c, work_dir, options.seed, db_path);
         } else if (c.workload == "create_delete_interleaved") {
             run_result = run_create_delete_interleaved(c, work_dir, options.seed, db_path);
+        } else if (c.workload == "crud_full") {
+            run_result = run_crud_full(c, work_dir, options.seed, db_path);
         } else {
             run_result.status = "unimplemented";
             run_result.error = "dispatch ausente para workload '" + c.workload + "'";

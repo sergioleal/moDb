@@ -34,13 +34,14 @@ std::size_t filler_bytes_for_payload(std::string_view payload) {
     return 256; // "normal" e qualquer valor desconhecido
 }
 
-GeneratedUser generate_user(std::uint64_t seed, std::uint64_t index, std::string_view payload) {
+GeneratedUser generate_user_ex(std::uint64_t seed, std::uint64_t index, std::size_t filler_bytes,
+                               std::int32_t status) {
     GeneratedUser user;
     user.id = static_cast<std::int64_t>(index);
     user.login = "user" + std::to_string(index);
     user.email = "user" + std::to_string(index) + "@example.test";
     user.created_at = kBaseEpochSeconds + static_cast<std::int64_t>(index) * kStepSeconds;
-    user.status = static_cast<std::int32_t>(index % 3);
+    user.status = status;
 
     std::uint64_t state = seed ^ (index * 0x9E3779B97F4A7C15ULL + 0xD1B54A32D192ED03ULL);
     // display_name: texto sintético curto, determinístico, nunca corpus real.
@@ -54,17 +55,21 @@ GeneratedUser generate_user(std::uint64_t seed, std::uint64_t index, std::string
     name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
     user.display_name = name;
 
-    const auto filler_size = filler_bytes_for_payload(payload);
-    user.filler.reserve(filler_size);
-    while (user.filler.size() < filler_size) {
+    user.filler.reserve(filler_bytes);
+    while (user.filler.size() < filler_bytes) {
         const auto chunk = splitmix64_next(state);
         const auto* bytes = reinterpret_cast<const std::byte*>(&chunk);
-        for (std::size_t i = 0; i < sizeof(chunk) && user.filler.size() < filler_size; ++i) {
+        for (std::size_t i = 0; i < sizeof(chunk) && user.filler.size() < filler_bytes; ++i) {
             user.filler.push_back(bytes[i]);
         }
     }
 
     return user;
+}
+
+GeneratedUser generate_user(std::uint64_t seed, std::uint64_t index, std::string_view payload) {
+    return generate_user_ex(seed, index, filler_bytes_for_payload(payload),
+                            static_cast<std::int32_t>(index % 3));
 }
 
 std::string canonical_line(const GeneratedUser& user) {

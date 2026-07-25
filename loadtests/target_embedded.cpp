@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -405,6 +406,204 @@ std::vector<ObjectId> reorder_for_delete(const std::vector<ObjectId>& ids, Delet
     return interleaved;
 }
 
+struct ReadPhaseOutcome {
+    bool ok{};
+    std::string error;
+    PhaseMetrics phase;
+    bool hash_match{};
+    std::string actual_hash;
+};
+
+// Fase `read` de crud_full: relê todos os objetos criados e compara o hash
+// lógico observado com `expected_hash` -- mesma validação de create_only
+// (§9), agora como fase própria e cronometrada, não escondida dentro do
+// create.
+ReadPhaseOutcome perform_read_phase(AttachedDatabase& attached, const std::vector<ObjectId>& ids,
+                                    const std::string& expected_hash, std::uint64_t object_count,
+                                    const std::filesystem::path& db_path,
+                                    const std::filesystem::path& wal_path) {
+    ReadPhaseOutcome outcome;
+
+    std::error_code size_error;
+    const auto pages_read_before = attached.database->data_pages_read();
+    std::vector<double> latencies_ns;
+    latencies_ns.reserve(ids.size());
+    std::ostringstream actual;
+    std::uint64_t errors = 0;
+
+    const auto read_start = std::chrono::steady_clock::now();
+    for (const auto id : ids) {
+        const auto op_start = std::chrono::steady_clock::now();
+        auto handle = attached.database->get<User>(id);
+        Result<User> value;
+        if (handle) {
+            value = attached.database->materialize(*handle);
+        }
+        const auto op_end = std::chrono::steady_clock::now();
+        latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+
+        if (!handle || !value) {
+            ++errors;
+            continue;
+        }
+        actual << canonical_line(from_engine_user(*value)) << '\n';
+    }
+    const auto read_end = std::chrono::steady_clock::now();
+    const auto pages_read_after = attached.database->data_pages_read();
+
+    const auto file_bytes = std::filesystem::file_size(db_path, size_error);
+    const std::uint64_t db_bytes = size_error ? 0 : file_bytes;
+    std::error_code wal_size_error;
+    const auto wal_bytes = std::filesystem::file_size(wal_path, wal_size_error);
+    const auto read_ns = ns_between(read_start, read_end);
+
+    outcome.phase.phase = "read";
+    outcome.phase.operations = ids.size();
+    outcome.phase.duration_ns = read_ns;
+    outcome.phase.ops_per_second =
+        read_ns > 0 ? (static_cast<double>(ids.size()) * 1'000'000'000.0) /
+                          static_cast<double>(read_ns)
+                   : 0.0;
+    outcome.phase.bytes_per_object = object_count > 0 ? db_bytes / object_count : 0;
+    outcome.phase.errors = errors;
+    outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
+    outcome.phase.peak_rss_bytes = peak_rss_bytes();
+    outcome.phase.db_bytes = db_bytes;
+    outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
+    outcome.phase.pages_read = pages_read_after - pages_read_before;
+
+    outcome.actual_hash = sha256_hex(sha256_text(actual.str()));
+    outcome.hash_match = errors == 0 && ids.size() == object_count && outcome.actual_hash == expected_hash;
+    outcome.ok = true;
+    return outcome;
+}
+
+struct UpdatePhaseOutcome {
+    bool ok{};
+    std::string error;
+    PhaseMetrics phase;
+    std::uint64_t sample_checked{};
+    std::uint64_t sample_mismatches{};
+};
+
+// Fase de update genérica (update_inplace/update_grow/update_shrink, §4.2):
+// `new_value_for(index)` (1-based, mesma ordem de perform_create_phase)
+// devolve o valor esperado após o update. Valida só uma AMOSTRA
+// determinística campo a campo (§9 item 4), não o conjunto inteiro --
+// diferente de create_only/read, que conferem tudo.
+UpdatePhaseOutcome perform_update_phase(
+    AttachedDatabase& attached, const std::vector<ObjectId>& ids, std::string_view phase_name,
+    std::uint64_t batch, const std::filesystem::path& db_path, const std::filesystem::path& wal_path,
+    const std::function<GeneratedUser(std::uint64_t)>& new_value_for, std::uint64_t sample_stride) {
+    UpdatePhaseOutcome outcome;
+    if (ids.empty()) {
+        outcome.ok = true;
+        outcome.phase.phase = std::string{phase_name};
+        return outcome;
+    }
+
+    std::error_code size_error;
+    const auto pages_read_before = attached.database->data_pages_read();
+    const auto batch_size = batch == 0 ? ids.size() : batch;
+    std::vector<double> latencies_ns;
+    latencies_ns.reserve(ids.size());
+    std::uint64_t errors = 0;
+
+    auto first_tx = attached.database->begin();
+    if (!first_tx) {
+        outcome.error = std::string{phase_name} + ": begin: " + first_tx.error().message;
+        return outcome;
+    }
+    std::optional<Transaction> tx{std::move(*first_tx)};
+
+    const auto phase_start = std::chrono::steady_clock::now();
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        const auto index = static_cast<std::uint64_t>(i) + 1;
+        const auto new_value = new_value_for(index);
+
+        const auto op_start = std::chrono::steady_clock::now();
+        auto handle = attached.database->get<User>(ids[i]);
+        Result<void> updated;
+        if (handle) {
+            updated = attached.database->update(*tx, *handle, to_engine_user(new_value));
+        }
+        const auto op_end = std::chrono::steady_clock::now();
+        latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+
+        if (!handle || !updated) {
+            ++errors;
+            outcome.error = std::string{phase_name} + "(i=" + std::to_string(index) +
+                            "): " + (handle ? updated.error().message : handle.error().message);
+            return outcome;
+        }
+
+        const auto position = i + 1;
+        if (position % batch_size == 0 || position == ids.size()) {
+            if (auto committed = tx->commit(); !committed) {
+                outcome.error = std::string{phase_name} + ": commit: " + committed.error().message;
+                return outcome;
+            }
+            if (position != ids.size()) {
+                auto next_tx = attached.database->begin();
+                if (!next_tx) {
+                    outcome.error =
+                        std::string{phase_name} + ": begin (lote seguinte): " + next_tx.error().message;
+                    return outcome;
+                }
+                tx.emplace(std::move(*next_tx));
+            }
+        }
+    }
+    const auto phase_end = std::chrono::steady_clock::now();
+    const auto pages_read_after = attached.database->data_pages_read();
+
+    const auto file_bytes = std::filesystem::file_size(db_path, size_error);
+    const std::uint64_t db_bytes = size_error ? 0 : file_bytes;
+    std::error_code wal_size_error;
+    const auto wal_bytes = std::filesystem::file_size(wal_path, wal_size_error);
+    const auto phase_ns = ns_between(phase_start, phase_end);
+
+    outcome.phase.phase = std::string{phase_name};
+    outcome.phase.operations = ids.size();
+    outcome.phase.duration_ns = phase_ns;
+    outcome.phase.ops_per_second =
+        phase_ns > 0 ? (static_cast<double>(ids.size()) * 1'000'000'000.0) /
+                           static_cast<double>(phase_ns)
+                     : 0.0;
+    outcome.phase.bytes_per_object = ids.size() > 0 ? db_bytes / ids.size() : 0;
+    outcome.phase.errors = errors;
+    outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
+    outcome.phase.peak_rss_bytes = peak_rss_bytes();
+    outcome.phase.db_bytes = db_bytes;
+    outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
+    outcome.phase.pages_read = pages_read_after - pages_read_before;
+
+    // Validação (§9 item 4): amostra determinística, campo a campo -- não o
+    // conjunto inteiro.
+    for (std::size_t i = 0; i < ids.size(); i += sample_stride) {
+        const auto index = static_cast<std::uint64_t>(i) + 1;
+        const auto expected_value = new_value_for(index);
+        auto handle = attached.database->get<User>(ids[i]);
+        if (!handle) {
+            ++outcome.sample_mismatches;
+            continue;
+        }
+        auto value = attached.database->materialize(*handle);
+        if (!value) {
+            ++outcome.sample_mismatches;
+            continue;
+        }
+        ++outcome.sample_checked;
+        const auto actual = from_engine_user(*value);
+        if (canonical_line(actual) != canonical_line(expected_value)) {
+            ++outcome.sample_mismatches;
+        }
+    }
+
+    outcome.ok = true;
+    return outcome;
+}
+
 } // namespace
 
 CaseRunResult run_create_only_embedded(const WorkloadParams& params,
@@ -538,6 +737,164 @@ CaseRunResult run_create_delete_embedded(const WorkloadParams& params, DeleteOrd
     // space_amplification é "tamanho final / bytes lógicos vivos" (§8); com
     // tudo deletado não há bytes vivos -- 0.0 é "não computável", não um
     // valor de bloat inventado (o motor pode ou não encolher o arquivo).
+    result.space_amplification = 0.0;
+    result.status = "completed";
+    result.ok = true;
+    return result;
+}
+
+CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
+                                     std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "crud_full");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    AttachedDatabase attached;
+    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+        result.status = "failed";
+        result.error = setup.error;
+        return result;
+    }
+
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path);
+    if (!create_outcome.ok) {
+        result.status = "failed";
+        result.error = create_outcome.error;
+        return result;
+    }
+    result.phases.push_back(create_outcome.phase);
+
+    auto read_outcome = perform_read_phase(attached, create_outcome.ids, create_outcome.expected_hash,
+                                           params.object_count, db_path, wal_path);
+    result.phases.push_back(read_outcome.phase);
+    if (!read_outcome.hash_match) {
+        result.status = "failed";
+        result.error = "read: hash lógico não confere com o esperado da criação";
+        return result;
+    }
+
+    // update_inplace mantém o mesmo tamanho de filler (só o status muda --
+    // não deveria mover o registro entre páginas); update_grow/update_shrink
+    // mudam deliberadamente o tamanho para exercitar crescimento/encolhimento
+    // (§4.2). Nenhum dos três reusa generate_user(seed,index,payload) puro,
+    // porque isso regeneraria o valor IDÊNTICO ao original -- generate_user_ex
+    // muda status e/ou tamanho de filler de propósito.
+    const auto base_filler = filler_bytes_for_payload(params.payload);
+    const auto grow_filler = base_filler * 2;
+    const auto shrink_filler = std::max<std::size_t>(base_filler / 4, 8);
+    const auto sample_stride = std::max<std::uint64_t>(1, params.object_count / 100);
+
+    auto inplace_value_for = [&](std::uint64_t index) {
+        const auto original = generate_user(params.seed, index, params.payload);
+        return generate_user_ex(params.seed, index, base_filler, (original.status + 1) % 3);
+    };
+    auto grow_value_for = [&](std::uint64_t index) {
+        const auto original = generate_user(params.seed, index, params.payload);
+        return generate_user_ex(params.seed, index, grow_filler, (original.status + 2) % 3);
+    };
+    auto shrink_value_for = [&](std::uint64_t index) {
+        const auto original = generate_user(params.seed, index, params.payload);
+        return generate_user_ex(params.seed, index, shrink_filler, original.status);
+    };
+
+    auto inplace_outcome = perform_update_phase(attached, create_outcome.ids, "update_inplace",
+                                                params.batch, db_path, wal_path, inplace_value_for,
+                                                sample_stride);
+    result.phases.push_back(inplace_outcome.phase);
+    if (!inplace_outcome.ok) {
+        result.status = "failed";
+        result.error = inplace_outcome.error;
+        return result;
+    }
+    if (inplace_outcome.sample_mismatches > 0) {
+        result.status = "failed";
+        result.error = "update_inplace: " + std::to_string(inplace_outcome.sample_mismatches) +
+                       "/" + std::to_string(inplace_outcome.sample_checked) +
+                       " amostra(s) não conferem campo a campo";
+        return result;
+    }
+
+    auto grow_outcome = perform_update_phase(attached, create_outcome.ids, "update_grow",
+                                             params.batch, db_path, wal_path, grow_value_for,
+                                             sample_stride);
+    result.phases.push_back(grow_outcome.phase);
+    if (!grow_outcome.ok) {
+        result.status = "failed";
+        result.error = grow_outcome.error;
+        return result;
+    }
+    if (grow_outcome.sample_mismatches > 0) {
+        result.status = "failed";
+        result.error = "update_grow: " + std::to_string(grow_outcome.sample_mismatches) + "/" +
+                       std::to_string(grow_outcome.sample_checked) +
+                       " amostra(s) não conferem campo a campo";
+        return result;
+    }
+
+    auto shrink_outcome = perform_update_phase(attached, create_outcome.ids, "update_shrink",
+                                               params.batch, db_path, wal_path, shrink_value_for,
+                                               sample_stride);
+    result.phases.push_back(shrink_outcome.phase);
+    if (!shrink_outcome.ok) {
+        result.status = "failed";
+        result.error = shrink_outcome.error;
+        return result;
+    }
+    if (shrink_outcome.sample_mismatches > 0) {
+        result.status = "failed";
+        result.error = "update_shrink: " + std::to_string(shrink_outcome.sample_mismatches) + "/" +
+                       std::to_string(shrink_outcome.sample_checked) +
+                       " amostra(s) não conferem campo a campo";
+        return result;
+    }
+
+    auto delete_outcome =
+        perform_delete_phase(attached, create_outcome.ids, params.batch, db_path, wal_path);
+    result.phases.push_back(delete_outcome.phase);
+    if (!delete_outcome.ok) {
+        result.status = "failed";
+        result.error = delete_outcome.error;
+        return result;
+    }
+    result.reclaimed_bytes = delete_outcome.reclaimed_bytes;
+
+    auto verification = verify_all_deleted(attached, create_outcome.ids);
+    result.all_deleted = verification.all_deleted;
+    result.still_resolving = verification.still_resolving;
+    if (!verification.all_deleted) {
+        result.status = "failed";
+        result.error = std::to_string(verification.still_resolving) +
+                       " objeto(s) ainda resolvem depois do delete (esperado: 0)";
+        return result;
+    }
+
+    // Bytes físicos escritos em toda a vida do caso: soma dos crescimentos
+    // positivos de db_bytes entre fases sucessivas (uma fase pode encolher o
+    // arquivo ou mantê-lo do mesmo tamanho -- só o que cresce é "escrita").
+    std::uint64_t total_bytes_written = 0;
+    std::uint64_t prev_db_bytes = create_outcome.db_bytes_before;
+    for (const auto& phase : result.phases) {
+        if (phase.db_bytes > prev_db_bytes) {
+            total_bytes_written += phase.db_bytes - prev_db_bytes;
+        }
+        prev_db_bytes = phase.db_bytes;
+    }
+
+    result.expected_hash = create_outcome.expected_hash;
+    result.actual_hash = read_outcome.actual_hash;
+    result.hash_match = read_outcome.hash_match;
+    result.peak_disk_bytes = delete_outcome.phase.db_bytes;
+    result.total_duration_ns = create_outcome.phase.duration_ns + read_outcome.phase.duration_ns +
+                               inplace_outcome.phase.duration_ns + grow_outcome.phase.duration_ns +
+                               shrink_outcome.phase.duration_ns + delete_outcome.phase.duration_ns;
+    result.write_amplification = create_outcome.logical_bytes > 0
+                                    ? static_cast<double>(total_bytes_written) /
+                                          static_cast<double>(create_outcome.logical_bytes)
+                                    : 0.0;
+    // Tudo deletado ao final -- 0 bytes lógicos vivos, então
+    // space_amplification (bytes/byte-vivo) não é computável (§8), não 0
+    // inventado de bloat.
     result.space_amplification = 0.0;
     result.status = "completed";
     result.ok = true;

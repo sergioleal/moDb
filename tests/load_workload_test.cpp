@@ -107,6 +107,36 @@ void test_forward_and_reverse_are_comparable(TestSuite& suite) {
                "os dois devem reportar um tamanho de arquivo final mensurável");
 }
 
+void test_crud_full(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_crud_full_embedded(small_params(work_dir), db_path);
+
+    suite.check(result.ok, "crud_full deve completar: " + result.error);
+    suite.check(result.status == "completed", "crud_full status deve ser completed");
+    suite.check(result.phases.size() == 6, "crud_full deve produzir exatamente 6 fases");
+    if (result.phases.size() == 6) {
+        const char* expected_names[] = {"create",         "read",         "update_inplace",
+                                        "update_grow",    "update_shrink", "delete"};
+        for (std::size_t i = 0; i < 6; ++i) {
+            suite.check(result.phases[i].phase == expected_names[i],
+                       std::string("fase ") + std::to_string(i) + " deve se chamar '" +
+                           expected_names[i] + "'");
+            suite.check(result.phases[i].operations == 200,
+                       std::string("fase '") + expected_names[i] + "' deve operar sobre os 200 objetos");
+        }
+        // bytes_per_object é tamanho TOTAL do arquivo / N nesse instante, não
+        // o tamanho de um registro -- o arquivo tende a só crescer ao longo
+        // do caso (páginas liberadas por update_shrink não voltam ao SO),
+        // então o sinal válido é update_grow >= create, não grow vs. shrink.
+        suite.check(result.phases[3].db_bytes >= result.phases[0].db_bytes,
+                   "update_grow deve exigir tanto ou mais espaço em arquivo que a criação original");
+    }
+    suite.check(result.hash_match, "a fase read deve validar o hash lógico da criação");
+    suite.check(result.all_deleted, "todos os objetos devem estar removidos ao final");
+    suite.check(result.still_resolving == 0, "nenhum id removido deve continuar resolvendo");
+}
+
 } // namespace
 
 int main() {
@@ -116,5 +146,6 @@ int main() {
     test_create_delete_reverse(suite);
     test_create_delete_interleaved(suite);
     test_forward_and_reverse_are_comparable(suite);
+    test_crud_full(suite);
     return suite.finish();
 }
