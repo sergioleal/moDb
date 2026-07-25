@@ -639,46 +639,59 @@ int main() {
                 suite.check(client.has_value(), "multiplex client connects");
                 if (client) {
                     constexpr std::uint64_t multiplex_limit = 40;
-                    auto stream_a = client->query(
-                        QueryDescription{.type = type_id, .limit = multiplex_limit});
-                    auto stream_b = client->query(
-                        QueryDescription{.type = type_id, .limit = multiplex_limit});
-                    suite.check(stream_a.has_value() && stream_b.has_value(),
-                                "two concurrent queries start");
-                    if (stream_a && stream_b) {
-                        suite.check(stream_a->query_id() != stream_b->query_id(),
-                                    "concurrent query_ids differ");
+                    // Duas consultas concorrentes são exatamente o cenário que
+                    // punha dois workers percorrendo generators no mesmo
+                    // `Database` — motor single-thread (ADR-011), o que corrompia
+                    // as listas do `BufferPool`. Como corrida, o defeito só
+                    // aparecia em parte das execuções (5–50% conforme o build),
+                    // então a rodada é repetida na MESMA conexão: cada repetição
+                    // é uma nova chance de a regressão se manifestar, sem custo
+                    // de reabrir servidor/conexão.
+                    constexpr int multiplex_rounds = 6;
+                    for (int round = 0; round < multiplex_rounds; ++round) {
+                        auto stream_a = client->query(
+                            QueryDescription{.type = type_id, .limit = multiplex_limit});
+                        auto stream_b = client->query(
+                            QueryDescription{.type = type_id, .limit = multiplex_limit});
+                        suite.check(stream_a.has_value() && stream_b.has_value(),
+                                    "two concurrent queries start");
+                        if (stream_a && stream_b) {
+                            suite.check(stream_a->query_id() != stream_b->query_id(),
+                                        "concurrent query_ids differ");
 
-                        std::size_t count_a = 0;
-                        std::size_t count_b = 0;
-                        bool done_a = false;
-                        bool done_b = false;
-                        while (!done_a || !done_b) {
-                            if (!done_a) {
-                                auto next = stream_a->next();
-                                if (!next) {
-                                    suite.check(false, "stream A error");
-                                    done_a = true;
-                                } else if (!*next) {
-                                    done_a = true;
-                                } else {
-                                    ++count_a;
+                            std::size_t count_a = 0;
+                            std::size_t count_b = 0;
+                            bool done_a = false;
+                            bool done_b = false;
+                            while (!done_a || !done_b) {
+                                if (!done_a) {
+                                    auto next = stream_a->next();
+                                    if (!next) {
+                                        suite.check(false, "stream A error");
+                                        done_a = true;
+                                    } else if (!*next) {
+                                        done_a = true;
+                                    } else {
+                                        ++count_a;
+                                    }
+                                }
+                                if (!done_b) {
+                                    auto next = stream_b->next();
+                                    if (!next) {
+                                        suite.check(false, "stream B error");
+                                        done_b = true;
+                                    } else if (!*next) {
+                                        done_b = true;
+                                    } else {
+                                        ++count_b;
+                                    }
                                 }
                             }
-                            if (!done_b) {
-                                auto next = stream_b->next();
-                                if (!next) {
-                                    suite.check(false, "stream B error");
-                                    done_b = true;
-                                } else if (!*next) {
-                                    done_b = true;
-                                } else {
-                                    ++count_b;
-                                }
-                            }
+                            suite.check(count_a == multiplex_limit,
+                                        "stream A received all objects");
+                            suite.check(count_b == multiplex_limit,
+                                        "stream B received all objects");
                         }
-                        suite.check(count_a == multiplex_limit, "stream A received all objects");
-                        suite.check(count_b == multiplex_limit, "stream B received all objects");
                     }
                 }
             }

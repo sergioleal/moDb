@@ -46,9 +46,17 @@ void reader_loop(SessionState& session) {
     while (!session.stop.load(std::memory_order_relaxed)) {
         auto message = recv_message(*session.peer);
         if (!message) {
-            session.reader_failed.store(true, std::memory_order_relaxed);
-            session.reader_error = message.error();
-            session.stop.store(true, std::memory_order_relaxed);
+            // Mesma corrida do lado cliente (ver ClientConn::reader_loop):
+            // `reader_error` contém um std::string que `wait_inbound` copia com
+            // `inbox_mu` tomado, então publicá-lo sem o mutex libera o buffer
+            // antigo debaixo do consumidor e corrompe o heap. Os flags entram no
+            // mesmo escopo para só ficarem visíveis com o Error já completo.
+            {
+                const std::scoped_lock lock{session.inbox_mu};
+                session.reader_error = message.error();
+                session.reader_failed.store(true, std::memory_order_relaxed);
+                session.stop.store(true, std::memory_order_relaxed);
+            }
             session.inbox_cv.notify_all();
             return;
         }
@@ -193,7 +201,7 @@ namespace {
 
 Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Database> database,
                               const Query& query, std::optional<std::size_t> fail_after,
-                              Compression preferred_codec) {
+                              Compression preferred_codec, std::mutex& engine_mutex) {
     StreamStats stats{};
     query::CancellationToken token;
     {
@@ -201,7 +209,25 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
         session.tokens[query.query_id] = token;
     }
 
-    if (auto status = send_locked(session, StreamBegin{.query_id = query.query_id}); !status) {
+    // O motor é single-thread (ADR-011): `BufferPool` e `ScratchPagePool` não
+    // têm sincronização, então dois workers percorrendo generators no mesmo
+    // `Database` corrompem as listas internas do pool — observado como
+    // STATUS_HEAP_CORRUPTION ao destruir o `BufferPool`. `engine_lock` fica
+    // tomado por todo o corpo (inclusive na destruição do generator, que
+    // rebobina a coroutine e o snapshot) e só é liberado em volta do `send`,
+    // que bloqueia em TCP: assim a multiplexação e o backpressure continuam
+    // valendo, sem que um cliente lento numa stream trave as outras.
+    std::unique_lock<std::mutex> engine_lock{engine_mutex};
+    // Envia com o motor liberado e o retoma antes de devolver, para que todo
+    // caminho de saída volte com o lock tomado.
+    const auto send_unlocked = [&](const Message& message) -> Result<void> {
+        engine_lock.unlock();
+        auto status = send_locked(session, message);
+        engine_lock.lock();
+        return status;
+    };
+
+    if (auto status = send_unlocked(StreamBegin{.query_id = query.query_id}); !status) {
         const std::scoped_lock lock{session.tokens_mu};
         session.tokens.erase(query.query_id);
         return std::unexpected(status.error());
@@ -233,7 +259,7 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
             return {};
         }
         const auto count = batch.records.size();
-        if (auto status = send_locked(session, batch); !status) {
+        if (auto status = send_unlocked(batch); !status) {
             return status;
         }
         stats.sent += count;
@@ -249,9 +275,9 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
         }
         if (!item) {
             (void)flush_batch();
-            (void)send_locked(session, StreamError{.query_id = query.query_id,
-                                                   .code = item.error().code,
-                                                   .message = item.error().message});
+            (void)send_unlocked(StreamError{.query_id = query.query_id,
+                                            .code = item.error().code,
+                                            .message = item.error().message});
             const std::scoped_lock lock{session.tokens_mu};
             session.tokens.erase(query.query_id);
             return stats;
@@ -259,9 +285,9 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
 
         if (fail_after && stats.produced >= *fail_after) {
             (void)flush_batch();
-            (void)send_locked(session, StreamError{.query_id = query.query_id,
-                                                   .code = ErrorCode::io_error,
-                                                   .message = "injected stream failure"});
+            (void)send_unlocked(StreamError{.query_id = query.query_id,
+                                            .code = ErrorCode::io_error,
+                                            .message = "injected stream failure"});
             const std::scoped_lock lock{session.tokens_mu};
             session.tokens.erase(query.query_id);
             return stats;
@@ -270,9 +296,9 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
         auto payload = object::encode_object_payload(item->fields);
         if (!payload) {
             (void)flush_batch();
-            (void)send_locked(session, StreamError{.query_id = query.query_id,
-                                                   .code = payload.error().code,
-                                                   .message = payload.error().message});
+            (void)send_unlocked(StreamError{.query_id = query.query_id,
+                                            .code = payload.error().code,
+                                            .message = payload.error().message});
             const std::scoped_lock lock{session.tokens_mu};
             session.tokens.erase(query.query_id);
             return stats;
@@ -302,8 +328,7 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
     }
     // Cancel ou fim natural: StreamEnd com o total produzido (conexão reutilizável).
     (void)cancelled;
-    if (auto status =
-            send_locked(session, StreamEnd{.query_id = query.query_id, .total = stats.produced});
+    if (auto status = send_unlocked(StreamEnd{.query_id = query.query_id, .total = stats.produced});
         !status) {
         const std::scoped_lock lock{session.tokens_mu};
         session.tokens.erase(query.query_id);
@@ -416,7 +441,8 @@ Result<void> Server::handle_connection(NativeSocket peer) {
             live_workers.fetch_add(1, std::memory_order_relaxed);
             const Compression codec = selected_codec_;
             std::thread worker([&, query_copy, codec]() mutable {
-                auto stats = run_query(session, database_, query_copy, fail_after_, codec);
+                auto stats =
+                    run_query(session, database_, query_copy, fail_after_, codec, *engine_mutex_);
                 if (stats) {
                     const std::scoped_lock lock{stats_mu};
                     last_stats_ = *stats;
@@ -483,6 +509,11 @@ Result<void> Server::handle_connection(NativeSocket peer) {
             reply.code = ErrorCode::operation_not_found;
             reply.message = "server has no operation registry";
         } else {
+            // `dispatch` executa a operação de domínio no mesmo `Database` que os
+            // workers de consulta percorrem, então também precisa do lock do
+            // motor (ADR-011) — sem ele um OpCall concorrente com um stream
+            // ativo corrompe as mesmas estruturas do BufferPool.
+            const std::scoped_lock engine_lock{*engine_mutex_};
             auto outcome = operations_->dispatch(call->operation_id, call->args, *database_);
             if (outcome) {
                 reply.ok = true;

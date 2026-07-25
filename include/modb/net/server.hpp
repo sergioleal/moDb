@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -108,6 +109,13 @@ private:
     std::shared_ptr<ops::OperationRegistry> operations_{};
     std::shared_ptr<ops::FacadeCatalog> facades_{};
     std::atomic<bool> stop_requested_{false};
+    // Serializa o avanço do motor entre os workers de consulta. O motor é
+    // single-thread (ADR-011): `BufferPool`/`ScratchPagePool` não têm
+    // sincronização, então dois generators correndo no mesmo `Database`
+    // corrompem as estruturas internas. `unique_ptr` porque `std::mutex` não é
+    // movível e `Server` precisa continuar movível — mesma solução que
+    // `Database::snapshot_registry_mutex_`.
+    std::unique_ptr<std::mutex> engine_mutex_{std::make_unique<std::mutex>()};
 };
 
 } // namespace modb::net

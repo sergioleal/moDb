@@ -54,21 +54,33 @@ ClientConn::~ClientConn() {
 }
 
 void ClientConn::reader_loop() {
+    // `failure` guarda um Error, que contém um std::string, e `recv_for` o COPIA
+    // com `mu` tomado. Publicá-lo aqui sem o mutex era uma corrida de dados:
+    // a atribuição libera o buffer antigo (a mensagem inicial já passa do SSO)
+    // e aloca outro enquanto o consumidor ainda lê o ponteiro, o que rasga a
+    // string e faz o free seguinte cair em endereço inválido — observado como
+    // STATUS_HEAP_CORRUPTION (0xC0000374) sob multiplexação de streams. Os
+    // flags entram no mesmo escopo para que quem acorda em `recv_for` só veja
+    // `stop`/`failed` ligados depois de `failure` estar completo.
+    const auto fail_and_stop = [this](Error error) {
+        {
+            const std::scoped_lock lock{mu};
+            failure = std::move(error);
+            failed.store(true, std::memory_order_relaxed);
+            stop.store(true, std::memory_order_relaxed);
+        }
+        cv.notify_all();
+    };
+
     while (!stop.load(std::memory_order_relaxed)) {
         auto message = recv_message(socket);
         if (!message) {
-            failed.store(true, std::memory_order_relaxed);
-            failure = message.error();
-            stop.store(true, std::memory_order_relaxed);
-            cv.notify_all();
+            fail_and_stop(message.error());
             return;
         }
         const auto query_id = message_query_id(*message);
         if (!query_id) {
-            failed.store(true, std::memory_order_relaxed);
-            failure = make_protocol("server sent message without query_id");
-            stop.store(true, std::memory_order_relaxed);
-            cv.notify_all();
+            fail_and_stop(make_protocol("server sent message without query_id"));
             return;
         }
         {

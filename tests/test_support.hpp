@@ -5,6 +5,8 @@
 
 // Disponibiliza a saída dos resultados no console.
 #include <iostream>
+// Disponibiliza o mutex que torna check() usável de várias threads.
+#include <mutex>
 // Disponibiliza mensagens leves sem cópia.
 #include <string_view>
 
@@ -15,6 +17,11 @@ public:
     void check(bool condition, std::string_view message) {
         // Não faz nada quando a condição é verdadeira.
         if (!condition) {
+            // Os testes de rede passam a mesma TestSuite para a thread que roda
+            // `serve_one()` e para a main, então `++failures_` acontecia de duas
+            // threads: sem o mutex a soma pode perder uma falha e o teste passa
+            // escondendo o defeito, além de embaralhar as linhas no stderr.
+            const std::scoped_lock lock{mutex_};
             // Soma uma falha ao resultado final.
             ++failures_;
             // Mostra qual expectativa não foi atendida.
@@ -32,6 +39,7 @@ public:
 
     // Converte a quantidade de falhas em um código de saída do processo.
     [[nodiscard]] int finish() const {
+        const std::scoped_lock lock{mutex_};
         // Mostra uma confirmação quando nenhuma verificação falhou.
         if (failures_ == 0) {
             std::cout << "All tests passed\n";
@@ -43,4 +51,8 @@ public:
 private:
     // Conta quantas verificações falharam.
     int failures_{0};
+    // Serializa check()/finish() porque os testes de rede compartilham a suíte
+    // entre a thread do servidor e a main. `mutable` para `finish()` continuar
+    // const, como os testes já esperam.
+    mutable std::mutex mutex_{};
 };
