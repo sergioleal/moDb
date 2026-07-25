@@ -223,7 +223,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 |---|---|---|---|---|
 | A | Matriz, seletores, perfis, budget-gate | — | ✅ | `45a1fcb` · 2026-07-25 |
 | B | Writer, dataset, `target_embedded`, `create_only` | — | ✅ | `45a1fcb` · 2026-07-25 |
-| D1 | Recusar dimensões não implementadas | 0 | ⬜ | dívida de B; ver §2 |
+| D1 | Recusar dimensões não implementadas | 0 | ✅ | `212a28e` · 2026-07-25 |
 | D2 | Ampliar métricas por fase | 0 | ⬜ | dívida de B; desbloqueia o painel |
 | C | Série histórica (rollup, index, trend, report) | 1 | ⬜ | depende de D2 |
 | D | `create_delete_{forward,reverse,interleaved}` | 2 | ⬜ | |
@@ -242,7 +242,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | R | Harness kill/restart, `restart_recovery` | 7 | ⬜ | ver §17 risco 13 |
 | K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ⬜ | depende de M, N, O, P, Q |
 
-Progresso: **2/20**.
+Progresso: **3/20**.
 
 ## 6. O que não está neste plano, de propósito
 
