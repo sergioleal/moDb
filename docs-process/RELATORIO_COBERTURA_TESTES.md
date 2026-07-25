@@ -86,6 +86,51 @@ exigiria um segundo helper de fuzz que sobrescreve, em vez de cortar, um byte
 de cada vez com valores fora do domínio esperado — não foi feito nesta
 rodada.
 
+**Item #3 (`src/net/replication_protocol.cpp`) — feito em 2026-07-25.** O
+achado aqui foi mais simples e mais grave que nos itens anteriores: a suíte
+antiga ([tests/replication_protocol_test.cpp](../tests/replication_protocol_test.cpp))
+só testava `ReplicationHello`, `WalFrame` e `WalGap` diretamente. O `gcov -b`
+mostrou `encode_replication_message` com **zero execuções** para 8 dos 13
+tipos do variant — `ReplicationHelloOk`, `BootstrapRequest`, `BootstrapBegin`,
+`BootstrapChunk`, `BootstrapEnd`, `WalAck`, `ReplicationError` e
+`ReplicationCancel` — e os respectivos `case` de decode igualmente mortos:
+nem o caminho feliz de encode/decode rodava para mais da metade dos tipos de
+mensagem. Isso explica por que este era o pior arquivo do projeto em ambas
+as métricas.
+
+Reescrito o arquivo de teste com:
+- Round-trip para **todos** os 13 tipos de mensagem do variant
+  `ReplicationMessage`, reaproveitando o mesmo `check_all_truncations_rejected`
+  de `protocol_test.cpp` (framing idêntico: `[u32 length][u8 type][payload]`;
+  aqui sem nenhum campo "aditivo" tolerado, então sem exceções).
+- Um caso de `WalFrame` com CRC explicitamente errado, confirmando a rejeição
+  por "WalFrame CRC mismatch" — branch que antes não disparava porque nenhum
+  teste jamais construía um CRC inconsistente de propósito.
+- Frame com tipo fora do enum e frame com `length` mentiroso, cobrindo os
+  dois erros de framing no topo de `decode_replication_message`.
+
+Uma armadilha encontrada e corrigida: `WalFrame.crc == 0` é sentinela de
+"calcule pra mim" (`msg.crc != 0 ? msg.crc : crc32(msg.records)` na linha 114
+do arquivo) — comparar a struct decodificada inteira com `==` contra o
+original sempre falha nesse campo. A suíte antiga já tinha contornado isso
+comparando só campos individuais; mantive a mesma abordagem para `WalFrame`
+em vez de forçar o helper genérico.
+
+**Resultado medido** (suíte completa, 128/128 testes, antes/depois limpos):
+
+| Arquivo | Linhas antes → depois | Branches antes → depois |
+|---|---|---|
+| `src/net/replication_protocol.cpp` | 40,7% → **100%** | 17,9% → **67,7%** |
+| Total `src/**/*.cpp` (cumulativo, itens #1+#2+#3) | 78,2% → **82,5%** | 44,6% → **48,8%** |
+
+`replication_protocol.cpp` saiu de pior arquivo do projeto para 100% de
+linhas cobertas — nenhuma linha remanescente sem execução. O branch % restante
+(32,3% faltando) é majoritariamente combinações específicas de "qual campo
+exatamente falhou" dentro de condições como `if (!v || !uuid || !tl || !lsn)`
+que o fuzz de truncamento já cobre parcialmente (um corte por vez força uma
+falha por vez), mas não exaustivamente para as 13 combinações de cada
+mensagem — diminishing returns, não perseguido nesta rodada.
+
 ## Metodologia
 
 1. `option(MODB_ENABLE_COVERAGE)` adicionada ao [CMakeLists.txt](../CMakeLists.txt)
