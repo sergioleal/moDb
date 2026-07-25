@@ -906,6 +906,17 @@ que permite que o mesmo caso rode nos quatro alvos.
 
 Uma subfase por branch, conforme a convenção do projeto.
 
+> **Estado atual e sequência revisada**:
+> [docs-process/PLANO_IMPLEMENTACAO_CARGA.md](../docs-process/PLANO_IMPLEMENTACAO_CARGA.md)
+> levanta o que está de fato implementado (lendo o código, não esta doc),
+> agrupa o resto em ondas dirigidas a dependência e rastreia o progresso
+> subfase por subfase. Ele registra duas divergências desta tabela, ambas
+> justificadas ali: duas dívidas do já implementado (`case_id` que mente sobre
+> concorrência; métricas que o dashboard pressupõe e o coletor não produz)
+> entram antes de qualquer subfase nova, e a Subfase H (escalas altas) é
+> adiantada em relação a G/I (rede), porque a pergunta "10k a 1M" é
+> respondível só com `embedded`.
+
 | subfase | entrega | critério de pronto |
 |---|---|---|
 | A | **Implementado.** matriz, ids, seletores, todos os 8 perfis de §6.2, `list-cases`, `--dry-run`, `budget` sem calibração (gate `--accept-unknown-budget`), `environments.hpp/.cpp` (valida `--environment` contra `loadtests/environments.json`), `json_value.hpp/.cpp` (parser JSON mínimo, não existia nada além de serialização) | `load_matrix_test` verde (13 casos); `list-cases`/`run --dry-run` imprimem sem executar; `--environment` inválido falha com a lista de ids cadastrados; `run-load.ps1`/`run-load.sh` param de imprimir "não encontrado" e chamam o binário de verdade |

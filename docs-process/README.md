@@ -35,6 +35,13 @@ definem escopo e não mudam a cada tarefa concluída.
   criados, os layouts binários byte a byte, as assinaturas de API e os testes
   automatizados caso a caso.
 
+- **[PLANO_IMPLEMENTACAO_CARGA.md](PLANO_IMPLEMENTACAO_CARGA.md)** — o mesmo
+  par "o quê / como", mas para os testes de carga: a especificação vive em
+  [`docs/PLANO_TESTES_DE_CARGA.md`](../docs/PLANO_TESTES_DE_CARGA.md) e este
+  documento levanta o que já está implementado, o que falta, em que ordem, e
+  serve de rastreador das subfases (A–R). Trabalho iniciado depois da Fase 16,
+  por isso fora da numeração de fases do `PLANO_ODB.md`.
+
 Relação entre os dois: `PLANO_ODB.md` é o "o quê e por quê" (nível de
 gerência/arquitetura); `PROTOCOLO_FASES.md` é o "como", fase a fase (nível de
 implementação). As fases e a numeração são as mesmas nos dois documentos. As
