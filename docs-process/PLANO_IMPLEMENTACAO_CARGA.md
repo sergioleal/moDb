@@ -225,7 +225,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | B | Writer, dataset, `target_embedded`, `create_only` | — | ✅ | `45a1fcb` · 2026-07-25 |
 | D1 | Recusar dimensões não implementadas | 0 | ✅ | `212a28e` · 2026-07-25 |
 | D2 | Ampliar métricas por fase | 0 | ✅ | `6509e24` · 2026-07-25 |
-| C | Série histórica (rollup, index, trend, report) | 1 | ⬜ | depende de D2 |
+| C | Série histórica (rollup, index, trend, report) | 1 | ✅ | `afadf60` · 2026-07-25 |
 | D | `create_delete_{forward,reverse,interleaved}` | 2 | ⬜ | |
 | E | `crud_full` | 2 | ⬜ | |
 | F | `progress_window`, `resume` | 3 | ⬜ | |
@@ -242,7 +242,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | R | Harness kill/restart, `restart_recovery` | 7 | ⬜ | ver §17 risco 13 |
 | K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ⬜ | depende de M, N, O, P, Q |
 
-Progresso: **4/20**.
+Progresso: **5/20**.
 
 ## 6. O que não está neste plano, de propósito
 
