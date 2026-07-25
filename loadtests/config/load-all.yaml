@@ -1,0 +1,71 @@
+# Roda todo workload já especificado (escada básica §4.2 + adicionais em
+# escopo §4.2.1) em duas escalas, embedded, no ambiente local.
+#
+# `case:` lista os casos explicitamente em vez de usar `profile:` +
+# `workload:` porque a composição de §6.1 é por INTERSEÇÃO: um perfil como
+# `load-local` só cobre a escada básica, e `workload:` NUNCA adiciona um
+# workload que o perfil não tinha — só restringe. Como quero também os
+# workloads de §4.2.1 (que não pertencem a nenhum perfil padrão além de
+# `load-behavior`), listar os `case_id` explícitos é a única forma correta de
+# pedir "todos" sem ambiguidade. Ver docs/PLANO_TESTES_DE_CARGA.md §6.1/§4.2.1.
+#
+# Fora da lista de propósito: `restart_recovery` (mata o processo, nunca entra
+# em execução automática), `schema_evolution` e `replica_catchup` (dependem de
+# infraestrutura que ainda não existe — ver §4.2.1). Escala `1M` também fora,
+# por tempo/disco; para incluí-la, duplique os itens trocando `.100k` por `.1M`.
+#
+# Ambiente aplica-se a todos os casos (D4 é ortogonal à identidade do caso,
+# §5) mesmo com `case:` explícito — a confirmar quando `modb_load` existir.
+
+profile:
+seed: 123456
+output_dir: load-results
+work_dir:
+filter:
+exclude:
+repeat: 1
+
+max_duration:
+max_disk_gb:
+max_rss_mb:
+accept_unknown_budget: false
+dry_run: false
+
+scale:
+
+workload:
+
+target:
+
+environment:
+  - desktop-windows
+
+concurrency:
+
+payload:
+
+case:
+  - load.create_only.embedded.10k
+  - load.create_only.embedded.100k
+  - load.create_delete_forward.embedded.10k
+  - load.create_delete_forward.embedded.100k
+  - load.create_delete_reverse.embedded.10k
+  - load.create_delete_reverse.embedded.100k
+  - load.create_delete_interleaved.embedded.10k
+  - load.create_delete_interleaved.embedded.100k
+  - load.crud_full.embedded.10k
+  - load.crud_full.embedded.100k
+  - load.read_hotspot.embedded.10k
+  - load.read_hotspot.embedded.100k
+  - load.range_scan_sweep.embedded.10k
+  - load.range_scan_sweep.embedded.100k
+  - load.mixed_oltp.embedded.10k
+  - load.mixed_oltp.embedded.100k
+  - load.snapshot_hold.embedded.10k
+  - load.snapshot_hold.embedded.100k
+  - load.blob_lifecycle.embedded.10k
+  - load.blob_lifecycle.embedded.100k
+  - load.cascade_delete.embedded.10k
+  - load.cascade_delete.embedded.100k
+  - load.oversubscribed_churn.embedded.10k
+  - load.oversubscribed_churn.embedded.100k

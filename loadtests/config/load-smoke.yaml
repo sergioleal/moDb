@@ -1,0 +1,37 @@
+# Config "roda de verdade hoje": só create_only, o único workload com
+# dispatch implementado nesta subfase (ver matrix::is_workload_implemented em
+# loadtests/matrix.cpp e docs/PLANO_TESTES_DE_CARGA.md, Subfase B).
+#
+# `accept_unknown_budget: true` é necessário porque não existe tabela de
+# calibração ainda (Subfase H, §10) -- sem isso `run` recusa executar
+# qualquer coisa, de propósito (§6.3).
+
+profile: load-smoke
+seed: 123456
+output_dir: load-results
+work_dir:
+filter:
+exclude:
+repeat: 1
+
+max_duration:
+max_disk_gb:
+max_rss_mb:
+accept_unknown_budget: true
+dry_run: false
+
+scale:
+
+workload:
+  - create_only
+
+target:
+
+environment:
+  - desktop-windows
+
+concurrency:
+
+payload:
+
+case:

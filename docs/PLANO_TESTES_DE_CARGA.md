@@ -1,6 +1,8 @@
 # Plano de testes de carga do Ring0
 
-- Estado: especificação, não implementada
+- Estado: em implementação incremental (Subfases A e B concluídas: matriz,
+  seletores, perfis, budget sem calibração, `modb_load run`/`list-cases`/
+  `list-profiles`, workload `create_only` real contra o motor embedded)
 - Versão: 1
 - Data: 2026-07-25
 - Escopo: carga de volume e duração sobre o modelo de objetos, com execução
@@ -93,13 +95,45 @@ de estresse. Ids estáveis, nunca reaproveitados com semântica diferente.
 | `create_delete_interleaved` | create → delete por stride/Zipf com seed | fragmentação real, free-list, reuso parcial | contagem == 0, fragmentação registrada |
 | `crud_full` | create → read → update in-place → update maior → update menor → delete | ciclo completo, reescrita de registro, movimento entre páginas | valores lidos == esperados por objeto; contagem == 0 |
 
-Extensões previstas, **fora do escopo desta versão** e habilitadas só nos perfis
-pesados quando implementadas: `crud_query` (CRUD + consulta indexada e streaming
-por seletividade) e `crud_relationships` (usuários com `Ref`/coleções e remoção
-em cascata).
-
 Regra de fases: cada fase é cronometrada, validada e resumida separadamente. Um
 `crud_full` em 1M produz seis `phase_summary`, não um número único.
+
+#### 4.2.1 Workloads adicionais — isolam comportamentos específicos do motor
+
+A escada acima mede o caminho de armazenamento (heap, páginas, fragmentação).
+Ela não diz nada sobre cache, MVCC, blobs, integridade referencial, recuperação
+ou réplica — cada um desses tem um modo de falha próprio que só aparece sob
+volume real e duração real, não em uma amostra de benchmark de alguns segundos.
+Os workloads abaixo isolam um comportamento por vez, do mesmo jeito que a
+escada isola um padrão de mutação por vez. Nenhum deles substitui a escada;
+"todos os workloads" nas descrições de perfil (§6.2) refere-se só à escada
+básica — estes exigem seleção explícita por `--workload` ou o perfil
+`load-behavior`.
+
+| id | fases | o que estressa | invariante final |
+|---|---|---|---|
+| `read_hotspot` | create → read (Zipf sobre working set fixo) | pressão de buffer pool/page cache sob leitura enviesada | valores lidos == esperados; hit rate do cache registrado |
+| `range_scan_sweep` | create → scan (seletividade 0,01%–100%) | custo de índice vs. scan completo variando seletividade e volume | contagem retornada == esperada por seletividade; plano (índice/scan) registrado |
+| `mixed_oltp` | fase única, sessões concorrentes emitindo create/read/update/delete numa proporção configurada (padrão 5/80/10/5) | contenção real e cauda de latência sob mistura — não sob uma operação isolada e repetida | contagem final reconcilia (criados − removidos); checksum de amostra determinística confere |
+| `snapshot_hold` | create → abrir snapshot(s) → churn (create/update/delete) → fechar snapshot(s) | retenção de versões MVCC sob volume e duração reais, GC ao fechar | leitura pela snapshot aberta permanece idêntica ao estado da abertura durante todo o churn; versões retidas e bytes registrados |
+| `blob_lifecycle` | create (com blob) → read/stream → grow → shrink → delete | `BlobStore` sob volume e tamanhos variados (1, 16, 256 MiB) | hash byte a byte do blob lido == escrito; espaço recuperado após delete |
+| `cascade_delete` | create_hierarchy (profundidade × largura) → cascade_delete (raiz) | integridade referencial e custo de remoção em cascata escalando com nº de descendentes | zero refs órfãs; total removido == total criado |
+| `oversubscribed_churn` | create → churn interleaved, cache explicitamente menor que o working set | degradação graciosa vs. catastrófica quando o volume ultrapassa o cache — versão em volume real do cenário `storage.buffer_pool.oversubscribed` (Fase 10) | mesmas invariantes de `create_delete_interleaved`, mais razão de eviction/releitura registrada |
+| `restart_recovery` | churn → kill em ponto definido (mid-transação, pós-commit, mid-checkpoint) → restart → verify | custo e corretude do replay de WAL escalando com volume | hash lógico pós-recuperação == hash do último commit durável; tempo de recuperação registrado |
+
+`range_scan_sweep` e `cascade_delete` formalizam, respectivamente, os antigos
+`crud_query` e `crud_relationships` — deixam de ser placeholder e passam a ter
+fases e invariantes definidos.
+
+Dois workloads adicionais dependem de infraestrutura que o harness genérico
+(`target.hpp`, §14) ainda não cobre; ficam **fora de todos os perfis** até essa
+infraestrutura existir — mesmo tratamento hoje dado a `primary_storage=wal_only`
+(§4.5 secundárias, risco 2 em §17):
+
+| id | fases | o que estressa | depende de |
+|---|---|---|---|
+| `schema_evolution` | create_v1 → leitura/escrita concorrente sob bindings v1 e v2 → verify | custo de migração/compatibilidade sem parar o mundo | harness de duas versões de `Binding` simultâneas — não existe no `target.hpp` genérico |
+| `replica_catchup` | primary_churn → medir lag → rajada → catchup | lag de replicação crescendo com volume; tempo de recuperação após rajada | réplica de leitura orquestrada pelo próprio `modb_load` — hoje `primary_storage` é só parâmetro do primary, não uma topologia com follower |
 
 ### 4.3 D3 — Alvo de execução
 
@@ -286,10 +320,18 @@ Semântica de composição, sem ambiguidade:
 | `load-heavy` | `250k`,`500k`,`1M` × todos os workloads × `embedded`,`remote_colocated` + variantes secundárias pairwise | 12–24 h |
 | `load-remote` | `10k`,`100k` × `create_only`,`crud_full` × `remote_colocated`,`remote_client_local` | 30–60 min |
 | `load-soak` | `500k` × `create_delete_interleaved` em laço por duração fixa | 1–24 h |
+| `load-behavior` | `100k` × `read_hotspot`,`range_scan_sweep`,`mixed_oltp`,`snapshot_hold`,`blob_lifecycle`,`cascade_delete`,`oversubscribed_churn` × `embedded` | 1–2 h |
 | `load-diagnostic` | vazio; exige seletores explícitos | sem meta |
 
 `load-heavy` é pairwise nas dimensões secundárias, não cartesiano: cada valor
-não padrão aparece ao menos uma vez, sem multiplicar a matriz.
+não padrão aparece ao menos uma vez, sem multiplicar a matriz. "Todos os
+workloads" em `load-smoke`/`load-local`/`load-standard`/`load-heavy` refere-se
+só à escada básica (§4.2); os workloads de §4.2.1 só entram via
+`load-behavior` ou seleção explícita. `restart_recovery` fica fora de todo
+perfil automático — mata o processo de propósito, então roda só sob
+`--workload restart_recovery` explícito, com o operador ciente. `schema_evolution`
+e `replica_catchup` ficam fora de todo perfil até a infraestrutura de que
+dependem existir (tabela em §4.2.1).
 
 ### 6.3 Planejamento antes de executar
 
@@ -314,6 +356,45 @@ Cada caso concluído é uma linha `case_summary` no JSONL. `resume` lê o
 restante, gravando no mesmo arquivo. Isso torna a matriz `load-heavy` viável em
 janelas de manutenção descontínuas.
 
+### 6.5 Configuração via YAML (`scripts/run-load.ps1` / `run-load.sh`)
+
+**Implementado.** Os dois scripts são um wrapper de execução local sobre os
+seletores de §6.1 — não um formato do próprio `modb_load` (que ainda não
+existe; Subfases A/B). Eles leem `loadtests/config/*.yaml`, um subconjunto
+restrito de YAML documentado no cabeçalho de
+`loadtests/config/load-local.yaml` (chave: valor escalar; chave: seguida de
+`  - item` para lista; sem aspas, sem lista em uma linha, sem aninhamento além
+de um nível — parseado à mão, erro de formato é falha de parse, não
+best-effort).
+
+```bash
+./scripts/run-load.sh                                  # usa load-local.yaml
+./scripts/run-load.sh --config loadtests/config/x.yaml --dry-run
+./scripts/run-load.sh --environment linux-remoto        # sobrescreve o yaml
+```
+
+```powershell
+.\scripts\run-load.ps1
+.\scripts\run-load.ps1 -ConfigPath loadtests\config\x.yaml -DryRun
+.\scripts\run-load.ps1 -Environment linux-remoto
+```
+
+Cada chave do YAML mapeia para uma flag de §6.1 (`scale`/`workload`/`target`/
+`environment`/`concurrency`/`payload`/`case` são listas, viram
+`--flag valor1,valor2`); `accept_unknown_budget` e `dry_run` são booleanos —
+o segundo passa `--dry-run` para o `modb_load` em si (ele só imprime o plano,
+§6.3), distinto do `-DryRun`/`--dry-run` do próprio script (esse nem exige o
+binário existir, só mostra o comando resolvido).
+
+Os scripts validam os ids de `environment:` contra `loadtests/environments.json`
+(§4.4) **antes** de montar o comando — erro de digitação falha ali, não depois
+do `modb_load` ter subido — e avisam (não bloqueiam) quando o ambiente é
+`kind=ssh`, porque estes dois scripts executam localmente; despacho remoto
+continua sendo `scripts/run-remote-benchmark.ps1` (ou o futuro
+`run-remote-load`). A validação em `run-load.sh` é best-effort: sem `jq`
+instalado, ela avisa e segue, porque `jq` não é dependência obrigatória do
+projeto.
+
 ## 7. Dataset
 
 `user_v1`, sintético e determinístico:
@@ -334,6 +415,11 @@ relógio de parede dentro do conteúdo (quebraria reprodutibilidade do hash).
 
 Ordem de remoção do `create_delete_interleaved` vem de um gerador com seed
 registrada, não de `rand()` global.
+
+`blob_lifecycle` (§4.2.1) usa `dataset_user_blob`, uma variante separada — não
+uma extensão de `user_v1` — que soma um campo de blob de tamanho configurável
+(1, 16, 256 MiB). Os demais workloads continuam sobre `user_v1` sem blob; risco
+15 (§17) explica por quê.
 
 ## 8. Métricas
 
@@ -455,9 +541,22 @@ Nome do arquivo, política `.partial` → `.jsonl`, tratamento de inteiros grand
 unidades no nome da métrica e proibição de segredos seguem §4 do
 [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md), sem divergência.
 
+**Implementado na Subfase A/B**: `run_start`, `environment`, `case_plan`,
+`case_start`, `phase_start`, `phase_summary`, `case_error`, `case_summary`,
+`run_end` — o suficiente para `create_only` produzir um arquivo válido e
+completo. `progress_window` chega na Subfase F (junto com `resume`);
+`skipped_budget` quando o guarda-corpo de disco/tempo tiver estimativa real
+para comparar (Subfase H); `run_note` conforme os casos que o exigem
+(interferência de ambiente, §17 risco 11) forem aparecendo.
+
 O campo `case_id` é gravado **também** como `scenario_id`, para que
 `modb_bench compare` funcione sobre arquivos de carga sem alteração no
-comparador.
+comparador. **Ainda não implementado**: `modb_bench compare` hoje só lê linhas
+com `"record":"scenario_summary"` (`benchmarks/runner/campaign.cpp:145`), e o
+`modb_load` desta subfase emite `case_summary` (record diferente, por design —
+ver tabela acima). Fazer as duas pontes conversarem é trabalho da Subfase J
+(junto com `gate`), não da A/B; até lá, comparar campanhas de carga exige ler
+o JSONL diretamente.
 
 O arquivo de campanha é a verdade primária de **uma execução**. A série ao longo
 do tempo é derivada dele e vive em outro lugar (§13); nenhuma análise histórica
@@ -728,15 +827,22 @@ não o relógio da máquina, para que histórico antigo continue legível.
 ```text
 loadtests/
   environments.json               catálogo de ambientes registrados (implementado, §4.4)
-  modb_load.cpp                  CLI: run, list-cases, resume, index, trend, report,
-                                 gate, list-profiles, list-environments
-  matrix.hpp/.cpp                dimensões, expansão, seletores, ids
-  environments.hpp/.cpp          carrega e valida environments.json, resolve --environment
-  profiles.hpp/.cpp              load-smoke ... load-soak
-  budget.hpp/.cpp                estimativas, calibração, guarda-corpos
-  dataset_user.hpp/.cpp          gerador user_v1
-  target.hpp                     interface comum das operações CRUD
-  target_embedded.cpp            implementação in-process
+  json_value.hpp/.cpp             implementado -- parser JSON mínimo, só leitura (não
+                                 existia nada além de serialização em benchmarks/runner)
+  modb_load.cpp                  implementado -- CLI: run, list-cases, list-profiles;
+                                 resume/index/trend/report/gate/compare reportam
+                                 "ainda não implementado" em vez de fingir que fazem algo
+  matrix.hpp/.cpp                implementado -- dimensões, expansão, seletores, ids
+  environments.hpp/.cpp          implementado -- carrega/valida environments.json, resolve --environment
+  profiles.hpp/.cpp              implementado -- os 8 perfis de §6.2 (nem todo workload
+                                 neles tem dispatch ainda -- ver is_workload_implemented)
+  budget.hpp/.cpp                implementado -- gate --accept-unknown-budget; sem
+                                 tabela de calibração ainda (Subfase H)
+  campaign.hpp/.cpp              implementado -- resolve_cases, render_case_plan,
+                                 run_campaign (os records de §12 usados até a Subfase B)
+  dataset_user.hpp/.cpp          implementado -- gerador user_v1, função pura de (seed,index)
+  target.hpp                     implementado -- structs comuns (PhaseMetrics, WorkloadParams, CaseRunResult)
+  target_embedded.hpp/.cpp       implementado -- contra modb::object::Database de verdade
   target_client.cpp              implementação via net::Client (loopback/remoto)
   history/
     rollup.hpp/.cpp              extração campanha -> rollup
@@ -747,20 +853,34 @@ loadtests/
   dashboard/
     index.html                   painel da série histórica (implementado, §13.11)
   workloads/
-    create_only.cpp
+    create_only.hpp/.cpp            implementado -- único com dispatch real nesta subfase
     create_delete_forward.cpp
     create_delete_reverse.cpp
     create_delete_interleaved.cpp
     crud_full.cpp
+    read_hotspot.cpp                comportamento (§4.2.1)
+    range_scan_sweep.cpp            comportamento; formaliza o antigo crud_query
+    mixed_oltp.cpp                  comportamento; concorrência como workload, não só dimensão
+    snapshot_hold.cpp               comportamento
+    blob_lifecycle.cpp              comportamento
+    cascade_delete.cpp              comportamento; formaliza o antigo crud_relationships
+    oversubscribed_churn.cpp        comportamento
+    restart_recovery.cpp            comportamento; precisa do harness de kill/restart (§17)
+  dataset_user_blob.hpp/.cpp        variante do dataset com blob, só para blob_lifecycle
   calibration/
     windows-x86_64.json
     linux-x86_64.json
+  config/
+    load-local.yaml                config de exemplo para run-load.* (implementado, §6.5)
+    load-smoke.yaml                 só create_only + accept_unknown_budget:true --
+                                   roda de ponta a ponta hoje (implementado)
 scripts/
   run-remote-benchmark.ps1        já consome loadtests/environments.json (implementado)
-  run-load.ps1 / run-load.sh
+  run-load.ps1 / run-load.sh      lêem YAML e chamam `modb_load run` localmente (implementado, §6.5)
   run-remote-load.ps1             assume o mesmo -Environment ID do script acima
 tests/
-  load_matrix_test.cpp           expansão, seletores, ids, conjunto vazio
+  load_matrix_test.cpp           implementado (`ctest -R modb.load_matrix`) -- expansão,
+                                 seletores, ids, conjunto vazio
   load_workload_test.cpp         cada workload em escala minúscula, invariantes
   load_history_test.cpp          rollup, series_key estável, idempotência do
                                  index, mediana móvel, deriva, quebra de série
@@ -771,8 +891,12 @@ load-results/                    ignorado pelo Git
 ```
 
 Reuso direto, sem cópia: `benchmarks/runner/jsonl_writer`, `environment`,
-`sha256` e `json_util`. Se necessário, esses quatro sobem para um alvo comum
-(`bench_runner_core`) consumido pelos dois executáveis.
+`sha256` e `json_util`. **Implementado como opção (a)**: `modb_load_core`
+(CMakeLists.txt) linka `modb_bench_core` `PUBLIC` em vez de duplicar os quatro
+arquivos — herda o include dir `benchmarks/` de graça, então
+`#include "runner/jsonl_writer.hpp"` funciona em `loadtests/*.cpp` sem
+configuração adicional. A extração para um `bench_runner_core` próprio
+continua possível depois, mas não foi necessária para A/B.
 
 A chave do desenho é `target.hpp`: uma interface de CRUD sobre `User` com duas
 implementações. Workload e matriz não sabem se estão embedded ou em rede — é o
@@ -784,8 +908,8 @@ Uma subfase por branch, conforme a convenção do projeto.
 
 | subfase | entrega | critério de pronto |
 |---|---|---|
-| A | matriz, ids, seletores, perfis, `list-cases`, `--dry-run`, `budget` sem calibração, `environments.hpp/.cpp` (registro já existe em `loadtests/environments.json`) | `load_matrix_test` verde; subset selecionável e imprimível sem executar carga; `--environment ID` inválido falha com a lista de ids cadastrados |
-| B | writer, records, `dataset_user`, `target_embedded`, workload `create_only`, escalas `1k`/`10k` | `load-smoke` gera JSONL válido com validação de invariante |
+| A | **Implementado.** matriz, ids, seletores, todos os 8 perfis de §6.2, `list-cases`, `--dry-run`, `budget` sem calibração (gate `--accept-unknown-budget`), `environments.hpp/.cpp` (valida `--environment` contra `loadtests/environments.json`), `json_value.hpp/.cpp` (parser JSON mínimo, não existia nada além de serialização) | `load_matrix_test` verde (13 casos); `list-cases`/`run --dry-run` imprimem sem executar; `--environment` inválido falha com a lista de ids cadastrados; `run-load.ps1`/`run-load.sh` param de imprimir "não encontrado" e chamam o binário de verdade |
+| B | **Implementado.** `campaign.cpp` (writer + os 8 records de §12 usados até aqui), `dataset_user` (gerador puro por (seed,index), splitmix64), `target_embedded.cpp` (contra `modb::object::Database` de verdade — create em lotes, bind de `User`, commit), workload `create_only`, escalas `1k`/`10k`/`100k`/`1M` (todas as escalas do catálogo, não só 1k/10k) | `modb_load run --profile load-smoke --workload create_only --accept-unknown-budget` gera JSONL válido com `hash_match:true` (create + releitura completa comparados por SHA-256); perfis com workload não implementado reportam `case_error` claro por caso e `status:"partial"`, nunca travam a campanha |
 | C | `series_key`, rollup, `index` idempotente, `trend`, `report` | duas execuções de `load-smoke` produzem dois pontos na mesma série; reindexar não duplica; o dashboard (§13.11) abre o `series.jsonl` gerado sem conversão |
 | D | `create_delete_forward`, `create_delete_reverse`, `create_delete_interleaved` | invariantes de contagem zero e espaço recuperado registrados |
 | E | `crud_full` com as seis fases separadas | leitura campo a campo confere; `phase_summary` por fase |
@@ -795,6 +919,18 @@ Uma subfase por branch, conforme a convenção do projeto.
 | I | `remote_colocated`, `remote_client_local`, indexação dos brutos trazidos (`run-remote-benchmark.ps1` já resolve `-Environment` pelo catálogo, §4.4) | `load-remote` traz exatamente um arquivo do host, com hash, e ele entra na série |
 | J | `gate`, deriva lenta, retenção e `--prune`, baselines marcadas | regressão sintética de 12% e deriva sintética de 15% são detectadas |
 | K | dimensões secundárias, `load-heavy` pairwise, `load-soak` | cada valor não padrão exercitado ao menos uma vez |
+| L | `read_hotspot`, `range_scan_sweep` (índice sobre `dataset_user`) | hit rate e plano (índice/scan) registrados; contagem por seletividade confere |
+| M | `mixed_oltp` sobre sessões concorrentes (reusa `--concurrency`, §4.5) | contagem final reconcilia sob concorrência real; checksum de amostra confere |
+| N | `snapshot_hold` | leitura pela snapshot aberta permanece idêntica durante todo o churn; versões/bytes retidos registrados |
+| O | `dataset_user_blob`, `blob_lifecycle` | hash byte a byte do blob confere; espaço recuperado após delete |
+| P | `cascade_delete` sobre hierarquias `Ref`/`OwnedRef` | zero refs órfãs em profundidade/largura configuráveis |
+| Q | `oversubscribed_churn`, perfil `load-behavior` | mesmas invariantes de `create_delete_interleaved` mais razão de eviction registrada; perfil executável de ponta a ponta |
+| R | harness de kill/restart (Windows e Linux), `restart_recovery` | hash pós-recuperação == hash do último commit durável; tempo de recuperação registrado nos dois SOs |
+
+`schema_evolution` e `replica_catchup` (§4.2.1) não têm subfase própria: entram
+na ordem só depois que a infraestrutura de que dependem (versionamento de
+`Binding` simultâneo; réplica orquestrada pelo harness) existir por outro
+motivo — não vale construir essa infraestrutura só para o teste de carga.
 
 A e B são o mínimo útil: já entregam "executar apenas um subset" com um workload
 real. **C vem antes dos demais workloads de propósito**: a partir dela toda
@@ -827,6 +963,34 @@ O plano estará implementado quando:
   SHA-256 impressos, e nenhum segredo no conteúdo;
 - três execuções do mesmo caso no mesmo ambiente ficarem dentro da variação
   declarada para os casos-gate.
+
+Especificamente para os workloads adicionais (§4.2.1):
+
+- `read_hotspot` registrar hit rate do cache e os valores lidos conferirem
+  campo a campo com o esperado;
+- `range_scan_sweep` retornar a contagem esperada em cada seletividade da
+  varredura e registrar se o plano usado foi índice ou scan completo;
+- `mixed_oltp` reconciliar a contagem final (criados − removidos) sob
+  concorrência real, com o checksum de uma amostra determinística conferindo —
+  nenhuma escrita perdida sob contenção;
+- `snapshot_hold` produzir leituras idênticas pela snapshot aberta do início ao
+  fim do churn, e registrar versões retidas, bytes retidos e a pausa de GC ao
+  fechar;
+- `blob_lifecycle` conferir hash byte a byte do blob lido contra o escrito em
+  pelo menos um tamanho de 256 MiB, com espaço recuperado após o delete;
+- `cascade_delete` não deixar nenhuma ref órfã após remover a raiz de uma
+  hierarquia com profundidade e largura configuráveis, com total removido ==
+  total criado;
+- `oversubscribed_churn` degradar de forma mensurável (não travar nem corromper)
+  quando o volume ultrapassa o cache configurado, com razão de eviction
+  registrada;
+- `restart_recovery` produzir hash pós-recuperação idêntico ao do último commit
+  durável em pelo menos três pontos de kill (mid-transação, pós-commit,
+  mid-checkpoint), em Windows e em Linux;
+- `schema_evolution` e `replica_catchup` permanecerem documentados como
+  dependentes de infraestrutura ainda não construída, sem entrar em nenhum
+  perfil até que essa infraestrutura exista — critério de aceite é a
+  dependência ficar explícita, não a implementação em si.
 
 Especificamente para a série histórica:
 
@@ -902,3 +1066,25 @@ Especificamente para a série histórica:
     identidade de hardware; a verificação de fato vem do record `environment`
     observado (§11) divergir do esperado para aquele `host_class` — que cai no
     risco 11.
+13. **Kill/restart é específico por plataforma** — `restart_recovery` (§4.2.1)
+    precisa matar o processo em pontos definidos (mid-transação, pós-commit,
+    mid-checkpoint) de um jeito que não mascare o que está sendo medido: em
+    Linux, `SIGKILL`; em Windows, não há equivalente direto (`TerminateProcess`
+    não é a mesma semântica de falha abrupta). O harness da Subfase R precisa
+    de um mecanismo por SO, documentado, e os dois têm que produzir o mesmo
+    critério de aceite — hash pós-recuperação idêntico.
+14. **Invariante sob concorrência é mais caro de verificar** — `mixed_oltp`
+    mistura create/read/update/delete concorrentes; "nenhuma escrita perdida"
+    não dá para verificar objeto a objeto sem serializar (o que anula o próprio
+    propósito do workload). Mitigação: checksum de uma amostra determinística
+    de ids, não do conjunto inteiro — mais barato, mas é verificação por
+    amostragem, não exaustiva; documentar isso explicitamente no resultado.
+15. **`blob_lifecycle` exige dataset próprio** — os workloads da escada básica
+    usam `dataset_user` (§7) sem blob. `dataset_user_blob` (Subfase O) é uma
+    variante nova, não uma extensão do existente, porque blobs de 256 MiB no
+    dataset padrão inflariam todos os outros workloads que não precisam deles.
+16. **`snapshot_hold` pode mascarar vazamento de memória como retenção
+    esperada** — versões retidas enquanto uma snapshot está aberta são
+    corretas por design (MVCC); a Subfase N precisa distinguir isso de um
+    vazamento real comparando o crescimento **depois** do `close_snapshot`
+    contra o esperado, não só durante o churn.

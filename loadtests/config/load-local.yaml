@@ -1,0 +1,67 @@
+# Configuração de execução para scripts/run-load.ps1 e scripts/run-load.sh.
+#
+# Espelha os seletores de `modb_load run` (docs/PLANO_TESTES_DE_CARGA.md §6.1).
+# Isto é uma camada de conveniência dos dois scripts, não um formato do
+# próprio modb_load — o binário ainda não existe (Subfases A/B do plano);
+# use --dry-run (nos scripts) para ver o comando resolvido sem exigir que ele
+# esteja construído.
+#
+# Formato: subconjunto restrito de YAML, parseado à mão pelos dois scripts.
+# Regras, sem exceção:
+#   - `chave: valor`   -> escalar. Vazio depois dos dois-pontos = "não definido".
+#   - `chave:` seguida de uma ou mais linhas `  - item` (indentadas) -> lista.
+#   - Uma chave é OU escalar OU lista, nunca as duas coisas.
+#   - Sem aspas, sem lista em uma linha (`[a, b]`), sem aninhamento além de um
+#     nível, sem múltiplos documentos (`---`), sem âncoras/referências.
+#   - Comentários começam com # e podem ocupar a linha inteira.
+# Qualquer linha fora desse formato é erro de parse, não best-effort.
+#
+# Para variar o perfil sem perder esta referência, copie este arquivo (ex.:
+# load-standard.yaml) em vez de editá-lo — os scripts aceitam -ConfigPath/--config.
+
+profile: load-local
+seed: 123456
+output_dir: load-results
+work_dir:
+filter:
+exclude:
+repeat: 1
+
+# Orçamento (docs/PLANO_TESTES_DE_CARGA.md §10). Vazio = sem limite explícito.
+max_duration:
+max_disk_gb:
+max_rss_mb:
+accept_unknown_budget: false
+
+# true passa --dry-run para o modb_load: ele mesmo só imprime o plano e o
+# orçamento estimado, sem executar carga (§6.3). Diferente do -DryRun/--dry-run
+# dos scripts (esse nem exige o binário existir) — ver cabeçalho de cada script.
+dry_run: false
+
+# Cada lista abaixo vira `--flag valor1,valor2` (junção por vírgula). A
+# composição segue §6.1: o perfil define o conjunto inicial e cada seletor
+# faz interseção com ele.
+scale:
+  - 10k
+  - 100k
+
+workload:
+  - create_only
+  - create_delete_reverse
+  - crud_full
+
+target:
+  - embedded
+  - loopback
+
+# Ids devem existir em loadtests/environments.json (§4.4); os scripts validam
+# isso antes de chamar modb_load. Ambiente kind=ssh aqui só gera aviso — estes
+# dois scripts executam localmente, não despacham por SSH.
+environment:
+  - desktop-windows
+
+concurrency:
+
+payload:
+
+case:

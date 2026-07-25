@@ -424,6 +424,27 @@ target_link_libraries(modb_bench_core PUBLIC modb::modb)
 add_executable(modb_bench benchmarks/modb_bench.cpp)
 target_link_libraries(modb_bench PRIVATE modb_bench_core)
 
+# Testes de carga (docs/PLANO_TESTES_DE_CARGA.md, Subfase A/B). Reaproveita
+# jsonl_writer/environment/sha256/json_util de modb_bench_core sem cópia
+# (§14 do plano); modb_load_core linka modb_bench_core PUBLIC, então herda
+# o include dir `benchmarks/` para `#include "runner/..."`.
+add_library(modb_load_core STATIC
+    loadtests/json_value.cpp
+    loadtests/matrix.cpp
+    loadtests/profiles.cpp
+    loadtests/budget.cpp
+    loadtests/environments.cpp
+    loadtests/dataset_user.cpp
+    loadtests/target_embedded.cpp
+    loadtests/workloads/create_only.cpp
+    loadtests/campaign.cpp
+)
+target_include_directories(modb_load_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/loadtests)
+target_link_libraries(modb_load_core PUBLIC modb_bench_core)
+
+add_executable(modb_load loadtests/modb_load.cpp)
+target_link_libraries(modb_load PRIVATE modb_load_core)
+
 if(MINGW)
     # O build estático do MinGW pode emitir type_info::operator== tanto nos
     # consumidores de std::function quanto em libstdc++. O motor não depende
@@ -439,6 +460,10 @@ if(MINGW)
     endif()
     target_link_options(modb_object_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
     target_link_options(modb_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
+    target_link_options(modb_load PRIVATE ${MODB_MINGW_LINK_OPTS})
+    if(TARGET modb_mingw_runtime_dlls)
+        add_dependencies(modb_load modb_mingw_runtime_dlls)
+    endif()
 endif()
 
 if(BUILD_TESTING)
@@ -590,6 +615,9 @@ if(BUILD_TESTING)
     add_executable(modb_benchmark_runner_tests tests/benchmark_runner_test.cpp)
     target_link_libraries(modb_benchmark_runner_tests PRIVATE modb_bench_core)
 
+    add_executable(modb_load_matrix_tests tests/load_matrix_test.cpp)
+    target_link_libraries(modb_load_matrix_tests PRIVATE modb_load_core)
+
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
@@ -704,6 +732,7 @@ if(BUILD_TESTING)
         target_link_options(modb_wal_only_bootstrap_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_wal_async_sink_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_load_matrix_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -776,6 +805,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.wal_only_bootstrap COMMAND modb_wal_only_bootstrap_tests)
     add_test(NAME modb.wal_async_sink COMMAND modb_wal_async_sink_tests)
     add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
+    add_test(NAME modb.load_matrix COMMAND modb_load_matrix_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)
