@@ -228,7 +228,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | C | Série histórica (rollup, index, trend, report) | 1 | ✅ | `afadf60` · 2026-07-25 |
 | D | `create_delete_{forward,reverse,interleaved}` | 2 | ✅ | `f6beb32` · 2026-07-25 |
 | E | `crud_full` | 2 | ✅ | `c64ca4e` · 2026-07-25 |
-| F | `progress_window`, `resume` | 3 | ⬜ | |
+| F | `progress_window`, `resume` | 3 | ✅ | `6ea2e02` · 2026-07-25 |
 | H | Escalas altas, calibração, guarda-corpos | 4 | ⬜ | adiantada vs §15; ver §3 |
 | G | `target_client`, `loopback` | 5 | ⬜ | |
 | I | Alvos remotos, `run-remote-load.ps1` | 5 | ⬜ | depende de G |
@@ -242,7 +242,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | R | Harness kill/restart, `restart_recovery` | 7 | ⬜ | ver §17 risco 13 |
 | K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ⬜ | depende de M, N, O, P, Q |
 
-Progresso: **7/20**.
+Progresso: **8/20**.
 
 ## 6. O que não está neste plano, de propósito
 
