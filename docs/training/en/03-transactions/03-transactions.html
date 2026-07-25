@@ -82,26 +82,20 @@ The last scenario is the sharpest one: opening a second transaction while the fi
 
         <blockquote><p><strong>Status:</strong> ✅ code written and verified against a real build.</p></blockquote>
 <h2>What You&#x27;ll Add</h2>
-<p>A &quot;give a raise&quot; operation that does it properly: one transaction, an explicit commit, and a deliberate demonstration of what happens when you *don&#x27;t* commit (rollback-on-scope-exit). You&#x27;ll also add a small &quot;transfer department budget&quot; style operation touching two records in one transaction, to show atomicity actually matters.</p>
+<p>A &quot;give a raise&quot; operation that does it properly: one transaction, an explicit commit, and a deliberate demonstration of what happens when you <em>don&#x27;t</em> commit (rollback-on-scope-exit). You&#x27;ll also add a small &quot;transfer department budget&quot; style operation touching two records in one transaction, to show atomicity actually matters.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>begin()</code>/<code>commit()</code>/<code>rollback()</code>, single-writer, RAII</li>
-<p>rollback-on-scope-exit, the WAL-before-pages commit protocol — see <a href="../../../GARANTIAS_TRANSACIONAIS.md">GARANTIAS_TRANSACIONAIS.md</a> §1-2/4/6.</p>
+<li><code>begin()</code>/<code>commit()</code>/<code>rollback()</code>, single-writer, RAII rollback-on-scope-exit, the WAL-before-pages commit protocol — see <a href="../../../GARANTIAS_TRANSACIONAIS.md">GARANTIAS_TRANSACIONAIS.md</a> §1-2/4/6.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-2 have run — Ana, Bruno, and Carla already exist, findable by name through Lesson 2&#x27;s index.</p>
 <h2>Steps</h2>
 <ul>
-<li>Open the file, bind, and look up Ana/Bruno/Carla&#x27;s ids by name (the</li>
-<p>same <code>find_employee_id</code> helper Lesson 2 introduced — every lesson from here on starts this way).</p>
-<li>Add a function that raises one employee&#x27;s salary inside a transaction,</li>
-<p>commits, and confirms the change stuck.</p>
-<li>Deliberately write a second version that begins a transaction, makes a</li>
-<p>change, and lets the <code>Transaction</code> go out of scope without calling <code>commit()</code> — show the change did *not* survive.</p>
-<li>Touch two employees in one transaction (average their salaries) to</li>
-<p>demonstrate atomicity of multi-object changes.</p>
-<li>Try opening a second transaction while one is active and show the</li>
-<p><code>transaction_active</code> failure.</p>
+<li>Open the file, bind, and look up Ana/Bruno/Carla&#x27;s ids by name (the same <code>find_employee_id</code> helper Lesson 2 introduced — every lesson from here on starts this way).</li>
+<li>Add a function that raises one employee&#x27;s salary inside a transaction, commits, and confirms the change stuck.</li>
+<li>Deliberately write a second version that begins a transaction, makes a change, and lets the <code>Transaction</code> go out of scope without calling <code>commit()</code> — show the change did <em>not</em> survive.</li>
+<li>Touch two employees in one transaction (average their salaries) to demonstrate atomicity of multi-object changes.</li>
+<li>Try opening a second transaction while one is active and show the <code>transaction_active</code> failure.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_03_transactions.cpp">lesson_03_transactions.cpp</a></p>
@@ -116,10 +110,8 @@ Averaged Ana and Bruno&#x27;s salaries in one transaction: Ana = 11250, Bruno = 
 A second begin() while one is already open failed as expected: a transaction is already in progress</code></pre>
 <h2>What to Notice</h2>
 <ul>
-<li>Forgetting <code>commit()</code> isn&#x27;t a bug you need to guard against</li>
-<p>defensively — it&#x27;s the safety net working as intended.</p>
-<li>Single-writer means concurrent readers are fine, but this app can&#x27;t</li>
-<p>have two threads both mid-transaction at once.</p>
+<li>Forgetting <code>commit()</code> isn&#x27;t a bug you need to guard against defensively — it&#x27;s the safety net working as intended.</li>
+<li>Single-writer means concurrent readers are fine, but this app can&#x27;t have two threads both mid-transaction at once.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

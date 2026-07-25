@@ -85,21 +85,16 @@ A `top_k(2, comparator)` query closes the lesson, returning the two highest earn
 <p>A search feature: find every employee in a department, or every employee earning above some salary threshold, using <code>Database::query&lt;Employee&gt;()</code> instead of hand-rolled loops. You&#x27;ll add an index on <code>salary</code> and confirm (via <code>.plan()</code>) that the search actually uses it.</p>
 <h2>New Concepts</h2>
 <ul>
-<li>The fluent <code>Query&lt;T&gt;</code> builder, lazy streaming via <code>.stream()</code>,</li>
-<p><code>.where()</code>/<code>.limit()</code>/<code>.equals()</code>/<code>.between()</code> — see <a href="../../../reference/queries-indexes.md">docs/reference/queries-indexes.md</a>.</p>
-<li><code>create_index&lt;T&gt;(field)</code> and the deterministic planner</li>
-<p>(<code>.plan()</code>/<code>first_result_cost</code>).</p>
+<li>The fluent <code>Query&lt;T&gt;</code> builder, lazy streaming via <code>.stream()</code>, <code>.where()</code>/<code>.limit()</code>/<code>.equals()</code>/<code>.between()</code> — see <a href="../../../reference/queries-indexes.md">docs/reference/queries-indexes.md</a>.</li>
+<li><code>create_index&lt;T&gt;(field)</code> and the deterministic planner (<code>.plan()</code>/<code>first_result_cost</code>).</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-6 have run.</p>
 <h2>Steps</h2>
 <ul>
-<li>Implement &quot;employees earning at least 15000&quot; with</li>
-<p><code>.between(salary_field, AttributeValue{15000}, AttributeValue{max_int64})</code>, print <code>.plan()</code> — it reports <code>access=table_scan</code> because no index exists yet.</p>
-<li>Call <code>create_index&lt;Employee&gt;(salary_field)</code>, then run the *exact same*</li>
-<p>query again and print <code>.plan()</code> a second time — the access method changes to <code>index_scan</code> with no change to the query itself.</p>
-<li>Add a <code>top_k(2, comparator)</code> &quot;top 2 earners&quot; query and print the results</li>
-<p>with their salaries.</p>
+<li>Implement &quot;employees earning at least 15000&quot; with <code>.between(salary_field, AttributeValue{15000}, AttributeValue{max_int64})</code>, print <code>.plan()</code> — it reports <code>access=table_scan</code> because no index exists yet.</li>
+<li>Call <code>create_index&lt;Employee&gt;(salary_field)</code>, then run the <em>exact same</em> query again and print <code>.plan()</code> a second time — the access method changes to <code>index_scan</code> with no change to the query itself.</li>
+<li>Add a <code>top_k(2, comparator)</code> &quot;top 2 earners&quot; query and print the results with their salaries.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_07_queries.cpp">lesson_07_queries.cpp</a></p>
@@ -116,10 +111,8 @@ Created an index on Employee.salary
 Top 2 earners: Carla(20000) Ana(13250)</code></pre>
 <h2>What to Notice</h2>
 <ul>
-<li>The planner is rule-based, not cost-based — the query shape didn&#x27;t</li>
-<p>change at all between the two <code>.plan()</code> calls; only whether an index existed changed the outcome.</p>
-<li><code>top_k</code> gets its own access path (Top-K selection) instead of a full</li>
-<p>sort, which is why it&#x27;s listed alongside <code>.between()</code> rather than as a post-processing step.</p>
+<li>The planner is rule-based, not cost-based — the query shape didn&#x27;t change at all between the two <code>.plan()</code> calls; only whether an index existed changed the outcome.</li>
+<li><code>top_k</code> gets its own access path (Top-K selection) instead of a full sort, which is why it&#x27;s listed alongside <code>.between()</code> rather than as a post-processing step.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

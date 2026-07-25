@@ -85,10 +85,8 @@ What this lesson establishes, more than any specific API, is the starting point 
 <p>The very first piece of the employee directory: an <code>Employee</code> struct and the <code>BindingBuilder</code> that maps it into Ring0&#x27;s catalog. By the end of this lesson the program does nothing more than prove the type is known to a database — no records exist yet (that&#x27;s Lesson 2).</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>BindingBuilder&lt;T&gt;</code>, field ids as the durable contract — see</li>
-<p><a href="../../../reference/object-model.md">docs/reference/object-model.md</a>.</p>
-<li><code>Database::create</code>, attaching to <code>DatabaseRegistry</code> — see</li>
-<p><a href="../../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a> (this lesson only needs the very first section of it).</p>
+<li><code>BindingBuilder&lt;T&gt;</code>, field ids as the durable contract — see <a href="../../../reference/object-model.md">docs/reference/object-model.md</a>.</li>
+<li><code>Database::create</code>, attaching to <code>DatabaseRegistry</code> — see <a href="../../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a> (this lesson only needs the very first section of it).</li>
 </ul>
 <h2>Starting Point</h2>
 <p>None — this is the first lesson. You start from an empty <code>.cpp</code> file.</p>
@@ -98,8 +96,7 @@ What this lesson establishes, more than any specific API, is the starting point 
 <li>Write <code>employee_binding()</code> returning a <code>BindingBuilder&lt;Employee&gt;</code>.</li>
 <li><code>Database::create</code>, wrap in <code>shared_ptr</code>, attach to the registry.</li>
 <li>Call <code>bind()</code>, print the resulting <code>TypeDefinitionId</code>.</li>
-<li>Detach from the registry — but leave the file itself in place, at a</li>
-<p>fixed path (<code>docs/training/en/employee-directory.modb</code>). Every later lesson is a *separate program run* that reopens this same file and continues from wherever the previous one left off; see the course <a href="../index.html#how-the-code-is-organized">README</a> for how that chain works.</p>
+<li>Detach from the registry — but leave the file itself in place, at a fixed path (<code>docs/training/en/employee-directory.modb</code>). Every later lesson is a <em>separate program run</em> that reopens this same file and continues from wherever the previous one left off; see the course <a href="../index.html#how-the-code-is-organized">README</a> for how that chain works.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_01_binding.cpp">lesson_01_binding.cpp</a></p>
@@ -113,10 +110,8 @@ Database created at .../docs/training/en/employee-directory.modb</code></pre>
 <p>The exact id depends on how many catalog-internal types are registered ahead of it; treat the number as &quot;some small positive id,&quot; not a promise of <code>16</code> specifically.</p>
 <h2>What to Notice</h2>
 <ul>
-<li>The field id, not the field name, is what&#x27;s actually persisted — this</li>
-<p>is the single idea the rest of the course leans on whenever the <code>Employee</code> struct grows.</p>
-<li>Nothing was written to disk yet in a durable sense — no</li>
-<p>transaction has been opened. That&#x27;s next.</p>
+<li>The field id, not the field name, is what&#x27;s actually persisted — this is the single idea the rest of the course leans on whenever the <code>Employee</code> struct grows.</li>
+<li>Nothing was written to disk yet in a durable sense — no transaction has been opened. That&#x27;s next.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

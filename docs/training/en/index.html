@@ -84,56 +84,34 @@ Run the lessons in order, once each, starting from Lesson 1. If you want to star
 
         <p>A project-based course: you build one application, an employee directory, from an empty file to a networked, multi-client system with remote operations, versioned facades, and an org-chart graph — one capability at a time. Each lesson assumes you completed the previous one and starts from that lesson&#x27;s ending code.</p>
 <p>This assumes you&#x27;re comfortable with modern C++ (structs, templates, lambdas, RAII, smart pointers, <code>std::filesystem</code>) and have already skimmed <a href="../../DEVELOPER_GUIDE.md">docs/DEVELOPER_GUIDE.md</a> or at least Chapter 0-1 of it (what Ring0 is, how to build it).</p>
-<blockquote><p><strong>Status:</strong> ✅ complete — all 13 lessons have real, compiling code, one</p></blockquote>
-<blockquote><p>self-contained folder per lesson, verified against an actual build and</p></blockquote>
-<blockquote><p>run. Each lesson names its target reference doc(s) in <code>docs/reference/</code></p></blockquote>
-<blockquote><p>— those are written in full and safe to read ahead of the lesson prose.</p></blockquote>
+<blockquote><p><strong>Status:</strong> ✅ complete — all 13 lessons have real, compiling code, one self-contained folder per lesson, verified against an actual build and run. Each lesson names its target reference doc(s) in <code>docs/reference/</code> — those are written in full and safe to read ahead of the lesson prose.</p></blockquote>
 <h2>Lessons</h2>
 <p>Each lesson lives in its own folder: the lesson doc, its <code>.cpp</code> source, and a <code>README.md</code> with the exact build/run commands.</p>
 <ol>
-<li><a href="01-binding-your-first-type/01-binding-your-first-type.html">Binding Your First Type</a> — define</li>
-<p><code>Employee</code>, bind it, create the database.</p>
-<li><a href="02-persist-and-reopen/02-persist-and-reopen.html">Persist and Reopen</a> — real records that</li>
-<p>survive a restart.</p>
-<li><a href="03-transactions/03-transactions.html">Transactions</a> — the commit/rollback contract, done</li>
-<p>properly.</p>
-<li><a href="04-handles-and-updates/04-handles-and-updates.html">Handles and Updates</a> — give an employee a</li>
-<p>raise.</p>
-<li><a href="05-relationships/05-relationships.html">Relationships: Departments and Projects</a> —</li>
-<p><code>Ref&lt;Department&gt;</code>, an owned record, and a collection of projects.</p>
-<li><a href="06-snapshots/06-snapshots.html">Consistent Reports with Snapshots</a> — a payroll report</li>
-<p>that doesn&#x27;t see half-finished edits.</p>
-<li><a href="07-queries-and-indexes/07-queries-and-indexes.html">Searching with Queries and Indexes</a> — find</li>
-<p>employees by department and salary, fast.</p>
-<li><a href="08-networking/08-networking.html">Serving the Directory Over the Network</a> — split into</li>
-<p>a server and a separate client.</p>
-<li><a href="09-remote-operations/09-remote-operations.html">Remote Operations: Transferring an Employee</a> —</li>
-<p>business logic that runs on the server.</p>
-<li><a href="10-facades/10-facades.html">Facades: A Stable HR API</a> — a versioned surface the</li>
-<p>client calls without knowing server internals.</p>
-<li><a href="11-graphs/11-graphs.html">The Org Chart: Graphs</a> — model and traverse</li>
-<p>manager/report relationships.</p>
-<li>*(Optional, advanced)* <a href="12-async-io/12-async-io.html">Asynchronous WAL I/O</a> — measure</li>
-<p>it before you reach for it.</p>
-<li>*(Optional, advanced)* <a href="13-read-replica/13-read-replica.html">A Read Replica for Reporting</a></li>
-<p>— offload reports to a follower.</p>
+<li><a href="01-binding-your-first-type/01-binding-your-first-type.html">Binding Your First Type</a> — define <code>Employee</code>, bind it, create the database.</li>
+<li><a href="02-persist-and-reopen/02-persist-and-reopen.html">Persist and Reopen</a> — real records that survive a restart.</li>
+<li><a href="03-transactions/03-transactions.html">Transactions</a> — the commit/rollback contract, done properly.</li>
+<li><a href="04-handles-and-updates/04-handles-and-updates.html">Handles and Updates</a> — give an employee a raise.</li>
+<li><a href="05-relationships/05-relationships.html">Relationships: Departments and Projects</a> — <code>Ref&lt;Department&gt;</code>, an owned record, and a collection of projects.</li>
+<li><a href="06-snapshots/06-snapshots.html">Consistent Reports with Snapshots</a> — a payroll report that doesn&#x27;t see half-finished edits.</li>
+<li><a href="07-queries-and-indexes/07-queries-and-indexes.html">Searching with Queries and Indexes</a> — find employees by department and salary, fast.</li>
+<li><a href="08-networking/08-networking.html">Serving the Directory Over the Network</a> — split into a server and a separate client.</li>
+<li><a href="09-remote-operations/09-remote-operations.html">Remote Operations: Transferring an Employee</a> — business logic that runs on the server.</li>
+<li><a href="10-facades/10-facades.html">Facades: A Stable HR API</a> — a versioned surface the client calls without knowing server internals.</li>
+<li><a href="11-graphs/11-graphs.html">The Org Chart: Graphs</a> — model and traverse manager/report relationships.</li>
+<li><em>(Optional, advanced)</em> <a href="12-async-io/12-async-io.html">Asynchronous WAL I/O</a> — measure it before you reach for it.</li>
+<li><em>(Optional, advanced)</em> <a href="13-read-replica/13-read-replica.html">A Read Replica for Reporting</a> — offload reports to a follower.</li>
 </ol>
 <h2>How the Code Is Organized</h2>
-<p>Each lesson is a folder — <code>01-binding-your-first-type/</code>, <code>02-persist-and-reopen/</code>, ... <code>13-read-replica/</code> — holding three things: the lesson doc (<code>&lt;slug&gt;.md</code>), one <strong>self-contained</strong> source file (<code>lesson_01_binding.cpp</code>, <code>lesson_02_persist_reopen.cpp</code>, ... <code>lesson_13_read_replica.cpp</code>, each containing only *that* lesson&#x27;s own new code), and a <code>README.md</code> with that lesson&#x27;s build command.</p>
+<p>Each lesson is a folder — <code>01-binding-your-first-type/</code>, <code>02-persist-and-reopen/</code>, ... <code>13-read-replica/</code> — holding three things: the lesson doc (<code>&lt;slug&gt;.md</code>), one <strong>self-contained</strong> source file (<code>lesson_01_binding.cpp</code>, <code>lesson_02_persist_reopen.cpp</code>, ... <code>lesson_13_read_replica.cpp</code>, each containing only <em>that</em> lesson&#x27;s own new code), and a <code>README.md</code> with that lesson&#x27;s build command.</p>
 <p>The lessons chain to each other through one real, persistent database file — <code>docs/training/en/employee-directory.modb</code> (git-ignored, like every other <code>*.modb</code> in this repo) — instead of through shared in-process state:</p>
 <ul>
-<li><strong>Lesson 1</strong> deletes any old copy and creates this file fresh. Every</li>
-<p>other lesson only ever *opens* it.</p>
-<li><strong>Every lesson from 2 onward is a separate program run</strong> that opens the</li>
-<p>same file, does its own work, and exits. Nothing is held in memory between lessons — the file on disk *is* the hand-off.</p>
-<li>Since each lesson is a separate binary, there&#x27;s no shared struct to</li>
-<p>carry object ids forward (like an in-memory &quot;here&#x27;s Ana&#x27;s id&quot; value). Instead, Lesson 2 creates an <strong>index on <code>Employee.name</code></strong> (<code>create_index&lt;Employee&gt;(FieldId{1})</code>), and every later lesson looks employees up by name (<code>indexed_object_ids&lt;Employee&gt;(...)</code>) instead of remembering ids across runs. Lesson 5 does the same for <code>Department.name</code>, needed starting at Lesson 9.</p>
-<li>Because of this, <strong>lessons must be run in order, once each</strong>, starting</li>
-<p>from Lesson 1 — running Lesson 5 before Lesson 2 fails with a clear &quot;have you run the earlier lessons first?&quot; message, since the records and indexes it expects don&#x27;t exist yet.</p>
-<li>Object ids, salaries, and other printed values are still deterministic</li>
-<p>given a full, in-order run — the same sequence of creates/removes always produces the same ids — except where a lesson explicitly measures wall-clock time (Lesson 12).</p>
-<li>To restart the whole course, just re-run Lesson 1 — it wipes the file</li>
-<p>and starts over.</p>
+<li><strong>Lesson 1</strong> deletes any old copy and creates this file fresh. Every other lesson only ever <em>opens</em> it.</li>
+<li><strong>Every lesson from 2 onward is a separate program run</strong> that opens the same file, does its own work, and exits. Nothing is held in memory between lessons — the file on disk <em>is</em> the hand-off.</li>
+<li>Since each lesson is a separate binary, there&#x27;s no shared struct to carry object ids forward (like an in-memory &quot;here&#x27;s Ana&#x27;s id&quot; value). Instead, Lesson 2 creates an <strong>index on <code>Employee.name</code></strong> (<code>create_index&lt;Employee&gt;(FieldId{1})</code>), and every later lesson looks employees up by name (<code>indexed_object_ids&lt;Employee&gt;(...)</code>) instead of remembering ids across runs. Lesson 5 does the same for <code>Department.name</code>, needed starting at Lesson 9.</li>
+<li>Because of this, <strong>lessons must be run in order, once each</strong>, starting from Lesson 1 — running Lesson 5 before Lesson 2 fails with a clear &quot;have you run the earlier lessons first?&quot; message, since the records and indexes it expects don&#x27;t exist yet.</li>
+<li>Object ids, salaries, and other printed values are still deterministic given a full, in-order run — the same sequence of creates/removes always produces the same ids — except where a lesson explicitly measures wall-clock time (Lesson 12).</li>
+<li>To restart the whole course, just re-run Lesson 1 — it wipes the file and starts over.</li>
 </ul>
 <p>Lessons 8, 9, and 10 (networking, remote operations, facades) keep the server and the client in <strong>one binary</strong>: a background thread runs the server&#x27;s accept loop while the main thread drives the client connection. A real deployment would split these into separate processes, but nothing in <code>Server</code>/<code>ServerConnection</code> requires it.</p>
 <h2>Build the Exercises</h2>
@@ -141,7 +119,7 @@ Run the lessons in order, once each, starting from Lesson 1. If you want to star
 <pre><code class="language-powershell">cmake --preset debug
 cmake --build --preset debug --target employee_directory_lesson_01
 .\build\debug\employee_directory_lesson_01.exe</code></pre>
-<p>Swap <code>01</code> for any lesson number 01-13. *Building* a later lesson&#x27;s target does not require building earlier ones first — each <code>.cpp</code> file compiles on its own. *Running* them, though, is in order: Lesson <code>NN</code> expects Lessons 1 through <code>NN-1</code> to have already run against the same persistent file. To go through the whole course from scratch:</p>
+<p>Swap <code>01</code> for any lesson number 01-13. <em>Building</em> a later lesson&#x27;s target does not require building earlier ones first — each <code>.cpp</code> file compiles on its own. <em>Running</em> them, though, is in order: Lesson <code>NN</code> expects Lessons 1 through <code>NN-1</code> to have already run against the same persistent file. To go through the whole course from scratch:</p>
 <pre><code class="language-powershell">cmake --preset debug
 cmake --build --preset debug
 foreach ($n in 1..13) {
@@ -149,15 +127,11 @@ foreach ($n in 1..13) {
 }</code></pre>
 <h2>Conventions Used in Every Lesson</h2>
 <ul>
-<li><strong>What You&#x27;ll Add</strong> — one paragraph, framed in terms of the running app,</li>
-<p>not the underlying mechanism.</p>
-<li><strong>New Concepts</strong> — links into <code>docs/reference/</code> for the precise</li>
-<p>documentation; the lesson itself stays narrative and example-driven.</p>
-<li><strong>Starting Point</strong> — what you&#x27;re building on top of (the previous</li>
-<p>lesson&#x27;s ending state).</p>
+<li><strong>What You&#x27;ll Add</strong> — one paragraph, framed in terms of the running app, not the underlying mechanism.</li>
+<li><strong>New Concepts</strong> — links into <code>docs/reference/</code> for the precise documentation; the lesson itself stays narrative and example-driven.</li>
+<li><strong>Starting Point</strong> — what you&#x27;re building on top of (the previous lesson&#x27;s ending state).</li>
 <li><strong>Steps</strong> — the actual walkthrough.</li>
-<li><strong>Full Listing</strong> — the complete file(s) at the end of the lesson, so you</li>
-<p>can diff against your own attempt.</p>
+<li><strong>Full Listing</strong> — the complete file(s) at the end of the lesson, so you can diff against your own attempt.</li>
 <li><strong>Build and Run</strong> — the exact command and expected output.</li>
 <li><strong>What to Notice</strong> — the one or two things worth remembering afterward.</li>
 </ul>

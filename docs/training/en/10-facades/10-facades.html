@@ -85,24 +85,18 @@ A facade is a naming and versioning layer, not a second execution engine. Everyt
 <p>An <code>HRFacade</code> grouping <code>TransferDepartment</code> (from Lesson 9) and a new <code>GiveRaise</code> operation behind one versioned, typed surface. The client opens the facade once and calls both methods through it, without knowing the server&#x27;s concrete operation classes.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>FacadeHandle&lt;TFacade&gt;::invoke&lt;Method&gt;</code>, <code>FacadeCatalog</code>, id+version</li>
-<p>identity (not array index), embedded vs. remote invoker — see <a href="../../../FACADES.md">FACADES.md</a>.</p>
+<li><code>FacadeHandle&lt;TFacade&gt;::invoke&lt;Method&gt;</code>, <code>FacadeCatalog</code>, id+version identity (not array index), embedded vs. remote invoker — see <a href="../../../FACADES.md">FACADES.md</a>.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-9 have run.</p>
 <h2>Steps</h2>
 <ul>
 <li>Look Bruno, Ana, and &quot;Engineering&quot; up by name.</li>
-<li>Add a <code>GiveRaise</code> operation (<code>k_id = &quot;employee.give_raise&quot;</code>, args</li>
-<p><code>employee_id</code> + <code>new_salary</code>), same shape as <code>TransferDepartment</code>.</p>
-<li>Define the <code>HRFacade</code> tag (<code>k_id = &quot;hr&quot;</code>, <code>k_version = 1</code>) and its</li>
-<p><code>FacadeDescriptor</code> listing both <code>TransferDepartment</code> and <code>GiveRaise</code> as <code>MethodDescriptor</code>s.</p>
-<li>Add <code>.facades = {hr_facade_descriptor()}</code> to the <code>ModuleManifest</code>, and</li>
-<p>load it with the <code>ModuleLoader::load</code> overload that also takes a <code>FacadeCatalog</code> (register both an <code>OperationRegistry</code> *and* a <code>FacadeCatalog</code> on the server).</p>
-<li>Client: <code>connection-&gt;open_facade&lt;HRFacade&gt;()</code>, then</li>
-<p><code>handle-&gt;invoke&lt;TransferDepartment&gt;(...)</code> and <code>handle-&gt;invoke&lt;GiveRaise&gt;(...)</code> — both go through the same typed handle.</p>
-<li>Demonstrate a version mismatch: define a second tag <code>HRFacadeV2</code> with</li>
-<p><code>k_version = 2</code> (a version the server never registered) and show <code>connection-&gt;open_facade&lt;HRFacadeV2&gt;()</code> fails.</p>
+<li>Add a <code>GiveRaise</code> operation (<code>k_id = &quot;employee.give_raise&quot;</code>, args <code>employee_id</code> + <code>new_salary</code>), same shape as <code>TransferDepartment</code>.</li>
+<li>Define the <code>HRFacade</code> tag (<code>k_id = &quot;hr&quot;</code>, <code>k_version = 1</code>) and its <code>FacadeDescriptor</code> listing both <code>TransferDepartment</code> and <code>GiveRaise</code> as <code>MethodDescriptor</code>s.</li>
+<li>Add <code>.facades = {hr_facade_descriptor()}</code> to the <code>ModuleManifest</code>, and load it with the <code>ModuleLoader::load</code> overload that also takes a <code>FacadeCatalog</code> (register both an <code>OperationRegistry</code> <em>and</em> a <code>FacadeCatalog</code> on the server).</li>
+<li>Client: <code>connection-&gt;open_facade&lt;HRFacade&gt;()</code>, then <code>handle-&gt;invoke&lt;TransferDepartment&gt;(...)</code> and <code>handle-&gt;invoke&lt;GiveRaise&gt;(...)</code> — both go through the same typed handle.</li>
+<li>Demonstrate a version mismatch: define a second tag <code>HRFacadeV2</code> with <code>k_version = 2</code> (a version the server never registered) and show <code>connection-&gt;open_facade&lt;HRFacadeV2&gt;()</code> fails.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_10_facades.cpp">lesson_10_facades.cpp</a></p>
@@ -120,10 +114,8 @@ A client compiled against &quot;hr&quot; version 2 asks for a version the server
   rejected as expected: incompatible facade version for &#x27;hr&#x27;: requested 2</code></pre>
 <h2>What to Notice</h2>
 <ul>
-<li>A facade is a naming/versioning layer, not a second execution engine —</li>
-<p><code>TransferDepartment</code> and <code>GiveRaise</code> still run exactly as they did in Lesson 9; the facade only adds discoverability and a version check in front of <code>invoke&lt;Method&gt;</code>.</p>
-<li>Identity is <code>FacadeId + version</code>, never the position in a list —</li>
-<p><code>HRFacadeV2</code> fails not because &quot;hr&quot; doesn&#x27;t exist, but because no version 2 of &quot;hr&quot; was ever registered.</p>
+<li>A facade is a naming/versioning layer, not a second execution engine — <code>TransferDepartment</code> and <code>GiveRaise</code> still run exactly as they did in Lesson 9; the facade only adds discoverability and a version check in front of <code>invoke&lt;Method&gt;</code>.</li>
+<li>Identity is <code>FacadeId + version</code>, never the position in a list — <code>HRFacadeV2</code> fails not because &quot;hr&quot; doesn&#x27;t exist, but because no version 2 of &quot;hr&quot; was ever registered.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

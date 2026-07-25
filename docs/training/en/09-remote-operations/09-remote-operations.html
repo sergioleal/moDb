@@ -85,25 +85,18 @@ The successful call moves Bruno to Engineering, closing the dangling reference L
 <p>A <code>department.transfer</code> operation that runs <strong>on the server</strong>, callable by id from the client: move an employee to a new department, validating the target department exists before making any change, all inside the server&#x27;s own transaction.</p>
 <h2>New Concepts</h2>
 <ul>
-<li>The <code>Operation</code> contract, <code>OperationRegistry::register_operation</code>/</li>
-<p><code>dispatch</code>, <code>ExecutionContext</code>, <code>ModuleManifest</code> + hash allowlist — see <a href="../../../reference/domain-operations.md">docs/reference/domain-operations.md</a>.</p>
+<li>The <code>Operation</code> contract, <code>OperationRegistry::register_operation</code>/ <code>dispatch</code>, <code>ExecutionContext</code>, <code>ModuleManifest</code> + hash allowlist — see <a href="../../../reference/domain-operations.md">docs/reference/domain-operations.md</a>.</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file after Lessons 1-8 have run.</p>
 <h2>Steps</h2>
 <ul>
-<li>Look Bruno up by name, and &quot;Engineering&quot; up by name through Lesson 5&#x27;s</li>
-<p><code>Department.name</code> index.</p>
-<li>Define <code>TransferDepartment : Operation</code> (<code>k_id = &quot;department.transfer&quot;</code>,</li>
-<p><code>encode_args</code>/<code>decode</code> for <code>employee_id</code> + <code>department_id</code>, both <code>u64</code>s).</p>
-<li><code>execute()</code> validates the target department exists (via</li>
-<p><code>ExecutionContext::objects().get&lt;Department&gt;(...)</code>) and fails cleanly if not, *before* materializing or mutating the employee.</p>
-<li>Build a <code>ModuleManifest</code> (id, module version, baseline, exported</li>
-<p>methods), compute its hash with <code>compute_manifest_hash</code>, <code>admit_hash</code> it on a <code>ModuleLoader</code>, <code>load</code> it into an <code>OperationRegistry</code>, and call <code>server-&gt;set_operation_registry(registry)</code>.</p>
-<li>Client calls it with `connection-&gt;call(TransferDepartment::k_id,</li>
-<p>*encoded_args)` to move Bruno back to Engineering (his old department, Sales, was removed back in Lesson 5 — this call also cleans up that dangling reference).</p>
-<li>Demonstrate the rejection path: call with a nonexistent department id</li>
-<p>(<code>ObjectId{999999}</code>) and confirm it fails with &quot;target department does not exist&quot; rather than partially mutating the employee.</p>
+<li>Look Bruno up by name, and &quot;Engineering&quot; up by name through Lesson 5&#x27;s <code>Department.name</code> index.</li>
+<li>Define <code>TransferDepartment : Operation</code> (<code>k_id = &quot;department.transfer&quot;</code>, <code>encode_args</code>/<code>decode</code> for <code>employee_id</code> + <code>department_id</code>, both <code>u64</code>s).</li>
+<li><code>execute()</code> validates the target department exists (via <code>ExecutionContext::objects().get&lt;Department&gt;(...)</code>) and fails cleanly if not, <em>before</em> materializing or mutating the employee.</li>
+<li>Build a <code>ModuleManifest</code> (id, module version, baseline, exported methods), compute its hash with <code>compute_manifest_hash</code>, <code>admit_hash</code> it on a <code>ModuleLoader</code>, <code>load</code> it into an <code>OperationRegistry</code>, and call <code>server-&gt;set_operation_registry(registry)</code>.</li>
+<li>Client calls it with <code>connection-&gt;call(TransferDepartment::k_id, *encoded_args)</code> to move Bruno back to Engineering (his old department, Sales, was removed back in Lesson 5 — this call also cleans up that dangling reference).</li>
+<li>Demonstrate the rejection path: call with a nonexistent department id (<code>ObjectId{999999}</code>) and confirm it fails with &quot;target department does not exist&quot; rather than partially mutating the employee.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_09_remote_operations.cpp">lesson_09_remote_operations.cpp</a></p>
@@ -118,10 +111,8 @@ Attempting a transfer to a department that doesn&#x27;t exist
   failed as expected: target department does not exist</code></pre>
 <h2>What to Notice</h2>
 <ul>
-<li>Validate before mutating — a <code>Result</code> failure returned from <code>execute()</code></li>
-<p>rolls back the transaction, so the failed transfer above leaves Bruno&#x27;s <code>department</code> field exactly as it was.</p>
-<li>The client never links against <code>TransferDepartment</code>&#x27;s implementation —</li>
-<p>only its id string and <code>encode_args</code>. The class itself, including its validation logic, lives and runs entirely on the server.</p>
+<li>Validate before mutating — a <code>Result</code> failure returned from <code>execute()</code> rolls back the transaction, so the failed transfer above leaves Bruno&#x27;s <code>department</code> field exactly as it was.</li>
+<li>The client never links against <code>TransferDepartment</code>&#x27;s implementation — only its id string and <code>encode_args</code>. The class itself, including its validation logic, lives and runs entirely on the server.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>

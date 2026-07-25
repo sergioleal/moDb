@@ -85,23 +85,17 @@ The object ids you will see (18, 19, 20) are deterministic for this exact sequen
 <p>Real employee records that survive closing and reopening the directory. The program now writes a handful of employees in one run, and a second run (simulating a restart) reads them back by id.</p>
 <h2>New Concepts</h2>
 <ul>
-<li><code>Database::create</code> vs <code>Database::open</code>, the <code>shared_ptr</code> +</li>
-<p><code>DatabaseRegistry</code> attach/detach pattern — see <a href="../../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a>.</p>
-<li>Why bindings must be repeated on every process start (they don&#x27;t persist</li>
-<p>themselves).</p>
+<li><code>Database::create</code> vs <code>Database::open</code>, the <code>shared_ptr</code> + <code>DatabaseRegistry</code> attach/detach pattern — see <a href="../../../reference/database-lifecycle.md">docs/reference/database-lifecycle.md</a>.</li>
+<li>Why bindings must be repeated on every process start (they don&#x27;t persist themselves).</li>
 </ul>
 <h2>Starting Point</h2>
 <p>The persistent database file Lesson 1 created (see the course <a href="../index.html#how-the-code-is-organized">README</a>) — this lesson is a separate program run that opens it.</p>
 <h2>Steps</h2>
 <ul>
-<li>Two scoped blocks simulate two separate program runs, both inside this</li>
-<p>one lesson&#x27;s <code>main()</code>, against the SAME file Lesson 1 created.</p>
-<li>First block: open (never create — Lesson 1 already did that), bind,</li>
-<p>begin a transaction, create three <code>Employee</code> records, commit.</p>
-<li>Also in the first block: <code>create_index&lt;Employee&gt;(FieldId{1})</code> on</li>
-<p><code>name</code> — every lesson from here on is a genuinely separate binary with no shared in-process state, so this index is what lets them find &quot;Ana&quot; again without remembering an <code>ObjectId</code> across runs.</p>
-<li>Second block: open again (a fresh <code>Database</code> instance, simulating a</li>
-<p>restart), re-bind, look Ana up <strong>by name</strong> through the new index, then read her record back by the resulting id.</p>
+<li>Two scoped blocks simulate two separate program runs, both inside this one lesson&#x27;s <code>main()</code>, against the SAME file Lesson 1 created.</li>
+<li>First block: open (never create — Lesson 1 already did that), bind, begin a transaction, create three <code>Employee</code> records, commit.</li>
+<li>Also in the first block: <code>create_index&lt;Employee&gt;(FieldId{1})</code> on <code>name</code> — every lesson from here on is a genuinely separate binary with no shared in-process state, so this index is what lets them find &quot;Ana&quot; again without remembering an <code>ObjectId</code> across runs.</li>
+<li>Second block: open again (a fresh <code>Database</code> instance, simulating a restart), re-bind, look Ana up <strong>by name</strong> through the new index, then read her record back by the resulting id.</li>
 </ul>
 <h2>Full Listing (End of Lesson)</h2>
 <p><a href="lesson_02_persist_reopen.cpp">lesson_02_persist_reopen.cpp</a></p>
@@ -115,12 +109,9 @@ After reopen, found &quot;Ana&quot; as employee 18 = Ana (12000)</code></pre>
 <p>The object ids (18/19/20) are deterministic for this exact sequence of operations, but they&#x27;re not &quot;1, 2, 3&quot; — the catalog itself consumes a few ids first (type definitions, baselines) before your first real record.</p>
 <h2>What to Notice</h2>
 <ul>
-<li>Forgetting to re-<code>bind()</code> after <code>open()</code> is the most common mistake at</li>
-<p>this stage — every lesson in this course re-binds every type it touches, every single time it opens the file, for exactly this reason.</p>
-<li>The <code>shared_ptr</code>/registry attach isn&#x27;t ceremony — it&#x27;s why a <code>Handle</code></li>
-<p>obtained in the first block would be meaningless in the second (different registry id, even same file).</p>
-<li>The name index exists purely as course infrastructure, introduced here</li>
-<p>because this is the first lesson that needs to find a record again after &quot;restarting.&quot; Lesson 7 is where indexes and query planning are actually taught as a topic.</p>
+<li>Forgetting to re-<code>bind()</code> after <code>open()</code> is the most common mistake at this stage — every lesson in this course re-binds every type it touches, every single time it opens the file, for exactly this reason.</li>
+<li>The <code>shared_ptr</code>/registry attach isn&#x27;t ceremony — it&#x27;s why a <code>Handle</code> obtained in the first block would be meaningless in the second (different registry id, even same file).</li>
+<li>The name index exists purely as course infrastructure, introduced here because this is the first lesson that needs to find a record again after &quot;restarting.&quot; Lesson 7 is where indexes and query planning are actually taught as a topic.</li>
 </ul>
 <h2>Related Reference</h2>
 <ul>
