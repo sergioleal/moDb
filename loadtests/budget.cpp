@@ -2,10 +2,17 @@
 
 namespace modb::loadtest {
 
-BudgetEstimate estimate_case(const Case&) {
-    // Tabela de calibração chega na Subfase H (docs/PLANO_TESTES_DE_CARGA.md
-    // §10). Até lá, toda estimativa é desconhecida -- nunca um chute.
-    return BudgetEstimate{};
+BudgetEstimate estimate_case(const Case& c, const CalibrationTable& table) {
+    BudgetEstimate result;
+    const auto* point = table.find(c.workload, c.payload, c.scale);
+    if (!point) {
+        return result;   // known=false -- sem calibração para esta combinação
+    }
+    result.known = true;
+    result.disk_bytes = point->disk_peak_bytes;
+    result.duration_ns = point->duration_ns;
+    result.peak_rss_bytes = point->peak_rss_bytes;
+    return result;
 }
 
 BudgetCheckResult check_campaign_budget(const BudgetLimits& limits, bool any_unknown_estimate) {

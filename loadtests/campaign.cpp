@@ -71,7 +71,32 @@ struct CaseTally {
     std::uint64_t completed{};
     std::uint64_t failed{};
     std::uint64_t unimplemented{};
+    std::uint64_t skipped_budget{};
 };
+
+// Devolve o motivo pelo qual `estimate` excede `limits`, ou "" se cabe (ou se
+// a estimativa é desconhecida -- nesse caso não há o que comparar, o gate de
+// orçamento desconhecido em run_campaign já cobriu esse caso). Só compara os
+// limites que o operador de fato informou (§10: os 3 `--max-*` são opcionais).
+std::string exceeds_budget_reason(const BudgetEstimate& estimate, const BudgetLimits& limits) {
+    if (!estimate.known) {
+        return "";
+    }
+    if (limits.max_duration_seconds &&
+        estimate.duration_ns > *limits.max_duration_seconds * 1'000'000'000ULL) {
+        return "duração estimada " + std::to_string(estimate.duration_ns / 1'000'000'000ULL) +
+               "s excede --max-duration " + std::to_string(*limits.max_duration_seconds) + "s";
+    }
+    if (limits.max_disk_gb && estimate.disk_bytes > *limits.max_disk_gb * 1024ULL * 1024 * 1024) {
+        return "disco de pico estimado " + std::to_string(estimate.disk_bytes) +
+               " bytes excede --max-disk-gb " + std::to_string(*limits.max_disk_gb) + "GB";
+    }
+    if (limits.max_rss_mb && estimate.peak_rss_bytes > *limits.max_rss_mb * 1024ULL * 1024) {
+        return "RSS de pico estimado " + std::to_string(estimate.peak_rss_bytes) +
+               " bytes excede --max-rss-mb " + std::to_string(*limits.max_rss_mb) + "MB";
+    }
+    return "";
+}
 
 // Escreve case_start, executa o dispatch (ou grava a recusa quando o
 // workload não tem dispatch) e grava progress_window/phase_start/
@@ -330,19 +355,35 @@ ResolveResult resolve_cases(const CampaignOptions& options) {
     return result;
 }
 
-std::string render_case_plan(const std::vector<Case>& cases) {
+std::string render_case_plan(const std::vector<Case>& cases, const CalibrationTable& table) {
     std::ostringstream oss;
     std::uint64_t total_objects = 0;
+    std::uint64_t total_disk_known = 0;
+    std::uint64_t total_duration_known = 0;
+    bool any_unknown = false;
     for (const auto& c : cases) {
-        auto estimate = estimate_case(c);
+        auto estimate = estimate_case(c, table);
         oss << c.case_id() << "  objetos=" << c.objects << "  disco~="
             << (estimate.known ? std::to_string(estimate.disk_bytes) : "?") << "  tempo~="
             << (estimate.known ? std::to_string(estimate.duration_ns) : "?") << '\n';
         total_objects += c.objects;
+        if (estimate.known) {
+            // Casos não limpam seus próprios arquivos de banco entre si
+            // (cada um gera um nome único em work_dir) -- o disco realmente
+            // consumido por uma campanha é a SOMA dos picos, não o maior
+            // caso isolado.
+            total_disk_known += estimate.disk_bytes;
+            total_duration_known += estimate.duration_ns;
+        } else {
+            any_unknown = true;
+        }
     }
+    const std::string prefix = any_unknown ? ">=" : "";
+    const std::string suffix = any_unknown ? " (parcial -- ao menos 1 caso sem calibração)" : "";
     oss << "--\n"
         << cases.size() << " caso(s)  objetos totais=" << total_objects
-        << "  disco de pico estimado ~= ?  tempo total estimado ~= ?\n";
+        << "  disco de pico estimado ~= " << prefix << total_disk_known << suffix
+        << "  tempo total estimado ~= " << prefix << total_duration_known << suffix << '\n';
     return oss.str();
 }
 
@@ -355,17 +396,36 @@ CampaignResult run_campaign(const CampaignOptions& options) {
         return result;
     }
 
+    const auto calibration_path =
+        options.calibration_file.empty() ? default_calibration_path() : options.calibration_file;
+    auto calibration_loaded = load_calibration(calibration_path);
+    if (!calibration_loaded.ok) {
+        result.error = calibration_loaded.error;
+        return result;
+    }
+    const auto& calibration = calibration_loaded.table;
+
     if (options.dry_run) {
         result.ok = true;
         result.status = "dry_run";
-        result.rendered_plan = render_case_plan(resolved.cases);
+        result.rendered_plan = render_case_plan(resolved.cases, calibration);
         return result;
     }
 
-    // Nenhuma tabela de calibração ainda (§10): toda estimativa é
-    // desconhecida, então este gate dispara sempre que `run` de fato tenta
-    // executar, a menos que o operador aceite explicitamente.
-    auto budget_check = check_campaign_budget(options.budget, /*any_unknown_estimate=*/true);
+    // Gate original (§6.3): sem NENHUMA estimativa para um caso, `run` exige
+    // aceitação explícita do operador -- a tabela de calibração (Subfase H)
+    // não cobre toda combinação (workload,payload,scale), então esse gate
+    // continua vivo mesmo com a tabela preenchida.
+    bool any_unknown_estimate = false;
+    std::uint64_t total_known_disk_bytes = 0;
+    for (const auto& c : resolved.cases) {
+        if (estimate_case(c, calibration).known) {
+            total_known_disk_bytes += estimate_case(c, calibration).disk_bytes;
+        } else {
+            any_unknown_estimate = true;
+        }
+    }
+    auto budget_check = check_campaign_budget(options.budget, any_unknown_estimate);
     if (!budget_check.ok) {
         result.error = budget_check.reason;
         return result;
@@ -376,6 +436,24 @@ CampaignResult run_campaign(const CampaignOptions& options) {
     const std::filesystem::path work_dir =
         options.work_dir.empty() ? options.output_dir : options.work_dir;
     std::filesystem::create_directories(work_dir, ec);
+
+    // §10: "run verifica espaço livre e aborta com mensagem clara antes de
+    // começar, em vez de encher o disco no meio de 1M". Casos não limpam seu
+    // próprio arquivo entre si (nomes únicos por caso em work_dir), então o
+    // espaço necessário é a SOMA dos picos conhecidos -- casos sem
+    // calibração não entram na soma (não há como), o gate acima já cobre
+    // esse caso via --accept-unknown-budget.
+    if (total_known_disk_bytes > 0) {
+        std::error_code space_ec;
+        const auto space_info = std::filesystem::space(work_dir, space_ec);
+        if (!space_ec && space_info.available < total_known_disk_bytes) {
+            result.error = "espaço livre insuficiente em " + work_dir.string() + ": disponível=" +
+                           std::to_string(space_info.available) + " bytes, estimado=" +
+                           std::to_string(total_known_disk_bytes) +
+                           " bytes (soma dos picos calibrados dos casos do plano)";
+            return result;
+        }
+    }
 
     const auto env_info = collect_environment(options.argv_joined);
     const auto stamp = utc_timestamp_millis();
@@ -462,13 +540,33 @@ CampaignResult run_campaign(const CampaignOptions& options) {
 
     CaseTally tally;
     for (const auto& c : resolved.cases) {
+        const auto case_id = c.case_id();
+        const auto estimate = estimate_case(c, calibration);
+        const auto reason = exceeds_budget_reason(estimate, options.budget);
+        if (!reason.empty()) {
+            ++tally.skipped_budget;
+            std::ostringstream oss;
+            oss << "{\"schema\":\"modb.loadtest\",\"schema_version\":1,\"record\":\"skipped_budget\","
+                  "\"run_id\":"
+                << json_string(run_id) << ",\"sequence\":" << ++sequence
+                << ",\"case_id\":" << json_string(case_id) << ",\"reason\":" << json_string(reason)
+                << ",\"estimated_disk_bytes\":" << json_uint(estimate.disk_bytes)
+                << ",\"estimated_duration_ns\":" << json_uint(estimate.duration_ns)
+                << ",\"estimated_peak_rss_bytes\":" << json_uint(estimate.peak_rss_bytes) << "}";
+            if (!write_or_fail(oss.str())) {
+                return result;
+            }
+            continue;
+        }
         if (!run_case_and_record(c, work_dir, options.seed, run_id, sequence, write_or_fail, tally)) {
             return result;
         }
     }
 
     const std::string overall_status =
-        tally.failed > 0 ? "failed" : (tally.unimplemented > 0 ? "partial" : "completed");
+        tally.failed > 0
+            ? "failed"
+            : (tally.unimplemented > 0 || tally.skipped_budget > 0 ? "partial" : "completed");
     {
         std::ostringstream oss;
         oss << "{\"schema\":\"modb.loadtest\",\"schema_version\":1,\"record\":\"run_end\","
@@ -478,6 +576,7 @@ CampaignResult run_campaign(const CampaignOptions& options) {
             << ",\"completed\":" << json_uint(tally.completed)
             << ",\"failed\":" << json_uint(tally.failed)
             << ",\"unimplemented\":" << json_uint(tally.unimplemented)
+            << ",\"skipped_budget\":" << json_uint(tally.skipped_budget)
             << ",\"previous_content_sha256\":" << json_string(writer.content_sha256_hex()) << "}";
         if (!write_or_fail(oss.str())) {
             return result;
@@ -587,6 +686,17 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
                     ++tally.failed;
                 }
             }
+        } else if (record == "skipped_budget") {
+            // Terceiro estado terminal de um caso (além de case_summary/
+            // case_error): a decisão de pular já foi tomada e registrada, e
+            // um caso pulado nunca tem case_start (o skip acontece antes),
+            // então sem tratar isso aqui resume tentaria "retomar" um caso
+            // sem parâmetros gravados e recusaria o arquivo inteiro por um
+            // motivo que não tem nada a ver com o real.
+            const auto case_id = v.get_string("case_id");
+            if (resolved.insert(case_id).second) {
+                ++tally.skipped_budget;
+            }
         }
     }
 
@@ -652,7 +762,9 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
     }
 
     const std::string overall_status =
-        tally.failed > 0 ? "failed" : (tally.unimplemented > 0 ? "partial" : "completed");
+        tally.failed > 0
+            ? "failed"
+            : (tally.unimplemented > 0 || tally.skipped_budget > 0 ? "partial" : "completed");
     {
         std::ostringstream oss;
         oss << "{\"schema\":\"modb.loadtest\",\"schema_version\":1,\"record\":\"run_end\","
@@ -661,7 +773,8 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
             << ",\"status\":" << json_string(overall_status)
             << ",\"completed\":" << json_uint(tally.completed)
             << ",\"failed\":" << json_uint(tally.failed)
-            << ",\"unimplemented\":" << json_uint(tally.unimplemented) << ",\"previous_content_sha256\":"
+            << ",\"unimplemented\":" << json_uint(tally.unimplemented)
+            << ",\"skipped_budget\":" << json_uint(tally.skipped_budget) << ",\"previous_content_sha256\":"
             << json_string(modb::bench::sha256_hex(modb::bench::sha256_text(content))) << "}";
         if (!write_or_fail(oss.str())) {
             result.error = write_error;

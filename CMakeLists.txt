@@ -433,6 +433,7 @@ add_library(modb_load_core STATIC
     loadtests/matrix.cpp
     loadtests/profiles.cpp
     loadtests/budget.cpp
+    loadtests/calibration.cpp
     loadtests/environments.cpp
     loadtests/dataset_user.cpp
     loadtests/process_metrics.cpp

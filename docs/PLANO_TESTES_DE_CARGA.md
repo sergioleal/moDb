@@ -499,16 +499,38 @@ Campanha com casos pulados termina `partial`, nunca `completed`.
 Tabela de calibração, a ser preenchida por medição na Subfase A e versionada no
 repositório (um arquivo por plataforma):
 
-| workload | payload | bytes/objeto | objetos/s | disco de pico 1M | duração 1M |
+| workload | payload | bytes/objeto | objetos/s (100k) | disco de pico 1M | duração 1M |
 |---|---|---|---|---|---|
-| `create_only` | `normal` | a medir | a medir | a medir | a medir |
-| `create_delete_forward` | `normal` | a medir | a medir | a medir | a medir |
-| `create_delete_reverse` | `normal` | a medir | a medir | a medir | a medir |
-| `create_delete_interleaved` | `normal` | a medir | a medir | a medir | a medir |
-| `crud_full` | `normal` | a medir | a medir | a medir | a medir |
+| `create_only` | `normal` | 458 | 6288 | 458.000.000 | 159 s (extrapolado) |
+| `create_delete_forward` | `normal` | 458 | 5555 | 458.000.000 | 180 s (extrapolado) |
+| `create_delete_reverse` | `normal` | 458 | 5584 | 458.000.000 | 179 s (extrapolado) |
+| `create_delete_interleaved` | `normal` | 458 | 5323 | 458.000.000 | 188 s (extrapolado) |
+| `crud_full` | `normal` | 1674 | 413 | 1.674.000.000 | 2420 s (extrapolado) |
 
 Extrapolação de 10k para 1M é linear por padrão e marcada como estimativa; após
 a primeira execução real de `1M`, o valor medido substitui a extrapolação.
+
+**Implementado na Subfase H (calibração reduzida).** `loadtests/calibration/
+windows-x86_64.json` traz medição real em `10k` e `100k` para os 5 workloads
+implementados (`payload=normal`); `1k`/`250k`/`500k`/`1M` são extrapolação
+linear simples a partir do ponto de `100k`, marcada por entrada
+(`extrapolation_caveat`). A vazão caiu entre 2,4x (`create_only`) e 5,1x
+(`crud_full`) só de `10k` para `100k` — um comportamento não-linear real do
+motor em escala crescente, não um artefato de medição -- então os valores de
+`250k`/`500k`/`1M` acima são conhecidos por serem **otimistas** (a duração
+real tende a ser maior). Substituir por medição real nessas escalas maiores
+segue como trabalho futuro. `loadtests/calibration/linux-x86_64.json` não
+existe ainda (sem ambiente Linux disponível nesta rodada de calibração) --
+`estimate_case` simplesmente devolve `known=false` para essa plataforma, o
+mesmo comportamento de antes da Subfase H.
+
+`budget.cpp`/`campaign.cpp` usam essa tabela de verdade: `estimate_case`
+consulta `loadtests/calibration/<plataforma>-<arch>.json` (resolvido em
+tempo de compilação); um caso com estimativa conhecida que excede
+`--max-duration`/`--max-disk-gb`/`--max-rss-mb` gera `skipped_budget` e é
+pulado (a campanha termina `partial`); antes de começar, `run` soma o disco
+de pico de todos os casos com estimativa conhecida e aborta com mensagem
+clara se o espaço livre em `--work-dir` for insuficiente.
 
 ## 11. Execução remota
 
@@ -564,9 +586,10 @@ unidades no nome da métrica e proibição de segredos seguem §4 do
 `run_end` — o suficiente para `create_only` produzir um arquivo válido e
 completo. **Implementado na Subfase F**: `progress_window` (a cada `window_interval`,
 padrão 10 s, só em fases que de fato fecham uma janela) e `resume`.
-`skipped_budget` quando o guarda-corpo de disco/tempo tiver estimativa real
-para comparar (Subfase H); `run_note` conforme os casos que o exigem
-(interferência de ambiente, §17 risco 11) forem aparecendo.
+**Implementado na Subfase H**: `skipped_budget`, emitido quando um caso com
+estimativa calibrada excede `--max-duration`/`--max-disk-gb`/`--max-rss-mb`.
+`run_note` conforme os casos que o exigem (interferência de ambiente, §17
+risco 11) forem aparecendo.
 
 O campo `case_id` é gravado **também** como `scenario_id`, para que
 `modb_bench compare` funcione sobre arquivos de carga sem alteração no

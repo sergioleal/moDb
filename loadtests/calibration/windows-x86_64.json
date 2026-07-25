@@ -1,0 +1,260 @@
+{
+  "schema": "modb.loadtest.calibration",
+  "schema_version": 1,
+  "platform": "windows",
+  "arch": "x86_64",
+  "measured_at": "2026-07-25",
+  "notes": "Calibração reduzida (Subfase H): medição real só em 10k/100k. 250k/500k/1M são extrapolação linear a partir de 100k, documentada como tal em cada entrada -- não uma medição real dessas escalas. Ver docs/PLANO_TESTES_DE_CARGA.md §10 e docs-process/PLANO_IMPLEMENTACAO_CARGA.md (Subfase H).",
+  "entries": [
+    {
+      "workload": "create_only",
+      "payload": "normal",
+      "measured_scales": [
+        "10k",
+        "100k"
+      ],
+      "objects_per_second_at_100k": 6287.9,
+      "bytes_per_object_at_100k": 458,
+      "degradation_10k_to_100k_ratio": 2.45,
+      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 2.45x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "scales": {
+        "1k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 159035590,
+          "disk_peak_bytes": 458000,
+          "peak_rss_bytes": 1602765
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 648725500,
+          "disk_peak_bytes": 4603904,
+          "peak_rss_bytes": 40366080
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 15903559000,
+          "disk_peak_bytes": 45813760,
+          "peak_rss_bytes": 160276480
+        },
+        "250k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 39758897500,
+          "disk_peak_bytes": 114500000,
+          "peak_rss_bytes": 400691200
+        },
+        "500k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 79517795000,
+          "disk_peak_bytes": 229000000,
+          "peak_rss_bytes": 801382400
+        },
+        "1M": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 159035590000,
+          "disk_peak_bytes": 458000000,
+          "peak_rss_bytes": 1602764800
+        }
+      }
+    },
+    {
+      "workload": "create_delete_forward",
+      "payload": "normal",
+      "measured_scales": [
+        "10k",
+        "100k"
+      ],
+      "objects_per_second_at_100k": 5555.16,
+      "bytes_per_object_at_100k": 458,
+      "degradation_10k_to_100k_ratio": 2.32,
+      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 2.32x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "scales": {
+        "1k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 180012952,
+          "disk_peak_bytes": 458000,
+          "peak_rss_bytes": 2221343
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 774825900,
+          "disk_peak_bytes": 4603904,
+          "peak_rss_bytes": 43708416
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 18001295200,
+          "disk_peak_bytes": 45813760,
+          "peak_rss_bytes": 222134272
+        },
+        "250k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 45003238000,
+          "disk_peak_bytes": 114500000,
+          "peak_rss_bytes": 555335680
+        },
+        "500k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 90006476000,
+          "disk_peak_bytes": 229000000,
+          "peak_rss_bytes": 1110671360
+        },
+        "1M": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 180012952000,
+          "disk_peak_bytes": 458000000,
+          "peak_rss_bytes": 2221342720
+        }
+      }
+    },
+    {
+      "workload": "create_delete_reverse",
+      "payload": "normal",
+      "measured_scales": [
+        "10k",
+        "100k"
+      ],
+      "objects_per_second_at_100k": 5583.51,
+      "bytes_per_object_at_100k": 458,
+      "degradation_10k_to_100k_ratio": 2.44,
+      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 2.44x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "scales": {
+        "1k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 179098714,
+          "disk_peak_bytes": 458000,
+          "peak_rss_bytes": 2221548
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 733947000,
+          "disk_peak_bytes": 4603904,
+          "peak_rss_bytes": 43720704
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 17909871400,
+          "disk_peak_bytes": 45813760,
+          "peak_rss_bytes": 222154752
+        },
+        "250k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 44774678500,
+          "disk_peak_bytes": 114500000,
+          "peak_rss_bytes": 555386880
+        },
+        "500k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 89549357000,
+          "disk_peak_bytes": 229000000,
+          "peak_rss_bytes": 1110773760
+        },
+        "1M": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 179098714000,
+          "disk_peak_bytes": 458000000,
+          "peak_rss_bytes": 2221547520
+        }
+      }
+    },
+    {
+      "workload": "create_delete_interleaved",
+      "payload": "normal",
+      "measured_scales": [
+        "10k",
+        "100k"
+      ],
+      "objects_per_second_at_100k": 5323.11,
+      "bytes_per_object_at_100k": 458,
+      "degradation_10k_to_100k_ratio": 2.41,
+      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 2.41x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "scales": {
+        "1k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 187860078,
+          "disk_peak_bytes": 458000,
+          "peak_rss_bytes": 2222203
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 780896100,
+          "disk_peak_bytes": 4603904,
+          "peak_rss_bytes": 43679744
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 18786007800,
+          "disk_peak_bytes": 45813760,
+          "peak_rss_bytes": 222220288
+        },
+        "250k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 46965019500,
+          "disk_peak_bytes": 114500000,
+          "peak_rss_bytes": 555550720
+        },
+        "500k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 93930039000,
+          "disk_peak_bytes": 229000000,
+          "peak_rss_bytes": 1111101440
+        },
+        "1M": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 187860078000,
+          "disk_peak_bytes": 458000000,
+          "peak_rss_bytes": 2222202880
+        }
+      }
+    },
+    {
+      "workload": "crud_full",
+      "payload": "normal",
+      "measured_scales": [
+        "10k",
+        "100k"
+      ],
+      "objects_per_second_at_100k": 413.21,
+      "bytes_per_object_at_100k": 1674,
+      "degradation_10k_to_100k_ratio": 5.07,
+      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 5.07x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "scales": {
+        "1k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 2420057907,
+          "disk_peak_bytes": 1674000,
+          "peak_rss_bytes": 2223104
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 4776010400,
+          "disk_peak_bytes": 16764928,
+          "peak_rss_bytes": 43892736
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 242005790700,
+          "disk_peak_bytes": 167395328,
+          "peak_rss_bytes": 222310400
+        },
+        "250k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 605014476750,
+          "disk_peak_bytes": 418500000,
+          "peak_rss_bytes": 555776000
+        },
+        "500k": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 1210028953500,
+          "disk_peak_bytes": 837000000,
+          "peak_rss_bytes": 1111552000
+        },
+        "1M": {
+          "source": "extrapolated_linear_from_100k",
+          "duration_ns": 2420057907000,
+          "disk_peak_bytes": 1674000000,
+          "peak_rss_bytes": 2223104000
+        }
+      }
+    }
+  ]
+}

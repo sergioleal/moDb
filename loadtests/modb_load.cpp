@@ -15,6 +15,7 @@
 //   modb_load report --case ID [--format csv|json] [--history-file PATH]
 //   modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]
 
+#include "calibration.hpp"
 #include "campaign.hpp"
 #include "history/index.hpp"
 #include "history/trend.hpp"
@@ -42,7 +43,8 @@ void print_usage() {
         << "                [--environment a,b] [--case id,id] [--filter SUBSTR]\n"
         << "                [--exclude SUBSTR] [--concurrency a,b] [--payload a,b]\n"
         << "                [--repeat N] [--seed N] [--output-dir DIR] [--work-dir DIR]\n"
-        << "                [--environments-file PATH] [--max-duration N] [--max-disk-gb N]\n"
+        << "                [--environments-file PATH] [--calibration-file PATH] [--max-duration N]\n"
+        << "                [--max-disk-gb N]\n"
         << "                [--max-rss-mb N] [--accept-unknown-budget] [--dry-run]\n"
         << "                [--history-file PATH] [--no-index]\n"
         << "  modb_load list-cases [os mesmos seletores acima]\n"
@@ -128,6 +130,8 @@ bool parse_common_selectors(int argc, char** argv, int start, CampaignOptions& o
             options.work_dir = need("--work-dir");
         } else if (arg == "--environments-file") {
             options.environments_file = need("--environments-file");
+        } else if (arg == "--calibration-file") {
+            options.calibration_file = need("--calibration-file");
         } else if (arg == "--max-duration") {
             options.budget.max_duration_seconds = std::strtoull(need("--max-duration"), nullptr, 10);
         } else if (arg == "--max-disk-gb") {
@@ -223,7 +227,15 @@ int command_list_cases(int argc, char** argv) {
         std::cerr << "Erro: " << resolved.error << '\n';
         return 2;
     }
-    std::cerr << modb::loadtest::render_case_plan(resolved.cases);
+    const auto calibration_path =
+        options.calibration_file.empty() ? modb::loadtest::default_calibration_path()
+                                         : options.calibration_file;
+    auto calibration = modb::loadtest::load_calibration(calibration_path);
+    if (!calibration.ok) {
+        std::cerr << "Erro: " << calibration.error << '\n';
+        return 2;
+    }
+    std::cerr << modb::loadtest::render_case_plan(resolved.cases, calibration.table);
     return 0;
 }
 

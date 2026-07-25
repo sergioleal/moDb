@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include "calibration.hpp"
 #include "campaign.hpp"
 #include "json_value.hpp"
 
@@ -68,6 +69,106 @@ CampaignOptions two_case_options(const std::filesystem::path& dir) {
     options.budget.accept_unknown_budget = true;
     options.argv_joined = "test";
     return options;
+}
+
+// Calibração fake com uma duração absurdamente alta para create_only@1k --
+// suficiente para os testes de orçamento (Subfase H) sem depender de números
+// reais medidos nem esperar uma execução longa de verdade.
+std::filesystem::path write_fake_calibration(const std::filesystem::path& dir,
+                                             std::uint64_t duration_ns) {
+    std::ostringstream oss;
+    oss << R"({"schema":"modb.loadtest.calibration","schema_version":1,)"
+        << R"("platform":"test","arch":"x86_64","measured_at":"2026-07-25","entries":[)"
+        << R"({"workload":"create_only","payload":"normal","scales":{)"
+        << R"("1k":{"source":"measured","duration_ns":)" << duration_ns
+        << R"(,"disk_peak_bytes":1000,"peak_rss_bytes":1000}}}]})";
+    const auto path = dir / "fake-calibration.json";
+    write_file(path, oss.str());
+    return path;
+}
+
+CampaignOptions single_case_options(const std::filesystem::path& dir) {
+    CampaignOptions options;
+    options.selectors.case_ids = {"load.create_only.embedded.1k"};
+    options.output_dir = dir;
+    options.work_dir = dir;
+    options.environments_file = dir / "no-such-environments.json";
+    options.seed = 20260725;
+    options.argv_joined = "test";
+    return options;
+}
+
+// Subfase H (§10): um caso cuja estimativa CALIBRADA excede --max-duration
+// deve ser pulado com `skipped_budget`, nunca executado -- e a campanha
+// termina `partial`, nunca `completed`, mesmo com um único caso.
+void test_budget_skips_case_exceeding_max_duration(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    auto options = single_case_options(dir);
+    // Calibração diz que este caso leva 1000s -- bem acima do limite de 1s.
+    options.calibration_file = write_fake_calibration(dir, 1000ULL * 1'000'000'000ULL);
+    options.budget.max_duration_seconds = 1;
+
+    auto result = run_campaign(options);
+    suite.check(result.ok, "campanha com 1 caso pulado ainda deve reportar ok (partial != failed): " +
+                              result.error);
+    suite.check(result.status == "partial",
+               "caso pulado por orçamento deve deixar a campanha 'partial', não 'completed'");
+
+    const auto content = read_file(result.result_path);
+    const auto lines = nonempty_lines(content);
+    suite.check(count_records(lines, "skipped_budget", "load.create_only.embedded.1k") == 1,
+               "deve existir exatamente 1 skipped_budget para o caso calibrado acima do limite");
+    suite.check(count_records(lines, "case_summary", "load.create_only.embedded.1k") == 0,
+               "caso pulado nunca deve produzir case_summary (não foi executado)");
+    suite.check(count_records(lines, "case_start", "load.create_only.embedded.1k") == 0,
+               "caso pulado por orçamento não deve ter case_start (o skip acontece antes)");
+}
+
+// O mesmo caso, sem limite de orçamento configurado, deve rodar normalmente
+// mesmo com a mesma calibração "cara" carregada -- os limites só mordem
+// quando o operador de fato os configura (§10).
+void test_budget_runs_case_when_no_limit_configured(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    auto options = single_case_options(dir);
+    options.calibration_file = write_fake_calibration(dir, 1000ULL * 1'000'000'000ULL);
+    // Nenhum --max-* configurado.
+
+    auto result = run_campaign(options);
+    suite.check(result.ok, "sem limite configurado, o caso deve rodar normalmente: " + result.error);
+    suite.check(result.status == "completed", "sem skip, a campanha deve completar normalmente");
+
+    const auto lines = nonempty_lines(read_file(result.result_path));
+    suite.check(count_records(lines, "case_summary", "load.create_only.embedded.1k") == 1,
+               "sem limite, o caso deve ter rodado de verdade e produzido case_summary");
+    suite.check(count_records(lines, "skipped_budget", "load.create_only.embedded.1k") == 0,
+               "sem limite configurado, nunca deve haver skipped_budget");
+}
+
+void test_calibration_missing_file_is_ok_and_empty(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    auto loaded = load_calibration(dir / "nao-existe.json");
+    suite.check(loaded.ok, "arquivo de calibração ausente não deve ser erro");
+    suite.check(loaded.table.entries.empty(), "tabela deve ficar vazia sem arquivo");
+    suite.check(loaded.table.find("create_only", "normal", "100k") == nullptr,
+               "find em tabela vazia deve devolver nullptr");
+}
+
+void test_calibration_load_and_find(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto path = write_fake_calibration(dir, 42'000'000'000ULL);
+    auto loaded = load_calibration(path);
+    suite.check(loaded.ok, "calibração válida deve carregar: " + loaded.error);
+
+    const auto* point = loaded.table.find("create_only", "normal", "1k");
+    suite.check(point != nullptr, "find deve achar a entrada gravada");
+    if (point) {
+        suite.check(point->duration_ns == 42'000'000'000ULL, "duration_ns deve bater com o gravado");
+        suite.check(point->disk_peak_bytes == 1000, "disk_peak_bytes deve bater com o gravado");
+    }
+    suite.check(loaded.table.find("create_only", "normal", "100k") == nullptr,
+               "escala não calibrada não deve ser encontrada");
+    suite.check(loaded.table.find("crud_full", "normal", "1k") == nullptr,
+               "workload não calibrado não deve ser encontrado");
 }
 
 // Verificação de ponta a ponta do critério de "pronto" da Subfase F
@@ -197,5 +298,9 @@ int main() {
     test_resume_does_not_rerun_completed_case(suite);
     test_resume_rejects_when_nothing_pending(suite);
     test_resume_rejects_non_partial_extension(suite);
+    test_budget_skips_case_exceeding_max_duration(suite);
+    test_budget_runs_case_when_no_limit_configured(suite);
+    test_calibration_missing_file_is_ok_and_empty(suite);
+    test_calibration_load_and_find(suite);
     return suite.finish();
 }

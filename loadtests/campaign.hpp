@@ -6,6 +6,7 @@
 // (§14 do plano) -- schema próprio `modb.loadtest`, não `modb.benchmark`.
 
 #include "budget.hpp"
+#include "calibration.hpp"
 #include "matrix.hpp"
 
 #include <cstdint>
@@ -22,6 +23,7 @@ struct CampaignOptions {
     std::filesystem::path output_dir{"load-results"};
     std::filesystem::path work_dir;   // vazio = usa output_dir
     std::filesystem::path environments_file{"loadtests/environments.json"};
+    std::filesystem::path calibration_file;   // vazio = usa default_calibration_path()
     std::uint64_t seed{1};
     bool dry_run{false};
     BudgetLimits budget;
@@ -45,8 +47,11 @@ struct ResolveResult {
 };
 [[nodiscard]] ResolveResult resolve_cases(const CampaignOptions& options);
 
-// Usado por `list-cases`: nunca executa nada, nunca escreve JSONL.
-[[nodiscard]] std::string render_case_plan(const std::vector<Case>& cases);
+// Usado por `list-cases`/`run --dry-run`: nunca executa nada, nunca escreve
+// JSONL. `table` vazia (sem arquivo de calibração) faz toda estimativa
+// imprimir "?", igual ao comportamento anterior à Subfase H.
+[[nodiscard]] std::string render_case_plan(const std::vector<Case>& cases,
+                                           const CalibrationTable& table);
 
 [[nodiscard]] CampaignResult run_campaign(const CampaignOptions& options);
 
