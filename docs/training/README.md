@@ -5,26 +5,28 @@ construction history (that course lives in
 [docs-process/training/](../../docs-process/training/README.md), one lesson
 per build phase, using independent standalone examples).
 
-Here, you build **one application** — an employee directory — from scratch,
+Here, you build **one application** -- an employee directory -- from scratch,
 and every lesson adds something new to that same, growing codebase. By the
 last lesson you'll have touched almost everything Ring0 offers: binding,
 persistence, transactions, typed handles, relationships and collections,
 snapshots, indexed queries, a network server and client, remote domain
-operations, versioned facades, and a graph-shaped org chart.
+operations, versioned facades, a graph-shaped org chart, read replicas,
+operational diagnostics, storage internals, protocol compatibility,
+replication catch-up, benchmarks, load tests, and fuzzing.
 
-Source material lives in `docs/training/en`. All 13 lessons are complete:
+Source material lives in `docs/training/en`. All 20 lessons are complete:
 each lesson has its own folder (`docs/training/en/<NN-slug>/`) holding the
-lesson doc, its real cumulative `.cpp` source, and a build `README.md` —
-each verified against an actual build and run.
+lesson doc, its real cumulative `.cpp` source, and a build `README.md`, each
+verified against an actual build and run.
 
 Start at [`en/README.md`](en/README.md).
 
 ## Relationship to the rest of the docs
 
-- [`docs/DEVELOPER_GUIDE.md`](../DEVELOPER_GUIDE.md) — a single-document,
+- [`docs/DEVELOPER_GUIDE.md`](../DEVELOPER_GUIDE.md) -- a single-document,
   faster-paced narrative tour of the same ground. Read that first if you
   want the big picture quickly; come here for a slower, project-based path
   with exercises.
-- [`docs/reference/`](../reference/) — precise, per-topic reference
+- [`docs/reference/`](../reference/) -- precise, per-topic reference
   documentation. Each lesson here links to the reference page(s) it
   exercises.

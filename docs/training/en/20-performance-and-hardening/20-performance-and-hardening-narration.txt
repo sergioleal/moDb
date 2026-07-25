@@ -1,0 +1,9 @@
+Lesson 20 -- Performance and Hardening continues the same course structure: one folder, one lesson document, one compiling source file, and one concrete product capability. The code is small on purpose; the important part is learning which durable artifact, command, or API surface proves the behavior.
+
+Lesson 20 -- Performance and Hardening is part of the bridge from tutorial code to operational use. The lesson keeps the example concrete, but the deeper habit is to connect every feature to the artifact that proves it: a page inventory, a baseline id, a version negotiation, a replication command, or a repeatable test result.
+
+The context for this lesson is that Lesson 20 -- Performance and Hardening extends the employee-directory course with one of the product capabilities that sits outside the first application-building arc.
+
+What we are trying to achieve is this: Run the lesson's own source file, connect the result to the relevant reference or operational document, and carry that understanding into the next lesson.
+
+By the end of this lesson, the learner should be able to identify the product capability this lesson exercises. Explain which artifact or command proves the concept. Know which reference document to use when applying it outside the tutorial.

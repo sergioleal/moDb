@@ -348,6 +348,20 @@ if(MODB_BUILD_EXAMPLES)
         docs/training/en/12-async-io/lesson_12_async_io.cpp)
     modb_add_training_lesson(employee_directory_lesson_13
         docs/training/en/13-read-replica/lesson_13_read_replica.cpp)
+    modb_add_training_lesson(employee_directory_lesson_14
+        docs/training/en/14-cli-and-diagnostics/lesson_14_cli_diagnostics.cpp)
+    modb_add_training_lesson(employee_directory_lesson_15
+        docs/training/en/15-storage-internals/lesson_15_storage_internals.cpp)
+    modb_add_training_lesson(employee_directory_lesson_16
+        docs/training/en/16-blobs-sets-and-maps/lesson_16_blobs_sets_maps.cpp)
+    modb_add_training_lesson(employee_directory_lesson_17
+        docs/training/en/17-catalog-and-baselines/lesson_17_catalog_baselines.cpp)
+    modb_add_training_lesson(employee_directory_lesson_18
+        docs/training/en/18-protocol-and-compatibility/lesson_18_protocol_compatibility.cpp)
+    modb_add_training_lesson(employee_directory_lesson_19
+        docs/training/en/19-replication-catchup-walonly/lesson_19_replication_catchup_walonly.cpp)
+    modb_add_training_lesson(employee_directory_lesson_20
+        docs/training/en/20-performance-and-hardening/lesson_20_performance_hardening.cpp)
 endif()
 
 if(MODB_BUILD_TRAINING)

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 16 -- Blobs, Sets, and Maps - Ring0 Training</title>
+  <link rel="stylesheet" href="../assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="../index.html">
+        <img src="../assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">Employee directory, lesson by lesson</span>
+        </span>
+      </a>
+      <nav class="topnav"><a class="nav-button" href="../15-storage-internals/15-storage-internals.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../17-catalog-and-baselines/17-catalog-and-baselines.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Lessons</p>
+        <ol class="lesson-list">
+          <li><a href="../index.html">Index</a></li>
+<li><a href="../01-binding-your-first-type/01-binding-your-first-type.html">Lesson 1</a></li>
+<li><a href="../02-persist-and-reopen/02-persist-and-reopen.html">Lesson 2</a></li>
+<li><a href="../03-transactions/03-transactions.html">Lesson 3</a></li>
+<li><a href="../04-handles-and-updates/04-handles-and-updates.html">Lesson 4</a></li>
+<li><a href="../05-relationships/05-relationships.html">Lesson 5</a></li>
+<li><a href="../06-snapshots/06-snapshots.html">Lesson 6</a></li>
+<li><a href="../07-queries-and-indexes/07-queries-and-indexes.html">Lesson 7</a></li>
+<li><a href="../08-networking/08-networking.html">Lesson 8</a></li>
+<li><a href="../09-remote-operations/09-remote-operations.html">Lesson 9</a></li>
+<li><a href="../10-facades/10-facades.html">Lesson 10</a></li>
+<li><a href="../11-graphs/11-graphs.html">Lesson 11</a></li>
+<li><a href="../12-async-io/12-async-io.html">Lesson 12</a></li>
+<li><a href="../13-read-replica/13-read-replica.html">Lesson 13</a></li>
+<li><a href="../14-cli-and-diagnostics/14-cli-and-diagnostics.html">Lesson 14</a></li>
+<li><a href="../15-storage-internals/15-storage-internals.html">Lesson 15</a></li>
+<li><a href="16-blobs-sets-and-maps.html" aria-current="page">Lesson 16</a></li>
+<li><a href="../17-catalog-and-baselines/17-catalog-and-baselines.html">Lesson 17</a></li>
+<li><a href="../18-protocol-and-compatibility/18-protocol-and-compatibility.html">Lesson 18</a></li>
+<li><a href="../19-replication-catchup-walonly/19-replication-catchup-walonly.html">Lesson 19</a></li>
+<li><a href="../20-performance-and-hardening/20-performance-and-hardening.html">Lesson 20</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Lesson 16 -- Blobs, Sets, and Maps</h1>
+          <p>Learn one capability, run the lesson&#x27;s own binary, then carry the idea into the next lesson.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>16-blobs-sets-and-maps.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="16-blobs-sets-and-maps.mp3"></audio>
+          <a class="script-link" href="16-blobs-sets-and-maps-narration.txt" target="_blank" rel="noopener noreferrer">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Lesson</h2>
+          <p>Lesson 16 -- Blobs, Sets, and Maps extends the employee-directory course with one of the product capabilities that sits outside the first application-building arc.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Run the lesson&#x27;s own source file, connect the result to the relevant reference or operational document, and carry that understanding into the next lesson.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Identify the product capability this lesson exercises. Explain which artifact or command proves the concept. Know which reference document to use when applying it outside the tutorial.</p>
+          <h3>Conceptual Layer</h3>
+          <p>Lesson 16 -- Blobs, Sets, and Maps is part of the bridge from tutorial code to operational use. The lesson keeps the example concrete, but the deeper habit is to connect every feature to the artifact that proves it: a page inventory, a baseline id, a version negotiation, a replication command, or a repeatable test result.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>Lesson 16 -- Blobs, Sets, and Maps continues the same course structure: one folder, one lesson document, one compiling source file, and one concrete product capability. The code is small on purpose; the important part is learning which durable artifact, command, or API surface proves the behavior.</p>
+        </section>
+
+        <blockquote><p><strong>Status:</strong> code written; run after Lesson 15.</p></blockquote>
+<h2>What You&#x27;ll Add</h2>
+<p>A durable training artifact attached to the same employee-directory database: a large note in <code>BlobStore</code>, a deduplicated <code>PersistentSet</code> of tags, and a <code>PersistentMap</code> of report scores.</p>
+<h2>New Concepts</h2>
+<ul>
+<li><code>BlobStore</code> as the storage layer under large binary values and collections.</li>
+<li><code>PersistentSet&lt;T&gt;</code> and <code>PersistentMap&lt;K,V&gt;</code>, both backed by BLBP blob pages.</li>
+<li>Why collection writes require an active database transaction.</li>
+</ul>
+<h2>Starting Point</h2>
+<p>The main <code>employee-directory.modb</code> file is still the chain artifact. Lesson 15 used a side lab file; this lesson returns to the main database and adds new state that Lesson 17 will inspect.</p>
+<h2>Steps</h2>
+<ul>
+<li>Bind a new <code>TrainingArtifact</code> type with three <code>BlobId</code> fields.</li>
+<li>Create a note blob, a tag set, and a score map inside one transaction.</li>
+<li>Store the blob ids in a durable object named <code>ops-artifact</code>.</li>
+<li>Reopen the collection facades in the same run and verify deduplication and key lookup.</li>
+</ul>
+<h2>Full Listing (End of Lesson)</h2>
+<p><a href="lesson_16_blobs_sets_maps.cpp" target="_blank" rel="noopener noreferrer">lesson_16_blobs_sets_maps.cpp</a></p>
+<h2>Build and Run</h2>
+<pre><code class="language-powershell">cmake --build --preset debug --target employee_directory_lesson_16
+.\build\debug\employee_directory_lesson_16.exe</code></pre>
+<h2>Expected Output</h2>
+<pre><code>Objective: add blob-backed training artifacts to the directory database.
+Created TrainingArtifact ops-artifact as object ...
+Note bytes: ...
+Tags stored: 3 (after duplicate inserts)
+Score for diagnostics: 95</code></pre>
+<h2>What to Notice</h2>
+<ul>
+<li>Collections are not inline fields. The object stores only the <code>BlobId</code> of each collection.</li>
+<li><code>PersistentSet</code> deduplicates by canonical element encoding.</li>
+<li><code>PersistentMap::put</code> replaces an existing key instead of creating a second entry.</li>
+</ul>
+<h2>Next</h2>
+<p>Continue with <a href="../17-catalog-and-baselines/17-catalog-and-baselines.html" target="_blank" rel="noopener noreferrer">Lesson 17 -- Catalog and Baselines</a>.</p>
+<h2>Related Reference</h2>
+<ul>
+<li><a href="../../../reference/relationships-collections.md" target="_blank" rel="noopener noreferrer">docs/reference/relationships-collections.md</a></li>
+<li><a href="../../../USO_DA_CLI.md" target="_blank" rel="noopener noreferrer">USO_DA_CLI.md</a> -- <code>blob</code> and <code>coll</code></li>
+</ul>
+        <nav class="bottomnav"><a class="nav-button" href="../15-storage-internals/15-storage-internals.html">Previous</a><a class="nav-button" href="../index.html">Index</a><a class="nav-button" href="../17-catalog-and-baselines/17-catalog-and-baselines.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

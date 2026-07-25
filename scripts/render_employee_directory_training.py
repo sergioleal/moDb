@@ -51,6 +51,13 @@ LESSONS = [
     ("11-graphs/11-graphs.md", "Lesson 11"),
     ("12-async-io/12-async-io.md", "Lesson 12"),
     ("13-read-replica/13-read-replica.md", "Lesson 13"),
+    ("14-cli-and-diagnostics/14-cli-and-diagnostics.md", "Lesson 14"),
+    ("15-storage-internals/15-storage-internals.md", "Lesson 15"),
+    ("16-blobs-sets-and-maps/16-blobs-sets-and-maps.md", "Lesson 16"),
+    ("17-catalog-and-baselines/17-catalog-and-baselines.md", "Lesson 17"),
+    ("18-protocol-and-compatibility/18-protocol-and-compatibility.md", "Lesson 18"),
+    ("19-replication-catchup-walonly/19-replication-catchup-walonly.md", "Lesson 19"),
+    ("20-performance-and-hardening/20-performance-and-hardening.md", "Lesson 20"),
 ]
 
 # Basenames of markdown files that are part of THIS rendered set -- used to
@@ -762,8 +769,53 @@ def lesson_sidebar(current_relpath: str) -> str:
 
 def hero_intro(title: str) -> str:
     if title == "Building an Employee Directory with Ring0":
-        return "A project-based C++ course: one real application, thirteen chained lessons, one persistent file."
+        return "A project-based C++ course: one real application, twenty chained lessons, one persistent file."
     return "Learn one capability, run the lesson's own binary, then carry the idea into the next lesson."
+
+
+def fallback_notes(markdown_relpath: str) -> dict[str, object]:
+    source = SOURCE_DIR / markdown_relpath
+    markdown = source.read_text(encoding="utf-8")
+    title = page_title(markdown, Path(markdown_relpath).stem)
+    return {
+        "context": (
+            f"{title} extends the employee-directory course with one of the product "
+            "capabilities that sits outside the first application-building arc."
+        ),
+        "goal": (
+            "Run the lesson's own source file, connect the result to the relevant "
+            "reference or operational document, and carry that understanding into the next lesson."
+        ),
+        "outcomes": [
+            "Identify the product capability this lesson exercises.",
+            "Explain which artifact or command proves the concept.",
+            "Know which reference document to use when applying it outside the tutorial.",
+        ],
+        "narration": (
+            f"{title} continues the same course structure: one folder, one lesson document, "
+            "one compiling source file, and one concrete product capability. The code is small "
+            "on purpose; the important part is learning which durable artifact, command, or API "
+            "surface proves the behavior."
+        ),
+    }
+
+
+def lesson_notes(markdown_relpath: str) -> dict[str, object]:
+    return LESSON_NOTES.get(notes_key(markdown_relpath), fallback_notes(markdown_relpath))
+
+
+def concept_deep_dive(markdown_relpath: str) -> str:
+    key = notes_key(markdown_relpath)
+    if key in CONCEPT_DEEP_DIVE:
+        return CONCEPT_DEEP_DIVE[key]
+    title = page_title((SOURCE_DIR / markdown_relpath).read_text(encoding="utf-8"),
+                       Path(markdown_relpath).stem)
+    return (
+        f"{title} is part of the bridge from tutorial code to operational use. "
+        "The lesson keeps the example concrete, but the deeper habit is to connect every "
+        "feature to the artifact that proves it: a page inventory, a baseline id, a "
+        "version negotiation, a replication command, or a repeatable test result."
+    )
 
 
 def audio_panel(markdown_relpath: str) -> str:
@@ -777,19 +829,18 @@ def audio_panel(markdown_relpath: str) -> str:
             <p class="audio-copy">Place your generated narration file at <code>{audio_href}</code>, then use the player below.</p>
           </div>
           <audio controls preload="none" src="{audio_href}"></audio>
-          <a class="script-link" href="{script_href}">Open narration script</a>
+          <a class="script-link" href="{script_href}" target="_blank" rel="noopener noreferrer">Open narration script</a>
         </section>
 """
 
 
 def rich_narration(markdown_relpath: str) -> str:
-    key = notes_key(markdown_relpath)
-    notes = LESSON_NOTES[key]
+    notes = lesson_notes(markdown_relpath)
     outcomes = " ".join(notes["outcomes"])
     return (
         notes["narration"].strip()
         + "\n\n"
-        + CONCEPT_DEEP_DIVE[key]
+        + concept_deep_dive(markdown_relpath)
         + "\n\nThe context for this lesson is that "
         + notes["context"]
         + "\n\nWhat we are trying to achieve is this: "
@@ -802,8 +853,7 @@ def rich_narration(markdown_relpath: str) -> str:
 
 
 def explanation_panel(markdown_relpath: str) -> str:
-    key = notes_key(markdown_relpath)
-    notes = LESSON_NOTES[key]
+    notes = lesson_notes(markdown_relpath)
     outcomes = " ".join(notes["outcomes"])
     return f"""
         <section class="explanation-panel">
@@ -815,16 +865,16 @@ def explanation_panel(markdown_relpath: str) -> str:
           <h3>Learning Outcomes</h3>
           <p>{html.escape(outcomes)}</p>
           <h3>Conceptual Layer</h3>
-          <p>{html.escape(CONCEPT_DEEP_DIVE[key])}</p>
+          <p>{html.escape(concept_deep_dive(markdown_relpath))}</p>
         </section>
 """
 
 
 def instructor_narrative_panel(markdown_relpath: str) -> str:
-    key = notes_key(markdown_relpath)
+    notes = lesson_notes(markdown_relpath)
     paragraphs = "\n".join(
         f"<p>{html.escape(paragraph.strip())}</p>"
-        for paragraph in LESSON_NOTES[key]["narration"].strip().split("\n\n")
+        for paragraph in notes["narration"].strip().split("\n\n")
     )
     return f"""
         <section class="narrative-panel">
