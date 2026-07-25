@@ -1,0 +1,28 @@
+{
+  "schema": "modb.loadtest.environments",
+  "schema_version": 1,
+  "environments": [
+    {
+      "id": "desktop-windows",
+      "label": "Meu desktop (Windows, dev)",
+      "kind": "local",
+      "host_class": "dev-windows",
+      "os_hint": "windows",
+      "notes": "Máquina de desenvolvimento; ruidosa (uso concorrente), não usar para gate — só para diagnóstico e smoke local."
+    },
+    {
+      "id": "linux-remoto",
+      "label": "Servidor Linux remoto (bench)",
+      "kind": "ssh",
+      "host_class": "bench-linux-01",
+      "os_hint": "linux",
+      "connection": {
+        "host": "161.35.9.43",
+        "default_user": "root",
+        "remote_work_dir": "/tmp/modb_load",
+        "binary_name": "modb_load"
+      },
+      "notes": "Host dedicado a benchmark/carga. Senha do SSH nunca fica neste arquivo nem em nenhum resultado — é solicitada interativamente pelo OpenSSH."
+    }
+  ]
+}

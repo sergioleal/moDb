@@ -33,7 +33,7 @@ variação e o critério de aceite.
 - **usuário**: um objeto persistente do tipo `User` (registro), não uma sessão
   humana. As escalas de 10k a 1M deste plano são **quantidade de objetos**.
 - **sessão**: uma conexão de cliente concorrente. Concorrência existe como
-  dimensão secundária (§4.4) com valores modestos, porque o motor tem **um
+  dimensão secundária (§4.5) com valores modestos, porque o motor tem **um
   único escritor de transação** (Fase 5) e o servidor assume poucas conexões
   por instância ([ADR-011](decisions/ADR-011-concorrencia-do-servidor.md)).
   Escalar sessões não escala escrita; mede contenção e fairness.
@@ -115,7 +115,80 @@ medição). `remote_client_local` é o alvo para questões de rede e é limitado
 escalas `10k`/`100k`, porque 1M objetos atravessando WAN mede o enlace, não o
 banco.
 
-### 4.4 Dimensões secundárias
+### 4.4 D4 — Ambiente registrado
+
+D3 responde "qual topologia" (o que roda onde, em relação a quem); D4 responde
+"em qual máquina cadastrada" — as duas são ortogonais. Topologias locais
+(`embedded`, `loopback`) rodam sobre um único ambiente registrado (o que
+executa o comando); topologias remotas (`remote_colocated`,
+`remote_client_local`) nomeiam papéis (cliente/servidor) que cada um resolve
+para um ambiente registrado, possivelmente dois diferentes.
+
+Sem um ambiente identificado, "máquina de bench" é uma string digitada de
+memória a cada execução — exatamente o modo como o risco 9 (§17) acontece. Um
+registro nomeado existe para ser escolhido de uma lista, não retranscrito.
+
+Catálogo: `loadtests/environments.json`, versionado no Git — sem segredo, só
+identidade e forma de alcançar a máquina (mesma prática já usada em
+`scripts/run-remote-benchmark.ps1`, que hoje tem o IP embutido no script em vez
+de cadastrado; isso sai como parte desta dimensão, não só na Subfase H).
+
+```json
+{
+  "schema": "modb.loadtest.environments",
+  "schema_version": 1,
+  "environments": [
+    {
+      "id": "desktop-windows",
+      "label": "Meu desktop (Windows, dev)",
+      "kind": "local",
+      "host_class": "dev-windows",
+      "os_hint": "windows",
+      "notes": "Máquina de desenvolvimento; ruidosa, não usar para gate."
+    },
+    {
+      "id": "linux-remoto",
+      "label": "Servidor Linux remoto (bench)",
+      "kind": "ssh",
+      "host_class": "bench-linux-01",
+      "os_hint": "linux",
+      "connection": {
+        "host": "161.35.9.43",
+        "default_user": "root",
+        "remote_work_dir": "/tmp/modb_load",
+        "binary_name": "modb_load"
+      }
+    }
+  ]
+}
+```
+
+Campos:
+
+- `id`: slug estável usado por `--environment`; nunca renomeado — renomear
+  significa cadastrar um novo id e marcar o antigo `"deprecated": true`, para
+  não invalidar séries antigas que o referenciam;
+- `kind`: `local` (processo no host onde o comando roda) ou `ssh` (host remoto
+  por OpenSSH — credenciais nunca no arquivo, solicitadas interativamente,
+  igual ao script atual);
+- `host_class`: o rótulo de comparabilidade de §13.4, resolvido a partir do
+  cadastro em vez de digitado a cada execução — fecha o risco 9;
+- `connection`: só para `kind=ssh`; host, usuário padrão, diretório e nome do
+  binário remoto; nenhuma senha ou token;
+- `notes`: texto livre, entra em `run_note` quando relevante (ex.: "não usar
+  para gate").
+
+CLI: `--environment ID[,ID...]` seleciona onde o comando de carga executa de
+fato. Implementado hoje, fora da ordem de implementação da Subfase A, em
+`scripts/run-remote-benchmark.ps1 -Environment <id>`: o script resolve host,
+usuário e caminho remoto pelo catálogo e recusa `kind` diferente de `ssh`. O
+`modb_load` da Subfase A adota a mesma interface.
+
+`environment` não entra no `case_id` (mantém o princípio 3 de ids estáveis),
+mas é gravado em `case_start`, no rollup (`environment`, §13.3) e é filtro de
+primeira classe na CLI e no dashboard (§13.11).
+
+### 4.5 Dimensões secundárias
 
 Fixas em um valor padrão; variadas apenas por caso dirigido a risco.
 
@@ -186,6 +259,7 @@ repetição da flag:
 | `--scale 10k,1M` | restringe D1 |
 | `--workload create_only,crud_full` | restringe D2 |
 | `--target embedded,loopback` | restringe D3 |
+| `--environment ID` | restringe D4 — resolve host/kind pelo catálogo `loadtests/environments.json` |
 | `--case ID` | caso exato; ignora perfil e demais seletores |
 | `--filter SUBSTR` | casamento por substring no `case_id` (mesma semântica do `modb_bench --filter`) |
 | `--exclude SUBSTR` | remove do conjunto após todos os filtros |
@@ -672,7 +746,7 @@ A chave do desenho é `target.hpp`: uma interface de CRUD sobre `User` com duas
 implementações. Workload e matriz não sabem se estão embedded ou em rede — é o
 que permite que o mesmo caso rode nos quatro alvos.
 
-## 14. Ordem de implementação
+## 15. Ordem de implementação
 
 Uma subfase por branch, conforme a convenção do projeto.
 
@@ -696,7 +770,7 @@ execução já deposita um ponto histórico, então nenhuma medição feita entr
 é perdida. Se a história fosse a última subfase, todo o trabalho de D a I
 produziria números que ninguém consegue comparar depois.
 
-## 15. Critérios de aceite
+## 16. Critérios de aceite
 
 O plano estará implementado quando:
 
@@ -741,7 +815,7 @@ Especificamente para a série histórica:
   mesma leitura que `modb_load trend`/`gate` para o mesmo caso e métrica — se
   divergirem, um dos dois está errado.
 
-## 16. Riscos e questões abertas
+## 17. Riscos e questões abertas
 
 1. **Sentido de "usuários"** — este plano assume volume de registros (§2). Se o
    alvo for sessões simultâneas, D1 e concorrência trocam de papel; decidir

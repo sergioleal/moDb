@@ -1,13 +1,16 @@
-<#
+﻿<#
 .SYNOPSIS
-Envia o benchmark Linux ao servidor e executa a carga remotamente.
+Envia o benchmark Linux a um ambiente registrado e executa a carga remotamente.
 
 .EXAMPLE
-.\scripts\run-remote-benchmark.ps1 -Thousands 100 -User root
+.\scripts\run-remote-benchmark.ps1 -Thousands 100 -Environment linux-remoto
 
 .NOTES
-O OpenSSH solicitará a senha no scp e novamente no ssh. A senha não é
-armazenada neste script nem exposta na linha de comando.
+O ambiente (host, usuário padrão, caminho remoto) vem de loadtests/environments.json
+(§4.4 do plano de testes de carga) — cadastre novos ambientes editando esse
+arquivo, nunca hardcode host neste script. O OpenSSH solicitará a senha no scp
+e novamente no ssh. A senha não é armazenada neste script, no registro de
+ambientes, nem exposta na linha de comando.
 #>
 
 [CmdletBinding()]
@@ -18,7 +21,11 @@ param(
 
     [Parameter()]
     [ValidatePattern('^[a-zA-Z0-9._-]+$')]
-    [string]$User = 'root',
+    [string]$Environment = 'linux-remoto',
+
+    [Parameter()]
+    [ValidatePattern('^[a-zA-Z0-9._-]+$')]
+    [string]$User,
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
@@ -26,13 +33,15 @@ param(
 
     [Parameter()]
     [ValidatePattern('^/[a-zA-Z0-9._/-]+$')]
-    [string]$RemotePath = '/tmp/modb_object_bench'
+    [string]$RemotePath,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$EnvironmentsFile = (Join-Path $PSScriptRoot '..\loadtests\environments.json')
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-$HostName = '161.35.9.43'
 
 function Require-Command {
     param([Parameter(Mandatory)][string]$Name)
@@ -43,6 +52,47 @@ function Require-Command {
     }
     return $command.Source
 }
+
+function Resolve-Environment {
+    param(
+        [Parameter(Mandatory)][string]$Id,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Registro de ambientes não encontrado: $Path"
+    }
+    $catalog = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $entry = $catalog.environments | Where-Object { $_.id -eq $Id }
+    if (-not $entry) {
+        $known = ($catalog.environments | ForEach-Object { $_.id }) -join ', '
+        throw "Ambiente '$Id' não está cadastrado em $Path. Ambientes conhecidos: $known"
+    }
+    if ($entry.kind -ne 'ssh') {
+        throw "Ambiente '$Id' é kind='$($entry.kind)' — este script só executa carga em ambientes kind='ssh'."
+    }
+    if (-not $entry.connection -or -not $entry.connection.host) {
+        throw "Ambiente '$Id' não tem 'connection.host' configurado em $Path."
+    }
+    return $entry
+}
+
+$env_entry = Resolve-Environment -Id $Environment -Path $EnvironmentsFile
+$HostName = $env_entry.connection.host
+if (-not $User) { $User = $env_entry.connection.default_user }
+if (-not $User) { $User = 'root' }
+if (-not $RemotePath) {
+    $remoteWorkDir = $env_entry.connection.remote_work_dir
+    $binaryName = $env_entry.connection.binary_name
+    if ($remoteWorkDir -and $binaryName) {
+        $RemotePath = "$remoteWorkDir/$binaryName"
+    }
+    else {
+        $RemotePath = '/tmp/modb_object_bench'
+    }
+}
+
+Write-Host "Ambiente: $Environment ($($env_entry.label)) -> ${User}@${HostName}"
 
 $scp = Require-Command 'scp'
 $ssh = Require-Command 'ssh'

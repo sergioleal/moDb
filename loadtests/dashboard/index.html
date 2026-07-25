@@ -243,6 +243,7 @@ tbody tr.sep td { border-top: 2px solid var(--axis); }
   <label class="f"><span>Workload</span><select id="f-workload"></select></label>
   <label class="f"><span>Alvo</span><select id="f-target"></select></label>
   <label class="f"><span>Escala</span><select id="f-scale"></select></label>
+  <label class="f"><span>Ambiente</span><select id="f-environment"></select></label>
   <label class="f"><span>Classe de host</span><select id="f-host"></select></label>
   <label class="f"><span>Caso da tendência</span><select id="f-case"></select></label>
   <label class="f"><span>Fase</span><select id="f-phase"></select></label>
@@ -448,11 +449,11 @@ function ingest(rows, bad, note) {
     .filter(r => r.started_at && r.case_id)
     .sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
 
-  const missing = state.rows.filter(r => !r.commit || !r.series_key || !r.env || !r.env.host_class || !r.status);
+  const missing = state.rows.filter(r => !r.commit || !r.series_key || !r.env || !r.env.host_class || !r.environment || !r.status);
   banners([
     state.demo ? { cls: "demo", strong: "Série de exemplo.", text: "Dados sintéticos para demonstrar as leituras do painel — nenhuma medição real. Carregue seu series.jsonl para substituir." } : null,
     bad && bad.length ? { cls: "err", strong: `${bad.length} linha(s) ignorada(s).`, text: bad.slice(0, 4).join(" · ") } : null,
-    missing.length ? { cls: "err", strong: `${missing.length} rollup(s) sem procedência completa.`, text: "Falta commit, series_key, host_class ou status — o indexador deve rejeitar (§13.3)." } : null,
+    missing.length ? { cls: "err", strong: `${missing.length} rollup(s) sem procedência completa.`, text: "Falta commit, series_key, host_class, environment ou status — o indexador deve rejeitar (§13.3)." } : null,
     note ? { cls: "", strong: note, text: "" } : null,
   ].filter(Boolean));
 
@@ -510,6 +511,7 @@ function buildFilters() {
   fill(document.getElementById("f-workload"), uniq(state.rows.map(r => r.workload)), "Todos");
   fill(document.getElementById("f-target"), uniq(state.rows.map(r => r.target)), "Todos");
   fill(document.getElementById("f-scale"), uniqScales(), "Todas");
+  fill(document.getElementById("f-environment"), uniq(state.rows.map(r => r.environment)), "Todos");
   fill(document.getElementById("f-host"), uniq(state.rows.map(r => r.env && r.env.host_class)), "Todas");
   const m = document.getElementById("f-metric");
   if (!m.options.length) {
@@ -566,6 +568,7 @@ function applyFilters(opts) {
     if (g("f-workload") !== "*" && r.workload !== g("f-workload")) return false;
     if (g("f-target") !== "*" && r.target !== g("f-target")) return false;
     if (g("f-scale") !== "*" && r.scale !== g("f-scale")) return false;
+    if (g("f-environment") !== "*" && r.environment !== g("f-environment")) return false;
     if (g("f-host") !== "*" && (!r.env || r.env.host_class !== g("f-host"))) return false;
     if (onlyComparable && r.comparable === false) return false;
     if (!includeFailed && r.status !== "completed") return false;
@@ -772,7 +775,7 @@ function renderTrend(rows, metricKey, phaseName) {
       { value: ref === null ? "—" : def.fmt(ref) + " " + def.unit, name: "mediana das 5 anteriores" },
       { value: ref ? fmtSignedPct((p.v - ref) / ref) : "—", name: "vs mediana" },
       { value: p.row.commit_short || (p.row.commit || "").slice(0, 7), name: p.row.branch || "" },
-      { value: p.row.status, name: (p.row.env && p.row.env.host_class) || "" },
+      { value: p.row.status, name: [p.row.environment, p.row.env && p.row.env.host_class].filter(Boolean).join(" · ") },
     ];
     const head = fmtDateTime(p.row.started_at);
     const show = e => showTip(e, head, rows2);
@@ -1028,7 +1031,7 @@ function renderTiles(caseRows, scoped, metricKey, phaseName) {
     value: lastVal === null ? "—" : def.fmt(lastVal), unit: def.unit,
     delta: ref === null ? { cls: "", text: "histórico insuficiente para comparar (mínimo 3 pontos)" }
       : { cls: gate.worse > 0 ? "delta-bad" : "delta-good", text: `${fmtSignedPct(rawRel)} vs mediana das 5 anteriores` },
-    foot: lastRow ? `${fmtDateTime(lastRow.started_at)} · ${lastRow.commit_short || (lastRow.commit || "").slice(0, 7)} · ${(lastRow.env && lastRow.env.host_class) || ""}` : "",
+    foot: lastRow ? `${fmtDateTime(lastRow.started_at)} · ${lastRow.commit_short || (lastRow.commit || "").slice(0, 7)} · ${lastRow.environment || (lastRow.env && lastRow.env.host_class) || ""}` : "",
   });
 
   const gateMap = { ok: ["good", "aprovado"], alert: ["warning", "alerta"], fail: ["critical", "reprovado"], insufficient: ["neutral", "histórico insuficiente"] };
@@ -1063,6 +1066,7 @@ const COLUMNS = [
   { key: "started_at", label: "Data", left: true, get: r => fmtDateTime(r.started_at), sort: r => new Date(r.started_at).getTime() },
   { key: "case_id", label: "Caso", left: true, get: r => r.case_id, sort: r => r.case_id },
   { key: "commit", label: "Commit", left: true, get: r => r.commit_short || (r.commit || "").slice(0, 7), sort: r => r.commit || "" },
+  { key: "environment", label: "Ambiente", left: true, get: r => r.environment || "", sort: r => r.environment || "" },
   { key: "host", label: "Host", left: true, get: r => (r.env && r.env.host_class) || "", sort: r => (r.env && r.env.host_class) || "" },
   { key: "build", label: "Build", left: true, get: r => (r.env && r.env.build_type) || "", sort: r => (r.env && r.env.build_type) || "" },
   { key: "value", label: "Valor", get: (r, ctx) => { const v = valueOf(r, ctx.metric, ctx.phase); return v === null ? "—" : ctx.def.fmt(v); }, sort: (r, ctx) => valueOf(r, ctx.metric, ctx.phase) },
@@ -1136,13 +1140,13 @@ function selectRun(row) {
 
 function exportCsv(rows, ctx) {
   const head = ["started_at", "case_id", "workload", "target", "scale", "objects", "commit", "branch",
-    "host_class", "build_type", "series_key", "status", "comparable", "phase", "metric", "value", "unit"];
+    "environment", "host_class", "build_type", "series_key", "status", "comparable", "phase", "metric", "value", "unit"];
   const lines = [head.join(";")];
   for (const r of rows) {
     const v = valueOf(r, ctx.metric, ctx.phase);
     lines.push([
       r.started_at, r.case_id, r.workload, r.target, r.scale, r.objects,
-      r.commit, r.branch, (r.env || {}).host_class, (r.env || {}).build_type,
+      r.commit, r.branch, r.environment, (r.env || {}).host_class, (r.env || {}).build_type,
       r.series_key, r.status, r.comparable, ctx.phase, ctx.metric,
       v === null ? "" : String(v).replace(".", ","), ctx.def.unit,
     ].map(x => x === undefined || x === null ? "" : String(x)).join(";"));
@@ -1197,14 +1201,16 @@ function render() {
     `${caseId} · fase ${PHASE_LABEL[phase] || phase} · ${caseRows.length} ponto(s)` +
     (caseRows.length ? ` · ${fmtDate(caseRows[0].started_at)} → ${fmtDate(caseRows[caseRows.length - 1].started_at)}` : "");
 
-  // O gráfico de escala só pode variar o volume: workload e alvo vêm do caso
-  // selecionado, senão a linha compara medições de naturezas diferentes.
+  // O gráfico de escala só pode variar o volume: workload, alvo e ambiente vêm
+  // do caso selecionado, senão a linha mistura hardware ou topologias diferentes
+  // e "custo por objeto cresce com o volume" deixa de significar isso.
   const anchor = caseRows[0] || scoped.find(r => r.case_id === caseId) || null;
   const scaleRows = anchor
     ? state.rows.filter(r => r.workload === anchor.workload && r.target === anchor.target &&
+        (!anchor.environment || r.environment === anchor.environment) &&
         r.comparable !== false && (document.getElementById("f-failed").checked || r.status === "completed"))
     : [];
-  const ctxLabel = anchor ? `${anchor.workload} · ${anchor.target}` : "";
+  const ctxLabel = anchor ? [anchor.workload, anchor.target, anchor.environment].filter(Boolean).join(" · ") : "";
 
   renderTiles(caseRows, scoped, metric, phase);
   renderTrend(caseRows, metric, phase);
@@ -1233,17 +1239,27 @@ function demoSeries() {
   const rnd = mulberry32(20260725);
   const rows = [];
   const cases = [
-    { workload: "create_only", target: "embedded", scale: "10k", objects: 1e4, base: 148000, runs: 26, drift: 0, step: null },
-    { workload: "create_only", target: "embedded", scale: "100k", objects: 1e5, base: 131000, runs: 26, drift: 0.0018, step: null },
-    { workload: "create_only", target: "embedded", scale: "1M", objects: 1e6, base: 96000, runs: 7, drift: 0, step: null },
-    { workload: "create_only", target: "loopback", scale: "100k", objects: 1e5, base: 74000, runs: 18, drift: 0, step: null },
-    { workload: "create_delete_reverse", target: "embedded", scale: "100k", objects: 1e5, base: 118000, runs: 22, drift: 0, step: { at: 15, factor: 0.87 } },
-    { workload: "crud_full", target: "embedded", scale: "100k", objects: 1e5, base: 61000, runs: 20, drift: 0, step: null },
+    { workload: "create_only", target: "embedded", scale: "10k", objects: 1e4, base: 148000, runs: 26, drift: 0, step: null, environment: "desktop-windows" },
+    { workload: "create_only", target: "embedded", scale: "100k", objects: 1e5, base: 131000, runs: 26, drift: 0.0018, step: null, environment: "desktop-windows" },
+    { workload: "create_only", target: "embedded", scale: "1M", objects: 1e6, base: 96000, runs: 7, drift: 0, step: null, environment: "desktop-windows" },
+    { workload: "create_only", target: "loopback", scale: "100k", objects: 1e5, base: 74000, runs: 18, drift: 0, step: null, environment: "desktop-windows" },
+    { workload: "create_delete_reverse", target: "embedded", scale: "100k", objects: 1e5, base: 118000, runs: 22, drift: 0, step: { at: 15, factor: 0.87 }, environment: "desktop-windows" },
+    { workload: "crud_full", target: "embedded", scale: "100k", objects: 1e5, base: 61000, runs: 20, drift: 0, step: null, environment: "desktop-windows" },
+    // mesmo workload/alvo do primeiro caso, mas no ambiente registrado remoto —
+    // demonstra a nova dimensão: mesma topologia, host_class e hardware diferentes.
+    { workload: "create_only", target: "remote_colocated", scale: "100k", objects: 1e5, base: 121000, runs: 14, drift: 0, step: null, environment: "linux-remoto" },
   ];
   const t0 = Date.parse("2026-01-09T02:10:00Z");
   const week = 7 * 86400000;
   const commits = "0123456789abcdef";
   const mkCommit = () => { let s = ""; for (let i = 0; i < 40; i++) s += commits[Math.floor(rnd() * 16)]; return s; };
+
+  // Espelha loadtests/environments.json — cada ambiente registrado resolve seu
+  // próprio host_class, então a série nunca depende de alguém digitar certo.
+  const ENVIRONMENTS = {
+    "desktop-windows": { host_id: "h7c1a2", host_class: "dev-windows", os: "Windows 11 Pro 10.0.26200", cpu_model: "Intel Core i7-13700", fs: "ntfs" },
+    "linux-remoto": { host_id: "h9f2b6", host_class: "bench-linux-01", os: "Linux 6.8.0", cpu_model: "AMD EPYC 7443P", fs: "ext4" },
+  };
 
   for (const c of cases) {
     const phases = c.workload === "crud_full"
@@ -1284,16 +1300,17 @@ function demoSeries() {
         series_key_version: 1,
         case_id: `load.${c.workload}.${c.target}.${c.scale}`,
         workload: c.workload, target: c.target, scale: c.scale, objects: c.objects, variant: "",
+        environment: c.environment,
         run_id: `019f${i.toString(16).padStart(4, "0")}${c.scale}${c.workload.slice(0, 3)}`,
         started_at: started, repeat_index: 0,
         commit, commit_short: commit.slice(0, 7), branch: "master", tree_dirty: false, diff_hash: null,
         workload_version: 1, dataset_id: "user_v1", dataset_version: 1, seed: "123456",
-        env: {
-          host_id: "h7c1a2", host_class: c.target === "embedded" ? "bench-linux-01" : "bench-linux-01",
-          os: "Linux 6.8.0", arch: "x86_64", cpu_model: "AMD EPYC 7443P", cores_physical: 8, cores_logical: 16,
-          ram_gb: 32, fs: "ext4", device_class: "nvme", build_type: "Release", compiler,
+        env: (() => { const e = ENVIRONMENTS[c.environment]; return {
+          host_id: e.host_id, host_class: e.host_class,
+          os: e.os, arch: "x86_64", cpu_model: e.cpu_model, cores_physical: 8, cores_logical: 16,
+          ram_gb: 32, fs: e.fs, device_class: "nvme", build_type: "Release", compiler,
           sanitizers: "none", page_size: 4096, format_version: 1, protocol_version: 1,
-        },
+        }; })(),
         params: {
           payload: "normal", batch: 1000, concurrency: 1, readers: 0,
           durability: "sync_real", cache: "warm", primary_storage: "full",
@@ -1340,7 +1357,7 @@ document.addEventListener("drop", e => {
   dz.classList.remove("drag");
   if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) readFiles(e.dataTransfer.files);
 });
-for (const id of ["f-period", "f-workload", "f-target", "f-scale", "f-host", "f-comparable", "f-failed"]) {
+for (const id of ["f-period", "f-workload", "f-target", "f-scale", "f-environment", "f-host", "f-comparable", "f-failed"]) {
   document.getElementById(id).addEventListener("change", () => { refreshDependentFilters(); render(); });
 }
 for (const id of ["f-case", "f-phase", "f-metric"]) {
