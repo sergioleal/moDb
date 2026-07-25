@@ -133,6 +133,59 @@ void test_expand_matrix_environment_cross_product(TestSuite& suite) {
                "2 ambientes para 1 caso base devem produzir 2 casos (cross-product, não override)");
 }
 
+// Dívida D1 (docs-process/PLANO_IMPLEMENTACAO_CARGA.md §2): case_id não pode
+// prometer uma dimensão secundária que o runtime ignora.
+void test_expand_matrix_rejects_unimplemented_concurrency(TestSuite& suite) {
+    std::vector<Case> cases(1);
+    cases[0].workload = "create_only";
+    cases[0].target = "embedded";
+    cases[0].scale = "10k";
+    cases[0].objects = 10'000;
+
+    MatrixSelectors selectors;
+    selectors.concurrency = {"16"};
+    auto expanded = expand_matrix(cases, selectors);
+    suite.check(!expanded.error.empty(),
+               "--concurrency 16 deve falhar em vez de gerar um case_id que o runtime ignora");
+    suite.check(expanded.error.find("Subfase M") != std::string::npos,
+               "a mensagem de erro deve citar a subfase que implementará concorrência");
+    suite.check(expanded.cases.empty(), "nenhum caso deve sobreviver quando a dimensão é rejeitada");
+}
+
+void test_expand_matrix_accepts_implemented_payload(TestSuite& suite) {
+    std::vector<Case> cases(1);
+    cases[0].workload = "create_only";
+    cases[0].target = "embedded";
+    cases[0].scale = "10k";
+    cases[0].objects = 10'000;
+
+    MatrixSelectors selectors;
+    selectors.payload = {"fat"};
+    auto expanded = expand_matrix(cases, selectors);
+    suite.check(expanded.error.empty(), "--payload fat deve continuar funcionando (dimensão honesta)");
+    suite.check(expanded.cases.size() == 1 && expanded.cases.front().payload == "fat",
+               "o caso resultante deve carregar payload=fat");
+}
+
+void test_unimplemented_dimension_reason_direct(TestSuite& suite) {
+    Case ok;
+    ok.workload = "create_only";
+    ok.target = "embedded";
+    ok.scale = "10k";
+    suite.check(unimplemented_dimension_reason(ok).empty(),
+               "case com todas as dimensões no padrão não deve ser rejeitado");
+
+    Case bad_cache = ok;
+    bad_cache.cache = "oversubscribed";
+    suite.check(!unimplemented_dimension_reason(bad_cache).empty(),
+               "cache não padrão deve ser rejeitado (sem dispatch implementado)");
+
+    Case bad_variant = ok;
+    bad_variant.explicit_variant = "c16";
+    suite.check(!unimplemented_dimension_reason(bad_variant).empty(),
+               "variante explícita de --case não decodificada deve ser rejeitada");
+}
+
 void test_expand_matrix_repeat(TestSuite& suite) {
     std::vector<Case> cases(1);
     cases[0].workload = "create_only";
@@ -207,6 +260,9 @@ int main() {
     test_expand_matrix_empty_set_is_error(suite);
     test_expand_matrix_case_overrides_profile(suite);
     test_expand_matrix_environment_cross_product(suite);
+    test_expand_matrix_rejects_unimplemented_concurrency(suite);
+    test_expand_matrix_accepts_implemented_payload(suite);
+    test_unimplemented_dimension_reason_direct(suite);
     test_expand_matrix_repeat(suite);
     test_expand_matrix_filter_and_exclude(suite);
     test_known_catalogs(suite);

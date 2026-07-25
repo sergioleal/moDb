@@ -171,6 +171,39 @@ std::string Case::case_id() const {
     return id;
 }
 
+std::string unimplemented_dimension_reason(const Case& c) {
+    // --case com sufixo explícito não é decodificado em dimensões concretas
+    // (parse_case_id só guarda o texto em explicit_variant) -- não há como
+    // validar o que ele promete, então é recusado direto, não silenciosamente
+    // aceito como se fosse inócuo.
+    if (!c.explicit_variant.empty()) {
+        return "variante explícita em --case ('" + c.explicit_variant +
+               "') ainda não é suportada: nenhuma dimensão secundária além de "
+               "payload/batch tem dispatch implementado (§4.5, dívida D1) -- descreva "
+               "a variação por seletor estruturado, não no sufixo do id";
+    }
+    if (c.concurrency != 1) {
+        return "concurrency=" + std::to_string(c.concurrency) +
+               " ainda não tem dispatch implementado (chega na Subfase M) -- " + c.case_id();
+    }
+    if (c.readers != 0) {
+        return "readers=" + std::to_string(c.readers) +
+               " ainda não tem dispatch implementado -- " + c.case_id();
+    }
+    if (c.durability != "sync_real") {
+        return "durability='" + c.durability + "' ainda não tem dispatch implementado -- " +
+               c.case_id();
+    }
+    if (c.cache != "warm") {
+        return "cache='" + c.cache + "' ainda não tem dispatch implementado -- " + c.case_id();
+    }
+    if (c.primary_storage != "full") {
+        return "primary_storage='" + c.primary_storage +
+               "' ainda não tem dispatch implementado -- " + c.case_id();
+    }
+    return "";
+}
+
 bool parse_case_id(std::string_view case_id, Case& out, std::string& error) {
     auto parts = split_dot(case_id);
     if (parts.size() < 4 || parts[0] != "load") {
@@ -307,6 +340,16 @@ ExpandResult expand_matrix(const std::vector<Case>& profile_cases,
         result.error = "conjunto vazio depois da composição de seletores (§6.1) -- nunca "
                        "\"executou zero casos com sucesso\": revise perfil, seletores, filter e exclude";
         return result;
+    }
+
+    // Dívida D1 (docs-process/PLANO_IMPLEMENTACAO_CARGA.md §2): recusar aqui,
+    // não deixar o case_id prometer uma dimensão que o runtime ignora.
+    for (const auto& c : working) {
+        auto reason = unimplemented_dimension_reason(c);
+        if (!reason.empty()) {
+            result.error = reason;
+            return result;
+        }
     }
 
     result.cases = std::move(working);

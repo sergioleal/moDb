@@ -98,6 +98,14 @@ struct ExpandResult {
     std::string error;   // não vazio = falhou; `cases` fica vazio
 };
 
+// Devolve o motivo pelo qual `c` não pode ser executado hoje, ou "" se todas
+// as dimensões secundárias estão implementadas para o valor que carregam.
+// `case_id()` nunca deve prometer uma variante que o runtime ignora (dívida
+// D1, docs-process/PLANO_IMPLEMENTACAO_CARGA.md §2) — payload e batch são as
+// únicas honestas; concurrency/readers/durability/cache/primary_storage
+// crescem para a lista à medida que a subfase que as implementa landa.
+[[nodiscard]] std::string unimplemented_dimension_reason(const Case& c);
+
 // Expande `profile_cases` (o conjunto inicial de um perfil; vazio se
 // `selectors.case_ids` for usado) segundo a semântica de composição de §6.1:
 // 1. `--case` substitui tudo por uma lista explícita;
