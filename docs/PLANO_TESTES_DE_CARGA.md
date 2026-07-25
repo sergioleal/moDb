@@ -410,8 +410,10 @@ a primeira execução real de `1M`, o valor medido substitui a extrapolação.
 
 Fluxo, evoluindo o `scripts/run-remote-benchmark.ps1` atual:
 
-1. host e porta são parâmetros, não constantes no script (o script atual tem o
-   IP embutido — isso sai);
+1. host, usuário e caminho remoto vêm do ambiente registrado (§4.4,
+   `--environment ID`), resolvidos por `loadtests/environments.json` — não são
+   mais constantes no script. **Já implementado**: o script atual aceita
+   `-Environment <id>` e recusa um ambiente cujo `kind` não seja `ssh`;
 2. validação de que o binário é ELF antes do envio, como hoje;
 3. validação de espaço livre no host remoto antes de iniciar;
 4. execução de `modb_load run` com os mesmos seletores usados localmente;
@@ -461,6 +463,20 @@ O arquivo de campanha é a verdade primária de **uma execução**. A série ao 
 do tempo é derivada dele e vive em outro lugar (§13); nenhuma análise histórica
 depende de manter todos os brutos disponíveis.
 
+A palavra "ambiente" nomeia três coisas distintas neste plano — deliberadamente
+relacionadas, nunca o mesmo campo:
+
+| termo | é | onde vive |
+|---|---|---|
+| ambiente registrado (D4, §4.4) | identidade cadastrada (`desktop-windows`, `linux-remoto`) — onde o comando executa | `loadtests/environments.json`; campo `environment` no rollup |
+| record `environment` (esta seção) | hardware/SO/rede efetivos de **uma execução** | uma linha por campanha bruta |
+| `env` (rollup, §13.3) | resumo do hardware/build, derivado do record acima | dentro de cada rollup |
+
+O ambiente registrado **resolve** `host_class` (§13.4) e informa o record
+`environment` da campanha; ele não o substitui — o record continua carregando o
+que foi observado de fato (versão de kernel, RTT medido etc.), não só o que
+estava cadastrado.
+
 ## 13. Série histórica
 
 ### 13.1 Problema a resolver
@@ -505,10 +521,13 @@ Campos obrigatórios, agrupados por função:
   `diff_hash` quando suja, `workload_version`, `dataset_id`,
   `dataset_version`, `seed`;
 - **comparabilidade** — `series_key` e `series_key_version` (§13.4);
-- **ambiente resumido** — `host_id` anonimizado, `host_class`, SO e versão,
-  arquitetura, modelo de CPU, núcleos físicos/lógicos, RAM, filesystem, classe do
-  dispositivo, tipo de build, compilador e versão, sanitizers, page size,
-  versões de formato e protocolo;
+- **ambiente registrado** — `environment`: o `id` de §4.4 (ex.: `desktop-windows`,
+  `linux-remoto`) — onde o caso rodou, não confundir com o `env` abaixo;
+- **ambiente resumido** (`env`) — `host_id` anonimizado, `host_class`, SO e
+  versão, arquitetura, modelo de CPU, núcleos físicos/lógicos, RAM, filesystem,
+  classe do dispositivo, tipo de build, compilador e versão, sanitizers, page
+  size, versões de formato e protocolo — resolvido a partir do ambiente
+  registrado e do que foi observado na execução;
 - **métricas por fase** — para cada fase: operações, duração, ops/s, p50, p95,
   p99, p99.9, bytes por objeto, tamanho de banco e WAL ao final, RSS de pico,
   páginas lidas/escritas/reutilizadas, erros;
@@ -520,10 +539,10 @@ Campos obrigatórios, agrupados por função:
 - **veredito** — `status`, lista de validações executadas, `comparable`;
 - **rastreabilidade** — nome do arquivo bruto e seu SHA-256.
 
-Um rollup sem `commit`, `series_key`, `host_class`, tipo de build, `seed` ou
-`status` é **rejeitado** pelo indexador com erro. Ponto histórico sem procedência
-é ruído que envenena a série anos depois; recusar na entrada é mais barato que
-limpar depois.
+Um rollup sem `commit`, `series_key`, `environment`, `host_class`, tipo de
+build, `seed` ou `status` é **rejeitado** pelo indexador com erro. Ponto
+histórico sem procedência é ruído que envenena a série anos depois; recusar na
+entrada é mais barato que limpar depois.
 
 Nomes de campo canônicos — o dashboard (§13.11) lê exatamente estes:
 
@@ -532,6 +551,7 @@ Nomes de campo canônicos — o dashboard (§13.11) lê exatamente estes:
  "series_key":"a1b2c3d4e5f60718","series_key_version":1,
  "case_id":"load.create_only.embedded.100k",
  "workload":"create_only","target":"embedded","scale":"100k","objects":100000,"variant":"",
+ "environment":"linux-remoto",
  "run_id":"019f2c...","started_at":"2026-08-07T03:12:44.120Z","repeat_index":0,
  "commit":"a1b2c3d4...","commit_short":"a1b2c3d","branch":"master","tree_dirty":false,"diff_hash":null,
  "workload_version":1,"dataset_id":"user_v1","dataset_version":1,"seed":"123456",
@@ -583,7 +603,11 @@ Regras:
    histórico;
 4. `host_class` é um rótulo configurado (`dev-windows`, `bench-linux-01`), não o
    hostname — permite trocar de hardware equivalente sem quebrar a série de
-   propósito, e a descontinuidade fica registrada em `run_note`.
+   propósito, e a descontinuidade fica registrada em `run_note`. Desde §4.4,
+   `host_class` é resolvido a partir do ambiente registrado, não digitado à
+   mão; **o `environment` (id) em si não entra no hash** — dois ambientes
+   cadastrados com o mesmo `host_class` (hardware equivalente) permanecem na
+   mesma série de propósito, e é isso que se quer.
 
 ### 13.5 Indexação
 
@@ -665,8 +689,12 @@ baseline é acrescentar entrada nova com o motivo da troca.
 
 `host_id` é hash do hostname com salt local configurado (`MODB_LOAD_HOST_SALT`),
 nunca o hostname bruto. Nenhum usuário, token, endereço IP de cliente ou caminho
-real entra no rollup; caminhos são normalizados. A série histórica é versionada no
-Git — o que entra nela é público para todo mundo que tem o repositório.
+real entra no rollup; caminhos são normalizados. O campo `environment` grava só
+o `id` cadastrado (`linux-remoto`), nunca `connection.host`/`connection.default_user`
+de `loadtests/environments.json` — essa distinção existe justamente para que o
+rollup não precise carregar detalhe de conexão nenhum. A série histórica é
+versionada no Git — o que entra nela é público para todo mundo que tem o
+repositório.
 
 ### 13.11 Dashboard
 
@@ -685,8 +713,9 @@ O painel é a leitura visual das regras deste capítulo, não um enfeite:
 | tendência com mediana móvel e limiares de alerta/falha desenhados | §13.7: o ponto é comparado com a mediana das 5 anteriores, não com o anterior |
 | separador vertical de `series_key` | §13.4: séries incomparáveis não são emendadas; a mediana reinicia na quebra |
 | marca de veredito por ponto + pino de deriva | §13.7: gate pontual e deriva lenta são mecanismos distintos |
-| gráfico de escala com referência de custo por objeto constante | §4.1: 10k → 1M é linear ou superlinear? |
+| gráfico de escala com referência de custo por objeto constante | §4.1: 10k → 1M é linear ou superlinear? — restrito ao mesmo workload, alvo e ambiente do caso selecionado, senão mistura hardware |
 | composição por fase | §4.2: cada fase medida separadamente |
+| filtro "Ambiente" e coluna correspondente na tabela | §4.4: separa execuções por ambiente registrado sem misturar hardware distinto em nenhum gráfico |
 | tabela com Δ anterior, Δ mediana e exportação CSV | relevo da paleta e §13.6: nenhum valor existe só no gráfico |
 
 Regras de leitura embutidas, iguais às da CLI: menos de 3 pontos não recebe
@@ -698,9 +727,11 @@ não o relógio da máquina, para que histórico antigo continue legível.
 
 ```text
 loadtests/
+  environments.json               catálogo de ambientes registrados (implementado, §4.4)
   modb_load.cpp                  CLI: run, list-cases, resume, index, trend, report,
-                                 gate, list-profiles
+                                 gate, list-profiles, list-environments
   matrix.hpp/.cpp                dimensões, expansão, seletores, ids
+  environments.hpp/.cpp          carrega e valida environments.json, resolve --environment
   profiles.hpp/.cpp              load-smoke ... load-soak
   budget.hpp/.cpp                estimativas, calibração, guarda-corpos
   dataset_user.hpp/.cpp          gerador user_v1
@@ -725,8 +756,9 @@ loadtests/
     windows-x86_64.json
     linux-x86_64.json
 scripts/
+  run-remote-benchmark.ps1        já consome loadtests/environments.json (implementado)
   run-load.ps1 / run-load.sh
-  run-remote-load.ps1
+  run-remote-load.ps1             assume o mesmo -Environment ID do script acima
 tests/
   load_matrix_test.cpp           expansão, seletores, ids, conjunto vazio
   load_workload_test.cpp         cada workload em escala minúscula, invariantes
@@ -752,7 +784,7 @@ Uma subfase por branch, conforme a convenção do projeto.
 
 | subfase | entrega | critério de pronto |
 |---|---|---|
-| A | matriz, ids, seletores, perfis, `list-cases`, `--dry-run`, `budget` sem calibração | `load_matrix_test` verde; subset selecionável e imprimível sem executar carga |
+| A | matriz, ids, seletores, perfis, `list-cases`, `--dry-run`, `budget` sem calibração, `environments.hpp/.cpp` (registro já existe em `loadtests/environments.json`) | `load_matrix_test` verde; subset selecionável e imprimível sem executar carga; `--environment ID` inválido falha com a lista de ids cadastrados |
 | B | writer, records, `dataset_user`, `target_embedded`, workload `create_only`, escalas `1k`/`10k` | `load-smoke` gera JSONL válido com validação de invariante |
 | C | `series_key`, rollup, `index` idempotente, `trend`, `report` | duas execuções de `load-smoke` produzem dois pontos na mesma série; reindexar não duplica; o dashboard (§13.11) abre o `series.jsonl` gerado sem conversão |
 | D | `create_delete_forward`, `create_delete_reverse`, `create_delete_interleaved` | invariantes de contagem zero e espaço recuperado registrados |
@@ -760,7 +792,7 @@ Uma subfase por branch, conforme a convenção do projeto.
 | F | `progress_window`, inclinação no rollup, `case_summary`, `resume` | interrupção em 100k retomável sem reexecutar caso concluído |
 | G | `target_client`, alvo `loopback`, métricas de rede | `load-local` cobre embedded e loopback com o mesmo caso |
 | H | escalas `250k`/`500k`/`1M`, calibração medida, guarda-corpos ativos | tabela §10 preenchida; caso acima do orçamento pulado com registro |
-| I | scripts remotos, `remote_colocated`, `remote_client_local`, indexação dos brutos trazidos | `load-remote` traz exatamente um arquivo do host, com hash, e ele entra na série |
+| I | `remote_colocated`, `remote_client_local`, indexação dos brutos trazidos (`run-remote-benchmark.ps1` já resolve `-Environment` pelo catálogo, §4.4) | `load-remote` traz exatamente um arquivo do host, com hash, e ele entra na série |
 | J | `gate`, deriva lenta, retenção e `--prune`, baselines marcadas | regressão sintética de 12% e deriva sintética de 15% são detectadas |
 | K | dimensões secundárias, `load-heavy` pairwise, `load-soak` | cada valor não padrão exercitado ao menos uma vez |
 
@@ -778,8 +810,11 @@ O plano estará implementado quando:
   orçamento estimado sem executar nada;
 - `modb_load run --workload create_delete_reverse --scale 100k --target embedded`
   executar exatamente um caso e produzir um único JSONL final;
-- cada combinação de D1 × D2 × D3 declarada nos perfis for executável
+- cada combinação de D1 × D2 × D3 × D4 declarada nos perfis for executável
   isoladamente por seletores, sem editar código;
+- registrar um novo ambiente (`kind=local` ou `kind=ssh`) em
+  `loadtests/environments.json` e rodar/filtrar por ele exigir só editar esse
+  arquivo — nunca o código de `modb_load` ou dos scripts;
 - interromper uma campanha deixar `.partial` legível e `resume` completar o
   restante sem repetir casos concluídos;
 - todo workload validar suas invariantes e uma corrupção injetada resultar em
@@ -843,15 +878,27 @@ Especificamente para a série histórica:
    fica restrito a `10k`/`100k`, que rodam com frequência. Decidir a cadência de
    cada perfil junto com a Subfase J, não depois.
 9. **Máquina de desenvolvimento na série** — pontos coletados em máquina de
-   trabalho com carga concorrente são ruidosos. `host_class` separa as séries, mas
-   é fácil esquecer de configurá-lo e contaminar a série oficial. Mitigação: sem
-   `host_class` explícito, o padrão é `dev-<plataforma>`, jamais o rótulo do host
-   de bench.
+   trabalho com carga concorrente são ruidosos. `host_class` separa as séries,
+   mas antes de §4.4 era fácil esquecer de configurá-lo à mão e contaminar a
+   série oficial. **Mitigado pelo ambiente registrado (§4.4)**: `host_class`
+   agora é resolvido do catálogo, não digitado por execução; o risco residual é
+   escolher `--environment` errado (ex.: `linux-remoto` numa sessão que na
+   verdade rodou no desktop) — sem detecção automática disso, é erro do
+   operador, não do sistema.
 10. **Rollup versionado gera conflito de merge** — arquivo append-only tocado por
     vários branches conflita. Mitigação: uma linha por ponto, ordenação por
     `started_at` na leitura e não no arquivo, e resolução de conflito por união
     das linhas — o `index` detecta duplicata por `run_id` de qualquer forma.
 11. **Deriva de ambiente confundida com regressão** — atualização de SO,
-    firmware ou driver de disco muda a linha de base sem mudar `series_key`.
-    Mitigação: `run_note` obrigatório quando o `environment` diverge do ponto
-    anterior da série em campo relevante, e o relatório marca o ponto.
+    firmware ou driver de disco no mesmo ambiente registrado muda a linha de
+    base sem mudar `series_key` (o `host_class` cadastrado não muda sozinho).
+    Mitigação: `run_note` obrigatório quando o record `environment` (§11, o
+    hardware/SO efetivo da execução — não confundir com o campo `environment`
+    do rollup) diverge do ponto anterior da série em campo relevante, e o
+    relatório marca o ponto.
+12. **Registro versus realidade** — nada impede de rodar fisicamente numa
+    máquina diferente da apontada por `--environment` (ex.: SSH para um host
+    que não é o cadastrado). O catálogo declara intenção, não verifica
+    identidade de hardware; a verificação de fato vem do record `environment`
+    observado (§11) divergir do esperado para aquele `host_class` — que cai no
+    risco 11.
