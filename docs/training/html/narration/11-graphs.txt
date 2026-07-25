@@ -1,0 +1,15 @@
+Adding `manager: Ref<Employee>` is this run's fourth schema evolution, after Lesson 4's `country` and Lesson 5's three relationship fields -- and, like every field before it, its default is a zero-valued `Ref`, so existing records keep projecting cleanly.
+
+Walking the org chart downward from a manager uses `GraphView::incoming`, wrapped in an `AdjacencyFn` that `graph::bfs` drives: given a manager, find every employee whose `manager` field points back at them. That direction needs an index on the field, which this lesson creates right alongside the schema change, and it can never report a "dangling" result -- a source that no longer resolves is just silently skipped.
+
+To see dangling handled deliberately, the lesson walks the *other* direction instead: a temporary employee, Gustavo, reports to another temporary employee, Felipe, using `graph::edge()` directly over the single `manager` field. Felipe is then removed, and walking up from Gustavo hits a target that no longer exists.
+
+Three traversals of that same broken edge, back to back, show what each `DanglingPolicy` actually does: `fail` stops the walk with an error, `skip` ends quietly with nothing reported, and `yield_error` surfaces the error but would have kept exploring any other, unrelated branch -- a difference this particular one-edge case cannot show, since Gustavo only has the one dangling edge to walk.
+
+A reporting chain is a graph whether or not the storage layer calls it one -- `manager` is just another `Ref` field, and the graph module walks it without requiring a dedicated graph-shaped type. The asymmetry between the two directions is the real lesson: `incoming` (who reports to me) needs an index and can never itself observe a dangling result, because a stale or missing source is simply filtered out of the index scan, while the single `manager` field walked upward can point at something gone, which is precisely why the dangling-policy comparison has to happen in that direction and not the other.
+
+The context for this lesson is that Employees already point at departments and projects. An organization also has a reporting chain, and "who reports to whom" is a graph, not a flat list.
+
+What we are trying to achieve is this: Add a `manager: Ref<Employee>` field, walk the org chart downward from a manager with `graph::bfs` and `GraphView::incoming`, then create a dangling manager reference and compare the three `DanglingPolicy` behaviors against it.
+
+By the end of this lesson, the learner should be able to explain why `incoming()` needs an index on the `Ref` field it walks. Describe the difference between walking "down" (reports) and "up" (manager) through the same field. State what `DanglingPolicy::fail`, `skip`, and `yield_error` each do to a traversal.

@@ -1,0 +1,15 @@
+This lesson opens a `Snapshot`, sums every employee's salary through it, then -- deliberately, while that same snapshot is still open -- commits a raise for Carla in a fresh transaction.
+
+Reading the payroll total again through the *same* snapshot returns the exact same number as before. That is not a bug or a timing accident; it is the entire point of a snapshot. It answers questions as of the moment it was opened, no matter what commits afterward.
+
+A second raise attempt for Carla, still with that snapshot open, fails outright with `snapshot_conflict`. The message names the object and explains why: an older open snapshot still needs to see its previous version. The fix is not to fight the conflict -- it is to let the blocking snapshot close and retry, which is exactly what this lesson does next, successfully.
+
+A fresh snapshot afterward reports the new, higher total. Finally, `collect_garbage()` reclaims the old, now-unreferenced versions that the earlier snapshot had been protecting -- object versions this lesson's own history had accumulated all the way back to Lesson 3.
+
+A snapshot separates time from mutation: without one, a reader's idea of "the database" can shift mid-read because of concurrent commits. With one, a reader asks for the state as of a specific logical moment and keeps getting consistent answers from it, no matter what commits afterward. `snapshot_conflict` is the price of that guarantee when a write and an open snapshot collide on the same object -- and it is a signal to retry once the snapshot closes, not a hard failure to avoid by holding snapshots open as briefly as possible in the first place.
+
+The context for this lesson is that Departments, an owned contact, and project assignments are now real. The next question is what a payroll report should see while other changes keep happening.
+
+What we are trying to achieve is this: Take a snapshot before running a payroll report, show a concurrent raise doesn't change the report's total, force a `snapshot_conflict` on purpose, retry once the snapshot closes, and call `collect_garbage()`.
+
+By the end of this lesson, the learner should be able to explain a `Snapshot` as an epoch number, not a copy of the database. Describe what `snapshot_conflict` means and why retrying is the right response. Connect open snapshots to what `collect_garbage()` is and is not allowed to reclaim.

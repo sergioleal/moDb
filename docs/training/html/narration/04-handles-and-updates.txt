@@ -1,0 +1,15 @@
+By the time this lesson runs, Ana, Bruno, and Carla already exist as plain 2-field records, written back in Lessons 2 and 3. That is exactly what makes this lesson's schema evolution real rather than staged: `EmployeeV2` adds a third field, `country`, defaulted to `"BR"`, and binding it under the same catalog name `"Employee"` is a genuinely divergent shape from what is already on disk.
+
+Reading Ana back through the new binding prints her with `country=BR` -- not because that value was ever written, but because the binding declares it as the default for records that predate the field. Nothing on disk was rewritten just by reading it this way.
+
+The raise that follows uses `Handle<EmployeeV2>::set<&EmployeeV2::salary>(tx, new_salary)` instead of the manual materialize-mutate-`update()` sequence from Lesson 3. The member-pointer expression lets the compiler participate in selecting the field; the transaction underneath still does exactly the same work as before.
+
+After this raise commits, Ana's record is physically stored in the full 3-field shape -- the first write she has had since the schema changed is also the write that migrates her.
+
+Schema evolution only means something when it happens against records that already exist -- which is why this lesson does not fabricate old data, it relies on Ana's real 2-field record from Lessons 2 and 3. `Handle<T>` is a typed reference to durable identity, and its `set<&T::member>` selects a field through the type system instead of a string, but it still cannot bypass the transaction underneath. The compiler helps you name the field correctly; the database still decides whether the write becomes durable.
+
+The context for this lesson is that Every employee so far has the same two-field shape from Lesson 1. Real applications eventually need to add a field to a type that already has real, persisted records.
+
+What we are trying to achieve is this: Introduce `EmployeeV2` with a `country` field defaulted to `"BR"`, observe real schema evolution against Ana's existing 2-field record, then raise her salary through a typed `Handle` instead of manual materialize-mutate-update.
+
+By the end of this lesson, the learner should be able to distinguish a divergent-shape re-`bind()` from a purely additive one. Explain why Ana's `country` comes from a declared default, not from disk. Use `Handle<T>::set<&T::member>(tx, value)` and say what it does under the hood.

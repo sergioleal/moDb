@@ -1,0 +1,15 @@
+This lesson opens by looking Ana, Bruno, and Carla up by name -- the same pattern Lesson 2 introduced, now used for real work instead of just proving it works.
+
+Bruno's raise is unremarkable and that is the point: begin a transaction, materialize, mutate the salary field, update, commit. Carla's raise looks almost identical, except the transaction is deliberately allowed to go out of scope without ever calling `commit()`. Nothing crashes. Nothing throws. The change simply never becomes durable, and reading Carla back afterward proves it.
+
+The third scenario touches two employees, Ana and Bruno, inside one transaction -- averaging their salaries -- to make atomicity concrete rather than abstract: either both salaries change together, or neither does.
+
+The last scenario is the sharpest one: opening a second transaction while the first is still active fails immediately, with a message that says exactly that. This application, like the database underneath it, has one writer at a time. Concurrent readers are unaffected; concurrent writers are not.
+
+A transaction is a promise about grouping: either an intended change becomes visible as a coherent unit, or none of it does. Forgetting `commit()` is not a defect to code defensively against -- it is the mechanism working exactly as designed, and this lesson treats it as a demonstration rather than an error case. Single-writer, meanwhile, is a deliberate simplicity: concurrent readers can proceed freely, but only one writer is ever mid-transaction, which is what makes the two-employee average in this lesson provably atomic rather than merely likely to be.
+
+The context for this lesson is that Employees now exist and can be found by name. The next question a real application has to answer is what "give someone a raise, correctly" actually requires.
+
+What we are trying to achieve is this: Commit one raise properly, deliberately let a second raise roll back by never calling `commit()`, touch two employees atomically in one transaction, and show a second `begin()` failing while the first is still open.
+
+By the end of this lesson, the learner should be able to explain rollback-on-scope-exit as a safety net, not a bug to guard against. Describe why touching Ana and Bruno's salaries in one transaction is safer than two separate writes. State, in one sentence, what single-writer means for this application.

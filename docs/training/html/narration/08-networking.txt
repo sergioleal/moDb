@@ -1,0 +1,13 @@
+This lesson keeps the server and the client in one binary: a background thread runs `serve_one()`, accepting exactly one connection, while the main thread plays the client. A real deployment would split these into separate processes, but nothing about `Server` or `ServerConnection` requires that split, and keeping them together here keeps the lesson's code easy to read top to bottom.
+
+`Server::listen(path, "127.0.0.1", 0)` opens the same persistent file every earlier lesson has been building up -- port zero means "pick any free port." The client connects, and the first thing it does is not query anything at all -- it reads the negotiated protocol version and `max_concurrent_streams` from the handshake, the network-level version of the compatibility habit that runs through this whole product.
+
+Only after that does the client collect every employee remotely, then repeat Lesson 7's exact-salary search -- but now through `QueryDescription`'s `EqualityFilter`, not the local `Query<T>` builder's `.between()`. That is a deliberate narrowing: the wire protocol supports a type, an optional limit, and one equality filter, nothing richer. If you need `.between()`, `top_k`, or composed conditions over the network, that gap is exactly what Lessons 9 and 10 exist to close.
+
+Crossing a process boundary changes what a client is allowed to assume. Inside one process, a lambda can inspect an object directly; across a connection, a request has to be described in a form the server can execute without importing the client's code. `QueryDescription` is that boundary object, and its narrowness -- one type, one optional limit, one optional equality filter -- is not an oversight. It is the minimum the wire protocol commits to, which is exactly why remote operations and facades exist for everything richer.
+
+The context for this lesson is that Everything so far has run inside one process talking to its own file. Real directories get queried by other programs, over a network.
+
+What we are trying to achieve is this: Start a `Server` on a background thread, connect as a client with `ServerConnection`, run a capability handshake, and repeat the salary search from Lesson 7 remotely through `QueryDescription`.
+
+By the end of this lesson, the learner should be able to describe the single-binary server/client convention this and the next two lessons use. Explain why `QueryDescription` only supports one `EqualityFilter`, not `.between()`. Read a handshake's negotiated protocol version and stream limit.

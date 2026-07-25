@@ -1,0 +1,15 @@
+This lesson is unusual in the course: there is nothing new for the employee directory to *do*. The measurement itself is the point.
+
+`wal_io` lives in `DatabaseOptions`, and it is a per-open runtime choice -- not something baked into the file's format the way a schema evolution is. That is what lets this lesson reopen the exact same file twice, once under the default synchronous WAL writer and once under `WalIoMode::async`, and time 200 committed raises against Carla under each.
+
+The two timings are printed side by side along with commits per second, and the lesson reports honestly whichever mode came out ahead on that particular run -- on the measurement this course captured, the default synchronous mode was marginally faster, consistent with this product's own operational notes describing "no consistent win yet" for the async path.
+
+Carla's salary is reset to a clean value at the end, so the timing loop's last iteration does not leave a strange number behind for Lesson 13's payroll report to pick up. The lesson's real lesson is not "async is slower" -- it is that an option existing is not a reason to reach for it before measuring.
+
+The value of a controlled, honest measurement is that it can report a negative result without embarrassment. `wal_io` being a per-open, per-process choice rather than a file format decision is what makes the comparison possible at all in one lesson -- the same bytes on disk work under either mode. Reporting whichever mode wins on this run, instead of asserting a expected winner, is the entire point: opt-in performance features earn their place in a real system by being measured against a real workload, not by existing.
+
+The context for this lesson is that Every commit so far has used Ring0's default, synchronous WAL writer. This optional, advanced lesson asks whether an asynchronous one is actually faster for this workload.
+
+What we are trying to achieve is this: Reopen the same persistent file twice -- once with default `DatabaseOptions`, once with `wal_io = WalIoMode::async` -- and time 200 committed raises under each, reporting honestly whichever mode wins.
+
+By the end of this lesson, the learner should be able to explain why `wal_io` is a per-open runtime choice, not a persisted format decision. State this lesson's actual measured result, and what it does and does not prove. Describe why "measure your own workload" is the lesson's real takeaway, not a specific mode.

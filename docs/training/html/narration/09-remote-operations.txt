@@ -1,0 +1,15 @@
+This lesson starts by looking up two things by name: Bruno, and the department this lesson is finally going to move him to, Engineering -- found through the `Department.name` index Lesson 5 quietly set up for exactly this moment.
+
+`TransferDepartment` is a small `Operation` class: an id string, argument encoding for an employee id and a department id, and an `execute()` that checks the target department exists *before* it materializes or mutates the employee. That ordering is the whole design: validate first, mutate second, so a rejected call never leaves a half-applied change behind.
+
+Registering it is a short but specific sequence -- build a `ModuleManifest`, compute its hash, admit that hash on a `ModuleLoader`, load it into an `OperationRegistry`, and attach that registry to the server. The client, meanwhile, never links against `TransferDepartment`'s implementation at all. It only knows the operation's id string and how to encode its arguments.
+
+The successful call moves Bruno to Engineering, closing the dangling reference Lesson 5 left open. The second call, aimed at a department id that does not exist, fails with a clear message -- and leaves Bruno's `department` field exactly as the first call left it.
+
+Moving a client-visible mutation onto the server is not just an implementation detail -- it is where an invariant gets enforced exactly once instead of reimplemented by every caller. If clients mutated `department` directly, each one would need to remember to check the target exists first; by making that check part of `TransferDepartment::execute()`, the rule lives with the data it protects. The client's job shrinks to expressing intent -- an id and an encoding -- while the server owns both the validation and the transaction boundary around it.
+
+The context for this lesson is that Bruno's department has pointed at a removed record since Lesson 5. Querying can find employees remotely, but it cannot fix that -- fixing it is business logic, and business logic belongs on the server.
+
+What we are trying to achieve is this: Define a `TransferDepartment` operation that validates its target before mutating anything, register it through an `OperationRegistry` and `ModuleManifest`, and call it from a remote client to finally move Bruno to Engineering.
+
+By the end of this lesson, the learner should be able to explain why `execute()` checks the target department before touching the employee. Describe what a client actually links against when it calls a remote operation. State what a rejected `execute()` call does to any change the operation might have made.

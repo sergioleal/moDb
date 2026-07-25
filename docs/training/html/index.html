@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Building an Employee Directory with Ring0 - Ring0 Training</title>
+  <link rel="stylesheet" href="assets/training.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brandbar">
+      <a class="brand" href="index.html">
+        <img src="assets/ring0-logo.svg" alt="Ring0 Training logo">
+        <span>
+          <span class="brand-name">Ring0 Training</span>
+          <span class="brand-subtitle">Employee directory, lesson by lesson</span>
+        </span>
+      </a>
+      <nav class="topnav"><span class="nav-button nav-disabled">Previous</span><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="01-binding-your-first-type.html">Next</a></nav>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <p class="sidebar-title">Course Lessons</p>
+        <ol class="lesson-list">
+          <li><a href="index.html" aria-current="page">Index</a></li>
+<li><a href="01-binding-your-first-type.html">Lesson 1</a></li>
+<li><a href="02-persist-and-reopen.html">Lesson 2</a></li>
+<li><a href="03-transactions.html">Lesson 3</a></li>
+<li><a href="04-handles-and-updates.html">Lesson 4</a></li>
+<li><a href="05-relationships.html">Lesson 5</a></li>
+<li><a href="06-snapshots.html">Lesson 6</a></li>
+<li><a href="07-queries-and-indexes.html">Lesson 7</a></li>
+<li><a href="08-networking.html">Lesson 8</a></li>
+<li><a href="09-remote-operations.html">Lesson 9</a></li>
+<li><a href="10-facades.html">Lesson 10</a></li>
+<li><a href="11-graphs.html">Lesson 11</a></li>
+<li><a href="12-async-io.html">Lesson 12</a></li>
+<li><a href="13-read-replica.html">Lesson 13</a></li>
+        </ol>
+      </aside>
+      <article class="content">
+        <section class="hero">
+          <p class="eyebrow">Ring0 Developer Course</p>
+          <h1>Building an Employee Directory with Ring0</h1>
+          <p>A project-based C++ course: one real application, thirteen chained lessons, one persistent file.</p>
+        </section>
+        
+        <section class="audio-panel">
+          <div>
+            <p class="audio-label">Instructor Audio</p>
+            <p class="audio-copy">Place your generated narration file at <code>audio/index.mp3</code>, then use the player below.</p>
+          </div>
+          <audio controls preload="none" src="audio/index.mp3"></audio>
+          <a class="script-link" href="narration/index.txt">Open narration script</a>
+        </section>
+
+        
+        <section class="explanation-panel">
+          <p class="eyebrow-dark">Context and Intent</p>
+          <h2>Before You Run the Lesson</h2>
+          <p>This course is the project-based companion to docs/DEVELOPER_GUIDE.md. Instead of a fast narrative tour, you build one real application -- an employee directory -- one capability at a time, and every lesson&#x27;s code is real, compiling code, not pseudocode.</p>
+          <h3>What We Are Trying To Achieve</h3>
+          <p>Set expectations for the whole arc -- binding, persistence, transactions, schema evolution, relationships, snapshots, queries, networking, remote operations, facades, graphs, async I/O, and replication -- and explain how the 13 lessons chain together.</p>
+          <h3>Learning Outcomes</h3>
+          <p>Understand why each lesson is a separate, self-contained program that opens the same persistent file the previous lesson left behind. See how object identity is recovered across separate runs through name-based lookups instead of shared in-process state. Know where each lesson&#x27;s source and build instructions live.</p>
+          <h3>Conceptual Layer</h3>
+          <p>Most tutorials show independent snippets: a query example here, a networking example there, each starting from a clean slate. That is easy to write but does not resemble how software actually accumulates. This course instead commits to one persistent artifact -- a single database file -- and every lesson&#x27;s code must cope with whatever state the file already holds, the same constraint a real production system lives under permanently. Object identity recovered by name lookup, not by remembered ids, is a direct consequence of taking that constraint seriously: a real client restarting cannot remember an id either.</p>
+        </section>
+
+        
+        <section class="narrative-panel">
+          <p class="eyebrow-dark">Instructor Narrative</p>
+          <h2>What This Lesson Means</h2>
+          <p>Think of this course as watching one small, real application grow, one commit-sized capability at a time, instead of reading thirteen disconnected demos.</p>
+<p>Every lesson lives in its own folder: the lesson document, one self-contained C++ source file, and a short README explaining exactly how to build and run it. &quot;Self-contained&quot; is a specific claim here -- each source file contains only that lesson&#x27;s own new code, nothing copy-pasted forward from earlier lessons.</p>
+<p>What makes the lessons a course rather than thirteen unrelated examples is a single, real, persistent database file. Lesson 1 creates it. Every lesson after that is a separate program run that opens the very same file and continues exactly where the previous run left off. Ana, Bruno, and Carla, once created in Lesson 2, are still there in Lesson 13.</p>
+<p>Because each lesson is a genuinely separate process with no shared memory, you will also see a recurring pattern: instead of remembering an employee&#x27;s numeric id across runs, later lessons look employees up by name through an index. That is not a toy simplification -- it is closer to how a real client actually finds a record after restarting.</p>
+<p>Run the lessons in order, once each, starting from Lesson 1. If you want to start over, just re-run Lesson 1 -- it deletes any old copy of the file and creates it fresh.</p>
+        </section>
+
+        <p>A project-based course: you build one application, an employee directory, from an empty file to a networked, multi-client system with remote operations, versioned facades, and an org-chart graph — one capability at a time. Each lesson assumes you completed the previous one and starts from that lesson&#x27;s ending code.</p>
+<p>This assumes you&#x27;re comfortable with modern C++ (structs, templates, lambdas, RAII, smart pointers, <code>std::filesystem</code>) and have already skimmed <a href="../DEVELOPER_GUIDE.md">docs/DEVELOPER_GUIDE.md</a> or at least Chapter 0-1 of it (what Ring0 is, how to build it).</p>
+<blockquote><p><strong>Status:</strong> ✅ complete — all 13 lessons have real, compiling code, one</p></blockquote>
+<blockquote><p>self-contained folder per lesson, verified against an actual build and</p></blockquote>
+<blockquote><p>run. Each lesson names its target reference doc(s) in <code>docs/reference/</code></p></blockquote>
+<blockquote><p>— those are written in full and safe to read ahead of the lesson prose.</p></blockquote>
+<h2>Lessons</h2>
+<p>Each lesson lives in its own folder: the lesson doc, its <code>.cpp</code> source, and a <code>README.md</code> with the exact build/run commands.</p>
+<ol>
+<li><a href="01-binding-your-first-type.html">Binding Your First Type</a> — define</li>
+<p><code>Employee</code>, bind it, create the database.</p>
+<li><a href="02-persist-and-reopen.html">Persist and Reopen</a> — real records that</li>
+<p>survive a restart.</p>
+<li><a href="03-transactions.html">Transactions</a> — the commit/rollback contract, done</li>
+<p>properly.</p>
+<li><a href="04-handles-and-updates.html">Handles and Updates</a> — give an employee a</li>
+<p>raise.</p>
+<li><a href="05-relationships.html">Relationships: Departments and Projects</a> —</li>
+<p><code>Ref&lt;Department&gt;</code>, an owned record, and a collection of projects.</p>
+<li><a href="06-snapshots.html">Consistent Reports with Snapshots</a> — a payroll report</li>
+<p>that doesn&#x27;t see half-finished edits.</p>
+<li><a href="07-queries-and-indexes.html">Searching with Queries and Indexes</a> — find</li>
+<p>employees by department and salary, fast.</p>
+<li><a href="08-networking.html">Serving the Directory Over the Network</a> — split into</li>
+<p>a server and a separate client.</p>
+<li><a href="09-remote-operations.html">Remote Operations: Transferring an Employee</a> —</li>
+<p>business logic that runs on the server.</p>
+<li><a href="10-facades.html">Facades: A Stable HR API</a> — a versioned surface the</li>
+<p>client calls without knowing server internals.</p>
+<li><a href="11-graphs.html">The Org Chart: Graphs</a> — model and traverse</li>
+<p>manager/report relationships.</p>
+<li>*(Optional, advanced)* <a href="12-async-io.html">Asynchronous WAL I/O</a> — measure</li>
+<p>it before you reach for it.</p>
+<li>*(Optional, advanced)* <a href="13-read-replica.html">A Read Replica for Reporting</a></li>
+<p>— offload reports to a follower.</p>
+</ol>
+<h2>How the Code Is Organized</h2>
+<p>Each lesson is a folder — <code>01-binding-your-first-type/</code>, <code>02-persist-and-reopen/</code>, ... <code>13-read-replica/</code> — holding three things: the lesson doc (<code>&lt;slug&gt;.md</code>), one <strong>self-contained</strong> source file (<code>lesson_01_binding.cpp</code>, <code>lesson_02_persist_reopen.cpp</code>, ... <code>lesson_13_read_replica.cpp</code>, each containing only *that* lesson&#x27;s own new code), and a <code>README.md</code> with that lesson&#x27;s build command.</p>
+<p>The lessons chain to each other through one real, persistent database file — <code>docs/training/en/employee-directory.modb</code> (git-ignored, like every other <code>*.modb</code> in this repo) — instead of through shared in-process state:</p>
+<ul>
+<li><strong>Lesson 1</strong> deletes any old copy and creates this file fresh. Every</li>
+<p>other lesson only ever *opens* it.</p>
+<li><strong>Every lesson from 2 onward is a separate program run</strong> that opens the</li>
+<p>same file, does its own work, and exits. Nothing is held in memory between lessons — the file on disk *is* the hand-off.</p>
+<li>Since each lesson is a separate binary, there&#x27;s no shared struct to</li>
+<p>carry object ids forward (like an in-memory &quot;here&#x27;s Ana&#x27;s id&quot; value). Instead, Lesson 2 creates an <strong>index on <code>Employee.name</code></strong> (<code>create_index&lt;Employee&gt;(FieldId{1})</code>), and every later lesson looks employees up by name (<code>indexed_object_ids&lt;Employee&gt;(...)</code>) instead of remembering ids across runs. Lesson 5 does the same for <code>Department.name</code>, needed starting at Lesson 9.</p>
+<li>Because of this, <strong>lessons must be run in order, once each</strong>, starting</li>
+<p>from Lesson 1 — running Lesson 5 before Lesson 2 fails with a clear &quot;have you run the earlier lessons first?&quot; message, since the records and indexes it expects don&#x27;t exist yet.</p>
+<li>Object ids, salaries, and other printed values are still deterministic</li>
+<p>given a full, in-order run — the same sequence of creates/removes always produces the same ids — except where a lesson explicitly measures wall-clock time (Lesson 12).</p>
+<li>To restart the whole course, just re-run Lesson 1 — it wipes the file</li>
+<p>and starts over.</p>
+</ul>
+<p>Lessons 8, 9, and 10 (networking, remote operations, facades) keep the server and the client in <strong>one binary</strong>: a background thread runs the server&#x27;s accept loop while the main thread drives the client connection. A real deployment would split these into separate processes, but nothing in <code>Server</code>/<code>ServerConnection</code> requires it.</p>
+<h2>Build the Exercises</h2>
+<p>Every lesson has its own CMake target, <code>employee_directory_lesson_NN</code>, and its own folder&#x27;s <code>README.md</code> repeats the exact command for that lesson:</p>
+<pre><code class="language-powershell">cmake --preset debug
+cmake --build --preset debug --target employee_directory_lesson_01
+.\build\debug\employee_directory_lesson_01.exe</code></pre>
+<p>Swap <code>01</code> for any lesson number 01-13. *Building* a later lesson&#x27;s target does not require building earlier ones first — each <code>.cpp</code> file compiles on its own. *Running* them, though, is in order: Lesson <code>NN</code> expects Lessons 1 through <code>NN-1</code> to have already run against the same persistent file. To go through the whole course from scratch:</p>
+<pre><code class="language-powershell">cmake --preset debug
+cmake --build --preset debug
+foreach ($n in 1..13) {
+    &amp; &quot;.\build\debug\employee_directory_lesson_$(&#x27;{0:D2}&#x27; -f $n).exe&quot;
+}</code></pre>
+<h2>Conventions Used in Every Lesson</h2>
+<ul>
+<li><strong>What You&#x27;ll Add</strong> — one paragraph, framed in terms of the running app,</li>
+<p>not the underlying mechanism.</p>
+<li><strong>New Concepts</strong> — links into <code>docs/reference/</code> for the precise</li>
+<p>documentation; the lesson itself stays narrative and example-driven.</p>
+<li><strong>Starting Point</strong> — what you&#x27;re building on top of (the previous</li>
+<p>lesson&#x27;s ending state).</p>
+<li><strong>Steps</strong> — the actual walkthrough.</li>
+<li><strong>Full Listing</strong> — the complete file(s) at the end of the lesson, so you</li>
+<p>can diff against your own attempt.</p>
+<li><strong>Build and Run</strong> — the exact command and expected output.</li>
+<li><strong>What to Notice</strong> — the one or two things worth remembering afterward.</li>
+</ul>
+        <nav class="bottomnav"><span class="nav-button nav-disabled">Previous</span><a class="nav-button" href="index.html">Index</a><a class="nav-button" href="01-binding-your-first-type.html">Next</a></nav>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

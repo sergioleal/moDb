@@ -1,0 +1,15 @@
+`GiveRaise` is built exactly like `TransferDepartment` was -- an id, argument encoding, an `execute()` that materializes, mutates, and updates. Nothing about individual operations changes in this lesson.
+
+What is new is `HRFacade`: a tag type naming a facade id and a version, backed by a `FacadeDescriptor` that lists both `TransferDepartment` and `GiveRaise` as its methods. The server registers this facade in a `FacadeCatalog` alongside the operation registry it already had. The client opens the facade once, gets back a typed handle, and calls `invoke<TransferDepartment>(...)` and `invoke<GiveRaise>(...)` through it -- moving Bruno back to Engineering and giving Ana a raise, both through the same handle.
+
+The version-mismatch demonstration is the sharpest part of the lesson: a second tag, `HRFacadeV2`, asks for a version of "hr" the server never registered. It is rejected -- not because "hr" is unknown, but because no version 2 of it exists. Identity here is the pair, facade id plus version, never a position in a list or an assumption about what the newest version must be.
+
+A facade is a naming and versioning layer, not a second execution engine. Everything `invoke<Method>` does still travels through the exact same operation dispatch Lesson 9 introduced.
+
+Operations are the executable unit; a facade is the product-facing surface built on top of them. That distinction matters as a system grows, because operations can be added, reused, and composed by more than one facade, while a facade gives one particular class of consumer -- here, an HR client -- a stable, versioned vocabulary to depend on. Identity being `FacadeId + version`, rather than a list position, is what makes that stability meaningful: a client compiled against a version the server never published fails to open the facade at all, instead of silently receiving a surface it was not built for.
+
+The context for this lesson is that `TransferDepartment` works, but calling it means knowing its exact id string and argument encoding. Real client SDKs want a stable, typed surface instead.
+
+What we are trying to achieve is this: Add a second operation, `GiveRaise`, and group both operations behind one versioned `HRFacade` that a client opens once and invokes typed methods through -- then show a mismatched facade version being rejected outright.
+
+By the end of this lesson, the learner should be able to explain what a `FacadeDescriptor` adds on top of an `OperationRegistry` entry. Describe why identity is `FacadeId + version`, not a position in a list. State what changes, and what does not, compared to calling `TransferDepartment` directly in Lesson 9.

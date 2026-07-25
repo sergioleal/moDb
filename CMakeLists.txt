@@ -320,8 +320,21 @@ if(MODB_BUILD_TRAINING)
             COMMENT "Rendering Ring0 training Markdown to HTML"
             VERBATIM
         )
+        add_custom_target(modb_employee_directory_training_html
+            COMMAND ${MODB_PYTHON_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/render_employee_directory_training.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Rendering employee-directory training Markdown to HTML"
+            VERBATIM
+        )
     else()
         add_custom_target(modb_training_html
+            COMMAND ${CMAKE_COMMAND} -E echo
+                "Python not found. Reconfigure with -DMODB_PYTHON_EXECUTABLE=<python>."
+            COMMAND ${CMAKE_COMMAND} -E false
+            VERBATIM
+        )
+        add_custom_target(modb_employee_directory_training_html
             COMMAND ${CMAKE_COMMAND} -E echo
                 "Python not found. Reconfigure with -DMODB_PYTHON_EXECUTABLE=<python>."
             COMMAND ${CMAKE_COMMAND} -E false
