@@ -9,6 +9,9 @@
 #include "runner/json_util.hpp"
 #include "runner/jsonl_writer.hpp"
 
+#include "modb/net/protocol.hpp"
+#include "modb/storage/page_file.hpp"
+
 #include <sstream>
 #include <system_error>
 
@@ -233,7 +236,9 @@ CampaignResult run_campaign(const CampaignOptions& options) {
             << ",\"arch\":" << json_string(env_info.arch)
             << ",\"hostname_token\":" << json_string(env_info.hostname_token)
             << ",\"page_size\":" << json_string(env_info.page_size)
-            << ",\"project_version\":" << json_string(env_info.project_version) << "}";
+            << ",\"project_version\":" << json_string(env_info.project_version)
+            << ",\"format_version\":" << json_uint(modb::storage::current_format_version)
+            << ",\"protocol_version\":" << json_uint(modb::net::protocol_version) << "}";
         if (!write_or_fail(oss.str())) {
             return result;
         }

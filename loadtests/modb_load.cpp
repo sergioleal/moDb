@@ -1,19 +1,29 @@
-// CLI de testes de carga (docs/PLANO_TESTES_DE_CARGA.md). Subfase A/B:
-// `run`, `list-cases`, `list-profiles` funcionam; `resume`/`index`/`trend`/
-// `report`/`gate`/`compare` ainda não existem (Subfases C/F/J) e dizem isso
-// claramente em vez de fingir que fizeram algo.
+// CLI de testes de carga (docs/PLANO_TESTES_DE_CARGA.md). Subfases A/B/C:
+// `run`, `list-cases`, `list-profiles`, `index`, `trend` funcionam;
+// `resume`/`gate`/`compare` ainda não existem (Subfases F/J) e dizem isso
+// claramente em vez de fingir que fizeram algo. `report` existe em forma
+// mínima (CSV das linhas do rollup).
 //
 // Uso:
 //   modb_load run --profile <nome> [seletores] [orçamento] [--output-dir DIR]
-//                 [--work-dir DIR] [--seed N] [--dry-run]
+//                 [--work-dir DIR] [--seed N] [--dry-run] [--no-index]
+//                 [--history-file PATH]
 //   modb_load list-cases [seletores]
 //   modb_load list-profiles
+//   modb_load index <campanha.jsonl> [--history-file PATH] [--environments-file PATH]
+//   modb_load trend --case ID --metric NOME [--phase NOME] [--history-file PATH]
+//   modb_load report --case ID [--format csv|json] [--history-file PATH]
 
 #include "campaign.hpp"
+#include "history/index.hpp"
+#include "history/trend.hpp"
+#include "json_value.hpp"
 #include "matrix.hpp"
 #include "profiles.hpp"
 
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -33,8 +43,12 @@ void print_usage() {
         << "                [--repeat N] [--seed N] [--output-dir DIR] [--work-dir DIR]\n"
         << "                [--environments-file PATH] [--max-duration N] [--max-disk-gb N]\n"
         << "                [--max-rss-mb N] [--accept-unknown-budget] [--dry-run]\n"
+        << "                [--history-file PATH] [--no-index]\n"
         << "  modb_load list-cases [os mesmos seletores acima]\n"
-        << "  modb_load list-profiles\n";
+        << "  modb_load list-profiles\n"
+        << "  modb_load index <campanha.jsonl> [--history-file PATH] [--environments-file PATH]\n"
+        << "  modb_load trend --case ID --metric NOME [--phase NOME] [--history-file PATH]\n"
+        << "  modb_load report --case ID [--format csv|json] [--history-file PATH]\n";
 }
 
 std::vector<std::string> split_comma(std::string_view value) {
@@ -68,9 +82,11 @@ std::string join_argv(int argc, char** argv) {
     return out;
 }
 
-// Preenche seletores comuns a `run` e `list-cases`. Devolve false (e já
-// imprime o motivo) se um argumento exigir valor e não houver.
-bool parse_common_selectors(int argc, char** argv, int start, CampaignOptions& options) {
+// Preenche seletores comuns a `run` e `list-cases`. `history_file`/`no_index`
+// só importam para `run` (indexação automática, §13.5) mas são aceitos aqui
+// também para `list-cases` sem efeito, para manter um único parser.
+bool parse_common_selectors(int argc, char** argv, int start, CampaignOptions& options,
+                           std::filesystem::path& history_file, bool& no_index) {
     for (int i = start; i < argc; ++i) {
         const std::string_view arg{argv[i]};
         auto need = [&](const char* name) -> const char* {
@@ -120,6 +136,10 @@ bool parse_common_selectors(int argc, char** argv, int start, CampaignOptions& o
             options.budget.accept_unknown_budget = true;
         } else if (arg == "--dry-run") {
             options.dry_run = true;
+        } else if (arg == "--history-file") {
+            history_file = need("--history-file");
+        } else if (arg == "--no-index") {
+            no_index = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage();
             std::exit(0);
@@ -135,7 +155,9 @@ bool parse_common_selectors(int argc, char** argv, int start, CampaignOptions& o
 int command_run(int argc, char** argv) {
     CampaignOptions options;
     options.argv_joined = join_argv(argc, argv);
-    parse_common_selectors(argc, argv, 2, options);
+    std::filesystem::path history_file{"load-history/series.jsonl"};
+    bool no_index = false;
+    parse_common_selectors(argc, argv, 2, options, history_file, no_index);
 
     if (!options.profile && options.selectors.case_ids.empty()) {
         std::cerr << "Erro: informe --profile ou --case\n";
@@ -162,13 +184,32 @@ int command_run(int argc, char** argv) {
     }
     std::cout << "Resultado: " << result.result_path.string() << "  run_id=" << result.run_id
               << "  status=" << result.status << '\n';
+
+    // Indexação automática ao final de `run` (§13.5); `--no-index` desliga.
+    if (!no_index) {
+        auto indexed = modb::loadtest::index_campaign(result.result_path, history_file,
+                                                       options.environments_file);
+        if (!indexed.ok) {
+            std::cerr << "Aviso: indexação falhou: " << indexed.error << '\n';
+        } else {
+            std::cerr << "Índice: " << indexed.appended << " ponto(s) novo(s), "
+                      << indexed.skipped_duplicate << " duplicata(s), " << indexed.rejected
+                      << " rejeitado(s) em " << history_file.string() << '\n';
+            for (const auto& reason : indexed.rejection_reasons) {
+                std::cerr << "  rejeitado: " << reason << '\n';
+            }
+        }
+    }
+
     return result.status == "failed" ? 1 : 0;
 }
 
 int command_list_cases(int argc, char** argv) {
     CampaignOptions options;
     options.argv_joined = join_argv(argc, argv);
-    parse_common_selectors(argc, argv, 2, options);
+    std::filesystem::path history_file{"load-history/series.jsonl"};
+    bool no_index = false;
+    parse_common_selectors(argc, argv, 2, options, history_file, no_index);
 
     if (!options.profile && options.selectors.case_ids.empty()) {
         std::cerr << "Erro: informe --profile ou --case\n";
@@ -187,6 +228,202 @@ int command_list_cases(int argc, char** argv) {
 int command_list_profiles() {
     for (const auto& name : modb::loadtest::list_profile_names()) {
         std::cout << name << '\n';
+    }
+    return 0;
+}
+
+int command_index(int argc, char** argv) {
+    if (argc < 3) {
+        std::cerr << "Uso: modb_load index <campanha.jsonl> [--history-file PATH] "
+                    "[--environments-file PATH]\n";
+        return 2;
+    }
+    const std::filesystem::path campaign_path{argv[2]};
+    std::filesystem::path history_file{"load-history/series.jsonl"};
+    std::filesystem::path environments_file{"loadtests/environments.json"};
+    for (int i = 3; i < argc; ++i) {
+        const std::string_view arg{argv[i]};
+        auto need = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) {
+                std::cerr << "Falta valor para " << name << '\n';
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (arg == "--history-file") {
+            history_file = need("--history-file");
+        } else if (arg == "--environments-file") {
+            environments_file = need("--environments-file");
+        } else {
+            std::cerr << "Argumento desconhecido: " << arg << '\n';
+            return 2;
+        }
+    }
+
+    auto indexed = modb::loadtest::index_campaign(campaign_path, history_file, environments_file);
+    if (!indexed.ok) {
+        std::cerr << "Erro: " << indexed.error << '\n';
+        return 1;
+    }
+    std::cout << indexed.appended << " ponto(s) novo(s), " << indexed.skipped_duplicate
+              << " duplicata(s), " << indexed.rejected << " rejeitado(s) em "
+              << history_file.string() << '\n';
+    for (const auto& reason : indexed.rejection_reasons) {
+        std::cerr << "  rejeitado: " << reason << '\n';
+    }
+    return indexed.rejected > 0 ? 1 : 0;
+}
+
+int command_trend(int argc, char** argv) {
+    std::string case_id, metric_id, phase;
+    std::filesystem::path history_file{"load-history/series.jsonl"};
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg{argv[i]};
+        auto need = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) {
+                std::cerr << "Falta valor para " << name << '\n';
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (arg == "--case") {
+            case_id = need("--case");
+        } else if (arg == "--metric") {
+            metric_id = need("--metric");
+        } else if (arg == "--phase") {
+            phase = need("--phase");
+        } else if (arg == "--history-file") {
+            history_file = need("--history-file");
+        } else {
+            std::cerr << "Argumento desconhecido: " << arg << '\n';
+            return 2;
+        }
+    }
+    if (case_id.empty() || metric_id.empty()) {
+        std::cerr << "Uso: modb_load trend --case ID --metric NOME [--phase NOME] "
+                    "[--history-file PATH]\n";
+        return 2;
+    }
+
+    auto metric = modb::loadtest::find_metric(metric_id);
+    if (!metric) {
+        std::cerr << "Erro: métrica desconhecida: " << metric_id << ". Conhecidas: ";
+        for (const auto& id : modb::loadtest::known_metric_ids()) {
+            std::cerr << id << ' ';
+        }
+        std::cerr << '\n';
+        return 2;
+    }
+
+    auto trend = modb::loadtest::compute_trend(history_file, case_id, metric_id, phase);
+    if (!trend.ok) {
+        std::cerr << "Erro: " << trend.error << '\n';
+        return 1;
+    }
+    if (trend.points.empty()) {
+        std::cout << "Nenhum ponto para o caso '" << case_id << "' em " << history_file.string()
+                  << '\n';
+        return 0;
+    }
+    std::cout << modb::loadtest::render_trend(trend, *metric);
+    return 0;
+}
+
+int command_report(int argc, char** argv) {
+    std::string case_id, format = "csv";
+    std::filesystem::path history_file{"load-history/series.jsonl"};
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg{argv[i]};
+        auto need = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) {
+                std::cerr << "Falta valor para " << name << '\n';
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (arg == "--case") {
+            case_id = need("--case");
+        } else if (arg == "--format") {
+            format = need("--format");
+        } else if (arg == "--history-file") {
+            history_file = need("--history-file");
+        } else {
+            std::cerr << "Argumento desconhecido: " << arg << '\n';
+            return 2;
+        }
+    }
+    if (case_id.empty()) {
+        std::cerr << "Uso: modb_load report --case ID [--format csv|json] [--history-file PATH]\n";
+        return 2;
+    }
+    if (format != "csv" && format != "json") {
+        std::cerr << "Erro: --format deve ser csv ou json\n";
+        return 2;
+    }
+    if (!std::filesystem::exists(history_file)) {
+        std::cerr << "Erro: arquivo histórico não encontrado: " << history_file.string() << '\n';
+        return 1;
+    }
+
+    // Forma mínima (§13.6): exporta linha a linha os campos de escopo de
+    // caso (totals não depende de --phase) para análise externa --
+    // planilha/notebook fazem o resto. Métricas por fase completas seguem
+    // reservadas ao dashboard e a `trend`.
+    std::ifstream file(history_file, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    std::istringstream lines(buffer.str());
+    std::string raw_line;
+    std::vector<std::string> rows;
+    while (std::getline(lines, raw_line)) {
+        if (raw_line.empty()) {
+            continue;
+        }
+        auto parsed = modb::loadtest::parse_json(raw_line);
+        if (!parsed.ok || !parsed.value.is_object()) {
+            std::cerr << "Erro: linha inválida em " << history_file.string() << ": " << parsed.error
+                      << '\n';
+            return 1;
+        }
+        if (parsed.value.get_string("case_id") != case_id) {
+            continue;
+        }
+        const auto* totals = parsed.value.find("totals");
+        const auto started_at = parsed.value.get_string("started_at");
+        const auto commit_short = parsed.value.get_string("commit_short");
+        const auto series_key = parsed.value.get_string("series_key");
+        const auto status = parsed.value.get_string("status");
+        const auto duration_ns = totals ? totals->get_number("duration_ns") : 0.0;
+        const auto peak_disk_bytes = totals ? totals->get_number("peak_disk_bytes") : 0.0;
+        const auto write_amplification = totals ? totals->get_number("write_amplification") : 0.0;
+
+        if (format == "csv") {
+            std::ostringstream row;
+            row << started_at << ';' << commit_short << ';' << series_key << ';' << status << ';'
+                << duration_ns << ';' << peak_disk_bytes << ';' << write_amplification;
+            rows.push_back(row.str());
+        } else {
+            std::ostringstream row;
+            row << "{\"started_at\":\"" << started_at << "\",\"commit_short\":\"" << commit_short
+                << "\",\"series_key\":\"" << series_key << "\",\"status\":\"" << status
+                << "\",\"total_duration_ns\":" << duration_ns
+                << ",\"peak_disk_bytes\":" << peak_disk_bytes
+                << ",\"write_amplification\":" << write_amplification << "}";
+            rows.push_back(row.str());
+        }
+    }
+
+    if (rows.empty()) {
+        std::cerr << "Nenhum ponto para o caso '" << case_id << "' em " << history_file.string()
+                  << '\n';
+        return 0;
+    }
+    if (format == "csv") {
+        std::cout << "started_at;commit_short;series_key;status;total_duration_ns;"
+                    "peak_disk_bytes;write_amplification\n";
+    }
+    for (const auto& row : rows) {
+        std::cout << row << '\n';
     }
     return 0;
 }
@@ -214,11 +451,20 @@ int main(int argc, char** argv) {
     if (command == "list-profiles") {
         return command_list_profiles();
     }
+    if (command == "index") {
+        return command_index(argc, argv);
+    }
+    if (command == "trend") {
+        return command_trend(argc, argv);
+    }
+    if (command == "report") {
+        return command_report(argc, argv);
+    }
     if (command == "resume") {
         return command_not_implemented("resume", "F");
     }
-    if (command == "index" || command == "trend" || command == "report" || command == "gate") {
-        return command_not_implemented(command, "C/J");
+    if (command == "gate") {
+        return command_not_implemented(command, "J");
     }
     if (command == "compare") {
         return command_not_implemented("compare", "J");

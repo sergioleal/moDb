@@ -829,9 +829,10 @@ loadtests/
   environments.json               catálogo de ambientes registrados (implementado, §4.4)
   json_value.hpp/.cpp             implementado -- parser JSON mínimo, só leitura (não
                                  existia nada além de serialização em benchmarks/runner)
-  modb_load.cpp                  implementado -- CLI: run, list-cases, list-profiles;
-                                 resume/index/trend/report/gate/compare reportam
-                                 "ainda não implementado" em vez de fingir que fazem algo
+  modb_load.cpp                  implementado -- CLI: run, list-cases, list-profiles,
+                                 index, trend, report (forma mínima); resume/gate/
+                                 compare reportam "ainda não implementado" em vez de
+                                 fingir que fazem algo; `run` indexa por padrão (--no-index desliga)
   matrix.hpp/.cpp                implementado -- dimensões, expansão, seletores, ids
   environments.hpp/.cpp          implementado -- carrega/valida environments.json, resolve --environment
   profiles.hpp/.cpp              implementado -- os 8 perfis de §6.2 (nem todo workload
@@ -845,11 +846,14 @@ loadtests/
   target_embedded.hpp/.cpp       implementado -- contra modb::object::Database de verdade
   target_client.cpp              implementação via net::Client (loopback/remoto)
   history/
-    rollup.hpp/.cpp              extração campanha -> rollup
-    series_key.hpp/.cpp          hash de comparabilidade e versionamento
-    index.cpp                    append idempotente em series.jsonl
-    trend.cpp                    série, mediana móvel, outliers, quebras
-    gate.cpp                     regressão pontual e deriva lenta
+    rollup.hpp/.cpp              implementado -- extração campanha -> rollup
+    series_key.hpp/.cpp          implementado -- hash de comparabilidade (environment
+                                 não entra; host_class entra)
+    index.hpp/.cpp               implementado -- append idempotente, recusa rollup
+                                 sem procedência
+    trend.hpp/.cpp               implementado -- 11 métricas (mesmo registro do
+                                 dashboard), mediana móvel, quebra de série, veredito
+    gate.cpp                     regressão pontual e deriva lenta (Subfase J)
   dashboard/
     index.html                   painel da série histórica (implementado, §13.11)
   workloads/
@@ -882,8 +886,10 @@ tests/
   load_matrix_test.cpp           implementado (`ctest -R modb.load_matrix`) -- expansão,
                                  seletores, ids, conjunto vazio
   load_workload_test.cpp         cada workload em escala minúscula, invariantes
-  load_history_test.cpp          rollup, series_key estável, idempotência do
-                                 index, mediana móvel, deriva, quebra de série
+  load_history_test.cpp          implementado (`ctest -R modb.load_history`) --
+                                 series_key estável, idempotência do index, rejeição
+                                 de rollup sem procedência, mediana móvel/veredito,
+                                 quebra de série reseta a janela
 load-history/                    versionado no Git
   series.jsonl                   append-only, um rollup por (caso, execução)
   baselines.json                 series_key -> run_id escolhido, com motivo

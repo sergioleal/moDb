@@ -60,6 +60,17 @@ public:
         return (v && v->is_string()) ? v->as_string() : fallback;
     }
 
+    // `fallback` se a chave não existir, não for objeto, ou o valor não for número.
+    [[nodiscard]] double get_number(std::string_view key, double fallback = 0.0) const {
+        const auto* v = find(key);
+        return (v && v->is_number()) ? v->as_number() : fallback;
+    }
+
+    [[nodiscard]] bool get_bool(std::string_view key, bool fallback = false) const {
+        const auto* v = find(key);
+        return (v && v->is_bool()) ? v->as_bool() : fallback;
+    }
+
 private:
     Storage storage_;
 };
