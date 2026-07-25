@@ -149,6 +149,26 @@ medição). `remote_client_local` é o alvo para questões de rede e é limitado
 escalas `10k`/`100k`, porque 1M objetos atravessando WAN mede o enlace, não o
 banco.
 
+**Implementado na Subfase G (versão mínima).** `loopback` funciona só para
+`create_only` (`loadtests/target_client.cpp` + `loadtests/loadtest_facade.cpp`):
+um `net::Server` real sobe em `127.0.0.1` (porta OS-assigned), um
+`app::ServerConnection` conecta e invoca `CreateBatch` (uma `ops::Operation`
+de facade, um lote por `--batch`, mesma semântica de commit-por-lote do
+`embedded`) e a validação de hash relê TUDO via `collect()` (query remota),
+ordenando pelo campo lógico `id` antes de comparar -- a ordem de um scan
+remoto não é garantida ser a ordem de criação, ao contrário do
+`embedded`, que relê pelos próprios ids na ordem em que foram criados.
+`create_delete_*`/`crud_full` continuam recusando `loopback` no próprio
+wrapper (`workloads/*.cpp`), não implementados nesta subfase. Métricas de
+rede propriamente ditas (bytes/frames/syscalls/TTFR, coluna "mede" da
+tabela acima) **não** são coletadas ainda -- cliente e servidor rodam no
+MESMO processo (um `std::thread` aceita a conexão), então `peak_rss_bytes`
+reflete os dois combinados, não um custo de rede isolado; `latency_ns` tem
+granularidade por LOTE (uma viagem de rede por `invoke`), não por objeto
+como no `embedded` -- os dois números não são comparáveis ponto a ponto
+entre alvos. Fechar essas lacunas (processos separados, métricas de rede
+reais) fica para uma iteração futura desta subfase.
+
 ### 4.4 D4 — Ambiente registrado
 
 D3 responde "qual topologia" (o que roda onde, em relação a quem); D4 responde

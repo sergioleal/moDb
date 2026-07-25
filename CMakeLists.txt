@@ -437,7 +437,10 @@ add_library(modb_load_core STATIC
     loadtests/environments.cpp
     loadtests/dataset_user.cpp
     loadtests/process_metrics.cpp
+    loadtests/user_type.cpp
     loadtests/target_embedded.cpp
+    loadtests/loadtest_facade.cpp
+    loadtests/target_client.cpp
     loadtests/workloads/create_only.cpp
     loadtests/workloads/create_delete_forward.cpp
     loadtests/workloads/create_delete_reverse.cpp
@@ -450,7 +453,7 @@ add_library(modb_load_core STATIC
     loadtests/history/trend.cpp
 )
 target_include_directories(modb_load_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/loadtests)
-target_link_libraries(modb_load_core PUBLIC modb_bench_core)
+target_link_libraries(modb_load_core PUBLIC modb_bench_core modb::app_client)
 
 add_executable(modb_load loadtests/modb_load.cpp)
 target_link_libraries(modb_load PRIVATE modb_load_core)

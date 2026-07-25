@@ -4,6 +4,7 @@
 #include "process_metrics.hpp"
 #include "runner/json_util.hpp"
 #include "runner/sha256.hpp"
+#include "user_type.hpp"
 
 #include "modb/object/database.hpp"
 #include "modb/storage/page.hpp"
@@ -24,54 +25,6 @@ using modb::bench::sha256_text;
 
 namespace modb::loadtest {
 namespace {
-
-// Struct C++ + Binding do tipo `User` (§7). Vive só nesta unidade de
-// compilação -- o mesmo padrão de `object_store_lifecycle.cpp` para `Item`.
-struct User {
-    std::int64_t id{};
-    std::string login;
-    std::string email;
-    std::string display_name;
-    std::int64_t created_at{};
-    std::int32_t status{};
-    std::vector<std::byte> filler;
-};
-
-BindingBuilder<User> user_binding() {
-    BindingBuilder<User> builder{"User"};
-    builder.field<1>("id", &User::id)
-        .field<2>("login", &User::login)
-        .field<3>("email", &User::email)
-        .field<4>("display_name", &User::display_name)
-        .field<5>("created_at", &User::created_at)
-        .field<6>("status", &User::status)
-        .field<7>("filler", &User::filler);
-    return builder;
-}
-
-User to_engine_user(const GeneratedUser& g) {
-    User u;
-    u.id = g.id;
-    u.login = g.login;
-    u.email = g.email;
-    u.display_name = g.display_name;
-    u.created_at = g.created_at;
-    u.status = g.status;
-    u.filler = g.filler;
-    return u;
-}
-
-GeneratedUser from_engine_user(const User& u) {
-    GeneratedUser g;
-    g.id = u.id;
-    g.login = u.login;
-    g.email = u.email;
-    g.display_name = u.display_name;
-    g.created_at = u.created_at;
-    g.status = u.status;
-    g.filler = u.filler;
-    return g;
-}
 
 std::uint64_t ns_between(std::chrono::steady_clock::time_point a,
                          std::chrono::steady_clock::time_point b) {

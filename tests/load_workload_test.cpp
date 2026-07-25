@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include "target_client.hpp"
 #include "target_embedded.hpp"
 
 #include <chrono>
@@ -44,6 +45,29 @@ void test_create_only(TestSuite& suite) {
     suite.check(result.hash_match, "create_only deve validar o hash lógico");
     suite.check(result.expected_hash == result.actual_hash, "expected_hash == actual_hash");
     suite.check(result.write_amplification > 0.0, "write_amplification deve ser computável (> 0)");
+}
+
+// Subfase G (versão mínima): o mesmo dataset/hash lógico via um
+// `net::Server`/`Client` real em loopback -- não um `Database` embedded
+// chamado diretamente. Batch não-redondo (37) exercita o lote final parcial
+// também sobre a rede, igual ao equivalente embedded.
+void test_create_only_loopback(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_create_only_client(small_params(work_dir), db_path);
+
+    suite.check(result.ok, "create_only loopback deve completar: " + result.error);
+    suite.check(result.status == "completed", "create_only loopback status deve ser completed");
+    suite.check(result.phases.size() == 1, "create_only loopback deve produzir exatamente 1 fase");
+    if (!result.phases.empty()) {
+        suite.check(result.phases[0].phase == "create", "a única fase deve se chamar 'create'");
+        suite.check(result.phases[0].operations == 200, "operations deve ser o object_count pedido");
+    }
+    suite.check(result.hash_match,
+               "create_only loopback deve validar o hash lógico relendo via query remota: " +
+                   result.error);
+    suite.check(result.expected_hash == result.actual_hash, "expected_hash == actual_hash");
+    suite.check(!result.expected_hash.empty(), "expected_hash não deve ficar vazio");
 }
 
 void test_create_delete_forward(TestSuite& suite) {
@@ -192,6 +216,7 @@ void test_crud_full(TestSuite& suite) {
 int main() {
     TestSuite suite;
     test_create_only(suite);
+    test_create_only_loopback(suite);
     test_create_delete_forward(suite);
     test_create_delete_reverse(suite);
     test_create_delete_interleaved(suite);

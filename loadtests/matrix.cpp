@@ -134,7 +134,11 @@ bool is_known_target(std::string_view target_id) {
 }
 
 bool is_target_implemented(std::string_view target_id) {
-    return target_id == "embedded";
+    // Subfase G (versão mínima): `loopback` só tem dispatch real em
+    // `create_only` (workloads/create_only.cpp) -- os demais workloads
+    // continuam recusando `loopback` no próprio wrapper, não aqui (esta
+    // função não sabe de workload, só de alvo).
+    return target_id == "embedded" || target_id == "loopback";
 }
 
 std::string Case::case_id() const {
