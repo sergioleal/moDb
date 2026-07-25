@@ -46,6 +46,46 @@ mecanismo de failpoint já usado em [tests/failpoint_test.cpp](../tests/failpoin
 aplicado a `PageFile` dentro do B-tree — não foi feito nesta rodada; fica
 como próximo passo se o item for revisitado.
 
+**Item #2 (`src/net/protocol.cpp`) — feito em 2026-07-25.** Quase todos os 198
+gaps eram branches de "campo truncado" nos decoders de mensagem — diferente de
+`btree.cpp`, esses são alcançáveis por um teste unitário puro, sem injeção de
+falha, porque os decoders só recebem um `std::span<const std::byte>`.
+Adicionado a [tests/protocol_test.cpp](../tests/protocol_test.cpp):
+
+- **`check_all_truncations_rejected`:** um frame válido é
+  `[u32 length][u8 type][payload]`. Cortar o corpo em qualquer prefixo
+  estrito, ajustando só o `length` externo para casar com o novo tamanho,
+  tem que falhar sempre — os campos internos (contagens, tamanhos de string,
+  sub-mensagens) continuam com os valores ORIGINAIS, então um corte cedo
+  demais necessariamente deixa algum campo sem bytes suficientes. Isso está
+  agora embutido em `check_round_trip`, então **toda** mensagem já testada
+  por round-trip ganhou de graça o fuzz de truncamento em cada offset do seu
+  corpo — sem precisar montar um frame hostil à mão por campo.
+- Esse property test revelou um comportamento real do protocolo: `Hello` e
+  `HelloOk` toleram os 2 bytes finais (`minor`, aditivo da Fase 10E) ausentes
+  de propósito, para compatibilidade com peers antigos — não é bug, e o
+  teste genérico precisou de um parâmetro `tolerated_tail` para essas duas
+  mensagens. Foram adicionados dois testes explícitos confirmando que
+  `Hello`/`HelloOk` decodificam com o default quando `minor` está ausente.
+
+**Resultado medido** (suíte completa, 128/128 testes, antes/depois limpos):
+
+| Arquivo | Linhas antes → depois | Branches antes → depois |
+|---|---|---|
+| `src/net/protocol.cpp` | 79,7% → **88,6%** | 43,7% → **58,6%** |
+| Total `src/**/*.cpp` (cumulativo, itens #1+#2) | 78,2% → **80,7%** | 44,6% → **47,2%** |
+
+**O que ainda falta em `protocol.cpp`** (111 linhas remanescentes): quase
+tudo agora é (a) limites de tamanho no ENCODE (string/lista grande demais —
+exigiria montar estruturas de dezenas de KB em memória) e (b) valores de enum
+inválidos em campos específicos não cobertos pela truncagem (ex.: "HelloOk
+selected unknown compression codec", "MethodDescriptor mode is unknown",
+"OpResult ok must be 0 or 1") — a truncagem só descobre "faltou byte", não
+"o byte está presente mas tem um valor semanticamente inválido". Cobrir isso
+exigiria um segundo helper de fuzz que sobrescreve, em vez de cortar, um byte
+de cada vez com valores fora do domínio esperado — não foi feito nesta
+rodada.
+
 ## Metodologia
 
 1. `option(MODB_ENABLE_COVERAGE)` adicionada ao [CMakeLists.txt](../CMakeLists.txt)

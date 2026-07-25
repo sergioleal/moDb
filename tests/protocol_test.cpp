@@ -42,7 +42,48 @@ using modb::object::ObjectId;
 using modb::object::TypeDefinitionId;
 using modb::storage::BinaryWriter;
 
-void check_round_trip(TestSuite& suite, const Message& original, std::string_view label) {
+// Um frame válido é [u32 length][u8 type][payload...], length = 1 + |payload|.
+// Cortar o corpo em QUALQUER prefixo estrito (ajustando só o length externo
+// para casar com o novo tamanho) precisa sempre falhar: os campos internos
+// (contagens, tamanhos de string, sub-mensagens) continuam com os valores
+// ORIGINAIS, então um corte cedo demais necessariamente deixa um campo sem
+// bytes suficientes. Isso exercita, de um só golpe, praticamente todo branch
+// "unexpected_end_of_input"/"X.error()" de cada decoder de mensagem — sem
+// precisar montar à mão um frame hostil por campo.
+// `tolerated_tail` bytes at the very end of the body are allowed to be
+// missing without an error: Hello/HelloOk end with an "aditivo" `minor` u16
+// (Fase 10E) that older peers never send, and the decoder deliberately skips
+// it (and any further trailing bytes) instead of failing — that is real,
+// intentional forward-compatibility, not a bug. Everything strictly before
+// that tolerated tail must still fail to decode.
+void check_all_truncations_rejected(TestSuite& suite, const Message& original,
+                                    std::string_view label, std::size_t tolerated_tail = 0) {
+    auto encoded = modb::net::encode_message(original);
+    if (!encoded || encoded->size() <= 5) {
+        return;  // sem encode ou sem corpo interessante para truncar.
+    }
+    const std::size_t body_total = encoded->size() - 4;
+    const std::size_t strict_limit = body_total > tolerated_tail ? body_total - tolerated_tail : 0;
+    bool all_rejected = true;
+    std::size_t offending = 0;
+    for (std::size_t body_len = 1; body_len < strict_limit; ++body_len) {
+        BinaryWriter frame;
+        frame.write_u32(static_cast<std::uint32_t>(body_len));
+        frame.write_bytes(std::span<const std::byte>(*encoded).subspan(4, body_len));
+        auto truncated = std::move(frame).take();
+        if (modb::net::decode_message(truncated).has_value()) {
+            all_rejected = false;
+            offending = body_len;
+            break;
+        }
+    }
+    suite.check(all_rejected, std::string{label} + ": every truncated prefix of the mandatory "
+                                                    "body is rejected (offending body_len=" +
+                                   std::to_string(offending) + ")");
+}
+
+void check_round_trip(TestSuite& suite, const Message& original, std::string_view label,
+                      std::size_t tolerated_tail = 0) {
     auto encoded = modb::net::encode_message(original);
     suite.check(encoded.has_value(), std::string{label} + " encodes");
     if (!encoded) {
@@ -54,6 +95,7 @@ void check_round_trip(TestSuite& suite, const Message& original, std::string_vie
         return;
     }
     suite.check(*decoded == original, std::string{label} + " round-trip");
+    check_all_truncations_rejected(suite, original, label, tolerated_tail);
 }
 
 std::vector<std::byte> prepend_length(std::uint32_t length, std::span<const std::byte> body) {
@@ -73,14 +115,52 @@ int main() {
                      Hello{.version = modb::net::protocol_version,
                            .database_name = "demo",
                            .accepted_codecs = {Compression::none}},
-                     "Hello");
+                     "Hello", /*tolerated_tail=*/2);  // `minor` (u16) e' aditivo (Fase 10E)
 
     check_round_trip(suite,
                      HelloOk{.version = modb::net::protocol_version,
                              .baseline = ObjectId{42},
                              .selected_codec = Compression::none,
                              .max_frame_bytes = max_frame_bytes},
-                     "HelloOk");
+                     "HelloOk", /*tolerated_tail=*/2);  // idem
+
+    // Peer antigo (anterior a' Fase 10E): Hello/HelloOk sem os 2 bytes finais
+    // de `minor` ainda decodificam, usando o default (0), em vez de falhar.
+    {
+        auto full = modb::net::encode_message(Hello{.version = modb::net::protocol_version,
+                                                     .database_name = "demo",
+                                                     .accepted_codecs = {Compression::none}});
+        suite.check(full.has_value(), "Hello (old-peer compat): base message encodes");
+        if (full && full->size() > 6) {
+            const std::size_t body_len = (full->size() - 4) - 2;  // omite os 2 bytes de `minor`
+            BinaryWriter frame;
+            frame.write_u32(static_cast<std::uint32_t>(body_len));
+            frame.write_bytes(std::span<const std::byte>(*full).subspan(4, body_len));
+            auto decoded = modb::net::decode_message(std::move(frame).take());
+            const auto* hello = decoded ? std::get_if<Hello>(&*decoded) : nullptr;
+            suite.check(hello != nullptr && hello->minor == 0,
+                        "Hello without the trailing `minor` field decodes with the default "
+                        "(old-peer compat)");
+        }
+    }
+    {
+        auto full = modb::net::encode_message(HelloOk{.version = modb::net::protocol_version,
+                                                       .baseline = ObjectId{42},
+                                                       .selected_codec = Compression::none,
+                                                       .max_frame_bytes = max_frame_bytes});
+        suite.check(full.has_value(), "HelloOk (old-peer compat): base message encodes");
+        if (full && full->size() > 6) {
+            const std::size_t body_len = (full->size() - 4) - 2;
+            BinaryWriter frame;
+            frame.write_u32(static_cast<std::uint32_t>(body_len));
+            frame.write_bytes(std::span<const std::byte>(*full).subspan(4, body_len));
+            auto decoded = modb::net::decode_message(std::move(frame).take());
+            const auto* hello_ok = decoded ? std::get_if<HelloOk>(&*decoded) : nullptr;
+            suite.check(hello_ok != nullptr && hello_ok->minor == 0,
+                        "HelloOk without the trailing `minor` field decodes with the default "
+                        "(old-peer compat)");
+        }
+    }
 
     QueryDescription description{
         .type = TypeDefinitionId{16},
