@@ -11,6 +11,7 @@
 #include "modb/graph/traversal.hpp"
 #include "modb/tx/wal.hpp"
 #include "modb/repl/replication.hpp"
+#include "modb/repl/wal_downloader.hpp"
 #include "modb/row.hpp"
 #include "modb/text_escape.hpp"
 #include "modb/value.hpp"
@@ -5102,6 +5103,7 @@ int run_replicate_command(int argc, char* argv[]) {
                      "  modb replicate bootstrap <primary.modb> <follower.modb>\n"
                      "  modb replicate seed-wal <follower.modb> <primary.wal> <primary.modb>\n"
                      "  modb replicate apply-wal <follower.modb> <primary.wal> <from_lsn>\n"
+                     "  modb replicate catch-up <follower.modb> <primary.wal> <primary.modb> [from_lsn]\n"
                      "  modb replicate status <file.modb>\n";
     };
     if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {
@@ -5205,6 +5207,47 @@ int run_replicate_command(int argc, char* argv[]) {
         std::cout << "applied_lsn=" << *applied << '\n';
         return 0;
     }
+    if (sub == "catch-up") {
+        if (argc != 6 && argc != 7) {
+            return print_usage_error(
+                "modb replicate catch-up <follower.modb> <primary.wal> <primary.modb> [from_lsn]");
+        }
+        modb::object::DatabaseOptions opts;
+        opts.primary_storage = modb::object::PrimaryStorage::wal_only;
+        opts.commit_ack = modb::object::CommitAckPolicy::local_wal;
+        const std::filesystem::path follower_path{argv[3]};
+        const std::filesystem::path wal_path{argv[4]};
+        const std::filesystem::path primary_path{argv[5]};
+        auto primary = modb::object::is_instance_control_file(primary_path)
+                           ? modb::object::Database::open(primary_path, opts)
+                           : modb::object::Database::open(primary_path);
+        if (!primary) {
+            return print_error(primary.error());
+        }
+        modb::repl::ReplicaCatchupOptions catchup;
+        catchup.replica_path = follower_path;
+        catchup.wal_source = wal_path;
+        catchup.spool_dir = follower_path.parent_path() / ".modb-catchup-spool";
+        catchup.database_uuid = primary->database_uuid();
+        catchup.timeline = primary->timeline_id();
+        catchup.oldest_available_lsn = primary->oldest_available_lsn();
+        if (argc == 7) {
+            auto from = parse_integer(argv[6]);
+            if (!from || *from < 0) {
+                return print_usage_error("from_lsn must be a non-negative integer");
+            }
+            catchup.applied_lsn = *from == 0 ? 0 : static_cast<std::uint64_t>(*from) - 1;
+            catchup.applied_lsn_is_explicit = true;
+        }
+        auto result = modb::repl::catch_up_replica_from_wal(catchup);
+        if (!result) {
+            return print_error(result.error());
+        }
+        std::cout << "catch-up state=" << modb::repl::to_string(result->state)
+                  << " applied_lsn=" << result->applied_lsn
+                  << " target_lsn=" << result->target_lsn << '\n';
+        return 0;
+    }
     if (sub == "status") {
         if (argc != 4) {
             return print_usage_error("modb replicate status <file>");
@@ -5232,6 +5275,16 @@ int run_replicate_command(int argc, char* argv[]) {
                   << "\ncheckpoint_lsn=" << opened->checkpoint_lsn()
                   << "\nfollower_ack_lsn=" << opened->follower_ack_lsn()
                   << "\noldest_available_lsn=" << opened->oldest_available_lsn() << '\n';
+        auto catchup = modb::repl::read_catchup_metadata(argv[3]);
+        if (catchup) {
+            std::cout << "catchup_state=" << modb::repl::to_string(catchup->state)
+                      << "\ncatchup_applied_lsn=" << catchup->applied_lsn
+                      << "\ncatchup_target_lsn=" << catchup->target_lsn;
+            if (!catchup->last_error.empty()) {
+                std::cout << "\ncatchup_last_error=" << catchup->last_error;
+            }
+            std::cout << '\n';
+        }
         return 0;
     }
     std::cerr << "Unknown replicate command: " << sub << '\n';

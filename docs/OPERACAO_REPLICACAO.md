@@ -46,6 +46,32 @@ Mostra `uuid`, `timeline`, `next_lsn`, `checkpoint_lsn`, `follower_ack_lsn` e
 2. Pedir frames a partir de `applied_lsn + 1`.
 3. Se o primary responder gap, executar novo bootstrap.
 
+## Catch-up por download do WAL (Fase 16)
+
+```text
+modb replicate catch-up follower.modb primary.modb.wal primary.modb [from_lsn]
+```
+
+O comando monta um manifesto do WAL disponível, baixa o segmento para um spool
+local (`.modb-catchup-spool` ao lado da réplica), valida tamanho/hash e aplica
+os registros em ordem até `up_to_date`.
+
+Se `from_lsn` for omitido, a réplica descobre a posição por metadata de
+catch-up, `follower_ack_lsn` e `checkpoint_lsn`. Use `from_lsn` apenas para
+forçar uma retomada operacional específica; internamente ele significa aplicar
+a partir desse LSN, com base local `from_lsn - 1`.
+
+Estados persistem em `<follower.modb>.catchup`:
+
+- `empty`: nenhuma tentativa confirmada;
+- `catching_up`: download/apply em andamento ou retomável;
+- `up_to_date`: aplicado até `target_lsn`;
+- `requires_bootstrap`: o WAL retido não cobre o buraco local;
+- `failed`: falha terminal com mensagem em `last_error`.
+
+`replicate status` mostra `catchup_state`, `catchup_applied_lsn`,
+`catchup_target_lsn` e, quando houver, `catchup_last_error`.
+
 ## Primary `wal_only` (Fase 15)
 
 Com `primary_storage=wal_only` o primary **não** mantém arquivo de páginas.

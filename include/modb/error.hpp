@@ -152,6 +152,12 @@ enum class ErrorCode {
     no_data_replica,
     // Timeout aguardando ACK de réplica de dados (Fase 15).
     commit_await_replica_timeout,
+    // Transição ou estado de catch-up inválido para a réplica (Fase 16).
+    invalid_replica_state,
+    // Falha ao baixar/spoolar segmentos WAL para catch-up (Fase 16).
+    replica_download_failed,
+    // Manifesto ou segmento WAL não bate com o hash/tamanho declarado (Fase 16).
+    manifest_hash_mismatch,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

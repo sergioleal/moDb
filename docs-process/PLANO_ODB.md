@@ -1028,10 +1028,10 @@ identidade persistente e seed sem snapshot do primary já precisam existir.
 
 #### Fase 16A — ADR e contrato de catch-up
 
-- [ ] Registrar em ADR o contrato de catch-up por WAL baixável: fontes
+- [x] Registrar em ADR o contrato de catch-up por WAL baixável: fontes
       permitidas (primary full, primary `wal_only` ou réplica doadora),
       manifesto, garantias de consistência e diferença para streaming online.
-- [ ] Definir estados persistentes da réplica: `empty`, `seeding`,
+- [x] Definir estados persistentes da réplica: `empty`, `seeding`,
       `catching_up`, `up_to_date`, `requires_bootstrap` e `failed`.
 
 Critério de aceite: ADR aceita; estados e transições cobertos por teste de
@@ -1039,10 +1039,10 @@ unidade (`modb.replica_catchup_state`). Tag alvo: `0.0.16a`.
 
 #### Fase 16B — Manifesto de WAL baixável
 
-- [ ] Expor manifesto com `database_uuid`, `timeline_id`, intervalo
+- [x] Expor manifesto com `database_uuid`, `timeline_id`, intervalo
       `[first_lsn, last_lsn]`, tamanho, hash por segmento e
       `oldest_available_lsn`.
-- [ ] Validar que a posição local da réplica (`applied_lsn`) é compatível com
+- [x] Validar que a posição local da réplica (`applied_lsn`) é compatível com
       o manifesto; gap abaixo da retenção vira `bootstrap_required`.
 
 Critério de aceite: `modb.replica_wal_manifest` valida manifesto íntegro,
@@ -1051,9 +1051,9 @@ insuficiente. Tag alvo: `0.0.16b`.
 
 #### Fase 16C — Download com spool durável e retomada
 
-- [ ] Implementar downloader de segmentos com arquivo temporário, fsync,
+- [x] Implementar downloader de segmentos com arquivo temporário, fsync,
       rename atômico e índice local de progresso.
-- [ ] Permitir retomada após queda no meio do download sem reaplicar bytes
+- [x] Permitir retomada após queda no meio do download sem reaplicar bytes
       incompletos nem perder segmentos já validados.
 
 Critério de aceite: `modb.replica_wal_download` cobre download completo,
@@ -1062,9 +1062,9 @@ retomada, truncamento, segmento duplicado e falha de armazenamento. Tag alvo:
 
 #### Fase 16D — Apply até `up_to_date`
 
-- [ ] Reutilizar o applier da Fase 14 para aplicar o WAL baixado em ordem,
+- [x] Reutilizar o applier da Fase 14 para aplicar o WAL baixado em ordem,
       com idempotência por `commit_lsn <= applied_lsn`.
-- [ ] Ao alcançar `last_lsn` do manifesto, persistir estado `up_to_date` e
+- [x] Ao alcançar `last_lsn` do manifesto, persistir estado `up_to_date` e
       emitir ACK/posição para retenção; se o primary avançou, assinar de
       `last_lsn + 1` ou repetir catch-up incremental.
 
@@ -1074,10 +1074,10 @@ duplica efeitos. Tag alvo: `0.0.16d`.
 
 #### Fase 16E — CLI, operação e fechamento
 
-- [ ] Expor CLI `modb replicate catch-up <replica> <wal-source>` e status com
+- [x] Expor CLI `modb replicate catch-up <replica> <wal-source>` e status com
       `catchup_state`, `applied_lsn`, `target_lsn`, lag e motivo de
       `requires_bootstrap`.
-- [ ] Documentar operação, retenção mínima, fontes válidas, limites de espaço
+- [x] Documentar operação, retenção mínima, fontes válidas, limites de espaço
       para spool e quando usar catch-up vs. bootstrap completo.
 
 Critério de aceite: fluxo ponta a ponta pela CLI: réplica vazia ou incompleta

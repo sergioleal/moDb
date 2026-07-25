@@ -745,11 +745,14 @@ A Fase 14 entrega comandos de réplica local (MVP sem daemon de streaming):
 modb replicate bootstrap <primary.modb> <follower.modb>
 modb replicate seed-wal <follower.modb> <primary.wal> <primary.modb>
 modb replicate apply-wal <follower.modb> <primary.wal> <from_lsn>
+modb replicate catch-up <follower.modb> <primary.wal> <primary.modb> [from_lsn]
 modb replicate status <file.modb>
 ```
 
 `bootstrap` copia o primary sob barreira do escritor; `apply-wal` aplica
-registros a partir de `from_lsn`; `status` mostra uuid/timeline/LSNs. Guia:
+registros a partir de `from_lsn`; `catch-up` baixa/spoola o WAL disponível,
+valida manifesto/hash e aplica até `up_to_date`; `status` mostra
+uuid/timeline/LSNs e estado de catch-up. Guia:
 [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md).
 
 ### Primary `wal_only` (Fase 15) — primary sem arquivo de dados
