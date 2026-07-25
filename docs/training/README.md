@@ -13,8 +13,9 @@ snapshots, indexed queries, a network server and client, remote domain
 operations, versioned facades, and a graph-shaped org chart.
 
 Source material lives in `docs/training/en`. All 13 lessons are complete:
-real, compiling, cumulative code under `examples/employee_directory/`, one
-file per lesson, each verified against an actual build and run.
+each lesson has its own folder (`docs/training/en/<NN-slug>/`) holding the
+lesson doc, its real cumulative `.cpp` source, and a build `README.md` —
+each verified against an actual build and run.
 
 Start at [`en/README.md`](en/README.md).
 

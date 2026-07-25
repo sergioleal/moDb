@@ -11,48 +11,54 @@ lambdas, RAII, smart pointers, `std::filesystem`) and have already skimmed
 [docs/DEVELOPER_GUIDE.md](../../DEVELOPER_GUIDE.md) or at least Chapter 0-1
 of it (what Ring0 is, how to build it).
 
-> **Status:** ✅ complete — all 13 lessons have real, compiling code under
-> `examples/employee_directory/`, verified against an actual build and
+> **Status:** ✅ complete — all 13 lessons have real, compiling code, one
+> self-contained folder per lesson, verified against an actual build and
 > run. Each lesson names its target reference doc(s) in `docs/reference/`
 > — those are written in full and safe to read ahead of the lesson prose.
 
 ## Lessons
 
-1. [Binding Your First Type](01-binding-your-first-type.md) — define
+Each lesson lives in its own folder: the lesson doc, its `.cpp` source,
+and a `README.md` with the exact build/run commands.
+
+1. [Binding Your First Type](01-binding-your-first-type/01-binding-your-first-type.md) — define
    `Employee`, bind it, create the database.
-2. [Persist and Reopen](02-persist-and-reopen.md) — real records that
+2. [Persist and Reopen](02-persist-and-reopen/02-persist-and-reopen.md) — real records that
    survive a restart.
-3. [Transactions](03-transactions.md) — the commit/rollback contract, done
+3. [Transactions](03-transactions/03-transactions.md) — the commit/rollback contract, done
    properly.
-4. [Handles and Updates](04-handles-and-updates.md) — give an employee a
+4. [Handles and Updates](04-handles-and-updates/04-handles-and-updates.md) — give an employee a
    raise.
-5. [Relationships: Departments and Projects](05-relationships.md) —
+5. [Relationships: Departments and Projects](05-relationships/05-relationships.md) —
    `Ref<Department>`, an owned record, and a collection of projects.
-6. [Consistent Reports with Snapshots](06-snapshots.md) — a payroll report
+6. [Consistent Reports with Snapshots](06-snapshots/06-snapshots.md) — a payroll report
    that doesn't see half-finished edits.
-7. [Searching with Queries and Indexes](07-queries-and-indexes.md) — find
+7. [Searching with Queries and Indexes](07-queries-and-indexes/07-queries-and-indexes.md) — find
    employees by department and salary, fast.
-8. [Serving the Directory Over the Network](08-networking.md) — split into
+8. [Serving the Directory Over the Network](08-networking/08-networking.md) — split into
    a server and a separate client.
-9. [Remote Operations: Transferring an Employee](09-remote-operations.md) —
+9. [Remote Operations: Transferring an Employee](09-remote-operations/09-remote-operations.md) —
    business logic that runs on the server.
-10. [Facades: A Stable HR API](10-facades.md) — a versioned surface the
+10. [Facades: A Stable HR API](10-facades/10-facades.md) — a versioned surface the
     client calls without knowing server internals.
-11. [The Org Chart: Graphs](11-graphs.md) — model and traverse
+11. [The Org Chart: Graphs](11-graphs/11-graphs.md) — model and traverse
     manager/report relationships.
-12. *(Optional, advanced)* [Asynchronous WAL I/O](12-async-io.md) — measure
+12. *(Optional, advanced)* [Asynchronous WAL I/O](12-async-io/12-async-io.md) — measure
     it before you reach for it.
-13. *(Optional, advanced)* [A Read Replica for Reporting](13-read-replica.md)
+13. *(Optional, advanced)* [A Read Replica for Reporting](13-read-replica/13-read-replica.md)
     — offload reports to a follower.
 
 ## How the Code Is Organized
 
-Each lesson is one self-contained, cumulative file under
-`examples/employee_directory/` — `lesson_01_binding.cpp`,
-`lesson_02_persist_reopen.cpp`, ... `lesson_13_read_replica.cpp`. Every
-file's `main()` replays every earlier lesson's function in order, on one
-continuously-reopened temp database file, and then runs that lesson's own
-new function. Concretely: `lesson_05_relationships.cpp` contains
+Each lesson is a folder — `01-binding-your-first-type/`,
+`02-persist-and-reopen/`, ... `13-read-replica/` — holding three things:
+the lesson doc (`<slug>.md`), one self-contained cumulative source file
+(`lesson_01_binding.cpp`, `lesson_02_persist_reopen.cpp`, ...
+`lesson_13_read_replica.cpp`), and a `README.md` with that lesson's build
+command. Every source file's `main()` replays every earlier lesson's
+function in order, on one continuously-reopened temp database file, and
+then runs that lesson's own new function. Concretely:
+`05-relationships/lesson_05_relationships.cpp` contains
 `lesson_01_bind_type`, `lesson_02_persist_and_reopen`, ... through
 `lesson_05_relationships`, called in that order from `main()`. This means:
 
@@ -74,7 +80,9 @@ preserves the single-cumulative-file story.
 
 ## Build the Exercises
 
-Every lesson has its own CMake target, `employee_directory_lesson_NN`:
+Every lesson has its own CMake target, `employee_directory_lesson_NN`,
+and its own folder's `README.md` repeats the exact command for that
+lesson:
 
 ```powershell
 cmake --preset debug
