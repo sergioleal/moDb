@@ -180,6 +180,46 @@ separadamente para investigação; não bloqueou a medição deste item porque
 afeta apenas o `.gcda` do próprio `server_streaming`, não os de
 `object_store.cpp`/`table_heap.cpp`.
 
+**Itens #6 (`src/object/database.cpp`) e #7 (`src/net/server.cpp`) — feitos
+em 2026-07-25.**
+
+- **`database.cpp`**: `Database` só fica utilizável depois de anexada a um
+  `DatabaseRegistry` (`database_id_` fica zero até `attach()`); `begin()` e
+  `collect_garbage()` chamados antes do attach nunca tinham teste (cada
+  método tem sua própria checagem inline, não uma função compartilhada — um
+  não cobre o outro). Também faltavam: `begin()` aninhado com uma transação
+  já ativa, commit duplo na mesma `Transaction`, commit depois de rollback, e
+  `collect_garbage()` durante uma transação ativa. Todas são guardas de
+  ciclo de vida simples de disparar via API pública — adicionadas a
+  [tests/database_identity_test.cpp](../tests/database_identity_test.cpp).
+- **`server.cpp`**: `Server::serve_forever()`/`Server::request_stop()`
+  estavam em **0%** — a suíte inteira só usa `serve_one()` chamado
+  manualmente em loop, nunca o laço de aceitação bloqueante real usado pelo
+  CLI (`modb serve`). Adicionado um teste que roda `serve_forever()` numa
+  thread e confirma que `request_stop()` (que fecha o listener para
+  destravar o `accept()` pendente) faz o laço retornar Ok em vez de
+  propagar o erro de conexão fechada — em
+  [tests/operation_server_test.cpp](../tests/operation_server_test.cpp),
+  não em `server_streaming_test.cpp`, para não misturar com o teste
+  instável mencionado acima (esse teste usa conexão única via `serve_one()`,
+  sem relação com os streams concorrentes suspeitos do bug).
+
+**Resultado medido** (suíte completa, 128/128 testes, antes/depois limpos):
+
+| Arquivo | Linhas antes → depois | Branches antes → depois |
+|---|---|---|
+| `src/object/database.cpp` | 80,0% → **82,6%** | 48,5% → **50,6%** |
+| `src/net/server.cpp` | 76,3% → **80,5%** | 44,6% → **46,7%** |
+| Total `src/**/*.cpp` (cumulativo, itens #1 a #7) | 78,2% → **83,1%** | 44,6% → **49,3%** |
+
+Assim como nos itens #4/#5, o que resta em ambos os arquivos é majoritariamente
+propagação de erro de I/O e negociação de protocolo hostil (Hello malformado,
+versão incompatível, codec de compressão rejeitado) — esta última seria
+alcançável com um cliente bruto via `NativeSocket`/`send_message`/
+`recv_message` (já usado em `server_streaming_test.cpp` para um caso), mas
+não foi perseguida nesta rodada por prudência: preferi não adicionar mais
+testes de rede ao arquivo que já mostrou instabilidade real.
+
 ## Metodologia
 
 1. `option(MODB_ENABLE_COVERAGE)` adicionada ao [CMakeLists.txt](../CMakeLists.txt)

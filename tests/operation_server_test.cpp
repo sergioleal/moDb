@@ -136,6 +136,31 @@ int main() {
         }
     }
 
+    // --- serve_forever()/request_stop(): laço de aceitação bloqueante inteiro
+    // não tinha nenhum teste (só serve_one() é usado acima e no resto da
+    // suíte) — request_stop() fecha o listener para destravar o accept()
+    // pendente, e serve_forever() deve então retornar Ok em vez de propagar
+    // o erro de conexão fechada.
+    {
+        const auto forever_path = temp_db_path("serve-forever");
+        cleanup(forever_path);
+        auto server = Server::listen(forever_path, "127.0.0.1", 0);
+        suite.check(server.has_value(), "serve_forever: server listens");
+        if (server) {
+            modb::Result<void> forever_result{};
+            std::thread runner([&server, &forever_result] {
+                forever_result = server->serve_forever();
+            });
+            // Dá tempo do laço entrar no accept() bloqueante antes de parar.
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            server->request_stop();
+            runner.join();
+            suite.check(forever_result.has_value(),
+                        "serve_forever: returns cleanly after request_stop()");
+        }
+        cleanup(forever_path);
+    }
+
     cleanup(path);
     return suite.finish();
 }
