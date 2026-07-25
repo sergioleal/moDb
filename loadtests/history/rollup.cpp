@@ -33,6 +33,13 @@ struct CaseAccumulator {
     double total_duration_ns{}, peak_disk_bytes{}, write_amplification{}, space_amplification{};
     double reclaimed_bytes{};
 
+    // Subfase F (§13.3 `windows`): ausente (has_windows=false) quando nenhuma
+    // fase do caso durou o bastante para fechar uma janela.
+    bool has_windows{false};
+    double windows_first_ops_per_second{}, windows_last_ops_per_second{};
+    double windows_slope_ops_per_second_per_min{};
+    double windows_first_p99_ns{}, windows_last_p99_ns{};
+
     bool has_error_only{false};   // case_error sem case_summary
 };
 
@@ -172,6 +179,15 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             acc.space_amplification = v.get_number("space_amplification");
             acc.reclaimed_bytes = v.get_number("reclaimed_bytes");
             acc.db_path = v.get_string("db_path");
+            if (const auto* windows = v.find("windows"); windows && windows->is_object()) {
+                acc.has_windows = true;
+                acc.windows_first_ops_per_second = windows->get_number("first_ops_per_second");
+                acc.windows_last_ops_per_second = windows->get_number("last_ops_per_second");
+                acc.windows_slope_ops_per_second_per_min =
+                    windows->get_number("slope_ops_per_second_per_min");
+                acc.windows_first_p99_ns = windows->get_number("first_p99_ns");
+                acc.windows_last_p99_ns = windows->get_number("last_p99_ns");
+            }
         } else if (record == "case_error") {
             const auto case_id = v.get_string("case_id");
             auto& acc = cases[case_id];
@@ -273,8 +289,17 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             << ",\"reclaimed_bytes\":" << json_uint(static_cast<std::uint64_t>(acc.reclaimed_bytes))
             << ",\"write_amplification\":" << acc.write_amplification
             << ",\"space_amplification\":" << acc.space_amplification << "}"
-            << ",\"windows\":null"
-            << ",\"status\":" << json_string(status)
+            << ",\"windows\":";
+        if (acc.has_windows) {
+            oss << "{\"first_ops_per_second\":" << acc.windows_first_ops_per_second
+                << ",\"last_ops_per_second\":" << acc.windows_last_ops_per_second
+                << ",\"slope_ops_per_second_per_min\":" << acc.windows_slope_ops_per_second_per_min
+                << ",\"first_p99_ns\":" << acc.windows_first_p99_ns
+                << ",\"last_p99_ns\":" << acc.windows_last_p99_ns << "}";
+        } else {
+            oss << "null";
+        }
+        oss << ",\"status\":" << json_string(status)
             << ",\"comparable\":" << json_bool(true) << ",\"validations\":"
             << (acc.has_summary ? "[\"count\",\"logical_hash\"]" : "[]")
             << ",\"raw_file\":" << json_string(raw_file)

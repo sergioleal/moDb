@@ -3,6 +3,7 @@
 #include "history/index.hpp"
 #include "history/series_key.hpp"
 #include "history/trend.hpp"
+#include "json_value.hpp"
 
 #include <chrono>
 #include <fstream>
@@ -34,7 +35,8 @@ std::string fake_environments_json() {
 // Campanha mínima porém válida (schema modb.loadtest, §12): um caso
 // `create_only` completo, os mesmos records que campaign.cpp de fato emite.
 std::string fake_campaign_jsonl(const std::string& run_id, const std::string& started_at,
-                                double ops_per_second, bool include_environment_record = true) {
+                                double ops_per_second, bool include_environment_record = true,
+                                const std::string& windows_json = "") {
     std::ostringstream oss;
     oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"run_start",)"
         << R"("run_id":")" << run_id << R"(","sequence":1,"started_at":")" << started_at
@@ -68,7 +70,11 @@ std::string fake_campaign_jsonl(const std::string& run_id, const std::string& st
         << R"(","sequence":5,"case_id":"load.create_only.embedded.10k","status":"completed",)"
         << R"("total_duration_ns":500000000,"peak_disk_bytes":3000,"expected_hash":"h1",)"
         << R"("actual_hash":"h1","hash_match":true,"write_amplification":1.5,)"
-        << R"("space_amplification":1.5,"db_path":"x.modb"})" << '\n';
+        << R"("space_amplification":1.5,"db_path":"x.modb")";
+    if (!windows_json.empty()) {
+        oss << R"(,"windows":)" << windows_json;
+    }
+    oss << "}" << '\n';
     oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"run_end",)"
         << R"("run_id":")" << run_id
         << R"(","sequence":6,"status":"completed","completed":1,"failed":0,"unimplemented":0,)"
@@ -248,6 +254,100 @@ void test_trend_series_break_resets_window(TestSuite& suite) {
     }
 }
 
+std::string read_file_content(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+// Encontra a última linha JSON do arquivo cujo `case_id` bate -- suficiente
+// para os testes de rollup, que só indexam 1 caso por campanha.
+const JsonValue* find_rollup_line(const std::vector<JsonValue>& parsed_lines) {
+    for (const auto& line : parsed_lines) {
+        if (line.get_string("case_id") == "load.create_only.embedded.10k") {
+            return &line;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<JsonValue> parse_jsonl(const std::string& content) {
+    std::vector<JsonValue> out;
+    std::istringstream lines(content);
+    std::string raw_line;
+    while (std::getline(lines, raw_line)) {
+        if (raw_line.empty()) {
+            continue;
+        }
+        auto parsed = parse_json(raw_line);
+        if (parsed.ok) {
+            out.push_back(std::move(parsed.value));
+        }
+    }
+    return out;
+}
+
+// Subfase F (§13.3 `windows`): rollup deve repassar o campo tal como o
+// coletor gravou -- number a number, não um `null` hardcoded.
+void test_rollup_reads_windows_field(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+    write_file(env_path, fake_environments_json());
+
+    const std::string windows_json =
+        R"({"first_ops_per_second":135000,"last_ops_per_second":128400,)"
+        R"("slope_ops_per_second_per_min":-390,"first_p99_ns":30100,"last_p99_ns":34200})";
+    const auto campaign_path = dir / "run-windows.jsonl";
+    write_file(campaign_path,
+              fake_campaign_jsonl("run-windows", "20260301T000000.000Z", 100,
+                                 /*include_environment_record=*/true, windows_json));
+
+    auto indexed = index_campaign(campaign_path, history_path, env_path);
+    suite.check(indexed.ok && indexed.appended == 1, "campanha com windows deve indexar 1 ponto");
+
+    const auto lines = parse_jsonl(read_file_content(history_path));
+    const auto* rollup = find_rollup_line(lines);
+    suite.check(rollup != nullptr, "rollup do caso deve existir no histórico");
+    if (rollup) {
+        const auto* windows = rollup->find("windows");
+        suite.check(windows != nullptr && windows->is_object(),
+                   "windows deve ser um objeto quando case_summary trouxe um");
+        if (windows && windows->is_object()) {
+            suite.check(windows->get_number("first_ops_per_second") == 135000,
+                       "first_ops_per_second deve ser repassado sem alteração");
+            suite.check(windows->get_number("slope_ops_per_second_per_min") == -390,
+                       "slope negativo (degradação) deve ser preservado, não truncado");
+        }
+    }
+}
+
+// Sem `windows` no case_summary (caso curto, sem janela -- comportamento
+// default de fake_campaign_jsonl), o rollup deve gravar `null`, nunca um
+// objeto inventado com zeros.
+void test_rollup_windows_null_when_absent(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+    write_file(env_path, fake_environments_json());
+
+    const auto campaign_path = dir / "run-no-windows.jsonl";
+    write_file(campaign_path, fake_campaign_jsonl("run-no-windows", "20260301T000000.000Z", 100));
+
+    auto indexed = index_campaign(campaign_path, history_path, env_path);
+    suite.check(indexed.ok && indexed.appended == 1, "campanha sem windows deve indexar 1 ponto");
+
+    const auto lines = parse_jsonl(read_file_content(history_path));
+    const auto* rollup = find_rollup_line(lines);
+    suite.check(rollup != nullptr, "rollup do caso deve existir no histórico");
+    if (rollup) {
+        const auto* windows = rollup->find("windows");
+        suite.check(windows != nullptr && windows->is_null(),
+                   "windows deve ser null quando case_summary não trouxe janelas");
+    }
+}
+
 void test_trend_rejects_unknown_metric(TestSuite& suite) {
     suite.check(!find_metric("metrica_fantasma").has_value(),
                "métrica desconhecida deve devolver nullopt");
@@ -265,6 +365,8 @@ int main() {
     test_index_rejects_missing_provenance(suite);
     test_trend_median_and_verdict(suite);
     test_trend_series_break_resets_window(suite);
+    test_rollup_reads_windows_field(suite);
+    test_rollup_windows_null_when_absent(suite);
     test_trend_rejects_unknown_metric(suite);
     return suite.finish();
 }

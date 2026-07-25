@@ -107,6 +107,56 @@ void test_forward_and_reverse_are_comparable(TestSuite& suite) {
                "os dois devem reportar um tamanho de arquivo final mensurável");
 }
 
+// Subfase F: em vez de esperar 10s de verdade, usa um window_interval
+// minúsculo para forçar o WindowTracker a fechar janelas em uma fase de
+// poucos milissegundos -- exercita a mesma lógica de fechamento/callback que
+// uma campanha real usaria a 100k+ objetos.
+void test_progress_window_emitted(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    auto params = small_params(work_dir, /*object_count=*/200, /*batch=*/37);
+    params.window_interval = std::chrono::nanoseconds(1);
+
+    std::vector<ProgressWindow> windows;
+    params.on_progress = [&](const ProgressWindow& w) { windows.push_back(w); };
+
+    std::filesystem::path db_path;
+    auto result = run_create_delete_embedded(params, DeleteOrder::Forward, "test-progress", db_path);
+
+    suite.check(result.ok, "create_delete_forward com callback deve completar: " + result.error);
+    suite.check(!windows.empty(),
+               "window_interval minúsculo deve fechar ao menos 1 janela antes do fim da fase");
+
+    bool saw_create = false, saw_delete = false;
+    for (const auto& w : windows) {
+        if (w.phase == "create") {
+            saw_create = true;
+        } else if (w.phase == "delete") {
+            saw_delete = true;
+        }
+        suite.check(w.operations_in_window > 0, "toda janela emitida deve ter operações contadas");
+    }
+    suite.check(saw_create && saw_delete,
+               "callback deve receber janelas tanto de 'create' quanto de 'delete'");
+
+    suite.check(result.windows.has_windows,
+               "CaseRunResult::windows deve ser preenchido quando alguma janela fechou");
+    suite.check(result.windows.first_ops_per_second >= 0.0 && result.windows.last_ops_per_second >= 0.0,
+               "first/last_ops_per_second devem ser números válidos");
+}
+
+// Sem callback e com o intervalo padrão de 10s (§8), uma fase de 200 objetos
+// termina bem antes de qualquer janela fechar -- has_windows deve continuar
+// false, não um falso positivo por omissão.
+void test_progress_window_absent_without_callback(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_create_only_embedded(small_params(work_dir), db_path);
+
+    suite.check(result.ok, "create_only sem callback deve completar: " + result.error);
+    suite.check(!result.windows.has_windows,
+               "sem callback e com fase curta, windows.has_windows deve ficar false");
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -146,6 +196,8 @@ int main() {
     test_create_delete_reverse(suite);
     test_create_delete_interleaved(suite);
     test_forward_and_reverse_are_comparable(suite);
+    test_progress_window_emitted(suite);
+    test_progress_window_absent_without_callback(suite);
     test_crud_full(suite);
     return suite.finish();
 }

@@ -356,6 +356,15 @@ Cada caso concluído é uma linha `case_summary` no JSONL. `resume` lê o
 restante, gravando no mesmo arquivo. Isso torna a matriz `load-heavy` viável em
 janelas de manutenção descontínuas.
 
+**Implementado na Subfase F.** `resume <arquivo.partial>` reconstrói cada caso
+pendente a partir do seu próprio `case_start` já gravado (nomes de campo, não o
+texto do `case_id` — que não decodifica dimensões secundárias fora do padrão),
+considera "concluído" todo `case_id` com `case_summary` **ou** `case_error`, e
+recusa retomar (erro explícito, não reexecução silenciosa) um caso que foi
+interrompido antes de emitir seu próprio `case_start`. `--work-dir` é opcional
+(não é persistido no schema §12; por padrão usa o diretório do próprio
+`.partial`, igual ao `run` sem `--work-dir`).
+
 ### 6.5 Configuração via YAML (`scripts/run-load.ps1` / `run-load.sh`)
 
 **Implementado.** Os dois scripts são um wrapper de execução local sobre os
@@ -449,6 +458,15 @@ o hash lógico que comprova equivalência entre variantes.
 **Séries por janela** — toda fase com duração acima de 30 s emite
 `progress_window` a cada janela fixa (padrão 10 s) com taxa, latência, RSS e
 tamanho de arquivo da janela. Sem isso, degradação temporal é invisível.
+
+**Implementado na Subfase F.** Na prática o corte é "pelo menos uma janela de
+`window_interval` fechou" (fase mais curta que o intervalo não emite nenhuma
+janela, nem uma de cauda) — mais simples que medir os 30 s de antemão e com o
+mesmo efeito: fases curtas nunca produzem `progress_window`. `case_summary`
+carrega `windows{first_ops_per_second,last_ops_per_second,
+slope_ops_per_second_per_min,first_p99_ns,last_p99_ns}` (da primeira fase do
+caso que fechou alguma janela) ou `null` quando nenhuma fechou; o rollup
+(§13.3) repassa esse campo tal como gravado.
 
 ## 9. Validação
 
@@ -544,7 +562,8 @@ unidades no nome da métrica e proibição de segredos seguem §4 do
 **Implementado na Subfase A/B**: `run_start`, `environment`, `case_plan`,
 `case_start`, `phase_start`, `phase_summary`, `case_error`, `case_summary`,
 `run_end` — o suficiente para `create_only` produzir um arquivo válido e
-completo. `progress_window` chega na Subfase F (junto com `resume`);
+completo. **Implementado na Subfase F**: `progress_window` (a cada `window_interval`,
+padrão 10 s, só em fases que de fato fecham uma janela) e `resume`.
 `skipped_budget` quando o guarda-corpo de disco/tempo tiver estimativa real
 para comparar (Subfase H); `run_note` conforme os casos que o exigem
 (interferência de ambiente, §17 risco 11) forem aparecendo.

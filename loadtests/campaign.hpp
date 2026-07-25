@@ -50,4 +50,19 @@ struct ResolveResult {
 
 [[nodiscard]] CampaignResult run_campaign(const CampaignOptions& options);
 
+// Subfase F (§6.4 "Retomada"): reabre um `.partial` interrompido, reconstrói
+// os casos já concluídos (case_summary ou case_error) a partir do próprio
+// arquivo -- sem depender de nenhum estado externo -- e executa só o
+// restante do `case_plan`, no mesmo arquivo. `work_dir` não é persistido no
+// schema (§12); por padrão usa o diretório do próprio `.partial` (igual ao
+// comportamento padrão de `run`, que também usa `output_dir` quando
+// `--work-dir` não é informado).
+struct ResumeOptions {
+    std::filesystem::path partial_path;
+    std::filesystem::path work_dir;
+    std::uint64_t seed_override{0};   // 0 = usa o seed gravado no run_start
+};
+
+[[nodiscard]] CampaignResult resume_campaign(const ResumeOptions& options);
+
 } // namespace modb::loadtest

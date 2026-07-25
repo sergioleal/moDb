@@ -100,6 +100,112 @@ LatencyPercentilesNs percentiles_of(std::vector<double> latencies_ns) {
     return latency;
 }
 
+// Fecha uma ProgressWindow a cada `interval` de tempo decorrido (§12) e
+// repassa para `callback` (nulo = não emite nada -- comportamento anterior
+// a esta subfase, sem custo além de checar um ponteiro de função a cada
+// operação). Mantida por fase, nunca compartilhada entre fases.
+class WindowTracker {
+public:
+    WindowTracker(std::string phase, ProgressCallback callback, std::chrono::nanoseconds interval,
+                 std::function<std::uint64_t()> db_bytes_getter)
+        : phase_(std::move(phase)), callback_(std::move(callback)), interval_(interval),
+          db_bytes_getter_(std::move(db_bytes_getter)) {}
+
+    void record_operation(double latency_ns) {
+        const auto now = std::chrono::steady_clock::now();
+        if (window_start_ == std::chrono::steady_clock::time_point{}) {
+            window_start_ = now;   // primeira operação da fase abre a 1a janela
+        }
+        ++ops_in_window_;
+        latencies_in_window_.push_back(latency_ns);
+        if (now - window_start_ >= interval_) {
+            emit(now);
+        }
+    }
+
+    // Fecha a última janela parcial, se sobrou alguma operação não emitida --
+    // mas só quando pelo menos uma janela completa já fechou antes (§8: fase
+    // mais curta que `interval` não emite janela nenhuma). Sem o guard de
+    // `window_count_ > 0`, TODA fase -- mesmo uma de 5 ms -- fecharia uma
+    // "janela" só de cauda no finish(), inventando um windows_summary de uma
+    // linha só para casos que nunca chegaram perto de uma janela de verdade.
+    void finish() {
+        if (window_count_ > 0 && ops_in_window_ > 0) {
+            emit(std::chrono::steady_clock::now());
+        }
+    }
+
+    [[nodiscard]] bool any_window_emitted() const { return window_count_ > 0; }
+    [[nodiscard]] const ProgressWindow& first_window() const { return first_window_; }
+    [[nodiscard]] const ProgressWindow& last_window() const { return last_window_; }
+
+private:
+    void emit(std::chrono::steady_clock::time_point now) {
+        ProgressWindow window;
+        window.phase = phase_;
+        window.window_index = window_count_;
+        window.operations_in_window = ops_in_window_;
+        window.elapsed_ns_in_window = ns_between(window_start_, now);
+        window.ops_per_second = window.elapsed_ns_in_window > 0
+                                   ? (static_cast<double>(ops_in_window_) * 1'000'000'000.0) /
+                                         static_cast<double>(window.elapsed_ns_in_window)
+                                   : 0.0;
+        std::sort(latencies_in_window_.begin(), latencies_in_window_.end());
+        window.p99_ns = latencies_in_window_.empty()
+                          ? 0.0
+                          : percentile_sorted(latencies_in_window_, 0.99);
+        window.peak_rss_bytes = peak_rss_bytes();
+        window.db_bytes = db_bytes_getter_ ? db_bytes_getter_() : 0;
+
+        if (window_count_ == 0) {
+            first_window_ = window;
+        }
+        last_window_ = window;
+        ++window_count_;
+        if (callback_) {
+            callback_(window);
+        }
+
+        ops_in_window_ = 0;
+        latencies_in_window_.clear();
+        window_start_ = now;
+    }
+
+    std::string phase_;
+    ProgressCallback callback_;
+    std::chrono::nanoseconds interval_;
+    std::function<std::uint64_t()> db_bytes_getter_;
+
+    std::chrono::steady_clock::time_point window_start_{};
+    std::uint64_t ops_in_window_{0};
+    std::vector<double> latencies_in_window_;
+    std::uint64_t window_count_{0};
+    ProgressWindow first_window_;
+    ProgressWindow last_window_;
+};
+
+// Preenche CaseRunResult::WindowsSummary a partir da PRIMEIRA fase do caso
+// que de fato fechou alguma janela -- normalmente a mais longa. Casos onde
+// nenhuma fase passa de `window_interval` não têm windows (§13.3: "casos com
+// janelas"), não é obrigatório em todo rollup.
+void adopt_windows_if_first(CaseRunResult::WindowsSummary& summary, const WindowTracker& tracker) {
+    if (summary.has_windows || !tracker.any_window_emitted()) {
+        return;
+    }
+    const auto& first = tracker.first_window();
+    const auto& last = tracker.last_window();
+    summary.has_windows = true;
+    summary.first_ops_per_second = first.ops_per_second;
+    summary.last_ops_per_second = last.ops_per_second;
+    summary.first_p99_ns = first.p99_ns;
+    summary.last_p99_ns = last.p99_ns;
+    const auto elapsed_minutes =
+        static_cast<double>(last.elapsed_ns_in_window) / 1e9 / 60.0 *
+        static_cast<double>(std::max<std::uint64_t>(1, last.window_index));
+    summary.slope_ops_per_second_per_min =
+        elapsed_minutes > 0 ? (last.ops_per_second - first.ops_per_second) / elapsed_minutes : 0.0;
+}
+
 // Garante detach do registro e destruição correta do Database mesmo em
 // caminho de erro (RAII, igual ao AttachedDatabase do benchmark).
 struct AttachedDatabase {
@@ -159,13 +265,21 @@ struct CreatePhaseOutcome {
 // criando (create_only, create_delete_*, crud_full).
 CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const WorkloadParams& params,
                                         const std::filesystem::path& db_path,
-                                        const std::filesystem::path& wal_path) {
+                                        const std::filesystem::path& wal_path,
+                                        CaseRunResult::WindowsSummary& windows_summary) {
     CreatePhaseOutcome outcome;
 
     std::error_code size_error;
     const auto initial_bytes = std::filesystem::file_size(db_path, size_error);
     outcome.db_bytes_before = size_error ? 0 : initial_bytes;
     const auto pages_read_before = attached.database->data_pages_read();
+
+    WindowTracker window_tracker("create", params.on_progress, params.window_interval,
+                                 [&db_path]() -> std::uint64_t {
+                                     std::error_code ec;
+                                     const auto bytes = std::filesystem::file_size(db_path, ec);
+                                     return ec ? 0 : bytes;
+                                 });
 
     const auto batch = params.batch == 0 ? params.object_count : params.batch;
     outcome.ids.reserve(params.object_count);
@@ -194,6 +308,7 @@ CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const Worklo
         auto created_handle = attached.database->create(*tx, to_engine_user(generated));
         const auto op_end = std::chrono::steady_clock::now();
         latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+        window_tracker.record_operation(latencies_ns.back());
 
         if (!created_handle) {
             ++errors;
@@ -220,6 +335,8 @@ CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const Worklo
     }
     const auto create_end = std::chrono::steady_clock::now();
     const auto pages_read_after = attached.database->data_pages_read();
+    window_tracker.finish();
+    adopt_windows_if_first(windows_summary, window_tracker);
 
     const auto file_bytes = std::filesystem::file_size(db_path, size_error);
     const std::uint64_t db_bytes_after = size_error ? 0 : file_bytes;
@@ -263,7 +380,10 @@ struct DeletePhaseOutcome {
 DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
                                         const std::vector<ObjectId>& ids_in_order,
                                         std::uint64_t batch, const std::filesystem::path& db_path,
-                                        const std::filesystem::path& wal_path) {
+                                        const std::filesystem::path& wal_path,
+                                        const ProgressCallback& on_progress,
+                                        std::chrono::nanoseconds window_interval,
+                                        CaseRunResult::WindowsSummary& windows_summary) {
     DeletePhaseOutcome outcome;
     if (ids_in_order.empty()) {
         outcome.ok = true;
@@ -275,6 +395,13 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
     const auto before_bytes = std::filesystem::file_size(db_path, size_error);
     const std::uint64_t db_bytes_before = size_error ? 0 : before_bytes;
     const auto pages_read_before = attached.database->data_pages_read();
+
+    WindowTracker window_tracker("delete", on_progress, window_interval,
+                                 [&db_path]() -> std::uint64_t {
+                                     std::error_code ec;
+                                     const auto bytes = std::filesystem::file_size(db_path, ec);
+                                     return ec ? 0 : bytes;
+                                 });
 
     const auto batch_size = batch == 0 ? ids_in_order.size() : batch;
     std::vector<double> latencies_ns;
@@ -294,6 +421,7 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
         auto removed = attached.database->remove(*tx, ids_in_order[i]);
         const auto op_end = std::chrono::steady_clock::now();
         latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+        window_tracker.record_operation(latencies_ns.back());
 
         if (!removed) {
             ++errors;
@@ -319,6 +447,8 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
     }
     const auto delete_end = std::chrono::steady_clock::now();
     const auto pages_read_after = attached.database->data_pages_read();
+    window_tracker.finish();
+    adopt_windows_if_first(windows_summary, window_tracker);
 
     const auto after_bytes = std::filesystem::file_size(db_path, size_error);
     const std::uint64_t db_bytes_after = size_error ? 0 : after_bytes;
@@ -421,7 +551,10 @@ struct ReadPhaseOutcome {
 ReadPhaseOutcome perform_read_phase(AttachedDatabase& attached, const std::vector<ObjectId>& ids,
                                     const std::string& expected_hash, std::uint64_t object_count,
                                     const std::filesystem::path& db_path,
-                                    const std::filesystem::path& wal_path) {
+                                    const std::filesystem::path& wal_path,
+                                    const ProgressCallback& on_progress,
+                                    std::chrono::nanoseconds window_interval,
+                                    CaseRunResult::WindowsSummary& windows_summary) {
     ReadPhaseOutcome outcome;
 
     std::error_code size_error;
@@ -430,6 +563,13 @@ ReadPhaseOutcome perform_read_phase(AttachedDatabase& attached, const std::vecto
     latencies_ns.reserve(ids.size());
     std::ostringstream actual;
     std::uint64_t errors = 0;
+
+    WindowTracker window_tracker("read", on_progress, window_interval,
+                                 [&db_path]() -> std::uint64_t {
+                                     std::error_code ec;
+                                     const auto bytes = std::filesystem::file_size(db_path, ec);
+                                     return ec ? 0 : bytes;
+                                 });
 
     const auto read_start = std::chrono::steady_clock::now();
     for (const auto id : ids) {
@@ -441,6 +581,7 @@ ReadPhaseOutcome perform_read_phase(AttachedDatabase& attached, const std::vecto
         }
         const auto op_end = std::chrono::steady_clock::now();
         latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+        window_tracker.record_operation(latencies_ns.back());
 
         if (!handle || !value) {
             ++errors;
@@ -450,6 +591,8 @@ ReadPhaseOutcome perform_read_phase(AttachedDatabase& attached, const std::vecto
     }
     const auto read_end = std::chrono::steady_clock::now();
     const auto pages_read_after = attached.database->data_pages_read();
+    window_tracker.finish();
+    adopt_windows_if_first(windows_summary, window_tracker);
 
     const auto file_bytes = std::filesystem::file_size(db_path, size_error);
     const std::uint64_t db_bytes = size_error ? 0 : file_bytes;
@@ -494,7 +637,9 @@ struct UpdatePhaseOutcome {
 UpdatePhaseOutcome perform_update_phase(
     AttachedDatabase& attached, const std::vector<ObjectId>& ids, std::string_view phase_name,
     std::uint64_t batch, const std::filesystem::path& db_path, const std::filesystem::path& wal_path,
-    const std::function<GeneratedUser(std::uint64_t)>& new_value_for, std::uint64_t sample_stride) {
+    const std::function<GeneratedUser(std::uint64_t)>& new_value_for, std::uint64_t sample_stride,
+    const ProgressCallback& on_progress, std::chrono::nanoseconds window_interval,
+    CaseRunResult::WindowsSummary& windows_summary) {
     UpdatePhaseOutcome outcome;
     if (ids.empty()) {
         outcome.ok = true;
@@ -508,6 +653,13 @@ UpdatePhaseOutcome perform_update_phase(
     std::vector<double> latencies_ns;
     latencies_ns.reserve(ids.size());
     std::uint64_t errors = 0;
+
+    WindowTracker window_tracker(std::string{phase_name}, on_progress, window_interval,
+                                 [&db_path]() -> std::uint64_t {
+                                     std::error_code ec;
+                                     const auto bytes = std::filesystem::file_size(db_path, ec);
+                                     return ec ? 0 : bytes;
+                                 });
 
     auto first_tx = attached.database->begin();
     if (!first_tx) {
@@ -529,6 +681,7 @@ UpdatePhaseOutcome perform_update_phase(
         }
         const auto op_end = std::chrono::steady_clock::now();
         latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+        window_tracker.record_operation(latencies_ns.back());
 
         if (!handle || !updated) {
             ++errors;
@@ -556,6 +709,8 @@ UpdatePhaseOutcome perform_update_phase(
     }
     const auto phase_end = std::chrono::steady_clock::now();
     const auto pages_read_after = attached.database->data_pages_read();
+    window_tracker.finish();
+    adopt_windows_if_first(windows_summary, window_tracker);
 
     const auto file_bytes = std::filesystem::file_size(db_path, size_error);
     const std::uint64_t db_bytes = size_error ? 0 : file_bytes;
@@ -620,7 +775,7 @@ CaseRunResult run_create_only_embedded(const WorkloadParams& params,
         return result;
     }
 
-    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path);
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
     if (!create_outcome.ok) {
         result.status = "failed";
         result.error = create_outcome.error;
@@ -692,7 +847,7 @@ CaseRunResult run_create_delete_embedded(const WorkloadParams& params, DeleteOrd
         return result;
     }
 
-    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path);
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
     if (!create_outcome.ok) {
         result.status = "failed";
         result.error = create_outcome.error;
@@ -701,7 +856,9 @@ CaseRunResult run_create_delete_embedded(const WorkloadParams& params, DeleteOrd
     result.phases.push_back(create_outcome.phase);
 
     const auto delete_ids = reorder_for_delete(create_outcome.ids, order);
-    auto delete_outcome = perform_delete_phase(attached, delete_ids, params.batch, db_path, wal_path);
+    auto delete_outcome = perform_delete_phase(attached, delete_ids, params.batch, db_path, wal_path,
+                                              params.on_progress, params.window_interval,
+                                              result.windows);
     result.phases.push_back(delete_outcome.phase);
     if (!delete_outcome.ok) {
         result.status = "failed";
@@ -757,7 +914,7 @@ CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
         return result;
     }
 
-    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path);
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
     if (!create_outcome.ok) {
         result.status = "failed";
         result.error = create_outcome.error;
@@ -766,7 +923,9 @@ CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
     result.phases.push_back(create_outcome.phase);
 
     auto read_outcome = perform_read_phase(attached, create_outcome.ids, create_outcome.expected_hash,
-                                           params.object_count, db_path, wal_path);
+                                           params.object_count, db_path, wal_path,
+                                           params.on_progress, params.window_interval,
+                                           result.windows);
     result.phases.push_back(read_outcome.phase);
     if (!read_outcome.hash_match) {
         result.status = "failed";
@@ -800,7 +959,8 @@ CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
 
     auto inplace_outcome = perform_update_phase(attached, create_outcome.ids, "update_inplace",
                                                 params.batch, db_path, wal_path, inplace_value_for,
-                                                sample_stride);
+                                                sample_stride, params.on_progress,
+                                                params.window_interval, result.windows);
     result.phases.push_back(inplace_outcome.phase);
     if (!inplace_outcome.ok) {
         result.status = "failed";
@@ -817,7 +977,8 @@ CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
 
     auto grow_outcome = perform_update_phase(attached, create_outcome.ids, "update_grow",
                                              params.batch, db_path, wal_path, grow_value_for,
-                                             sample_stride);
+                                             sample_stride, params.on_progress,
+                                             params.window_interval, result.windows);
     result.phases.push_back(grow_outcome.phase);
     if (!grow_outcome.ok) {
         result.status = "failed";
@@ -834,7 +995,8 @@ CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
 
     auto shrink_outcome = perform_update_phase(attached, create_outcome.ids, "update_shrink",
                                                params.batch, db_path, wal_path, shrink_value_for,
-                                               sample_stride);
+                                               sample_stride, params.on_progress,
+                                               params.window_interval, result.windows);
     result.phases.push_back(shrink_outcome.phase);
     if (!shrink_outcome.ok) {
         result.status = "failed";
@@ -850,7 +1012,8 @@ CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
     }
 
     auto delete_outcome =
-        perform_delete_phase(attached, create_outcome.ids, params.batch, db_path, wal_path);
+        perform_delete_phase(attached, create_outcome.ids, params.batch, db_path, wal_path,
+                             params.on_progress, params.window_interval, result.windows);
     result.phases.push_back(delete_outcome.phase);
     if (!delete_outcome.ok) {
         result.status = "failed";

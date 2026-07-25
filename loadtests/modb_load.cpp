@@ -1,8 +1,8 @@
-// CLI de testes de carga (docs/PLANO_TESTES_DE_CARGA.md). Subfases A/B/C:
-// `run`, `list-cases`, `list-profiles`, `index`, `trend` funcionam;
-// `resume`/`gate`/`compare` ainda não existem (Subfases F/J) e dizem isso
-// claramente em vez de fingir que fizeram algo. `report` existe em forma
-// mínima (CSV das linhas do rollup).
+// CLI de testes de carga (docs/PLANO_TESTES_DE_CARGA.md). Subfases A/B/C/F:
+// `run`, `list-cases`, `list-profiles`, `index`, `trend`, `resume` funcionam;
+// `gate`/`compare` ainda não existem (Subfase J) e dizem isso claramente em
+// vez de fingir que fizeram algo. `report` existe em forma mínima (CSV das
+// linhas do rollup).
 //
 // Uso:
 //   modb_load run --profile <nome> [seletores] [orçamento] [--output-dir DIR]
@@ -13,6 +13,7 @@
 //   modb_load index <campanha.jsonl> [--history-file PATH] [--environments-file PATH]
 //   modb_load trend --case ID --metric NOME [--phase NOME] [--history-file PATH]
 //   modb_load report --case ID [--format csv|json] [--history-file PATH]
+//   modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]
 
 #include "campaign.hpp"
 #include "history/index.hpp"
@@ -48,7 +49,8 @@ void print_usage() {
         << "  modb_load list-profiles\n"
         << "  modb_load index <campanha.jsonl> [--history-file PATH] [--environments-file PATH]\n"
         << "  modb_load trend --case ID --metric NOME [--phase NOME] [--history-file PATH]\n"
-        << "  modb_load report --case ID [--format csv|json] [--history-file PATH]\n";
+        << "  modb_load report --case ID [--format csv|json] [--history-file PATH]\n"
+        << "  modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]\n";
 }
 
 std::vector<std::string> split_comma(std::string_view value) {
@@ -428,6 +430,48 @@ int command_report(int argc, char** argv) {
     return 0;
 }
 
+int command_resume(int argc, char** argv) {
+    if (argc < 3) {
+        std::cerr << "Uso: modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]\n";
+        return 2;
+    }
+    modb::loadtest::ResumeOptions options;
+    options.partial_path = argv[2];
+    for (int i = 3; i < argc; ++i) {
+        const std::string_view arg{argv[i]};
+        auto need = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) {
+                std::cerr << "Falta valor para " << name << '\n';
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (arg == "--work-dir") {
+            options.work_dir = need("--work-dir");
+        } else if (arg == "--seed") {
+            options.seed_override = std::strtoull(need("--seed"), nullptr, 10);
+        } else if (arg == "--help" || arg == "-h") {
+            print_usage();
+            return 0;
+        } else {
+            std::cerr << "Argumento desconhecido: " << arg << '\n';
+            return 2;
+        }
+    }
+
+    auto result = modb::loadtest::resume_campaign(options);
+    if (!result.ok && result.result_path.empty()) {
+        std::cerr << "Erro: " << result.error << '\n';
+        return 2;
+    }
+    if (!result.error.empty()) {
+        std::cerr << "Erro: " << result.error << '\n';
+    }
+    std::cout << "Resultado: " << result.result_path.string() << "  run_id=" << result.run_id
+              << "  status=" << result.status << '\n';
+    return result.status == "failed" ? 1 : 0;
+}
+
 int command_not_implemented(std::string_view command, std::string_view subfase) {
     std::cerr << "modb_load " << command << ": ainda não implementado (ver "
              << "docs/PLANO_TESTES_DE_CARGA.md, Subfase " << subfase << ").\n";
@@ -461,7 +505,7 @@ int main(int argc, char** argv) {
         return command_report(argc, argv);
     }
     if (command == "resume") {
-        return command_not_implemented("resume", "F");
+        return command_resume(argc, argv);
     }
     if (command == "gate") {
         return command_not_implemented(command, "J");

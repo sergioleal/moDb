@@ -4,11 +4,29 @@
 // §4.3/§14). Nesta subfase só existe `target_embedded`; `target_client.hpp`
 // (loopback/remoto) chega na Subfase G reaproveitando os mesmos estes tipos.
 
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 namespace modb::loadtest {
+
+// Uma janela de progresso dentro de uma fase longa (§12 `progress_window`).
+// Emitida a cada `WorkloadParams::window_interval` (padrão 10 s, §8) --
+// nunca para fases curtas, que terminam antes da primeira janela fechar.
+struct ProgressWindow {
+    std::string phase;
+    std::uint64_t window_index{};
+    std::uint64_t operations_in_window{};
+    std::uint64_t elapsed_ns_in_window{};
+    double ops_per_second{};
+    double p99_ns{};
+    std::uint64_t peak_rss_bytes{};
+    std::uint64_t db_bytes{};
+};
+
+using ProgressCallback = std::function<void(const ProgressWindow&)>;
 
 // Percentis de latência por operação, em nanossegundos (§8). Os nomes de
 // campo casam exatamente com o que loadtests/dashboard/index.html lê.
@@ -51,6 +69,13 @@ struct WorkloadParams {
     std::uint64_t object_count{};
     std::uint64_t batch{1000};
     std::string payload{"normal"};
+
+    // Subfase F: `on_progress` nulo (padrão) = não emite progress_window,
+    // igual ao comportamento de antes desta subfase. `window_interval` só
+    // importa quando `on_progress` está setado -- testes usam um intervalo
+    // pequeno para não esperar 10s de verdade.
+    ProgressCallback on_progress;
+    std::chrono::nanoseconds window_interval{std::chrono::seconds(10)};
 };
 
 // Resultado de um caso completo: fases + validação (§9) + rastreabilidade.
@@ -77,6 +102,18 @@ struct CaseRunResult {
     bool all_deleted{true};
     std::uint64_t still_resolving{0};
     std::uint64_t reclaimed_bytes{0};
+
+    // Subfase F (§13.3 `windows`): inclinação intra-execução da fase mais
+    // longa do caso -- ausente (has_windows=false) quando nenhuma fase
+    // durou o bastante para fechar uma janela.
+    struct WindowsSummary {
+        bool has_windows{false};
+        double first_ops_per_second{};
+        double last_ops_per_second{};
+        double slope_ops_per_second_per_min{};
+        double first_p99_ns{};
+        double last_p99_ns{};
+    } windows;
 };
 
 } // namespace modb::loadtest
