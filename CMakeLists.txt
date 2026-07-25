@@ -264,35 +264,36 @@ if(MODB_BUILD_EXAMPLES)
     modb_add_server_example(ring0_server_phase_13_async_io
         examples/server/by_phase/phase_13/async_io.cpp)
 
-    # docs/training/ -- one cumulative employee-directory app, one binary per
-    # lesson; each lesson's source contains every earlier lesson's code plus
-    # that lesson's own addition (see docs/training/en/README.md).
+    # docs/training/en/ -- one cumulative employee-directory app, one binary
+    # per lesson; each lesson's source contains every earlier lesson's code
+    # plus that lesson's own addition (see docs/training/en/README.md). Each
+    # lesson's folder holds its doc, its source, and its own build README.
     modb_add_server_example(employee_directory_lesson_01
-        examples/employee_directory/lesson_01_binding.cpp)
+        docs/training/en/01-binding-your-first-type/lesson_01_binding.cpp)
     modb_add_server_example(employee_directory_lesson_02
-        examples/employee_directory/lesson_02_persist_reopen.cpp)
+        docs/training/en/02-persist-and-reopen/lesson_02_persist_reopen.cpp)
     modb_add_server_example(employee_directory_lesson_03
-        examples/employee_directory/lesson_03_transactions.cpp)
+        docs/training/en/03-transactions/lesson_03_transactions.cpp)
     modb_add_server_example(employee_directory_lesson_04
-        examples/employee_directory/lesson_04_handles.cpp)
+        docs/training/en/04-handles-and-updates/lesson_04_handles.cpp)
     modb_add_server_example(employee_directory_lesson_05
-        examples/employee_directory/lesson_05_relationships.cpp)
+        docs/training/en/05-relationships/lesson_05_relationships.cpp)
     modb_add_server_example(employee_directory_lesson_06
-        examples/employee_directory/lesson_06_snapshots.cpp)
+        docs/training/en/06-snapshots/lesson_06_snapshots.cpp)
     modb_add_server_example(employee_directory_lesson_07
-        examples/employee_directory/lesson_07_queries.cpp)
+        docs/training/en/07-queries-and-indexes/lesson_07_queries.cpp)
     modb_add_server_example(employee_directory_lesson_08
-        examples/employee_directory/lesson_08_networking.cpp)
+        docs/training/en/08-networking/lesson_08_networking.cpp)
     modb_add_server_example(employee_directory_lesson_09
-        examples/employee_directory/lesson_09_remote_operations.cpp)
+        docs/training/en/09-remote-operations/lesson_09_remote_operations.cpp)
     modb_add_server_example(employee_directory_lesson_10
-        examples/employee_directory/lesson_10_facades.cpp)
+        docs/training/en/10-facades/lesson_10_facades.cpp)
     modb_add_server_example(employee_directory_lesson_11
-        examples/employee_directory/lesson_11_graphs.cpp)
+        docs/training/en/11-graphs/lesson_11_graphs.cpp)
     modb_add_server_example(employee_directory_lesson_12
-        examples/employee_directory/lesson_12_async_io.cpp)
+        docs/training/en/12-async-io/lesson_12_async_io.cpp)
     modb_add_server_example(employee_directory_lesson_13
-        examples/employee_directory/lesson_13_read_replica.cpp)
+        docs/training/en/13-read-replica/lesson_13_read_replica.cpp)
 endif()
 
 if(MODB_BUILD_TRAINING)
