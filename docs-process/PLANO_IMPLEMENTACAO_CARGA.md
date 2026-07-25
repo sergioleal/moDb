@@ -230,7 +230,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | E | `crud_full` | 2 | ✅ | `c64ca4e` · 2026-07-25 |
 | F | `progress_window`, `resume` | 3 | ✅ | `6ea2e02` · 2026-07-25 |
 | H | Escalas altas, calibração, guarda-corpos | 4 | ✅ | `7b4779f` · 2026-07-25 (calibração reduzida: 10k/100k medidos, 250k/500k/1M extrapolados -- ver docs/PLANO_TESTES_DE_CARGA.md §10) |
-| G | `target_client`, `loopback` | 5 | ⬜ | |
+| G | `target_client`, `loopback` | 5 | ✅ | `3442bec` · 2026-07-25 (versão mínima: só `create_only`; sem métricas de rede reais nem processos separados -- ver docs/PLANO_TESTES_DE_CARGA.md §4.3) |
 | I | Alvos remotos, `run-remote-load.ps1` | 5 | ⬜ | depende de G |
 | J | `gate`, deriva, retenção, baselines | 6 | ⬜ | depende de C |
 | L | `read_hotspot`, `range_scan_sweep` | 7 | ⬜ | |
@@ -242,7 +242,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | R | Harness kill/restart, `restart_recovery` | 7 | ⬜ | ver §17 risco 13 |
 | K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ⬜ | depende de M, N, O, P, Q |
 
-Progresso: **9/20**.
+Progresso: **10/20**.
 
 ## 6. O que não está neste plano, de propósito
 
