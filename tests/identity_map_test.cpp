@@ -80,6 +80,40 @@ int main() {
         suite.check_error(map->find(ObjectId{17}), ErrorCode::record_not_found,
                           "an unbound id is reported as not found");
 
+        // current_epoch/has_previous/inspect/clear_previous têm cada um sua
+        // PRÓPRIA checagem "não encontrado" (código duplicado, não uma função
+        // compartilhada) — nenhuma delas tinha teste. ObjectId{17} cai na
+        // mesma página IDMP de ObjectId{16} (mesma entry_page), então isso
+        // exercita o segundo nível: a página existe, mas este slot nunca foi
+        // alocado.
+        suite.check_error(map->current_epoch(ObjectId{17}), ErrorCode::record_not_found,
+                          "current_epoch of an unbound id (same IDMP page) is not found");
+        suite.check_error(map->has_previous(ObjectId{17}), ErrorCode::record_not_found,
+                          "has_previous of an unbound id (same IDMP page) is not found");
+        suite.check_error(map->inspect(ObjectId{17}), ErrorCode::record_not_found,
+                          "inspect of an unbound id (same IDMP page) is not found");
+        suite.check_error(map->clear_previous(ObjectId{17}), ErrorCode::record_not_found,
+                          "clear_previous of an unbound id (same IDMP page) is not found");
+
+        // Um id bem maior cai numa entry_page cuja página IDMP nunca foi
+        // criada: exercita o PRIMEIRO nível de cada checagem (a própria
+        // página não existe, não só o slot).
+        const ObjectId far_away{1'000'000};
+        suite.check_error(map->current_epoch(far_away), ErrorCode::record_not_found,
+                          "current_epoch of an id in a never-created IDMP page is not found");
+        suite.check_error(map->has_previous(far_away), ErrorCode::record_not_found,
+                          "has_previous of an id in a never-created IDMP page is not found");
+        suite.check_error(map->erase(far_away, 1), ErrorCode::record_not_found,
+                          "erase of an id in a never-created IDMP page is not found");
+        suite.check_error(map->inspect(far_away), ErrorCode::record_not_found,
+                          "inspect of an id in a never-created IDMP page is not found");
+        suite.check_error(map->clear_previous(far_away), ErrorCode::record_not_found,
+                          "clear_previous of an id in a never-created IDMP page is not found");
+
+        // bind rejeita o ObjectId inválido (0) antes de tocar qualquer página.
+        suite.check_error(map->bind(invalid_object_id, record, 1), ErrorCode::invalid_object_id,
+                          "binding the invalid ObjectId 0 is rejected");
+
         // rebind: atualiza a localização.
         const auto moved = make_record(99);
         suite.check(map->rebind(ObjectId{16}, moved, 2).has_value(), "a bound object rebinds");

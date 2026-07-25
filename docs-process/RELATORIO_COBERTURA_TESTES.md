@@ -220,6 +220,100 @@ alcançável com um cliente bruto via `NativeSocket`/`send_message`/
 não foi perseguida nesta rodada por prudência: preferi não adicionar mais
 testes de rede ao arquivo que já mostrou instabilidade real.
 
+**Itens #8 (`src/object/identity_map.cpp`), #9 (`src/net/client.cpp`) e #10
+(`src/net/native_socket.cpp`) — feitos em 2026-07-25. Ranking completo.**
+
+- **`identity_map.cpp`**: as 9 operações públicas (`find`, `find_at`,
+  `current_epoch`, `has_previous`, `rebind`, `erase`, `inspect`,
+  `clear_previous`) têm cada uma sua PRÓPRIA checagem duplicada de "id não
+  encontrado" (não uma função compartilhada), em dois níveis — a página IDMP
+  do id nem existe, ou existe mas o slot nunca foi alocado. `find`/`find_at`/
+  `rebind`/`bind` já tinham teste para isso; `current_epoch`, `has_previous`,
+  `erase`, `inspect` e `clear_previous` nunca tinham. Adicionados os dois
+  níveis para as 5 que faltavam, mais `bind(ObjectId{0})` (rejeitado antes de
+  tocar qualquer página) — em
+  [tests/identity_map_test.cpp](../tests/identity_map_test.cpp).
+- **`client.cpp`**: não tinha nenhum teste dedicado — só cobertura indireta
+  via testes de servidor, que sempre conversam com um `Server` real e
+  bem-comportado. Todo o tratamento de handshake hostil (resposta que não é
+  `HelloOk`, versão minor do servidor acima da do cliente,
+  `max_expansion_ratio` zerado) nunca rodava. Criado
+  [tests/client_test.cpp](../tests/client_test.cpp) com um "servidor" de
+  mentira (aceita uma conexão via `NativeSocket`, descarta a `Hello`
+  recebida e responde com a mensagem fornecida) para forçar cada caso, mais
+  o teste de `connect()` contra uma porta sem ninguém escutando.
+- **`native_socket.cpp`**: também sem teste dedicado. `resolve_ipv4()` tenta
+  `inet_pton()` primeiro (IP literal) e só cai no `getaddrinfo()` quando o
+  host não é um literal — como todo teste da suíte sempre usa `"127.0.0.1"`
+  literalmente, o fallback de `getaddrinfo()` nunca rodava. As operações
+  num socket fechado (`accept`/`send_all`/`recv_exact`/`local_port`/
+  `set_send_buffer_bytes`/`set_recv_buffer_bytes`/`set_recv_timeout_ms`) e o
+  operador de move-assignment também nunca tinham teste. Criado
+  [tests/native_socket_test.cpp](../tests/native_socket_test.cpp) cobrindo
+  os três: socket fechado, move-assignment, e resolução via hostname
+  (`"localhost"`, que força o `getaddrinfo()`).
+- Ambos os arquivos de teste novos foram registrados no
+  [CMakeLists.txt](../CMakeLists.txt) (`modb_client_tests`,
+  `modb_native_socket_tests`) e no CTest (`modb.client`, `modb.native_socket`).
+
+**Resultado medido** (suíte completa, agora 130/130 testes, antes/depois limpos):
+
+| Arquivo | Linhas antes → depois | Branches antes → depois |
+|---|---|---|
+| `src/object/identity_map.cpp` | 80,4% → **85,0%** | 40,7% → **46,2%** |
+| `src/net/client.cpp` | 77,1% → **80,5%** | 42,0% → **44,8%** |
+| `src/net/native_socket.cpp` | 74,2% → **87,6%** | 31,3% → **41,1%** |
+| Total `src/**/*.cpp` (cumulativo, itens #1 a #10 — ranking completo) | 78,2% → **83,8%** | 44,6% → **49,9%** |
+
+## Ranking completo — resumo final
+
+Todos os 10 itens do ranking original foram executados. Resultado por arquivo
+(medições feitas isoladamente, antes/depois limpos a cada item — os números
+cumulativos de `src/**/*.cpp` em cada seção acima refletem a soma progressiva
+até aquele ponto):
+
+| # | Arquivo | Linhas antes → depois | Branches antes → depois |
+|---:|---|---|---|
+| 1 | `src/index/btree.cpp` | 69,1% → **88,0%** | 38,7% → **52,5%** |
+| — | `include/modb/index/key_codec.hpp` | 63,9% → **90,2%** | 8,8% → **11,6%** |
+| 2 | `src/net/protocol.cpp` | 79,7% → **88,6%** | 43,7% → **58,6%** |
+| 3 | `src/net/replication_protocol.cpp` | 40,7% → **100%** | 17,9% → **67,7%** |
+| 4 | `src/object/object_store.cpp` | 77,2% → **79,5%** | 44,7% → **46,3%** |
+| 5 | `src/storage/table_heap.cpp` | 78,6% → **81,5%** | 46,4% → **48,4%** |
+| 6 | `src/object/database.cpp` | 80,0% → **82,6%** | 48,5% → **50,6%** |
+| 7 | `src/net/server.cpp` | 76,3% → **80,5%** | 44,6% → **46,7%** |
+| 8 | `src/object/identity_map.cpp` | 80,4% → **85,0%** | 40,7% → **46,2%** |
+| 9 | `src/net/client.cpp` | 77,1% → **80,5%** | 42,0% → **44,8%** |
+| 10 | `src/net/native_socket.cpp` | 74,2% → **87,6%** | 31,3% → **41,1%** |
+| | **Total `src/` (todos os `.cpp`)** | **78,2% → 83,8%** | **44,6% → 49,9%** |
+
+`replication_protocol.cpp` saiu de pior arquivo do projeto para 100% de
+linhas cobertas. Os dois arquivos "sem teste dedicado" identificados pela
+auditoria qualitativa original (`client.cpp`, `native_socket.cpp`) agora têm
+suítes próprias. Branch coverage do projeto subiu de 44,6% para quase 50%
+sem tocar uma linha de código de produção — todo o ganho veio de testes
+novos revelando comportamento já existente e não exercitado.
+
+**Padrão que se repetiu nos 10 itens:** a maioria das lacunas encontradas não
+eram bugs, mas **tipos inteiros de mensagem, operações ou modos de falha que
+nenhum teste jamais exercitava** — `replication_protocol.cpp` tinha 8 de 13
+tipos de mensagem sem round-trip; `object_store.cpp` tinha toda a indexação
+em 0%; `identity_map.cpp` tinha 5 de 9 operações sem teste de "não
+encontrado"; `client.cpp`/`native_socket.cpp` não tinham teste dedicado
+algum. Truncar um frame válido byte a byte (`protocol_test.cpp`,
+`replication_protocol_test.cpp`) foi a técnica de maior alavancagem: um único
+helper genérico cobriu dezenas de branches de validação de campo de uma vez.
+
+**O que ficou de fora, deliberadamente, em todos os 10 itens:** caminhos que
+exigem injeção de falha de I/O (`file.read()`/`file.write()` retornando
+erro) ou corrupção estrutural deliberada (`corrupt_page` e afins) — o
+mecanismo de failpoint já existe ([tests/failpoint_test.cpp](../tests/failpoint_test.cpp))
+mas aplicá-lo sistematicamente a cada arquivo é um projeto à parte, fora do
+escopo desta rodada. Também ficou de fora, por prudência, mais testes de
+rede no arquivo `server_streaming_test.cpp` (ver achado de instabilidade
+acima) e o fuzz de substituição de byte (em vez de truncamento) para valores
+de enum semanticamente inválidos em `protocol.cpp`.
+
 ## Metodologia
 
 1. `option(MODB_ENABLE_COVERAGE)` adicionada ao [CMakeLists.txt](../CMakeLists.txt)
