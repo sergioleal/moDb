@@ -857,10 +857,11 @@ loadtests/
   dashboard/
     index.html                   painel da série histórica (implementado, §13.11)
   workloads/
-    create_only.hpp/.cpp            implementado -- único com dispatch real nesta subfase
-    create_delete_forward.cpp
-    create_delete_reverse.cpp
-    create_delete_interleaved.cpp
+    create_only.hpp/.cpp            implementado
+    create_delete_forward.hpp/.cpp  implementado
+    create_delete_reverse.hpp/.cpp  implementado
+    create_delete_interleaved.hpp/.cpp implementado -- stride=7, mesmo padrão de
+                                       benchmarks/scenarios/object_store_lifecycle.cpp
     crud_full.cpp
     read_hotspot.cpp                comportamento (§4.2.1)
     range_scan_sweep.cpp            comportamento; formaliza o antigo crud_query
@@ -885,7 +886,8 @@ scripts/
 tests/
   load_matrix_test.cpp           implementado (`ctest -R modb.load_matrix`) -- expansão,
                                  seletores, ids, conjunto vazio
-  load_workload_test.cpp         cada workload em escala minúscula, invariantes
+  load_workload_test.cpp         implementado (`ctest -R modb.load_workload`) -- cada
+                                 workload em escala minúscula, invariantes
   load_history_test.cpp          implementado (`ctest -R modb.load_history`) --
                                  series_key estável, idempotência do index, rejeição
                                  de rollup sem procedência, mediana móvel/veredito,

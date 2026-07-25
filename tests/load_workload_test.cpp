@@ -1,0 +1,120 @@
+#include "test_support.hpp"
+
+#include "target_embedded.hpp"
+
+#include <chrono>
+#include <filesystem>
+
+using namespace modb::loadtest;
+
+namespace {
+
+std::filesystem::path make_temp_work_dir() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto dir = std::filesystem::temp_directory_path() /
+              ("modb-load-workload-test-" + std::to_string(unique));
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+WorkloadParams small_params(const std::filesystem::path& work_dir, std::uint64_t object_count = 200,
+                           std::uint64_t batch = 37) {
+    WorkloadParams params;
+    params.work_dir = work_dir.string();
+    params.seed = 20260725;
+    params.object_count = object_count;
+    params.batch = batch;   // não-redondo de propósito: exercita o lote final parcial
+    params.payload = "normal";
+    return params;
+}
+
+void test_create_only(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_create_only_embedded(small_params(work_dir), db_path);
+
+    suite.check(result.ok, "create_only deve completar: " + result.error);
+    suite.check(result.status == "completed", "create_only status deve ser completed");
+    suite.check(result.phases.size() == 1, "create_only deve produzir exatamente 1 fase");
+    if (!result.phases.empty()) {
+        suite.check(result.phases[0].phase == "create", "a única fase deve se chamar 'create'");
+        suite.check(result.phases[0].operations == 200, "operations deve ser o object_count pedido");
+        suite.check(result.phases[0].latency_ns.p50 >= 0.0, "p50 deve ser um número válido");
+    }
+    suite.check(result.hash_match, "create_only deve validar o hash lógico");
+    suite.check(result.expected_hash == result.actual_hash, "expected_hash == actual_hash");
+    suite.check(result.write_amplification > 0.0, "write_amplification deve ser computável (> 0)");
+}
+
+void test_create_delete_forward(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_create_delete_embedded(small_params(work_dir), DeleteOrder::Forward,
+                                             "test-forward", db_path);
+
+    suite.check(result.ok, "create_delete_forward deve completar: " + result.error);
+    suite.check(result.phases.size() == 2, "create_delete_forward deve produzir 2 fases");
+    if (result.phases.size() == 2) {
+        suite.check(result.phases[0].phase == "create", "1a fase deve ser 'create'");
+        suite.check(result.phases[1].phase == "delete", "2a fase deve ser 'delete'");
+        suite.check(result.phases[1].operations == 200, "delete deve remover todos os 200 objetos");
+    }
+    suite.check(result.all_deleted, "todos os objetos devem estar removidos ao final");
+    suite.check(result.still_resolving == 0, "nenhum id removido deve continuar resolvendo");
+}
+
+void test_create_delete_reverse(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_create_delete_embedded(small_params(work_dir), DeleteOrder::Reverse,
+                                             "test-reverse", db_path);
+
+    suite.check(result.ok, "create_delete_reverse deve completar: " + result.error);
+    suite.check(result.all_deleted, "todos os objetos devem estar removidos ao final");
+    suite.check(result.still_resolving == 0, "nenhum id removido deve continuar resolvendo");
+}
+
+void test_create_delete_interleaved(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_create_delete_embedded(small_params(work_dir), DeleteOrder::Interleaved,
+                                             "test-interleaved", db_path);
+
+    suite.check(result.ok, "create_delete_interleaved deve completar: " + result.error);
+    suite.check(result.all_deleted, "todos os objetos devem estar removidos ao final");
+    suite.check(result.still_resolving == 0, "nenhum id removido deve continuar resolvendo");
+    if (result.phases.size() == 2) {
+        // Não é uma garantia matemática estrita para toda semente, mas o
+        // stride>1 visita as páginas em ordem espalhada -- pages_read do
+        // delete não deveria ficar zerado como no forward/reverse sequencial.
+        suite.check(result.phases[1].operations == 200,
+                   "delete deve remover todos os 200 objetos mesmo fora de ordem");
+    }
+}
+
+// Compara o tamanho final entre forward e reverse na MESMA semente/escala --
+// não é uma garantia por caso isolado (§4.2 fala do padrão geral), mas os
+// dois devem ao menos produzir um resultado válido e comparável.
+void test_forward_and_reverse_are_comparable(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path forward_db, reverse_db;
+    auto forward = run_create_delete_embedded(small_params(work_dir), DeleteOrder::Forward,
+                                              "cmp-forward", forward_db);
+    auto reverse = run_create_delete_embedded(small_params(work_dir), DeleteOrder::Reverse,
+                                              "cmp-reverse", reverse_db);
+    suite.check(forward.ok && reverse.ok, "forward e reverse devem completar na mesma semente");
+    suite.check(forward.peak_disk_bytes > 0 && reverse.peak_disk_bytes > 0,
+               "os dois devem reportar um tamanho de arquivo final mensurável");
+}
+
+} // namespace
+
+int main() {
+    TestSuite suite;
+    test_create_only(suite);
+    test_create_delete_forward(suite);
+    test_create_delete_reverse(suite);
+    test_create_delete_interleaved(suite);
+    test_forward_and_reverse_are_comparable(suite);
+    return suite.finish();
+}

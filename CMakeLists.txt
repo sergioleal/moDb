@@ -438,6 +438,9 @@ add_library(modb_load_core STATIC
     loadtests/process_metrics.cpp
     loadtests/target_embedded.cpp
     loadtests/workloads/create_only.cpp
+    loadtests/workloads/create_delete_forward.cpp
+    loadtests/workloads/create_delete_reverse.cpp
+    loadtests/workloads/create_delete_interleaved.cpp
     loadtests/campaign.cpp
     loadtests/history/series_key.cpp
     loadtests/history/rollup.cpp
@@ -626,6 +629,9 @@ if(BUILD_TESTING)
     add_executable(modb_load_history_tests tests/load_history_test.cpp)
     target_link_libraries(modb_load_history_tests PRIVATE modb_load_core)
 
+    add_executable(modb_load_workload_tests tests/load_workload_test.cpp)
+    target_link_libraries(modb_load_workload_tests PRIVATE modb_load_core)
+
     add_executable(modb_catalog_persistence_tests tests/catalog_persistence_test.cpp)
     target_link_libraries(modb_catalog_persistence_tests PRIVATE modb::modb)
 
@@ -742,6 +748,7 @@ if(BUILD_TESTING)
         target_link_options(modb_benchmark_runner_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_load_matrix_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_load_history_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
+        target_link_options(modb_load_workload_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_catalog_persistence_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_storage_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
         target_link_options(modb_page_cache_tests PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -816,6 +823,7 @@ if(BUILD_TESTING)
     add_test(NAME modb.benchmark_runner COMMAND modb_benchmark_runner_tests)
     add_test(NAME modb.load_matrix COMMAND modb_load_matrix_tests)
     add_test(NAME modb.load_history COMMAND modb_load_history_tests)
+    add_test(NAME modb.load_workload COMMAND modb_load_workload_tests)
     add_test(NAME modb.catalog_persistence COMMAND modb_catalog_persistence_tests)
     add_test(NAME modb.storage COMMAND modb_storage_tests)
     add_test(NAME modb.page_cache COMMAND modb_page_cache_tests)

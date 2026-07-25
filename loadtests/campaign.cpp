@@ -3,6 +3,9 @@
 #include "budget.hpp"
 #include "environments.hpp"
 #include "profiles.hpp"
+#include "workloads/create_delete_forward.hpp"
+#include "workloads/create_delete_interleaved.hpp"
+#include "workloads/create_delete_reverse.hpp"
 #include "workloads/create_only.hpp"
 
 #include "runner/environment.hpp"
@@ -299,6 +302,12 @@ CampaignResult run_campaign(const CampaignOptions& options) {
         CaseRunResult run_result;
         if (c.workload == "create_only") {
             run_result = run_create_only(c, work_dir, options.seed, db_path);
+        } else if (c.workload == "create_delete_forward") {
+            run_result = run_create_delete_forward(c, work_dir, options.seed, db_path);
+        } else if (c.workload == "create_delete_reverse") {
+            run_result = run_create_delete_reverse(c, work_dir, options.seed, db_path);
+        } else if (c.workload == "create_delete_interleaved") {
+            run_result = run_create_delete_interleaved(c, work_dir, options.seed, db_path);
         } else {
             run_result.status = "unimplemented";
             run_result.error = "dispatch ausente para workload '" + c.workload + "'";
@@ -358,6 +367,9 @@ CampaignResult run_campaign(const CampaignOptions& options) {
             << ",\"hash_match\":" << json_bool(run_result.hash_match)
             << ",\"write_amplification\":" << run_result.write_amplification
             << ",\"space_amplification\":" << run_result.space_amplification
+            << ",\"all_deleted\":" << json_bool(run_result.all_deleted)
+            << ",\"still_resolving\":" << json_uint(run_result.still_resolving)
+            << ",\"reclaimed_bytes\":" << json_uint(run_result.reclaimed_bytes)
             << ",\"db_path\":" << json_string(db_path.string()) << "}";
         if (!write_or_fail(oss.str())) {
             return result;

@@ -31,6 +31,7 @@ struct CaseAccumulator {
     bool hash_match{false};
     std::string status, expected_hash, actual_hash, db_path, error_message;
     double total_duration_ns{}, peak_disk_bytes{}, write_amplification{}, space_amplification{};
+    double reclaimed_bytes{};
 
     bool has_error_only{false};   // case_error sem case_summary
 };
@@ -169,6 +170,7 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             acc.hash_match = v.get_bool("hash_match");
             acc.write_amplification = v.get_number("write_amplification");
             acc.space_amplification = v.get_number("space_amplification");
+            acc.reclaimed_bytes = v.get_number("reclaimed_bytes");
             acc.db_path = v.get_string("db_path");
         } else if (record == "case_error") {
             const auto case_id = v.get_string("case_id");
@@ -268,7 +270,8 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             << ",\"totals\":{\"duration_ns\":" << json_uint(static_cast<std::uint64_t>(acc.total_duration_ns))
             << ",\"peak_disk_bytes\":" << json_uint(static_cast<std::uint64_t>(acc.peak_disk_bytes))
             << ",\"peak_rss_bytes\":" << json_uint(acc.peak_rss_bytes_across_phases)
-            << ",\"reclaimed_bytes\":0,\"write_amplification\":" << acc.write_amplification
+            << ",\"reclaimed_bytes\":" << json_uint(static_cast<std::uint64_t>(acc.reclaimed_bytes))
+            << ",\"write_amplification\":" << acc.write_amplification
             << ",\"space_amplification\":" << acc.space_amplification << "}"
             << ",\"windows\":null"
             << ",\"status\":" << json_string(status)

@@ -69,6 +69,14 @@ struct CaseRunResult {
     // bytes lógicos vivos (§8). 0.0 quando não computável (nenhum objeto).
     double write_amplification{};
     double space_amplification{};
+
+    // Subfase D (create_delete_*, §4.2): validação de "tudo removido" --
+    // distinta da validação de hash de create_only/crud_full. `true`/`0`
+    // quando o workload não faz delete (ex.: create_only), nunca um
+    // falso-positivo por omissão.
+    bool all_deleted{true};
+    std::uint64_t still_resolving{0};
+    std::uint64_t reclaimed_bytes{0};
 };
 
 } // namespace modb::loadtest

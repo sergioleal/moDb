@@ -12,6 +12,9 @@ namespace {
 // verdade sobre o que `run` de fato consegue executar.
 const std::vector<std::string> kImplementedWorkloads = {
     "create_only",
+    "create_delete_forward",
+    "create_delete_reverse",
+    "create_delete_interleaved",
 };
 
 bool contains(const std::vector<std::string>& values, std::string_view target) {
