@@ -136,6 +136,25 @@ fase nomeada com o `AccessMethod` real do `query::QueryPlan` (`scan_1pct_index_s
 por exemplo) -- o "plano registrado" do critério de pronto vira parte do
 próprio nome da fase, não um campo novo no schema.
 
+**Implementado na Subfase M**: `mixed_oltp`, único workload que lê
+`c.concurrency` de verdade -- fecha a dívida D1 para essa dimensão
+(`unimplemented_dimension_reason` agora só recusa concurrency≠1 para os
+outros workloads). `params.concurrency` sessões (`std::thread` de verdade)
+emitem create/read/update/delete (5/80/10/5) contra o MESMO `Database`,
+cada operação inteira (begin+engine+commit+contabilidade) sob um único
+`std::mutex` -- o motor é single-thread (ADR-011), então isso é contenção
+real na fila de entrada, não paralelismo real dentro do motor (mesmo
+desenho que `Server::engine_mutex_` já usa para sessões de rede). A
+reconciliação conta de verdade via `query<User>().stream()` (não só confia
+na contabilidade em memória) e o checksum de amostra ordena os ids
+sobreviventes por um passo fixo, mesma disciplina de `sample_stride` do
+crud_full. `write_amplification`/`space_amplification` ficam em 0.0
+(não computável sob criação/atualização/remoção concorrentes intercaladas,
+mesma convenção de "não inventar" já usada em `create_delete_embedded`).
+Verificado ao vivo com `--case load.mixed_oltp.embedded.10k` (60000
+operações, 0 erros, `hash_match:true`) e com 4 threads reais num teste
+menor.
+
 Dois workloads adicionais dependem de infraestrutura que o harness genérico
 (`target.hpp`, §14) ainda não cobre; ficam **fora de todos os perfis** até essa
 infraestrutura existir — mesmo tratamento hoje dado a `primary_storage=wal_only`

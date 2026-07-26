@@ -18,6 +18,7 @@ const std::vector<std::string> kImplementedWorkloads = {
     "crud_full",
     "read_hotspot",
     "range_scan_sweep",
+    "mixed_oltp",
 };
 
 bool contains(const std::vector<std::string>& values, std::string_view target) {
@@ -194,9 +195,15 @@ std::string unimplemented_dimension_reason(const Case& c) {
                "payload/batch tem dispatch implementado (§4.5, dívida D1) -- descreva "
                "a variação por seletor estruturado, não no sufixo do id";
     }
-    if (c.concurrency != 1) {
+    // Subfase M: `mixed_oltp` é o único workload que de fato lê `c.concurrency`
+    // (sessões concorrentes de verdade, serializadas por um mutex sobre o
+    // motor single-thread, §4.5). Todo outro workload continua recusando
+    // concurrency != 1 -- prometer um `case_id` com `.c16` que o runtime
+    // ignora é exatamente a dívida D1 que esta checagem existe para evitar.
+    if (c.concurrency != 1 && c.workload != "mixed_oltp") {
         return "concurrency=" + std::to_string(c.concurrency) +
-               " ainda não tem dispatch implementado (chega na Subfase M) -- " + c.case_id();
+               " ainda não tem dispatch implementado para o workload '" + c.workload +
+               "' (só 'mixed_oltp' desde a Subfase M) -- " + c.case_id();
     }
     if (c.readers != 0) {
         return "readers=" + std::to_string(c.readers) +

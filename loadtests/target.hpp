@@ -74,6 +74,9 @@ struct WorkloadParams {
     std::uint64_t object_count{};
     std::uint64_t batch{1000};
     std::string payload{"normal"};
+    // Subfase M: só `mixed_oltp` lê isto -- sessões concorrentes de verdade
+    // (§4.5), serializadas por um mutex sobre o motor single-thread (ADR-011).
+    std::uint64_t concurrency{1};
 
     // Subfase F: `on_progress` nulo (padrão) = não emite progress_window,
     // igual ao comportamento de antes desta subfase. `window_interval` só

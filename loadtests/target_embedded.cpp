@@ -16,9 +16,12 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <sstream>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
 using namespace modb;
@@ -1250,6 +1253,282 @@ CaseRunResult run_range_scan_sweep_embedded(const WorkloadParams& params,
     }
     result.peak_disk_bytes = create_outcome.phase.db_bytes;
     result.hash_match = true;   // não há hash lógico separado -- a invariante é a contagem por fase
+    return result;
+}
+
+namespace {
+
+// Estado compartilhado do mixed_oltp (§4.2.1): tudo protegido por `mutex` --
+// o motor é single-thread (ADR-011), então mesmo a contabilidade em memória
+// (não só as chamadas ao `Database`) precisa ficar atrás do mesmo lock.
+struct MixedOltpSharedState {
+    std::mutex mutex;
+    std::vector<ObjectId> live_ids;
+    std::unordered_map<std::uint64_t, std::uint64_t> logical_id_of;   // ObjectId.value -> logical id
+    std::unordered_map<std::uint64_t, GeneratedUser> expected;         // logical id -> valor esperado atual
+    std::uint64_t next_logical_id{0};
+    std::uint64_t created{0};
+    std::uint64_t deleted{0};
+    std::uint64_t errors{0};
+    std::vector<double> latencies_ns;
+};
+
+// Uma sessão do mixed_oltp: `ops` operações na proporção fixa 5/80/10/5
+// (create/read/update/delete, §4.2.1). Cada operação inteira -- begin,
+// engine, commit, contabilidade -- roda sob `state.mutex`: contenção real na
+// fila de entrada do motor single-thread, não paralelismo real dentro dele.
+void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, std::uint64_t ops,
+                       std::uint64_t base_seed, std::uint64_t rng_seed, std::string payload) {
+    std::mt19937_64 rng(rng_seed);
+    std::uniform_real_distribution<double> action(0.0, 1.0);
+    std::uniform_int_distribution<int> status_dist(0, 2);
+    const auto filler_bytes = filler_bytes_for_payload(payload);
+
+    for (std::uint64_t i = 0; i < ops; ++i) {
+        const double r = action(rng);
+        std::lock_guard<std::mutex> lock(state.mutex);
+        const auto op_start = std::chrono::steady_clock::now();
+
+        if (r < 0.05) {
+            // create (5%)
+            const auto logical_id = ++state.next_logical_id;
+            const auto generated = generate_user(base_seed, logical_id, payload);
+            auto tx = attached.database->begin();
+            if (!tx) {
+                ++state.errors;
+            } else {
+                auto created = attached.database->create(*tx, to_engine_user(generated));
+                if (!created) {
+                    ++state.errors;
+                } else if (auto committed = tx->commit(); !committed) {
+                    ++state.errors;
+                } else {
+                    state.live_ids.push_back(created->id());
+                    state.logical_id_of[created->id().value] = logical_id;
+                    state.expected[logical_id] = generated;
+                    ++state.created;
+                }
+            }
+        } else if (r < 0.85 && !state.live_ids.empty()) {
+            // read (80%)
+            const auto idx = rng() % state.live_ids.size();
+            auto handle = attached.database->get<User>(state.live_ids[idx]);
+            if (!handle) {
+                ++state.errors;
+            } else if (auto value = attached.database->materialize(*handle); !value) {
+                ++state.errors;
+            }
+        } else if (r < 0.95 && !state.live_ids.empty()) {
+            // update (10%)
+            const auto idx = rng() % state.live_ids.size();
+            const auto object_id = state.live_ids[idx];
+            const auto logical_id = state.logical_id_of.at(object_id.value);
+            const auto new_value =
+                generate_user_ex(base_seed, logical_id, filler_bytes, status_dist(rng));
+            auto handle = attached.database->get<User>(object_id);
+            if (!handle) {
+                ++state.errors;
+            } else {
+                auto tx = attached.database->begin();
+                if (!tx) {
+                    ++state.errors;
+                } else if (auto updated = attached.database->update(*tx, *handle,
+                                                                    to_engine_user(new_value));
+                          !updated) {
+                    ++state.errors;
+                } else if (auto committed = tx->commit(); !committed) {
+                    ++state.errors;
+                } else {
+                    state.expected[logical_id] = new_value;
+                }
+            }
+        } else if (!state.live_ids.empty()) {
+            // delete (5%, ou sobra de read/update quando live_ids esvaziou)
+            const auto idx = rng() % state.live_ids.size();
+            const auto object_id = state.live_ids[idx];
+            auto tx = attached.database->begin();
+            if (!tx) {
+                ++state.errors;
+            } else if (auto removed = attached.database->remove(*tx, object_id); !removed) {
+                ++state.errors;
+            } else if (auto committed = tx->commit(); !committed) {
+                ++state.errors;
+            } else {
+                const auto logical_id = state.logical_id_of.at(object_id.value);
+                state.expected.erase(logical_id);
+                state.logical_id_of.erase(object_id.value);
+                state.live_ids[idx] = state.live_ids.back();
+                state.live_ids.pop_back();
+                ++state.deleted;
+            }
+        }
+
+        const auto op_end = std::chrono::steady_clock::now();
+        state.latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+    }
+}
+
+} // namespace
+
+CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
+                                      std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "mixed_oltp");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    AttachedDatabase attached;
+    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+        result.status = "failed";
+        result.error = setup.error;
+        return result;
+    }
+
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
+    if (!create_outcome.ok) {
+        result.status = "failed";
+        result.error = create_outcome.error;
+        return result;
+    }
+    result.phases.push_back(create_outcome.phase);
+
+    MixedOltpSharedState state;
+    state.next_logical_id = params.object_count;
+    state.live_ids = create_outcome.ids;
+    for (std::uint64_t i = 0; i < create_outcome.ids.size(); ++i) {
+        const auto logical_id = i + 1;
+        state.logical_id_of[create_outcome.ids[i].value] = logical_id;
+        state.expected[logical_id] = generate_user(params.seed, logical_id, params.payload);
+    }
+    state.created = params.object_count;
+
+    const auto concurrency = std::max<std::uint64_t>(1, params.concurrency);
+    // Volume arbitrário mas generoso o bastante pras threads de fato
+    // competirem pelo mutex em vez de terminarem antes de se cruzarem.
+    const auto total_ops = std::max<std::uint64_t>(params.object_count * 5, 1000);
+    const auto ops_per_thread = total_ops / concurrency;
+
+    const auto mixed_start = std::chrono::steady_clock::now();
+    {
+        std::vector<std::thread> threads;
+        threads.reserve(concurrency);
+        for (std::uint64_t t = 0; t < concurrency; ++t) {
+            const auto rng_seed = params.seed ^ (0x9E37'79B9'7F4A'7C15ULL * (t + 1));
+            threads.emplace_back(mixed_oltp_worker, std::ref(attached), std::ref(state),
+                                 ops_per_thread, params.seed, rng_seed, params.payload);
+        }
+        for (auto& th : threads) {
+            th.join();
+        }
+    }
+    const auto mixed_end = std::chrono::steady_clock::now();
+
+    // Reconciliação independente (§4.2.1 "contagem final reconcilia"): conta
+    // de verdade quantos `User` existem no banco -- não só confia na
+    // contabilidade em memória, que poderia estar certa por acidente mesmo
+    // com um bug real na sincronização.
+    std::uint64_t engine_count = 0;
+    for (auto& row : attached.database->query<User>().stream()) {
+        if (row) {
+            ++engine_count;
+        }
+    }
+    const auto expected_live = state.created - state.deleted;
+    const auto bookkeeping_count = state.live_ids.size();
+    const bool reconciled = engine_count == expected_live && bookkeeping_count == expected_live;
+
+    // Checksum de amostra determinística (§4.2.1): ordena os logical_ids
+    // sobreviventes e amostra por passo fixo -- mesma disciplina do
+    // `sample_stride` de crud_full, não uma amostra aleatória a cada run.
+    std::vector<std::uint64_t> surviving;
+    surviving.reserve(state.expected.size());
+    for (const auto& [logical_id, unused] : state.expected) {
+        (void)unused;
+        surviving.push_back(logical_id);
+    }
+    std::sort(surviving.begin(), surviving.end());
+    std::unordered_map<std::uint64_t, ObjectId> object_id_of_logical;
+    object_id_of_logical.reserve(state.logical_id_of.size());
+    for (const auto& [object_value, logical_id] : state.logical_id_of) {
+        object_id_of_logical[logical_id] = ObjectId{object_value};
+    }
+
+    const auto sample_stride = std::max<std::uint64_t>(1, surviving.size() / 100);
+    std::ostringstream expected_stream, actual_stream;
+    std::uint64_t sample_checked = 0, sample_mismatches = 0;
+    for (std::size_t i = 0; i < surviving.size(); i += sample_stride) {
+        const auto logical_id = surviving[i];
+        expected_stream << canonical_line(state.expected.at(logical_id)) << '\n';
+        ++sample_checked;
+        auto object_it = object_id_of_logical.find(logical_id);
+        if (object_it == object_id_of_logical.end()) {
+            ++sample_mismatches;
+            continue;
+        }
+        auto handle = attached.database->get<User>(object_it->second);
+        Result<User> value;
+        if (handle) {
+            value = attached.database->materialize(*handle);
+        }
+        if (!handle || !value) {
+            ++sample_mismatches;
+            continue;
+        }
+        const auto actual_line = canonical_line(from_engine_user(*value));
+        actual_stream << actual_line << '\n';
+        if (actual_line != canonical_line(state.expected.at(logical_id))) {
+            ++sample_mismatches;
+        }
+    }
+
+    result.expected_hash = sha256_hex(sha256_text(expected_stream.str()));
+    result.actual_hash = sha256_hex(sha256_text(actual_stream.str()));
+    result.hash_match = reconciled && sample_mismatches == 0;
+
+    const auto mixed_ns = ns_between(mixed_start, mixed_end);
+    PhaseMetrics phase;
+    phase.phase = "mixed_oltp";
+    phase.operations = ops_per_thread * concurrency;
+    phase.duration_ns = mixed_ns;
+    phase.ops_per_second = mixed_ns > 0 ? (static_cast<double>(phase.operations) * 1'000'000'000.0) /
+                                            static_cast<double>(mixed_ns)
+                                       : 0.0;
+    phase.errors = state.errors;
+    phase.latency_ns = percentiles_of(std::move(state.latencies_ns));
+    phase.peak_rss_bytes = peak_rss_bytes();
+    std::error_code size_error;
+    const auto db_bytes = std::filesystem::file_size(db_path, size_error);
+    phase.db_bytes = size_error ? 0 : db_bytes;
+    std::error_code wal_error;
+    const auto wal_bytes = std::filesystem::file_size(wal_path, wal_error);
+    phase.wal_bytes = wal_error ? 0 : wal_bytes;
+    result.phases.push_back(phase);
+
+    if (!result.hash_match) {
+        result.status = "failed";
+        std::ostringstream err;
+        if (!reconciled) {
+            err << "mixed_oltp: contagem não reconcilia (motor=" << engine_count
+                << " contabilidade=" << bookkeeping_count << " esperado=" << expected_live << "). ";
+        }
+        if (sample_mismatches > 0) {
+            err << "mixed_oltp: " << sample_mismatches << "/" << sample_checked
+                << " amostra(s) não conferem.";
+        }
+        result.error = err.str();
+        return result;
+    }
+
+    result.total_duration_ns = create_outcome.phase.duration_ns + mixed_ns;
+    result.peak_disk_bytes = phase.db_bytes;
+    // Sob criação/atualização/remoção concorrentes intercaladas não há um
+    // denominador "bytes lógicos gerados" limpo como nos outros workloads --
+    // 0.0 é "não computado", não um valor inventado (mesma convenção de
+    // `create_delete_embedded`'s space_amplification após tudo deletado).
+    result.write_amplification = 0.0;
+    result.space_amplification = 0.0;
+    result.status = "completed";
+    result.ok = true;
     return result;
 }
 

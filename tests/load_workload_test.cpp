@@ -227,6 +227,41 @@ void test_range_scan_sweep(TestSuite& suite) {
     suite.check(any_index_scan, "ao menos uma seletividade deveria usar o índice recém-criado");
 }
 
+// Subfase M (§4.2.1, fecha D1 para --concurrency): sessões concorrentes de
+// verdade (std::thread) emitindo create/read/update/delete contra o mesmo
+// banco. Reconciliação (contagem real via query<User>) e checksum de
+// amostra devem conferir mesmo com contenção real de verdade.
+void test_mixed_oltp_concurrent(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    auto params = small_params(work_dir, /*object_count=*/300, /*batch=*/50);
+    params.concurrency = 4;
+    std::filesystem::path db_path;
+    auto result = run_mixed_oltp_embedded(params, db_path);
+
+    suite.check(result.ok, "mixed_oltp com concurrency=4 deve completar: " + result.error);
+    suite.check(result.status == "completed", "mixed_oltp status deve ser completed");
+    suite.check(result.phases.size() == 2, "mixed_oltp deve produzir 2 fases (create + mixed_oltp)");
+    if (result.phases.size() == 2) {
+        suite.check(result.phases[1].phase == "mixed_oltp", "a 2a fase deve se chamar 'mixed_oltp'");
+        suite.check(result.phases[1].operations > 0, "a fase mista deve ter executado operações");
+    }
+    suite.check(result.hash_match,
+               "reconciliação e checksum de amostra devem conferir sob concorrência real: " +
+                   result.error);
+}
+
+// Concurrency=1 (padrão) deve continuar funcionando -- um único thread é só
+// um caso particular do mesmo código, não um caminho separado.
+void test_mixed_oltp_single_threaded(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    auto params = small_params(work_dir, /*object_count=*/200, /*batch=*/37);
+    std::filesystem::path db_path;
+    auto result = run_mixed_oltp_embedded(params, db_path);
+
+    suite.check(result.ok, "mixed_oltp com concurrency=1 deve completar: " + result.error);
+    suite.check(result.hash_match, "reconciliação deve conferir com uma única sessão: " + result.error);
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -271,6 +306,8 @@ int main() {
     test_progress_window_absent_without_callback(suite);
     test_read_hotspot(suite);
     test_range_scan_sweep(suite);
+    test_mixed_oltp_concurrent(suite);
+    test_mixed_oltp_single_threaded(suite);
     test_crud_full(suite);
     return suite.finish();
 }

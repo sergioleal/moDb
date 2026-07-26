@@ -51,4 +51,12 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
 [[nodiscard]] CaseRunResult run_range_scan_sweep_embedded(const WorkloadParams& params,
                                                           std::filesystem::path& out_db_path);
 
+// mixed_oltp (§4.2.1): cria um working set inicial, depois `params.concurrency`
+// threads emitindo create/read/update/delete (proporção fixa 5/80/10/5) contra
+// o MESMO banco, serializadas por um mutex (o motor é single-thread, ADR-011)
+// -- contenção real na fila de entrada, não paralelismo real dentro do motor.
+// Fecha a dívida D1 para `--concurrency` (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).
+[[nodiscard]] CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
+                                                    std::filesystem::path& out_db_path);
+
 } // namespace modb::loadtest
