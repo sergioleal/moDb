@@ -236,13 +236,13 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | L | `read_hotspot`, `range_scan_sweep` | 7 | ✅ | `55ad77c` · 2026-07-25 |
 | M | `mixed_oltp` (concorrência real) | 7 | ✅ | `fb02617` · 2026-07-25 (fecha D1 para `--concurrency`) |
 | N | `snapshot_hold` | 7 | ✅ | `c77d6c3` · 2026-07-25 |
-| O | `dataset_user_blob`, `blob_lifecycle` | 7 | ⬜ | |
+| O | `dataset_user_blob`, `blob_lifecycle` | 7 | ✅ | `47f0c41` · 2026-07-25 (blob_lifecycle real; sem dataset_user_blob formal, gerador ad hoc; tamanhos reduzidos; sem free list no motor -- ver §4.2.1) |
 | P | `cascade_delete` | 7 | ⬜ | |
 | Q | `oversubscribed_churn`, perfil `load-behavior` | 7 | ⬜ | |
 | R | Harness kill/restart, `restart_recovery` | 7 | ⬜ | ver §17 risco 13 |
 | K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ⬜ | depende de M, N, O, P, Q |
 
-Progresso: **15/20**.
+Progresso: **16/20**.
 
 ## 6. O que não está neste plano, de propósito
 
