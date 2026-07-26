@@ -202,6 +202,17 @@ Verificado ao vivo em `--case load.cascade_delete.embedded.1k`: árvore de
 1555 nós (largura 6, profundidade 4: 6⁴+6³+6²+6+1), removida em cascata com
 `still_resolving=0`.
 
+**Revisão pós-implementação**: a criação da árvore (`create_hierarchy`)
+agora respeita `batch` (§4.5) -- comita periodicamente durante a recursão em
+vez de manter a árvore inteira (até ~1,08M nós em `object_count=1M`, largura
+32) numa única transação. O ponto de corte é sempre logo depois de um nó ser
+criado (nunca no meio de um nó com filhos pendentes), porque referências só
+apontam para trás -- seguro em qualquer profundidade. **A remoção em cascata
+da raiz continua sendo UMA chamada `database.remove(tx, raiz)`, numa
+transação só**: `Database::remove_cascade` é uma operação atômica do motor
+sem um jeito de paginar de fora (fora do escopo deste harness de carga --
+exigiria uma API nova no motor, não só no `modb_load`).
+
 **Implementado na Subfase Q**: `oversubscribed_churn`. Mesma lógica de
 `create_delete_interleaved` (mesmas fases, mesmo `reorder_for_delete`), mas
 `Database::create` recebe um `cache_capacity` explícito (parâmetro que já
@@ -283,6 +294,22 @@ granularidade por LOTE (uma viagem de rede por `invoke`), não por objeto
 como no `embedded` -- os dois números não são comparáveis ponto a ponto
 entre alvos. Fechar essas lacunas (processos separados, métricas de rede
 reais) fica para uma iteração futura desta subfase.
+
+**Revisão pós-implementação.** `target_client.cpp` ganhou uma rede de
+segurança (RAII) para o join da thread aceitadora -- uma exceção escapando
+do bloco cliente/servidor não deixa mais a thread joinable para
+`~std::thread` chamar `std::terminate()`. **Pendência conhecida, não
+corrigida nesta revisão**: `Server::request_stop()` fecha o listener via
+`close(fd)` contra uma thread bloqueada em `accept()` -- destrava de verdade
+no Windows, mas é comportamento não especificado em POSIX (no Linux,
+`accept()` tende a continuar bloqueado, travando `acceptor.join()` no
+caminho de falha de `connect()`). Isso só importa quando o alvo `loopback`/
+`remote_colocated` de fato rodar em Linux -- ainda não aconteceu nesta
+sessão (SSH para `linux-remoto` nunca testado, §6.4/scripts/run-remote-
+load.ps1). Não corrigido aqui porque a correção vive em `src/net/server.cpp`/
+`include/modb/net/server.hpp`, arquivos sob edição concorrente de outro
+processo (plano de servidor assíncrono) nesta mesma árvore de trabalho --
+tocar neles arriscaria colidir com esse trabalho em andamento.
 
 ### 4.4 D4 — Ambiente registrado
 

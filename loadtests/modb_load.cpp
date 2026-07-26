@@ -500,7 +500,10 @@ int command_report(int argc, char** argv) {
 
 int command_resume(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Uso: modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]\n";
+        std::cerr << "Uso: modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]\n"
+                  << "                       [--calibration-file PATH] [--max-duration N]\n"
+                  << "                       [--max-disk-gb N] [--max-rss-mb N] "
+                     "[--accept-unknown-budget]\n";
         return 2;
     }
     modb::loadtest::ResumeOptions options;
@@ -518,6 +521,16 @@ int command_resume(int argc, char** argv) {
             options.work_dir = need("--work-dir");
         } else if (arg == "--seed") {
             options.seed_override = std::strtoull(need("--seed"), nullptr, 10);
+        } else if (arg == "--calibration-file") {
+            options.calibration_file = need("--calibration-file");
+        } else if (arg == "--max-duration") {
+            options.budget.max_duration_seconds = std::strtoull(need("--max-duration"), nullptr, 10);
+        } else if (arg == "--max-disk-gb") {
+            options.budget.max_disk_gb = std::strtoull(need("--max-disk-gb"), nullptr, 10);
+        } else if (arg == "--max-rss-mb") {
+            options.budget.max_rss_mb = std::strtoull(need("--max-rss-mb"), nullptr, 10);
+        } else if (arg == "--accept-unknown-budget") {
+            options.budget.accept_unknown_budget = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage();
             return 0;

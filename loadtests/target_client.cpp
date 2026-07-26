@@ -104,6 +104,22 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
     // `accept()` nesse caso específico (única situação em que o par
     // conecta/aceita não completa por conta própria).
     std::thread acceptor([&server] { (void)server->serve_one(); });
+    // Rede de segurança: se uma exceção escapar do bloco abaixo (ex.:
+    // `bad_alloc` construindo `actual_stream`/`expected_stream` para um
+    // object_count grande) antes do `acceptor.join()` explícito mais abaixo,
+    // a thread ficaria joinable e `~std::thread` chamaria `std::terminate()`
+    // no processo inteiro. O join explícito continua sendo o caminho normal
+    // (mesmo ponto de antes, preserva a ordem de leitura de métricas
+    // pós-servidor); este guard só age no caminho de exceção.
+    struct JoinOnUnwind {
+        std::thread& t;
+        bool done = false;
+        ~JoinOnUnwind() {
+            if (!done && t.joinable()) {
+                t.join();
+            }
+        }
+    } join_guard{acceptor};
 
     bool ok = false;
     std::string error_message;
@@ -216,6 +232,7 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
     } // `connection` sai de escopo aqui -- fecha a sessão e libera `serve_one()`.
 
     acceptor.join();
+    join_guard.done = true;
 
     if (!ok) {
         result.status = "failed";

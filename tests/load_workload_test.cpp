@@ -229,6 +229,36 @@ void test_range_scan_sweep(TestSuite& suite) {
     suite.check(any_index_scan, "ao menos uma seletividade deveria usar o índice recém-criado");
 }
 
+// Regressão pós-revisão: object_count=0 não pode indexar
+// `create_outcome.ids[rank-1]` fora dos limites (ZipfSampler com n=0) --
+// deve falhar de forma limpa, não ler memória inválida.
+void test_read_hotspot_rejects_zero_object_count(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_read_hotspot_embedded(small_params(work_dir, /*object_count=*/0, /*batch=*/1),
+                                            db_path);
+
+    suite.check(!result.ok, "object_count=0 não tem nada para amostrar -- deve falhar, não travar");
+    suite.check(result.status == "failed", "status deve ser failed");
+    suite.check(!result.error.empty(), "erro deve explicar object_count=0");
+}
+
+// Regressão pós-revisão: `write_amplification` usava a mesma fórmula de
+// `space_amplification` (tamanho total do arquivo / bytes lógicos) em vez de
+// bytes escritos DURANTE a própria fase de leitura -- read_hotspot só lê, não
+// deveria fazer o arquivo crescer de forma significativa nesta fase.
+void test_read_hotspot_write_amplification_reflects_read_only_phase(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_read_hotspot_embedded(small_params(work_dir), db_path);
+
+    suite.check(result.ok, "read_hotspot deve completar: " + result.error);
+    suite.check(result.space_amplification > 0.0, "space_amplification deve refletir o arquivo todo");
+    suite.check(result.write_amplification < result.space_amplification,
+               "write_amplification (só a fase de leitura) deve ser bem menor que "
+               "space_amplification (arquivo inteiro) -- read_hotspot não escreve dados novos");
+}
+
 // Subfase M (§4.2.1, fecha D1 para --concurrency): sessões concorrentes de
 // verdade (std::thread) emitindo create/read/update/delete contra o mesmo
 // banco. Reconciliação (contagem real via query<User>) e checksum de
@@ -282,6 +312,27 @@ void test_snapshot_hold(TestSuite& suite) {
     suite.check(result.phases.size() == 2, "snapshot_hold deve produzir 2 fases (create + hold)");
     if (result.phases.size() == 2) {
         suite.check(result.phases[1].phase == "hold", "a 2a fase deve se chamar 'hold'");
+    }
+}
+
+// Regressão pós-revisão: `retained_versions` somava os objetos extras
+// criados FORA do working set original (nunca tiveram versão antiga nenhuma)
+// como se fossem versões antigas retidas pela snapshot. Com object_count=1,
+// update_end=delete_end=0 -- nem update nem delete tocam o único objeto
+// original, então NADA deveria ficar retido: um valor > 0 aqui é
+// exatamente o bug (contar o objeto extra como retenção).
+void test_snapshot_hold_retained_versions_excludes_extra_objects(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result =
+        run_snapshot_hold_embedded(small_params(work_dir, /*object_count=*/1, /*batch=*/1), db_path);
+
+    suite.check(result.ok, "snapshot_hold com object_count=1 deve completar: " + result.error);
+    suite.check(result.phases.size() == 2, "deve produzir 2 fases (create + hold)");
+    if (result.phases.size() == 2) {
+        suite.check(result.phases[1].retained_versions == 0,
+                   "sem nenhum update/delete no working set original, retained_versions deve ser "
+                   "exatamente 0 -- não deve incluir o objeto extra criado fora dele");
     }
 }
 
@@ -388,6 +439,27 @@ void test_restart_recovery(TestSuite& suite) {
                    (reopened_again ? std::string{} : reopened_again.error().message));
 }
 
+// Regressão pós-revisão: a fase de criação só era registrada em
+// `result.phases` no FIM da função, então uma falha em qualquer um dos ~10
+// pontos de erro entre a criação e a reabertura (aqui, "working set pequeno
+// demais para o churn" com object_count=0) reportava zero fases mesmo com a
+// criação já tendo terminado com sucesso.
+void test_restart_recovery_reports_create_phase_on_early_failure(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_restart_recovery_embedded(
+        small_params(work_dir, /*object_count=*/0, /*batch=*/1), db_path);
+
+    suite.check(!result.ok, "object_count=0 não tem working set suficiente para o churn -- deve falhar");
+    suite.check(result.status == "failed", "status deve ser failed");
+    suite.check(!result.phases.empty(),
+               "mesmo falhando no churn, a fase de criação (já bem-sucedida antes do erro) deve "
+               "continuar registrada -- não pode reportar zero fases");
+    if (!result.phases.empty()) {
+        suite.check(result.phases[0].phase == "create", "a fase registrada deve se chamar 'create'");
+    }
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -431,14 +503,18 @@ int main() {
     test_progress_window_emitted(suite);
     test_progress_window_absent_without_callback(suite);
     test_read_hotspot(suite);
+    test_read_hotspot_rejects_zero_object_count(suite);
+    test_read_hotspot_write_amplification_reflects_read_only_phase(suite);
     test_range_scan_sweep(suite);
     test_mixed_oltp_concurrent(suite);
     test_mixed_oltp_single_threaded(suite);
     test_snapshot_hold(suite);
+    test_snapshot_hold_retained_versions_excludes_extra_objects(suite);
     test_blob_lifecycle(suite);
     test_cascade_delete(suite);
     test_oversubscribed_churn(suite);
     test_restart_recovery(suite);
+    test_restart_recovery_reports_create_phase_on_early_failure(suite);
     test_crud_full(suite);
     return suite.finish();
 }

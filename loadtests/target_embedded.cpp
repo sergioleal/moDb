@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -2072,17 +2073,27 @@ struct BuildResult {
 // (cada nó recebe o `next_sibling` já pronto, então nenhum precisa de
 // update depois de criado). `next_sibling_id` é o que ESTE nó deve apontar
 // como próximo irmão -- vem do chamador, não é decidido aqui.
-Result<BuildResult> build_hierarchy_subtree(Database& database, Transaction& tx,
+//
+// `tx`/`created_since_commit` são compartilhados por toda a recursão (por
+// referência) para respeitar `batch` (§4.5): sem isso, a árvore inteira
+// (até ~1,08M nós em object_count=1M) ficaria numa única transação, com
+// toda página suja seguindo no buffer de transação até um commit só no
+// final. O ponto de corte -- logo depois de `database.create` retornar --
+// é seguro em qualquer profundidade porque só existem referências para
+// TRÁS (um nó só referencia filhos já criados, nunca o contrário), então
+// nunca fecha uma transação no meio de um nó com filhos pendentes.
+Result<BuildResult> build_hierarchy_subtree(Database& database, std::optional<Transaction>& tx,
                                             std::uint64_t depth, std::uint64_t width,
                                             ObjectId next_sibling_id,
-                                            std::uint64_t& next_logical_id) {
+                                            std::uint64_t& next_logical_id, std::uint64_t batch,
+                                            std::uint64_t& created_since_commit) {
     ObjectId children_head{};
     std::uint64_t descendants = 0;
     if (depth > 0) {
         ObjectId sibling_so_far{};
         for (std::uint64_t i = 0; i < width; ++i) {
-            auto built =
-                build_hierarchy_subtree(database, tx, depth - 1, width, sibling_so_far, next_logical_id);
+            auto built = build_hierarchy_subtree(database, tx, depth - 1, width, sibling_so_far,
+                                                 next_logical_id, batch, created_since_commit);
             if (!built) {
                 return std::unexpected(built.error());
             }
@@ -2096,11 +2107,25 @@ Result<BuildResult> build_hierarchy_subtree(Database& database, Transaction& tx,
     node.id = static_cast<std::int64_t>(++next_logical_id);
     node.first_child = OwnedRef<HierarchyNode>{children_head};
     node.next_sibling = OwnedRef<HierarchyNode>{next_sibling_id};
-    auto created = database.create(tx, node);
+    auto created = database.create(*tx, node);
     if (!created) {
         return std::unexpected(created.error());
     }
-    return BuildResult{created->id(), descendants + 1};
+    const auto id = created->id();
+
+    if (++created_since_commit >= batch) {
+        auto committed = tx->commit();
+        if (!committed) {
+            return std::unexpected(committed.error());
+        }
+        auto next_tx = database.begin();
+        if (!next_tx) {
+            return std::unexpected(next_tx.error());
+        }
+        tx.emplace(std::move(*next_tx));
+        created_since_commit = 0;
+    }
+    return BuildResult{id, descendants + 1};
 }
 
 } // namespace
@@ -2139,14 +2164,17 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
 
     const auto create_start = std::chrono::steady_clock::now();
     {
-        auto tx = attached.database->begin();
-        if (!tx) {
+        auto first_tx = attached.database->begin();
+        if (!first_tx) {
             result.status = "failed";
-            result.error = "begin(create_hierarchy): " + tx.error().message;
+            result.error = "begin(create_hierarchy): " + first_tx.error().message;
             return result;
         }
-        auto built =
-            build_hierarchy_subtree(*attached.database, *tx, kDepth, width, ObjectId{}, next_logical_id);
+        std::optional<Transaction> tx{std::move(*first_tx)};
+        std::uint64_t created_since_commit = 0;
+        const auto batch = params.batch == 0 ? std::numeric_limits<std::uint64_t>::max() : params.batch;
+        auto built = build_hierarchy_subtree(*attached.database, tx, kDepth, width, ObjectId{},
+                                             next_logical_id, batch, created_since_commit);
         if (!built) {
             result.status = "failed";
             result.error = "create_hierarchy: " + built.error().message;

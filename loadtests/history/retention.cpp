@@ -92,7 +92,16 @@ PruneResult prune_raw_files(const PruneOptions& options) {
             candidate.run_id = point.run_id;
             candidate.raw_file = point.raw_file;
 
-            if (i >= keep_from) {
+            if (point.started_at.empty()) {
+                // Sem `started_at` a ordenação por recência não é confiável
+                // (uma string vazia compara como "mais antiga que qualquer
+                // outra" na ordenação ascendente, o que pode empurrar um
+                // ponto na verdade recente para fora da janela por engano)
+                // -- mais seguro nunca remover do que arriscar apagar algo
+                // que não deveria.
+                candidate.kept = true;
+                candidate.reason = "started_at ausente -- não é seguro determinar idade para poda";
+            } else if (i >= keep_from) {
                 candidate.kept = true;
                 candidate.reason = "entre os " + std::to_string(options.keep) +
                                    " mais recentes da série";

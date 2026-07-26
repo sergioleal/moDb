@@ -8,6 +8,7 @@
 #include "history/trend.hpp"
 #include "json_value.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <sstream>
@@ -351,6 +352,92 @@ void test_rollup_windows_null_when_absent(TestSuite& suite) {
     }
 }
 
+// Uma campanha com DUAS ocorrências do mesmo case_id (equivalente ao que
+// `--repeat 2` produz de verdade -- repeat_index não participa de
+// Case::case_id(), §5) -- para testar que a extração de rollup gera um
+// ponto histórico POR OCORRÊNCIA, não um só mesclando as duas.
+std::string fake_campaign_two_repeats_jsonl(const std::string& run_id, const std::string& started_at) {
+    std::ostringstream oss;
+    oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"run_start",)"
+        << R"("run_id":")" << run_id << R"(","sequence":1,"started_at":")" << started_at
+        << R"(","profile":"","seed":"42","command":"test"})" << '\n';
+    oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"environment",)"
+        << R"("run_id":")" << run_id
+        << R"(","sequence":2,"git_commit":"abcdef0123456789","git_commit_short":"abcdef0",)"
+        << R"("git_branch":"master","git_dirty":false,"compiler_id":"gcc",)"
+        << R"("compiler_version":"14","cxx_standard":"26","build_type":"Debug",)"
+        << R"("os_name":"Windows","os_version":"11","arch":"x86_64",)"
+        << R"("hostname_token":"h1234567","page_size":"4096","project_version":"0.1.0",)"
+        << R"("format_version":1,"protocol_version":1})" << '\n';
+    std::uint64_t seq = 3;
+    for (int repeat_index = 0; repeat_index < 2; ++repeat_index) {
+        oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"case_start",)"
+            << R"("run_id":")" << run_id << R"(","sequence":)" << seq++
+            << R"(,"case_id":"load.create_only.embedded.10k","workload":"create_only",)"
+            << R"("target":"embedded","scale":"10k","objects":10000,"environment":"test-env",)"
+            << R"("payload":"normal","batch":1000,"concurrency":1,"readers":0,)"
+            << R"("durability":"sync_real","cache":"warm","primary_storage":"full",)"
+            << R"("repeat_index":)" << repeat_index << "}" << '\n';
+        oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"phase_summary",)"
+            << R"("run_id":")" << run_id << R"(","sequence":)" << seq++
+            << R"(,"case_id":"load.create_only.embedded.10k","phase":"create",)"
+            << R"("operations":10000,"duration_ns":500000000,"ops_per_second":)" << (100 + repeat_index)
+            << R"(,"errors":0,"latency_ns":{"p50":100,"p95":200,"p99":300,"p999":400},)"
+            << R"("peak_rss_bytes":1000,"db_bytes":2000,"wal_bytes":1000,"pages_read":0,)"
+            << R"("pages_written_estimated":10})" << '\n';
+        oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"case_summary",)"
+            << R"("run_id":")" << run_id << R"(","sequence":)" << seq++
+            << R"(,"case_id":"load.create_only.embedded.10k","status":"completed",)"
+            << R"("total_duration_ns":500000000,"peak_disk_bytes":3000,"expected_hash":"h1",)"
+            << R"("actual_hash":"h1","hash_match":true,"write_amplification":1.5,)"
+            << R"("space_amplification":1.5,"db_path":"x.modb"})" << '\n';
+    }
+    oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"run_end",)"
+        << R"("run_id":")" << run_id << R"(","sequence":)" << seq
+        << R"(,"status":"completed","completed":2,"failed":0,"unimplemented":0,)"
+        << R"("previous_content_sha256":"x"})" << '\n';
+    return oss.str();
+}
+
+// Regressão pós-revisão: o acumulador de `extract_rollups` era chaveado só
+// por `case_id`, então as 2 ocorrências eram mescladas num único rollup (o
+// `phases` da 2a sobrescrevia/concatenava com a 1a, e só 1 ponto histórico
+// era gravado onde deveriam existir 2).
+void test_index_produces_distinct_points_per_repeat(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto campaign_path = dir / "campaign-repeats.jsonl";
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+    write_file(env_path, fake_environments_json());
+    write_file(campaign_path, fake_campaign_two_repeats_jsonl("run-repeats-1", "20260401T000000.000Z"));
+
+    auto indexed = index_campaign(campaign_path, history_path, env_path);
+    suite.check(indexed.ok, "campanha com 2 repetições deve indexar sem erro: " + indexed.error);
+    suite.check(indexed.appended == 2,
+               "cada repetição deve virar seu PRÓPRIO ponto histórico -- não podem ser mescladas "
+               "em 1 só");
+
+    const auto lines = parse_jsonl(read_file_content(history_path));
+    std::vector<double> repeat_indices;
+    std::vector<std::size_t> phase_counts;
+    for (const auto& line : lines) {
+        if (line.get_string("case_id") == "load.create_only.embedded.10k") {
+            repeat_indices.push_back(line.get_number("repeat_index"));
+            const auto* phases = line.find("phases");
+            phase_counts.push_back(phases && phases->is_array() ? phases->as_array().size() : 0);
+        }
+    }
+    suite.check(repeat_indices.size() == 2, "devem existir 2 linhas de rollup para o mesmo case_id");
+    std::sort(repeat_indices.begin(), repeat_indices.end());
+    suite.check(repeat_indices.size() == 2 && repeat_indices[0] == 0 && repeat_indices[1] == 1,
+               "as 2 linhas devem ter repeat_index distintos (0 e 1), não o mesmo valor duplicado");
+    for (const auto count : phase_counts) {
+        suite.check(count == 1,
+                   "cada rollup deve ter exatamente 1 fase (a da sua própria ocorrência) -- não "
+                   "acumular as fases das outras repetições");
+    }
+}
+
 std::string day_stamp(int day) {
     std::ostringstream oss;
     oss << "202601" << (day < 10 ? "0" : "") << day << "T000000.000Z";
@@ -459,6 +546,43 @@ void test_gate_insufficient_history_passes(TestSuite& suite) {
     suite.check(gate.passed,
                "histórico insuficiente nunca deve reprovar (§13.7: não bloquear CI por falta de "
                "dados)");
+}
+
+// Regressão pós-revisão: uma métrica legitimamente 0 na referência (ex.:
+// wal_bytes/peak_disk em escalas pequenas) fazia a razão relativa
+// (atual-referência)/referência virar inf/nan -- um falso "fail" ou "ok"
+// dependendo do sinal, em vez de "insufficient" por falta de base de
+// comparação real.
+void test_gate_drift_handles_zero_reference(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+    write_file(env_path, fake_environments_json());
+
+    // 23 pontos com wal_bytes=0 na referência (pontos 1-20) e um valor
+    // positivo no candidato -- sem a guarda, (positivo-0)/0 = inf.
+    constexpr int kPoints = 23;
+    for (int i = 0; i < kPoints; ++i) {
+        const auto run_id = "run-gate-zero-" + std::to_string(i);
+        const auto campaign_path = dir / (run_id + ".jsonl");
+        auto campaign = fake_campaign_jsonl(run_id, day_stamp(i + 1), 100);
+        // wal_bytes=0 em todos os pontos, exceto os 3 mais recentes (o
+        // candidato e sua janela "atual" de 5) -- ainda positivo o
+        // suficiente para != referência.
+        const std::string wal_field = i < kPoints - 3 ? R"("wal_bytes":0,)" : R"("wal_bytes":500,)";
+        const auto pos = campaign.find(R"("wal_bytes":1000,)");
+        suite.check(pos != std::string::npos, "fixture deveria conter o campo wal_bytes esperado");
+        campaign.replace(pos, std::string(R"("wal_bytes":1000,)").size(), wal_field);
+        write_file(campaign_path, campaign);
+        auto indexed = index_campaign(campaign_path, history_path, env_path);
+        suite.check(indexed.ok && indexed.appended == 1, "ponto com wal_bytes ajustado deve indexar");
+    }
+
+    auto gate = compute_gate(history_path, "load.create_only.embedded.10k", "wal_bytes", "create");
+    suite.check(gate.ok, "compute_gate não deve falhar: " + gate.error);
+    suite.check(gate.drift_verdict == "insufficient",
+               "referência com mediana 0 não tem razão relativa computável -- deve ficar "
+               "'insufficient', nunca um falso fail/ok por inf/nan");
 }
 
 std::string fake_rollup_line(const std::string& series_key, const std::string& run_id,
@@ -572,6 +696,89 @@ void test_prune_keeps_recent_failed_and_baseline(TestSuite& suite) {
                "prune nunca deve modificar series.jsonl");
 }
 
+// Regressão pós-revisão: `started_at` vazio ordenava como "o mais antigo de
+// todos" (string vazia compara menor que qualquer outra), então um rollup
+// sem essa informação era empurrado para fora da janela de recência e podado
+// primeiro -- mesmo podendo, na verdade, ser o ponto mais recente.
+void test_prune_keeps_point_with_missing_started_at(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto raw_dir = dir / "raw";
+    std::filesystem::create_directories(raw_dir);
+
+    std::ostringstream history;
+    // 1 ponto sem started_at + 10 pontos normais -- sem a guarda, o vazio
+    // ordenaria antes de todos e ficaria fora da janela de 10 mais recentes.
+    history << fake_rollup_line("seriesA", "run-missing", "completed", "", "modb-load-run-missing.jsonl")
+           << '\n';
+    write_file(raw_dir / "modb-load-run-missing.jsonl", "conteudo bruto de teste\n");
+    for (int i = 0; i < 10; ++i) {
+        const auto run_id = "run-" + std::to_string(i);
+        const auto raw_file = "modb-load-" + run_id + ".jsonl";
+        history << fake_rollup_line("seriesA", run_id, "completed", day_stamp(i + 1), raw_file) << '\n';
+        write_file(raw_dir / raw_file, "conteudo bruto de teste\n");
+    }
+    write_file(history_path, history.str());
+
+    PruneOptions options;
+    options.history_path = history_path;
+    options.raw_dir = raw_dir;
+    options.keep = 10;
+    options.confirm = true;
+
+    auto pruned = prune_raw_files(options);
+    suite.check(pruned.ok, "prune não deve falhar: " + pruned.error);
+    suite.check(std::filesystem::exists(raw_dir / "modb-load-run-missing.jsonl"),
+               "um rollup sem started_at não pode ser podado -- não há como saber sua idade com "
+               "segurança");
+    suite.check(pruned.deleted.empty(),
+               "nada deveria ser removido (11 pontos, janela de 10, mas o 'extra' é o que não tem "
+               "started_at e por isso é protegido)");
+}
+
+// Regressão pós-revisão: `raw_file` é o arquivo de campanha inteiro,
+// compartilhado por TODAS as séries que tiveram algum caso naquela
+// campanha -- mas cada série decidia manter/remover olhando só a PRÓPRIA
+// janela de recência. Uma campanha "velha" para a série A (fora da janela
+// de 10) mas ainda o ÚNICO ponto da série B não pode ter seu raw_file
+// apagado só porque a série A, isoladamente, achou que já podia.
+void test_prune_does_not_delete_raw_file_needed_by_another_series(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto raw_dir = dir / "raw";
+    std::filesystem::create_directories(raw_dir);
+
+    std::ostringstream history;
+    // Série A: 11 pontos -- o mais antigo (run-0) fica fora da janela de 10.
+    for (int i = 0; i < 11; ++i) {
+        const auto run_id = "run-" + std::to_string(i);
+        const auto raw_file = "modb-load-" + run_id + ".jsonl";
+        history << fake_rollup_line("seriesA", run_id, "completed", day_stamp(i + 1), raw_file) << '\n';
+        write_file(raw_dir / raw_file, "conteudo bruto de teste\n");
+    }
+    // Série B: um único ponto, reaproveitando o MESMO raw_file de run-0 --
+    // representa uma campanha que gerou casos de duas séries diferentes (o
+    // arquivo bruto é compartilhado pela campanha inteira, rollup.cpp §13.3).
+    history << fake_rollup_line("seriesB", "run-0", "completed", day_stamp(1), "modb-load-run-0.jsonl")
+           << '\n';
+    write_file(history_path, history.str());
+
+    PruneOptions options;
+    options.history_path = history_path;
+    options.raw_dir = raw_dir;
+    options.keep = 10;
+    options.confirm = true;
+
+    auto pruned = prune_raw_files(options);
+    suite.check(pruned.ok, "prune não deve falhar: " + pruned.error);
+    suite.check(std::filesystem::exists(raw_dir / "modb-load-run-0.jsonl"),
+               "run-0 é o mais antigo da série A (candidato isolado a remoção), mas o MESMO "
+               "raw_file ainda é o único ponto da série B -- não pode ser apagado");
+    suite.check(pruned.deleted.empty(),
+               "nada deveria ser removido de verdade (o único candidato compartilha raw_file com "
+               "outra série que ainda precisa dele)");
+}
+
 void test_trend_rejects_unknown_metric(TestSuite& suite) {
     suite.check(!find_metric("metrica_fantasma").has_value(),
                "métrica desconhecida deve devolver nullopt");
@@ -591,12 +798,16 @@ int main() {
     test_trend_series_break_resets_window(suite);
     test_rollup_reads_windows_field(suite);
     test_rollup_windows_null_when_absent(suite);
+    test_index_produces_distinct_points_per_repeat(suite);
     test_gate_point_regression_fails(suite);
     test_gate_drift_detects_slow_degradation(suite);
+    test_gate_drift_handles_zero_reference(suite);
     test_gate_rejects_unknown_metric(suite);
     test_gate_insufficient_history_passes(suite);
     test_baseline_append_is_additive(suite);
     test_prune_keeps_recent_failed_and_baseline(suite);
+    test_prune_keeps_point_with_missing_started_at(suite);
+    test_prune_does_not_delete_raw_file_needed_by_another_series(suite);
     test_trend_rejects_unknown_metric(suite);
     return suite.finish();
 }

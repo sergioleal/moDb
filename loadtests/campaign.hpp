@@ -75,6 +75,11 @@ struct ResumeOptions {
     std::filesystem::path partial_path;
     std::filesystem::path work_dir;
     std::uint64_t seed_override{0};   // 0 = usa o seed gravado no run_start
+    // Reaplicados aos casos PENDENTES, igual a `run` (§10) -- sem isto, um
+    // `resume` de uma campanha que originalmente tinha --max-* configurado
+    // perderia o orçamento no meio do caminho, cada vez que fosse retomada.
+    std::filesystem::path calibration_file;   // vazio = usa default_calibration_path()
+    BudgetLimits budget;
 };
 
 [[nodiscard]] CampaignResult resume_campaign(const ResumeOptions& options);

@@ -62,7 +62,8 @@ std::string case_params_json(const Case& c) {
         << ",\"concurrency\":" << json_uint(c.concurrency) << ",\"readers\":" << json_uint(c.readers)
         << ",\"durability\":" << json_string(c.durability) << ",\"cache\":" << json_string(c.cache)
         << ",\"primary_storage\":" << json_string(c.primary_storage)
-        << ",\"repeat_index\":" << json_uint(c.repeat_index);
+        << ",\"repeat_index\":" << json_uint(c.repeat_index)
+        << ",\"explicit_variant\":" << json_string(c.explicit_variant);
     return oss.str();
 }
 
@@ -308,6 +309,7 @@ Case case_from_case_start(const JsonValue& v) {
     c.cache = v.get_string("cache");
     c.primary_storage = v.get_string("primary_storage");
     c.repeat_index = static_cast<std::uint64_t>(v.get_number("repeat_index"));
+    c.explicit_variant = v.get_string("explicit_variant");
     return c;
 }
 
@@ -452,8 +454,9 @@ CampaignResult run_campaign(const CampaignOptions& options) {
     bool any_unknown_estimate = false;
     std::uint64_t total_known_disk_bytes = 0;
     for (const auto& c : resolved.cases) {
-        if (estimate_case(c, calibration).known) {
-            total_known_disk_bytes += estimate_case(c, calibration).disk_bytes;
+        const auto estimate = estimate_case(c, calibration);
+        if (estimate.known) {
+            total_known_disk_bytes += estimate.disk_bytes;
         } else {
             any_unknown_estimate = true;
         }
@@ -683,17 +686,32 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
     std::uint64_t sequence = 0;
     CaseTally tally;
 
-    std::size_t line_no = 0;
-    std::istringstream lines(content);
-    std::string raw_line;
-    while (std::getline(lines, raw_line)) {
-        ++line_no;
-        if (raw_line.empty()) {
-            continue;
+    // Pré-divide em linhas não vazias (em vez de um `while (getline)` direto)
+    // para poder distinguir "a ÚLTIMA linha está torta" de "uma linha no
+    // meio está corrompida": só a última pode ser uma escrita truncada por
+    // uma queda de processo no meio de um fwrite -- exatamente o cenário
+    // que `resume` existe para cobrir -- então é tratada como fim de
+    // arquivo, não como corrupção real. Uma linha malformada no MEIO
+    // continua um erro rígido (algo genuinamente errado, não uma
+    // interrupção limpa).
+    std::vector<std::string> raw_lines;
+    {
+        std::istringstream lines(content);
+        std::string raw_line;
+        while (std::getline(lines, raw_line)) {
+            if (!raw_line.empty()) {
+                raw_lines.push_back(raw_line);
+            }
         }
-        auto parsed = parse_json(raw_line);
+    }
+
+    for (std::size_t i = 0; i < raw_lines.size(); ++i) {
+        auto parsed = parse_json(raw_lines[i]);
         if (!parsed.ok || !parsed.value.is_object()) {
-            result.error = partial_str + ":" + std::to_string(line_no) +
+            if (i + 1 == raw_lines.size()) {
+                break;
+            }
+            result.error = partial_str + ":" + std::to_string(i + 1) +
                            ": linha não é um objeto JSON válido (" + parsed.error + ")";
             return result;
         }
@@ -789,6 +807,18 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
     std::error_code ec;
     std::filesystem::create_directories(work_dir, ec);
 
+    // Reaplica --max-* aos casos pendentes (§10) -- sem isto, um `resume`
+    // perderia o orçamento que a campanha original tinha, cada vez que fosse
+    // retomada, mesmo que o operador tenha passado os mesmos --max-* de novo.
+    const auto calibration_path = options.calibration_file.empty() ? default_calibration_path()
+                                                                    : options.calibration_file;
+    auto calibration_loaded = load_calibration(calibration_path);
+    if (!calibration_loaded.ok) {
+        result.error = calibration_loaded.error;
+        return result;
+    }
+    const auto& calibration = calibration_loaded.table;
+
     std::ofstream out(options.partial_path, std::ios::binary | std::ios::app);
     if (!out) {
         result.error = "não foi possível reabrir " + partial_str + " para acrescentar";
@@ -809,6 +839,25 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
     };
 
     for (const auto& c : pending_cases) {
+        const auto case_id = c.case_id();
+        const auto estimate = estimate_case(c, calibration);
+        const auto reason = exceeds_budget_reason(estimate, options.budget);
+        if (!reason.empty()) {
+            ++tally.skipped_budget;
+            std::ostringstream oss;
+            oss << "{\"schema\":\"modb.loadtest\",\"schema_version\":1,\"record\":\"skipped_budget\","
+                  "\"run_id\":"
+                << json_string(run_id) << ",\"sequence\":" << ++sequence
+                << ",\"case_id\":" << json_string(case_id) << ",\"reason\":" << json_string(reason)
+                << ",\"estimated_disk_bytes\":" << json_uint(estimate.disk_bytes)
+                << ",\"estimated_duration_ns\":" << json_uint(estimate.duration_ns)
+                << ",\"estimated_peak_rss_bytes\":" << json_uint(estimate.peak_rss_bytes) << "}";
+            if (!write_or_fail(oss.str())) {
+                result.error = write_error;
+                return result;
+            }
+            continue;
+        }
         if (!run_case_and_record(c, work_dir, seed, run_id, sequence, write_or_fail, tally)) {
             result.error = write_error;
             return result;
