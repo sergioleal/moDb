@@ -234,7 +234,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | I | Alvos remotos, `run-remote-load.ps1` | 5 | ✅ | `492e8a5` · 2026-07-25 (parcial: `remote_colocated` verificado localmente; `run-remote-load.ps1` escrito mas nunca rodou contra um host remoto de verdade nesta sessão -- ver docs/PLANO_TESTES_DE_CARGA.md §11; `remote_client_local` segue sem dispatch) |
 | J | `gate`, deriva, retenção, baselines | 6 | ✅ | `1e065ad` · 2026-07-25 (regressão de 12% e deriva de 15%/20 execuções verificadas com dados sintéticos; retenção sem compressão de 30 dias nem `run_note` -- ver docs/PLANO_TESTES_DE_CARGA.md §13.7-13.9) |
 | L | `read_hotspot`, `range_scan_sweep` | 7 | ✅ | `55ad77c` · 2026-07-25 |
-| M | `mixed_oltp` (concorrência real) | 7 | ⬜ | fecha D1 para `--concurrency` |
+| M | `mixed_oltp` (concorrência real) | 7 | ✅ | `fb02617` · 2026-07-25 (fecha D1 para `--concurrency`) |
 | N | `snapshot_hold` | 7 | ⬜ | |
 | O | `dataset_user_blob`, `blob_lifecycle` | 7 | ⬜ | |
 | P | `cascade_delete` | 7 | ⬜ | |
@@ -242,7 +242,7 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | R | Harness kill/restart, `restart_recovery` | 7 | ⬜ | ver §17 risco 13 |
 | K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ⬜ | depende de M, N, O, P, Q |
 
-Progresso: **13/20**.
+Progresso: **14/20**.
 
 ## 6. O que não está neste plano, de propósito
 
