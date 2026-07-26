@@ -24,7 +24,7 @@ Usa loadtests\config\load-local.yaml.
 Sobrescreve a lista `environment:` do YAML sem editar o arquivo.
 #>
 
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
@@ -183,7 +183,7 @@ if (-not $BinaryPath) {
 }
 
 if (-not $BinaryPath -or -not (Test-Path -LiteralPath $BinaryPath)) {
-    throw "modb_load não encontrado. Ele ainda não está implementado -- ver docs/PLANO_TESTES_DE_CARGA.md, Subfases A/B. Use -DryRun para só ver o comando que seria executado."
+    throw "modb_load.exe não encontrado em build\debug\ nem build\release\ -- compile o projeto primeiro, ou passe -BinaryPath apontando pro binário. Use -DryRun (com um só traço; '--dry-run' não é reconhecido pelo PowerShell) para só ver o comando que seria executado sem exigir o binário."
 }
 
 $resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path
