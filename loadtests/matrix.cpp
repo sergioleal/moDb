@@ -19,6 +19,7 @@ const std::vector<std::string> kImplementedWorkloads = {
     "read_hotspot",
     "range_scan_sweep",
     "mixed_oltp",
+    "snapshot_hold",
 };
 
 bool contains(const std::vector<std::string>& values, std::string_view target) {

@@ -59,4 +59,14 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
 [[nodiscard]] CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
                                                     std::filesystem::path& out_db_path);
 
+// snapshot_hold (§4.2.1): create -> abre uma snapshot -> churn (update numa
+// metade dos ids, delete em outra, cria alguns novos) -> relê pela MESMA
+// snapshot ainda aberta (deve bater byte a byte com o estado da abertura) ->
+// fecha a snapshot -> `collect_garbage()` -> relê sem snapshot (deve refletir
+// o churn). Cada id é tocado no máximo uma vez durante o churn -- uma
+// segunda alteração no mesmo objeto com a snapshot ainda aberta falharia com
+// `snapshot_conflict` (só há espaço para uma versão `previous` por vez).
+[[nodiscard]] CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
+                                                       std::filesystem::path& out_db_path);
+
 } // namespace modb::loadtest

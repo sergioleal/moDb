@@ -155,6 +155,21 @@ Verificado ao vivo com `--case load.mixed_oltp.embedded.10k` (60000
 operações, 0 erros, `hash_match:true`) e com 4 threads reais num teste
 menor.
 
+**Implementado na Subfase N**: `snapshot_hold`. Abre uma `Snapshot` de
+verdade (`database.snapshot()`), relê o working set inteiro por ela antes
+do churn, faz update/delete/create no LIVE (nunca tocando o mesmo objeto
+duas vezes -- uma segunda alteração com a mesma snapshot ainda aberta falha
+com `snapshot_conflict`, só há espaço para uma versão `previous` por vez),
+relê de novo pela MESMA snapshot ainda aberta (tem que bater byte a byte
+com a leitura anterior ao churn) e só então fecha a snapshot
+(`std::optional<Snapshot>::reset()`) e chama `collect_garbage()`. Depois do
+fechamento, uma leitura NORMAL confirma que o estado reflete o churn de
+verdade (objetos removidos não resolvem; atualizados mostram o novo valor).
+`PhaseMetrics` ganha `retained_versions` (novo campo, `data_record_count()`
+menos o conjunto vivo atual -- versões extras que a snapshot obrigou o
+motor a reter). Verificado ao vivo em 10k objetos: `retained_versions=7666`
+durante o hold, `hash_match:true`, `all_deleted:true`.
+
 Dois workloads adicionais dependem de infraestrutura que o harness genérico
 (`target.hpp`, §14) ainda não cobre; ficam **fora de todos os perfis** até essa
 infraestrutura existir — mesmo tratamento hoje dado a `primary_storage=wal_only`

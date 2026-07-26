@@ -262,6 +262,27 @@ void test_mixed_oltp_single_threaded(TestSuite& suite) {
     suite.check(result.hash_match, "reconciliação deve conferir com uma única sessão: " + result.error);
 }
 
+// Subfase N (§4.2.1): a leitura pela snapshot aberta não pode mudar durante
+// o churn, e o estado pós-fechamento (sem snapshot) precisa refletir o
+// churn de verdade.
+void test_snapshot_hold(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_snapshot_hold_embedded(small_params(work_dir, /*object_count=*/90, /*batch=*/13),
+                                             db_path);
+
+    suite.check(result.ok, "snapshot_hold deve completar: " + result.error);
+    suite.check(result.status == "completed", "snapshot_hold status deve ser completed");
+    suite.check(result.hash_match,
+               "leitura estável pela snapshot + estado pós-churn devem conferir: " + result.error);
+    suite.check(result.all_deleted,
+               "objetos removidos durante o churn não devem resolver após o fechamento");
+    suite.check(result.phases.size() == 2, "snapshot_hold deve produzir 2 fases (create + hold)");
+    if (result.phases.size() == 2) {
+        suite.check(result.phases[1].phase == "hold", "a 2a fase deve se chamar 'hold'");
+    }
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -308,6 +329,7 @@ int main() {
     test_range_scan_sweep(suite);
     test_mixed_oltp_concurrent(suite);
     test_mixed_oltp_single_threaded(suite);
+    test_snapshot_hold(suite);
     test_crud_full(suite);
     return suite.finish();
 }

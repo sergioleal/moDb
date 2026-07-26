@@ -63,6 +63,12 @@ struct PhaseMetrics {
     // durante a fase (`database.page_file().buffer_pool().metrics()`).
     // -1.0 = não medido nesta fase (a maioria dos workloads não mede isso).
     double cache_hit_rate{-1.0};
+
+    // Subfase N (§4.2.1 `snapshot_hold`): registros além do conjunto vivo
+    // atual -- versões `previous` que uma snapshot aberta obriga o motor a
+    // reter (`database.data_record_count() - vivos_atuais`). 0 quando não
+    // medido (nenhuma snapshot aberta nesta fase).
+    std::uint64_t retained_versions{0};
 };
 
 // Parâmetros efetivos que um workload recebe do caso já resolvido pela

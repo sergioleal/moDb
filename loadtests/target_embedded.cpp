@@ -1532,4 +1532,222 @@ CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
     return result;
 }
 
+CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
+                                         std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "snapshot_hold");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    AttachedDatabase attached;
+    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+        result.status = "failed";
+        result.error = setup.error;
+        return result;
+    }
+
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
+    if (!create_outcome.ok) {
+        result.status = "failed";
+        result.error = create_outcome.error;
+        return result;
+    }
+    result.phases.push_back(create_outcome.phase);
+
+    auto opened = attached.database->snapshot();
+    if (!opened) {
+        result.status = "failed";
+        result.error = "database.snapshot(): " + opened.error().message;
+        return result;
+    }
+    std::optional<Snapshot> held{std::move(*opened)};
+
+    // Leitura pela snapshot ANTES do churn -- "o estado da abertura" que
+    // precisa continuar idêntico até o fechamento (§4.2.1).
+    std::ostringstream baseline_stream;
+    for (const auto id : create_outcome.ids) {
+        auto value = attached.database->get<User>(id, *held);
+        if (!value) {
+            result.status = "failed";
+            result.error = "leitura inicial pela snapshot falhou: " + value.error().message;
+            return result;
+        }
+        baseline_stream << canonical_line(from_engine_user(*value)) << '\n';
+    }
+    const auto baseline_hash = sha256_hex(sha256_text(baseline_stream.str()));
+
+    // Churn: cada id tocado no máximo uma vez (update OU delete, nunca os
+    // dois) -- uma segunda alteração no mesmo objeto com a snapshot ainda
+    // aberta falharia com snapshot_conflict (só uma versão `previous` cabe).
+    const auto n = create_outcome.ids.size();
+    const auto update_end = n / 3;
+    const auto delete_end = (2 * n) / 3;
+
+    std::unordered_map<std::uint64_t, GeneratedUser> final_expected;   // logical id -> valor final
+    const auto filler_bytes = filler_bytes_for_payload(params.payload);
+    std::uint64_t churn_errors = 0;
+
+    const auto hold_start = std::chrono::steady_clock::now();
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto logical_id = i + 1;
+        if (i < update_end) {
+            const auto new_value = generate_user_ex(params.seed, logical_id, filler_bytes,
+                                                     static_cast<std::int32_t>((logical_id + 1) % 3));
+            auto handle = attached.database->get<User>(create_outcome.ids[i]);
+            if (!handle) {
+                ++churn_errors;
+                continue;
+            }
+            auto tx = attached.database->begin();
+            if (!tx || !attached.database->update(*tx, *handle, to_engine_user(new_value)) ||
+                !tx->commit()) {
+                ++churn_errors;
+                continue;
+            }
+            final_expected[logical_id] = new_value;
+        } else if (i < delete_end) {
+            auto tx = attached.database->begin();
+            if (!tx || !attached.database->remove(*tx, create_outcome.ids[i]) || !tx->commit()) {
+                ++churn_errors;
+                continue;
+            }
+            // removido -- não entra em final_expected.
+        } else {
+            final_expected[logical_id] = generate_user(params.seed, logical_id, params.payload);
+        }
+    }
+    // Objetos novos, fora do working set original -- não existiam na época
+    // da snapshot, então nunca deveriam aparecer numa releitura por ela.
+    const auto extra_count = std::max<std::uint64_t>(1, n / 10);
+    for (std::uint64_t i = 0; i < extra_count; ++i) {
+        auto tx = attached.database->begin();
+        if (!tx) {
+            ++churn_errors;
+            continue;
+        }
+        const auto generated = generate_user(params.seed ^ 0x5AFE'0001ULL, n + i + 1, params.payload);
+        if (!attached.database->create(*tx, to_engine_user(generated)) || !tx->commit()) {
+            ++churn_errors;
+        }
+    }
+
+    if (churn_errors > 0) {
+        result.status = "failed";
+        result.error = "snapshot_hold: " + std::to_string(churn_errors) + " erro(s) durante o churn";
+        return result;
+    }
+
+    const auto retained_while_open =
+        attached.database->data_record_count() > (n - (delete_end - update_end))
+            ? attached.database->data_record_count() - (n - (delete_end - update_end))
+            : 0;
+
+    // Releitura pela MESMA snapshot ainda aberta -- deve bater byte a byte
+    // com a leitura antes do churn (isolamento MVCC de verdade, não simulado).
+    std::ostringstream after_churn_stream;
+    for (const auto id : create_outcome.ids) {
+        auto value = attached.database->get<User>(id, *held);
+        if (!value) {
+            result.status = "failed";
+            result.error = "releitura pela snapshot (ainda aberta) falhou: " + value.error().message;
+            return result;
+        }
+        after_churn_stream << canonical_line(from_engine_user(*value)) << '\n';
+    }
+    const auto after_churn_hash = sha256_hex(sha256_text(after_churn_stream.str()));
+    const bool snapshot_stable = after_churn_hash == baseline_hash;
+
+    held.reset();   // fecha a snapshot -- libera a época para o GC.
+    const auto hold_end = std::chrono::steady_clock::now();
+
+    auto gc = attached.database->collect_garbage();
+    const auto reclaimed = gc ? *gc : 0;
+
+    // Depois de fechar: uma leitura NORMAL (sem snapshot) deve refletir o
+    // churn -- prova que a snapshot não vazou isolamento além do seu escopo.
+    std::uint64_t still_resolving_deleted = 0;
+    std::ostringstream final_actual_stream;
+    std::vector<std::uint64_t> surviving_ids;
+    surviving_ids.reserve(final_expected.size());
+    for (const auto& [logical_id, unused] : final_expected) {
+        (void)unused;
+        surviving_ids.push_back(logical_id);
+    }
+    std::sort(surviving_ids.begin(), surviving_ids.end());
+    std::ostringstream final_expected_stream;
+    for (const auto logical_id : surviving_ids) {
+        final_expected_stream << canonical_line(final_expected.at(logical_id)) << '\n';
+        auto handle = attached.database->get<User>(create_outcome.ids[logical_id - 1]);
+        Result<User> value;
+        if (handle) {
+            value = attached.database->materialize(*handle);
+        }
+        if (!handle || !value) {
+            result.status = "failed";
+            result.error = "leitura pós-fechamento falhou para o id lógico " +
+                           std::to_string(logical_id);
+            return result;
+        }
+        final_actual_stream << canonical_line(from_engine_user(*value)) << '\n';
+    }
+    for (std::size_t i = update_end; i < delete_end; ++i) {
+        if (attached.database->get<User>(create_outcome.ids[i])) {
+            ++still_resolving_deleted;
+        }
+    }
+
+    const auto final_expected_hash = sha256_hex(sha256_text(final_expected_stream.str()));
+    const auto final_actual_hash = sha256_hex(sha256_text(final_actual_stream.str()));
+
+    result.all_deleted = still_resolving_deleted == 0;
+    result.still_resolving = still_resolving_deleted;
+    result.hash_match =
+        snapshot_stable && result.all_deleted && final_expected_hash == final_actual_hash;
+    result.expected_hash = final_expected_hash;
+    result.actual_hash = final_actual_hash;
+
+    if (!result.hash_match) {
+        result.status = "failed";
+        std::ostringstream err;
+        if (!snapshot_stable) {
+            err << "snapshot_hold: a leitura pela snapshot mudou durante o churn (isolamento MVCC "
+                  "violado). ";
+        }
+        if (!result.all_deleted) {
+            err << still_resolving_deleted << " objeto(s) removido(s) durante o churn ainda "
+                                              "resolvem depois do fechamento. ";
+        }
+        if (final_expected_hash != final_actual_hash) {
+            err << "estado final não confere com o esperado pós-churn.";
+        }
+        result.error = err.str();
+        return result;
+    }
+
+    std::error_code size_error;
+    const auto db_bytes = std::filesystem::file_size(db_path, size_error);
+    PhaseMetrics phase;
+    phase.phase = "hold";
+    phase.operations = n;
+    phase.duration_ns = ns_between(hold_start, hold_end);
+    phase.peak_rss_bytes = peak_rss_bytes();
+    phase.db_bytes = size_error ? 0 : db_bytes;
+    phase.retained_versions = retained_while_open;
+    phase.errors = churn_errors;
+    result.phases.push_back(phase);
+
+    result.total_duration_ns = create_outcome.phase.duration_ns + phase.duration_ns;
+    result.peak_disk_bytes = phase.db_bytes;
+    // `collect_garbage()` devolve uma CONTAGEM de registros recuperados, não
+    // bytes -- `CaseRunResult::reclaimed_bytes` é bytes de verdade em
+    // `create_delete_embedded` (encolhimento de arquivo), então não reusamos
+    // o campo aqui só para não inventar uma unidade errada. `reclaimed`
+    // continua disponível para quem ler este código, só não persiste no
+    // schema (nenhum campo hoje representa "registros recuperados pelo GC").
+    (void)reclaimed;
+    result.status = "completed";
+    result.ok = true;
+    return result;
+}
+
 } // namespace modb::loadtest

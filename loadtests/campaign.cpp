@@ -11,6 +11,7 @@
 #include "workloads/mixed_oltp.hpp"
 #include "workloads/read_hotspot.hpp"
 #include "workloads/range_scan_sweep.hpp"
+#include "workloads/snapshot_hold.hpp"
 
 #include "json_value.hpp"
 #include "runner/environment.hpp"
@@ -67,7 +68,8 @@ std::string phase_json(const PhaseMetrics& p) {
         << ",\"db_bytes\":" << json_uint(p.db_bytes) << ",\"wal_bytes\":" << json_uint(p.wal_bytes)
         << ",\"pages_read\":" << json_uint(p.pages_read)
         << ",\"pages_written_estimated\":" << json_uint(p.pages_written_estimated)
-        << ",\"cache_hit_rate\":" << p.cache_hit_rate;
+        << ",\"cache_hit_rate\":" << p.cache_hit_rate
+        << ",\"retained_versions\":" << json_uint(p.retained_versions);
     return oss.str();
 }
 
@@ -187,6 +189,8 @@ bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, s
         run_result = run_range_scan_sweep(c, work_dir, seed, on_progress, db_path);
     } else if (c.workload == "mixed_oltp") {
         run_result = run_mixed_oltp(c, work_dir, seed, on_progress, db_path);
+    } else if (c.workload == "snapshot_hold") {
+        run_result = run_snapshot_hold(c, work_dir, seed, on_progress, db_path);
     } else {
         run_result.status = "unimplemented";
         run_result.error = "dispatch ausente para workload '" + c.workload + "'";
