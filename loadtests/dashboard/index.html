@@ -84,6 +84,12 @@ body {
 h1 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
 p  { margin: 0; }
+/* O `display: none` que o navegador dá a `[hidden]` tem especificidade zero e
+   perde para qualquer regra de classe que declare `display` — `.filters .f` e
+   `label.check`, por exemplo. Sem isto, `applyMode()` marca o filtro como
+   escondido e ele continua na tela (Antes/Depois sobrevivendo à volta para o
+   modo histórico). */
+[hidden] { display: none !important; }
 .sub { color: var(--text-secondary); font-size: 12.5px; }
 .muted { color: var(--text-muted); }
 code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
@@ -135,6 +141,63 @@ label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13
 .card.wide { grid-column: 1 / -1; }
 .card > header { margin: 0 0 10px; gap: 4px 16px; }
 
+/* ---- ícone de informação por gráfico ---- */
+.titlerow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+button.info {
+  width: 17px; height: 17px; padding: 0; flex: none;
+  border-radius: 50%; font-size: 11px; line-height: 1; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-muted); border-color: var(--axis);
+}
+button.info:hover { color: var(--text-primary); background: var(--hover-wash); }
+button.info.on { color: var(--surface-1); background: var(--text-secondary); border-color: var(--text-secondary); }
+.infobox {
+  border: 1px solid var(--border); border-left: 3px solid var(--series-1);
+  border-radius: 8px; background: var(--page); padding: 9px 11px;
+  margin: 8px 0 10px; font-size: 12.5px; color: var(--text-secondary);
+}
+.infobox div + div { margin-top: 4px; }
+.infobox b { color: var(--text-primary); font-weight: 600; }
+
+/* ---- exportação dos achados como prompt ---- */
+.promptbox {
+  border: 1px solid var(--border); border-radius: 10px; background: var(--page);
+  padding: 11px 12px; margin-top: 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.promptbox .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.promptbox textarea {
+  width: 100%; min-height: 260px; resize: vertical;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.45;
+  color: var(--text-primary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px;
+}
+.promptbox .warn { color: var(--text-secondary); font-size: 12.5px; }
+.promptbox .warn b { color: var(--text-primary); }
+
+/* ---- achados: a conclusão, com a evidência colada nela ---- */
+h3 { font-size: 12.5px; font-weight: 600; margin: 0 0 2px; }
+.grid.nested { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-bottom: 0; }
+.sub-card { border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px 12px; background: var(--page); }
+.findings .item {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 11px 0; border-bottom: 1px solid var(--grid);
+}
+.findings .item:last-child { border-bottom: none; padding-bottom: 0; }
+.findings .item:first-child { padding-top: 2px; }
+.findings .sev { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--text-muted); }
+.findings .sev.critical { background: var(--status-critical); }
+.findings .sev.serious  { background: var(--status-serious); }
+.findings .sev.warning  { background: var(--status-warning); }
+.findings .sev.gain     { background: var(--delta-good); }
+.findings .sev.info     { background: var(--text-muted); }
+.findings .txt { flex: 1 1 auto; min-width: 0; }
+.findings .head { font-weight: 600; }
+.findings .ev { color: var(--text-secondary); font-size: 12.5px; margin-top: 3px; }
+.findings .ev b { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.findings .why { color: var(--text-muted); font-size: 12px; margin-top: 3px; }
+.findings .act { flex: none; }
+.findings .none { color: var(--text-secondary); font-size: 12.5px; }
+
 /* ---- stat tiles / hero ---- */
 .tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 14px; }
 .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px 14px; }
@@ -160,6 +223,26 @@ label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13
 
 .delta-good { color: var(--delta-good); }
 .delta-bad  { color: var(--status-critical); }
+
+/* ---- ação destrutiva: sempre pedindo confirmação explícita ---- */
+button.danger { border-color: color-mix(in srgb, var(--status-critical) 55%, var(--border)); color: var(--status-critical); }
+button.danger:hover { background: color-mix(in srgb, var(--status-critical) 8%, var(--surface-1)); }
+.confirm {
+  border: 1px solid color-mix(in srgb, var(--status-critical) 55%, var(--border));
+  background: color-mix(in srgb, var(--status-critical) 5%, var(--surface-1));
+  border-radius: 10px; padding: 11px 13px; margin: 0 0 12px; font-size: 12.5px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.confirm .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.confirm ul { margin: 0; padding-left: 18px; color: var(--text-secondary); }
+.confirm code { word-break: break-all; }
+.removedbar { flex-wrap: wrap; align-items: center; }
+.removedbar details { flex: 1 1 100%; color: var(--text-secondary); }
+.removedbar summary { cursor: pointer; }
+.removedbar pre {
+  background: var(--page); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; overflow-x: auto; font-size: 11.5px; margin: 6px 0 0;
+}
 
 /* ---- legendas ---- */
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
@@ -202,6 +285,9 @@ td { font-variant-numeric: tabular-nums; }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--hover-wash); }
 tbody tr.sep td { border-top: 2px solid var(--axis); }
+tbody tr.sel { background: color-mix(in srgb, var(--series-1) 10%, transparent); }
+tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--series-1); }
+tfoot td { font-weight: 600; border-top: 2px solid var(--axis); border-bottom: none; }
 .detail { margin-top: 12px; }
 .detail pre {
   background: var(--page); border: 1px solid var(--border); border-radius: 10px;
@@ -230,9 +316,20 @@ tbody tr.sep td { border-top: 2px solid var(--axis); }
 </div>
 
 <div id="banners"></div>
+<div id="removed"></div>
 
 <div class="filters" id="filters" hidden>
-  <label class="f"><span>Período</span>
+  <label class="f"><span>Modo</span>
+    <select id="f-mode">
+      <option value="history">Histórico (série)</option>
+      <option value="run">Uma execução (set)</option>
+      <option value="compare">Comparar (A ↔ B)</option>
+    </select>
+  </label>
+  <label class="f run-only" hidden><span>Execução</span><select id="f-run"></select></label>
+  <label class="f cmp-only" hidden><span>Antes (A)</span><select id="f-cmp-a"></select></label>
+  <label class="f cmp-only" hidden><span>Depois (B)</span><select id="f-cmp-b"></select></label>
+  <label class="f hist-only"><span>Período</span>
     <select id="f-period">
       <option value="0">Tudo</option>
       <option value="30">Últimos 30 dias</option>
@@ -240,16 +337,95 @@ tbody tr.sep td { border-top: 2px solid var(--axis); }
       <option value="365">Últimos 365 dias</option>
     </select>
   </label>
-  <label class="f"><span>Workload</span><select id="f-workload"></select></label>
-  <label class="f"><span>Alvo</span><select id="f-target"></select></label>
-  <label class="f"><span>Escala</span><select id="f-scale"></select></label>
-  <label class="f"><span>Ambiente</span><select id="f-environment"></select></label>
-  <label class="f"><span>Classe de host</span><select id="f-host"></select></label>
-  <label class="f"><span>Caso da tendência</span><select id="f-case"></select></label>
-  <label class="f"><span>Fase</span><select id="f-phase"></select></label>
-  <label class="f"><span>Métrica</span><select id="f-metric"></select></label>
-  <label class="check"><input type="checkbox" id="f-comparable" checked> só comparáveis</label>
-  <label class="check"><input type="checkbox" id="f-failed" checked> incluir falhas</label>
+  <label class="f hist-only"><span>Workload</span><select id="f-workload"></select></label>
+  <label class="f hist-only"><span>Alvo</span><select id="f-target"></select></label>
+  <label class="f hist-only"><span>Escala</span><select id="f-scale"></select></label>
+  <label class="f hist-only"><span>Ambiente</span><select id="f-environment"></select></label>
+  <label class="f hist-only"><span>Classe de host</span><select id="f-host"></select></label>
+  <label class="f hist-only"><span>Caso da tendência</span><select id="f-case"></select></label>
+  <label class="f hist-only"><span>Fase</span><select id="f-phase"></select></label>
+  <label class="f hist-only"><span>Métrica</span><select id="f-metric"></select></label>
+  <label class="check hist-only"><input type="checkbox" id="f-comparable" checked> só comparáveis</label>
+  <label class="check hist-only"><input type="checkbox" id="f-failed" checked> incluir falhas</label>
+</div>
+
+<!-- A conclusão vem antes dos dados: achados ordenados por gravidade, cada um
+     com a evidência que o sustenta e um atalho para o gráfico que o prova. -->
+<div id="analysis" hidden>
+  <div class="card wide findings">
+    <header style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <div>
+        <div class="titlerow"><h2 id="findings-title">Leitura</h2><button class="info" data-info="findings" data-target="findings-list">i</button></div>
+        <p class="sub" id="findings-sub"></p>
+      </div>
+      <div class="spacer" style="flex:1"></div>
+      <label class="check"><input type="checkbox" id="f-noise" checked> exigir sinal acima do ruído</label>
+      <button id="findings-export" title="Monta um texto autossuficiente com todos os achados e os números que os sustentam, pronto para colar num LLM">Exportar para LLM…</button>
+    </header>
+    <div id="findings-list"></div>
+    <div id="findings-prompt" hidden></div>
+  </div>
+
+  <div class="card wide" id="diag-card">
+    <header style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <div>
+        <h2 id="diag-title">Diagnóstico</h2>
+        <p class="sub" id="diag-sub"></p>
+      </div>
+    </header>
+    <div class="grid nested">
+      <div class="sub-card">
+        <div class="titlerow"><h3>Onde foi o tempo</h3><button class="info" data-info="attr" data-target="attr-plot">i</button></div>
+        <p class="sub" id="attr-sub"></p>
+        <div id="attr-plot"></div>
+        <div class="legend" id="attr-legend"></div>
+      </div>
+      <div class="sub-card">
+        <div class="titlerow"><h3>Forma da latência</h3><button class="info" data-info="shape" data-target="shape-plot">i</button></div>
+        <p class="sub" id="shape-sub"></p>
+        <div id="shape-plot"></div>
+        <div class="legend" id="shape-legend"></div>
+      </div>
+      <div class="sub-card">
+        <div class="titlerow"><h3>Sinal ou ruído</h3><button class="info" data-info="noise" data-target="noise-plot">i</button></div>
+        <p class="sub" id="noise-sub"></p>
+        <div id="noise-plot"></div>
+        <div class="legend" id="noise-legend"></div>
+      </div>
+      <div class="sub-card">
+        <div class="titlerow"><h3>Dentro da execução</h3><button class="info" data-info="win" data-target="win-plot">i</button></div>
+        <p class="sub" id="win-sub"></p>
+        <div id="win-plot"></div>
+        <div class="legend" id="win-legend"></div>
+      </div>
+      <div class="sub-card">
+        <div class="titlerow"><h3>Custo por objeto vs escala</h3><button class="info" data-info="cost" data-target="cost-plot">i</button></div>
+        <p class="sub" id="cost-sub"></p>
+        <div id="cost-plot"></div>
+        <div class="legend" id="cost-legend"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modo comparação: dois sets lado a lado, junta por caso -->
+<div id="cmp-content" hidden>
+  <div class="card wide">
+    <header style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <div>
+        <div class="titlerow"><h2 id="cmp-title">Comparação</h2><button class="info" data-info="compare" data-target="cmp-verdict">i</button></div>
+        <p class="sub" id="cmp-sub"></p>
+      </div>
+      <div class="spacer" style="flex:1"></div>
+      <button id="cmp-swap" title="Troca A e B">Inverter A ↔ B</button>
+    </header>
+    <div id="cmp-verdict"></div>
+    <div class="tablewrap"><table id="cmp-table">
+      <thead><tr id="cmp-thead"></tr></thead>
+      <tbody id="cmp-tbody"></tbody>
+    </table></div>
+    <div class="detail" id="cmp-detail"></div>
+  </div>
 </div>
 
 <div id="content" hidden>
@@ -257,7 +433,7 @@ tbody tr.sep td { border-top: 2px solid var(--axis); }
 
   <div class="card wide">
     <header>
-      <h2 id="trend-title">Tendência</h2>
+      <div class="titlerow"><h2 id="trend-title">Tendência</h2><button class="info" data-info="trend" data-target="trend-plot">i</button></div>
       <p class="sub" id="trend-sub"></p>
     </header>
     <div id="trend-plot"></div>
@@ -267,7 +443,7 @@ tbody tr.sep td { border-top: 2px solid var(--axis); }
   <div class="grid">
     <div class="card">
       <header>
-        <h2>Escala — o custo por objeto se mantém?</h2>
+        <div class="titlerow"><h2>Escala — o custo por objeto se mantém?</h2><button class="info" data-info="scale" data-target="scale-plot">i</button></div>
         <p class="sub" id="scale-sub"></p>
       </header>
       <div id="scale-plot"></div>
@@ -275,7 +451,7 @@ tbody tr.sep td { border-top: 2px solid var(--axis); }
     </div>
     <div class="card">
       <header>
-        <h2>Composição por fase</h2>
+        <div class="titlerow"><h2>Composição por fase</h2><button class="info" data-info="phase" data-target="phase-plot">i</button></div>
         <p class="sub" id="phase-sub"></p>
       </header>
       <div id="phase-plot"></div>
@@ -300,9 +476,65 @@ tbody tr.sep td { border-top: 2px solid var(--axis); }
   </div>
 </div>
 
+<!-- Modo "uma execução": tudo abaixo é escopado a um único run_id (um set) -->
+<div id="run-content" hidden>
+  <div class="tiles" id="run-tiles"></div>
+
+  <div class="card wide">
+    <header style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+      <div>
+        <h2 id="run-title">Casos deste set</h2>
+        <p class="sub" id="run-sub"></p>
+      </div>
+      <div class="spacer" style="flex:1"></div>
+      <button id="run-csv" title="Exporta os casos deste set em CSV separado por ponto-e-vírgula">Exportar CSV</button>
+      <button id="run-delete" class="danger" title="Remove os rollups deste set da visão e gera um series.jsonl sem ele">Apagar este set…</button>
+    </header>
+    <div id="run-confirm" hidden></div>
+    <div class="tablewrap"><table id="run-table">
+      <thead><tr id="run-thead"></tr></thead>
+      <tbody id="run-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <header>
+        <div class="titlerow"><h2>Este set vs o próprio histórico</h2><button class="info" data-info="runDelta" data-target="run-delta-plot">i</button></div>
+        <p class="sub" id="run-delta-sub"></p>
+      </header>
+      <div id="run-delta-plot"></div>
+      <div class="legend" id="run-delta-legend"></div>
+    </div>
+    <div class="card">
+      <header>
+        <div class="titlerow"><h2>Composição por fase</h2><button class="info" data-info="runPhase" data-target="run-phase-plot">i</button></div>
+        <p class="sub" id="run-phase-sub"></p>
+      </header>
+      <div id="run-phase-plot"></div>
+      <div class="legend" id="run-phase-legend"></div>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <header>
+      <h2 id="run-detail-title">Métricas por fase</h2>
+      <div class="sub" id="run-detail-sub"></div>
+    </header>
+    <div class="tablewrap"><table id="phase-table">
+      <thead><tr id="phase-thead"></tr></thead>
+      <tbody id="phase-tbody"></tbody>
+      <tfoot id="phase-tfoot"></tfoot>
+    </table></div>
+    <div class="detail" id="run-detail"></div>
+  </div>
+</div>
+
 <p class="foot">
   Alimentado por <code>modb_load index</code> (§13.5) e consumível também por <code>modb_load trend</code>/<code>report</code>.
-  Especificação: <code>docs/PLANO_TESTES_DE_CARGA.md</code> §13.
+  No modo <em>uma execução</em>, o veredito de cada caso é o mesmo de <code>modb_load gate --metric total_duration</code>;
+  apagar um set não escreve em disco — o painel devolve um <code>series.jsonl</code> sem ele (§13.8).
+  Especificação: <code>docs/PLANO_TESTES_DE_CARGA.md</code> §13.11.
 </p>
 
 <div class="tip" id="tip" role="status" aria-live="polite"></div>
@@ -364,6 +596,42 @@ function fmtSignedPct(x) {
   const s = (x >= 0 ? "+" : "−") + nf1.format(Math.abs(x * 100)) + "%";
   return s;
 }
+// Escalas absolutas do rollup (§13.3): bytes e nanossegundos crus só são
+// legíveis com unidade escolhida por magnitude -- no painel de um único set
+// não há eixo comum para normalizar, cada célula se explica sozinha.
+function num(v) { return (typeof v === "number" && isFinite(v)) ? v : null; }
+function fmtBytes(b) {
+  if (num(b) === null) return "—";
+  const a = Math.abs(b);
+  if (a >= 1024 * MiB) return nf2.format(b / (1024 * MiB)) + " GiB";
+  if (a >= MiB) return nf1.format(b / MiB) + " MiB";
+  if (a >= 1024) return nf0.format(b / 1024) + " KiB";
+  return nf0.format(b) + " B";
+}
+function fmtDur(ns) {
+  if (num(ns) === null) return "—";
+  const s = ns / 1e9;
+  if (s >= 3600) return nf2.format(s / 3600) + " h";
+  if (s >= 90) return nf1.format(s / 60) + " min";
+  if (s >= 1) return nf2.format(s) + " s";
+  return nf1.format(ns / 1e6) + " ms";
+}
+// Latência, throughput, bytes/objeto e amplificação valendo exatamente 0
+// significam "este workload não registrou o campo", não "mediu zero": o
+// rollup (§13.3) não tem sentinela própria e grava 0 quando não coletou.
+// Nenhuma medição real dá 0 ns/0 obj/s/0×, então mostrar "0" aqui
+// convidaria a comparar um não-dado com um dado.
+function fmtUnmeasured(v, fmt) {
+  const n = num(v);
+  return (n === null || n === 0) ? "—" : fmt(n);
+}
+function fmtLat(ns) {
+  if (num(ns) === null) return "—";
+  if (ns >= 1e9) return nf2.format(ns / 1e9) + " s";
+  if (ns >= 1e6) return nf2.format(ns / 1e6) + " ms";
+  if (ns >= 1e3) return nf1.format(ns / 1e3) + " µs";
+  return nf0.format(ns) + " ns";
+}
 
 /* ---------- estatística ---------- */
 function median(xs) {
@@ -371,6 +639,40 @@ function median(xs) {
   if (!v.length) return null;
   const m = v.length >> 1;
   return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+function cleanNums(xs) { return xs.filter(x => typeof x === "number" && isFinite(x)); }
+function meanOf(xs) { const v = cleanNums(xs); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+// Desvio padrão amostral -- com n<2 não existe dispersão a estimar.
+function stdevOf(xs) {
+  const v = cleanNums(xs);
+  if (v.length < 2) return null;
+  const m = meanOf(v);
+  return Math.sqrt(v.reduce((a, x) => a + (x - m) ** 2, 0) / (v.length - 1));
+}
+// Coeficiente de variação: o "ruído natural" da série na própria unidade
+// relativa da métrica. É ele que diz se um delta de 5% quer dizer algo
+// nesta série ou se ela varia isso sozinha entre execuções idênticas.
+function cvOf(xs) {
+  const m = meanOf(xs), sd = stdevOf(xs);
+  return (m === null || sd === null || m === 0) ? null : sd / Math.abs(m);
+}
+// Ajuste log-log: y = a·x^b. Em custo por objeto, b == 1 é escala linear
+// (dobrar o volume dobra o tempo) e b > 1 é super-linear. r2 diz se a reta
+// descreve os pontos ou se eles não seguem lei de potência nenhuma.
+function fitPower(points) {
+  const pts = points.filter(p => p.x > 0 && p.y > 0);
+  if (pts.length < 3) return null;
+  const lx = pts.map(p => Math.log(p.x)), ly = pts.map(p => Math.log(p.y));
+  const mx = meanOf(lx), my = meanOf(ly);
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    sxy += (lx[i] - mx) * (ly[i] - my);
+    sxx += (lx[i] - mx) ** 2;
+    syy += (ly[i] - my) ** 2;
+  }
+  if (!sxx || !syy) return null;
+  return { b: sxy / sxx, r2: (sxy * sxy) / (sxx * syy), n: pts.length };
 }
 
 /* ---------- métricas selecionáveis ---------- *
@@ -430,41 +732,86 @@ const PHASE_LABEL = {
   update_grow: "update maior", update_shrink: "update menor", delete: "delete",
 };
 const SERIES_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6"];
+function phaseRank(p) { const i = PHASE_ORDER.indexOf(p); return i < 0 ? PHASE_ORDER.length : i; }
 
 /* ---------- estado ---------- */
 const state = {
   rows: [],          // rollups válidos, ordenados por started_at
   demo: false,
   sort: { key: "started_at", dir: -1 },
+  runSort: { key: "case_id", dir: 1 },
   selectedRun: null,
+  mode: "history",   // "history" = série no tempo; "run" = um set; "compare" = A ↔ B
+  runId: null,       // set selecionado no modo "run"
+  selectedCase: null,
+  focus: null,       // { row, phase } — alvo dos gráficos de diagnóstico
+  lastAnalysis: null,// { result, kind, rows, ... } — base da exportação
+  noiseGate: true,   // exigir que o delta passe do ruído da série, não só do limiar
+  cmpA: null, cmpB: null,
+  // Remoção de set (§13.8): o painel nunca escreve em disco -- tira da visão,
+  // guarda o que tirou para desfazer e para reemitir o series.jsonl sem ele.
+  removed: [],       // [{ run_id, label, rows }]
+  removedKeys: new Set(),
+  sourceLines: [],   // { key, text } na ordem original do arquivo carregado
+  sourceName: "series.jsonl",
 };
+
+// Mesma chave de idempotência do `modb_load index` (§13.5): um rollup é
+// identificado por (run_id, case_id, repeat_index).
+function rowKey(r) { return [r.run_id, r.case_id, r.repeat_index || 0].join("|"); }
 
 /* =====================================================================
  * Entrada de dados
  * ===================================================================== */
 function parseJsonl(text, srcName) {
-  const out = [], bad = [];
+  const out = [], bad = [], lines = [];
   text.split(/\r?\n/).forEach((line, i) => {
     const t = line.trim();
     if (!t) return;
     let obj;
     try { obj = JSON.parse(t); } catch (e) { bad.push(`${srcName}:${i + 1} JSON inválido`); return; }
-    if (obj && obj.schema === "modb.loadtest.rollup") out.push(obj);
-    else if (obj && obj.record) { /* linha de campanha bruta: ignorada em silêncio */ }
+    if (obj && obj.schema === "modb.loadtest.rollup") {
+      out.push(obj);
+      // Guarda o texto exato: exportar "o arquivo sem este set" tem de
+      // devolver as outras linhas byte a byte, não uma reserialização
+      // (reordenaria chaves e perderia precisão de números).
+      lines.push({ key: rowKey(obj), text: t });
+    } else if (obj && obj.record) { /* linha de campanha bruta: ignorada em silêncio */ }
     else bad.push(`${srcName}:${i + 1} schema desconhecido`);
   });
-  return { rows: out, bad };
+  return { rows: out, bad, lines };
 }
 
-function ingest(rows, bad, note) {
+// Toda carga nova recomeça do zero: sets removidos e linhas de origem
+// pertencem ao arquivo que estava aberto, não ao próximo.
+function resetData(sourceName) {
+  state.rows = [];
+  state.removed = [];
+  state.removedKeys.clear();
+  state.sourceLines = [];
+  state.sourceName = sourceName || "series.jsonl";
+  state.runId = null;
+  state.selectedCase = null;
+  state.selectedRun = null;
+}
+
+function ingest(rows, bad, note, lines) {
   const seen = new Map();
   for (const r of state.rows.concat(rows)) {
-    const key = [r.run_id, r.case_id, r.repeat_index || 0].join("|");
+    const key = rowKey(r);
     if (!seen.has(key)) seen.set(key, r);           // idempotente, como o `index`
   }
   state.rows = Array.from(seen.values())
     .filter(r => r.started_at && r.case_id)
     .sort((a, b) => parseTimestamp(a.started_at) - parseTimestamp(b.started_at));
+  if (lines) {
+    const seenLine = new Set();
+    state.sourceLines = lines.filter(l => {
+      if (seenLine.has(l.key)) return false;
+      seenLine.add(l.key);
+      return true;
+    });
+  }
 
   const missing = state.rows.filter(r => !r.commit || !r.series_key || !r.env || !r.env.host_class || !r.environment || !r.status);
   banners([
@@ -474,8 +821,23 @@ function ingest(rows, bad, note) {
     note ? { cls: "", strong: note, text: "" } : null,
   ].filter(Boolean));
 
-  if (!state.rows.length) { document.getElementById("content").hidden = true; document.getElementById("filters").hidden = true; return; }
+  afterDataChange();
+}
+
+// Ponto único depois de qualquer mudança no conjunto carregado (carga nova,
+// set removido, remoção desfeita): reconstrói seletores e redesenha.
+function afterDataChange() {
+  gateCache.clear();
+  renderRemovedBar();
+  if (!state.rows.length) {
+    document.getElementById("content").hidden = true;
+    document.getElementById("run-content").hidden = true;
+    document.getElementById("filters").hidden = true;
+    return;
+  }
   buildFilters();
+  buildRunSelect();
+  buildCompareSelects();
   render();
 }
 
@@ -495,15 +857,26 @@ function banners(list) {
 function readFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
-  let pending = files.length, rows = [], bad = [];
-  files.forEach(f => {
+  // Os arquivos são lidos em paralelo: acumula por índice para que a ordem
+  // das linhas de origem seja a dos arquivos escolhidos, não a de chegada
+  // (é essa ordem que o `series.jsonl` reexportado vai preservar).
+  const parts = new Array(files.length).fill(null);
+  let pending = files.length, bad = [];
+  const done = () => {
+    const rows = parts.flatMap(p => (p ? p.rows : []));
+    const lines = parts.flatMap(p => (p ? p.lines : []));
+    state.demo = false;
+    resetData(files.length === 1 ? files[0].name : "series.jsonl");
+    ingest(rows, bad, `${rows.length} ponto(s) de ${files.length} arquivo(s).`, lines);
+  };
+  files.forEach((f, idx) => {
     const fr = new FileReader();
     fr.onload = () => {
       const r = parseJsonl(String(fr.result), f.name);
-      rows = rows.concat(r.rows); bad = bad.concat(r.bad);
-      if (--pending === 0) { state.demo = false; state.rows = []; ingest(rows, bad, `${rows.length} ponto(s) de ${files.length} arquivo(s).`); }
+      parts[idx] = r; bad = bad.concat(r.bad);
+      if (--pending === 0) done();
     };
-    fr.onerror = () => { if (--pending === 0) ingest(rows, bad.concat([`falha ao ler ${f.name}`])); };
+    fr.onerror = () => { bad = bad.concat([`falha ao ler ${f.name}`]); if (--pending === 0) done(); };
     fr.readAsText(f);
   });
 }
@@ -560,8 +933,15 @@ function refreshDependentFilters() {
   if (cases.some(c => c[0] === prev)) caseSel.value = prev;
   else if (cases.length) caseSel.value = cases[0][0];
 
-  const phases = uniq(scoped.flatMap(r => (r.phases || []).map(p => p.phase)))
-    .sort((a, b) => PHASE_ORDER.indexOf(a) - PHASE_ORDER.indexOf(b));
+  // Fases do CASO escolhido, não do recorte todo: oferecer `cascade_delete`
+  // para um caso `create_only` só produz seleção vazia -- e agora que o painel
+  // abre concluindo, abrir sem nada a concluir é pior que um filtro pobre.
+  // Fase desconhecida (workload novo) vai para o fim em vez de virar -1 e
+  // pular na frente de `create`.
+  const chosenCase = caseSel.value;
+  const caseScoped = scoped.filter(r => r.case_id === chosenCase);
+  const phases = uniq((caseScoped.length ? caseScoped : scoped).flatMap(r => (r.phases || []).map(p => p.phase)))
+    .sort((a, b) => phaseRank(a) - phaseRank(b));
   const ph = document.getElementById("f-phase");
   const prevPh = ph.value;
   ph.textContent = "";
@@ -940,7 +1320,12 @@ function renderPhases(rows) {
   const legend = document.getElementById("phase-legend");
   legend.textContent = "";
   const runs = rows.slice(-10);
-  const phases = PHASE_ORDER.filter(p => runs.some(r => phaseOf(r, p)));
+  // Fase que o workload nomeou por si (`mixed_oltp`, `hold`, `cascade_delete`)
+  // não está em PHASE_ORDER: filtrar por essa lista fazia a barra somar só as
+  // fases conhecidas e chamar isso de 100% da duração do caso -- para
+  // mixed_oltp, `create` aparecia como o caso inteiro.
+  const phases = uniq(runs.flatMap(r => (r.phases || []).map(p => p.phase)))
+    .sort((a, b) => phaseRank(a) - phaseRank(b));
   // Com uma única fase, "share" seria sempre 100% e não diria nada: nesse caso as
   // barras passam a mostrar duração absoluta, comparável entre execuções.
   const single = phases.length === 1;
@@ -1012,6 +1397,22 @@ function renderPhases(rows) {
 /* =====================================================================
  * Tiles
  * ===================================================================== */
+function tileInto(el, opts) {
+  const d = document.createElement("div");
+  d.className = "tile" + (opts.hero ? " hero" : "");
+  const l = document.createElement("div"); l.className = "label"; l.textContent = opts.label;
+  const v = document.createElement("div"); v.className = "value"; v.textContent = opts.value;
+  if (opts.unit) { const u = document.createElement("span"); u.className = "unit"; u.textContent = opts.unit; v.appendChild(u); }
+  d.append(l, v);
+  if (opts.pill) d.appendChild(pill(opts.pill.cls, opts.pill.text));
+  if (opts.foot) { const f = document.createElement("div"); f.className = "foot"; f.textContent = opts.foot; d.appendChild(f); }
+  if (opts.delta) {
+    const f = document.createElement("div"); f.className = "foot " + opts.delta.cls;
+    f.textContent = opts.delta.text; d.appendChild(f);
+  }
+  el.appendChild(d);
+}
+
 function renderTiles(caseRows, scoped, metricKey, phaseName) {
   const el = document.getElementById("tiles");
   el.textContent = "";
@@ -1025,21 +1426,7 @@ function renderTiles(caseRows, scoped, metricKey, phaseName) {
   const gate = lastVal === null ? { verdict: "insufficient", worse: null } : verdictFor(lastVal, ref, def);
   const drift = driftFor(values, def);
 
-  const tile = (opts) => {
-    const d = document.createElement("div");
-    d.className = "tile" + (opts.hero ? " hero" : "");
-    const l = document.createElement("div"); l.className = "label"; l.textContent = opts.label;
-    const v = document.createElement("div"); v.className = "value"; v.textContent = opts.value;
-    if (opts.unit) { const u = document.createElement("span"); u.className = "unit"; u.textContent = opts.unit; v.appendChild(u); }
-    d.append(l, v);
-    if (opts.pill) d.appendChild(pill(opts.pill.cls, opts.pill.text));
-    if (opts.foot) { const f = document.createElement("div"); f.className = "foot"; f.textContent = opts.foot; d.appendChild(f); }
-    if (opts.delta) {
-      const f = document.createElement("div"); f.className = "foot " + opts.delta.cls;
-      f.textContent = opts.delta.text; d.appendChild(f);
-    }
-    el.appendChild(d);
-  };
+  const tile = opts => tileInto(el, opts);
 
   // O delta mostra a variação real da métrica; a cor diz se essa direção é boa.
   const rawRel = (lastVal !== null && ref) ? (lastVal - ref) / ref : null;
@@ -1093,27 +1480,35 @@ const COLUMNS = [
   { key: "series", label: "Série", left: true, get: r => (r.series_key || "").slice(0, 8), sort: r => r.series_key || "" },
 ];
 
-function renderTable(rows, ctx) {
-  const thead = document.getElementById("thead");
+// Cabeçalho clicável + ordenação, iguais nas duas tabelas (série e set).
+function buildHead(thead, columns, sort) {
   thead.textContent = "";
-  for (const c of COLUMNS) {
+  for (const c of columns) {
     const th = document.createElement("th");
     th.className = c.left ? "l" : "";
-    th.textContent = c.label + (state.sort.key === c.key ? (state.sort.dir > 0 ? " ↑" : " ↓") : "");
+    th.textContent = c.label + (sort.key === c.key ? (sort.dir > 0 ? " ↑" : " ↓") : "");
     th.addEventListener("click", () => {
-      if (state.sort.key === c.key) state.sort.dir *= -1;
-      else state.sort = { key: c.key, dir: 1 };
+      if (sort.key === c.key) sort.dir *= -1;
+      else { sort.key = c.key; sort.dir = 1; }
       render();
     });
     thead.appendChild(th);
   }
-  const col = COLUMNS.find(c => c.key === state.sort.key) || COLUMNS[0];
-  const sorted = rows.slice().sort((a, b) => {
-    const va = col.sort(a, ctx), vb = col.sort(b, ctx);
+}
+function sortRows(rows, columns, sort, ctx) {
+  const col = columns.find(c => c.key === sort.key) || columns[0];
+  const keyOf = col.sort || col.get;
+  return rows.slice().sort((a, b) => {
+    const va = keyOf(a, ctx), vb = keyOf(b, ctx);
     if (va === null || va === undefined) return 1;
     if (vb === null || vb === undefined) return -1;
-    return (va > vb ? 1 : va < vb ? -1 : 0) * state.sort.dir;
+    return (va > vb ? 1 : va < vb ? -1 : 0) * sort.dir;
   });
+}
+
+function renderTable(rows, ctx) {
+  buildHead(document.getElementById("thead"), COLUMNS, state.sort);
+  const sorted = sortRows(rows, COLUMNS, state.sort, ctx);
 
   const tbody = document.getElementById("tbody");
   tbody.textContent = "";
@@ -1149,10 +1544,24 @@ function selectRun(row) {
   const h = document.createElement("div");
   h.className = "sub";
   h.textContent = `${row.case_id} · ${fmtDateTime(row.started_at)} · bruto: ${row.raw_file || "—"}`;
+  const open = document.createElement("button");
+  open.textContent = "Ver só esta execução";
+  open.title = "Abre o set (run_id) inteiro deste ponto, com as métricas por fase e a opção de apagá-lo";
+  open.style.marginLeft = "10px";
+  open.addEventListener("click", () => openRun(row.run_id, row));
+  h.appendChild(open);
   const pre = document.createElement("pre");
   pre.textContent = JSON.stringify(row, null, 2);
   el.append(h, pre);
   el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
 function exportCsv(rows, ctx) {
@@ -1168,12 +1577,2215 @@ function exportCsv(rows, ctx) {
       v === null ? "" : String(v).replace(".", ","), ctx.def.unit,
     ].map(x => x === undefined || x === null ? "" : String(x)).join(";"));
   }
-  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "modb-load-series.csv";
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  downloadBlob(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }),
+               "modb-load-series.csv");
+}
+
+/* =====================================================================
+ * Modo "uma execução" — um set == um `run_id`
+ * ---------------------------------------------------------------------
+ * Uma campanha grava um rollup por caso, todos com o mesmo `run_id` e
+ * `started_at` (§13.3): o "set" é esse grupo. Aqui nada é comparado no
+ * tempo além do necessário para dar veredito ao próprio set; o resto é
+ * leitura absoluta do que aquela execução mediu, incluindo os campos que
+ * o modo histórico não mostra (p95, páginas, cache, versões retidas,
+ * janelas, validações).
+ * ===================================================================== */
+
+// A duração do caso é o que o gate e o `trend` já sabem ler para escopo de
+// caso, e existe em todo rollup -- serve de veredito do set sem obrigar a
+// escolher fase/métrica antes de ver a execução.
+const RUN_GATE_METRIC = "total_duration";
+
+function runsIndex() {
+  const by = new Map();
+  for (const r of state.rows) {
+    if (!r.run_id) continue;
+    if (!by.has(r.run_id)) by.set(r.run_id, []);
+    by.get(r.run_id).push(r);
+  }
+  return Array.from(by.entries())
+    .map(([run_id, rows]) => ({ run_id, rows }))
+    .sort((a, b) => parseTimestamp(b.rows[0].started_at) - parseTimestamp(a.rows[0].started_at));
+}
+function runLabel(rows) {
+  const r = rows[0];
+  const failed = rows.filter(x => x.status !== "completed").length;
+  return [
+    fmtDateTime(r.started_at),
+    r.commit_short || (r.commit || "").slice(0, 12),
+    `${rows.length} caso(s)`,
+    r.environment || (r.env && r.env.host_class) || "",
+    failed ? `${failed} com falha` : "",
+  ].filter(Boolean).join(" · ");
+}
+function buildRunSelect() {
+  const sel = document.getElementById("f-run");
+  const runs = runsIndex();
+  const prev = state.runId;
+  sel.textContent = "";
+  for (const run of runs) {
+    const o = document.createElement("option");
+    o.value = run.run_id; o.textContent = runLabel(run.rows);
+    sel.appendChild(o);
+  }
+  if (runs.some(r => r.run_id === prev)) sel.value = prev;
+  else state.runId = runs.length ? runs[0].run_id : null;
+  if (state.runId) sel.value = state.runId;
+}
+function currentRun() {
+  const runs = runsIndex();
+  return runs.find(r => r.run_id === state.runId) || runs[0] || null;
+}
+// Salto do modo histórico para o set daquele ponto.
+function openRun(runId, caseRow) {
+  state.runId = runId;
+  state.selectedCase = caseRow || null;
+  state.mode = "run";
+  document.getElementById("f-mode").value = "run";
+  buildRunSelect();
+  applyMode();
+  render();
+  document.getElementById("run-content").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+// Os filtros da série não recortam um set: dentro de um `run_id` não há
+// período, e esconder casos por workload/escala daria a impressão de que a
+// campanha rodou menos do que rodou.
+function applyMode() {
+  const run = state.mode === "run", cmp = state.mode === "compare";
+  for (const el of document.querySelectorAll(".hist-only")) el.hidden = run || cmp;
+  for (const el of document.querySelectorAll(".run-only")) el.hidden = !run;
+  for (const el of document.querySelectorAll(".cmp-only")) el.hidden = !cmp;
+  document.getElementById("content").hidden = run || cmp;
+  document.getElementById("run-content").hidden = !run;
+  document.getElementById("cmp-content").hidden = !cmp;
+  // A leitura/diagnóstico valem para série e para set; a comparação já é a
+  // sua própria análise e traz o veredito no topo dela.
+  document.getElementById("analysis").hidden = cmp;
+}
+
+/* ---------- agregados e veredito do set ---------- */
+function runSummary(rows) {
+  const s = { cases: rows.length, failed: 0, incomparable: 0, ops: 0, duration: 0, phases: 0,
+              disk: 0, diskCase: "", rss: 0, rssCase: "", wa: null, waCase: "", reclaimed: 0 };
+  for (const r of rows) {
+    if (r.status !== "completed") s.failed++;
+    if (r.comparable === false) s.incomparable++;
+    const ph = r.phases || [];
+    s.phases += ph.length;
+    for (const p of ph) s.ops += num(p.operations) || 0;
+    const t = r.totals || {};
+    s.duration += num(t.duration_ns) || 0;
+    s.reclaimed += num(t.reclaimed_bytes) || 0;
+    const disk = num(t.peak_disk_bytes) || 0;
+    if (disk > s.disk) { s.disk = disk; s.diskCase = r.case_id; }
+    const rss = num(t.peak_rss_bytes) || 0;
+    if (rss > s.rss) { s.rss = rss; s.rssCase = r.case_id; }
+    const wa = num(t.write_amplification);
+    if (wa !== null && wa > 0 && (s.wa === null || wa > s.wa)) { s.wa = wa; s.waCase = r.case_id; }
+  }
+  return s;
+}
+// Pontos comparáveis da MESMA série anteriores a este set (§13.4/§13.7) --
+// nunca do próprio set, senão a execução se compararia consigo mesma.
+function historyBefore(row) {
+  const t = parseTimestamp(row.started_at).getTime();
+  return state.rows.filter(r => r.case_id === row.case_id && r.series_key === row.series_key &&
+    r.comparable !== false && r.status === "completed" &&
+    parseTimestamp(r.started_at).getTime() < t);
+}
+// Memoizado: a tabela do set pede o mesmo veredito por célula, por ordenação
+// e por barra do gráfico, e cada cálculo varre a série inteira. Invalidado em
+// afterDataChange() -- o resultado depende de state.rows.
+const gateCache = new Map();
+function gateAgainstHistory(row, metricKey, phaseName) {
+  const ck = rowKey(row) + "|" + metricKey + "|" + (phaseName || "");
+  if (gateCache.has(ck)) return gateCache.get(ck);
+  const def = METRICS[metricKey];
+  const v = valueOf(row, metricKey, phaseName);
+  let out;
+  if (v === null) {
+    out = { verdict: "insufficient", rel: null, ref: null, value: null, points: 0 };
+  } else {
+    const prev = historyBefore(row).map(r => valueOf(r, metricKey, phaseName)).filter(x => x !== null);
+    const trailing = prev.slice(-5);
+    const ref = trailing.length >= 3 ? median(trailing) : null;
+    const g = verdictFor(v, ref, def);
+    out = { verdict: g.verdict, worse: g.worse, ref, value: v, points: prev.length,
+            rel: ref ? (v - ref) / ref : null };
+  }
+  gateCache.set(ck, out);
+  return out;
+}
+const VERDICT_PILL = {
+  ok: ["good", "aprovado"], alert: ["warning", "alerta"],
+  fail: ["critical", "reprovado"], insufficient: ["neutral", "sem histórico"],
+};
+function verdictColor(verdict) {
+  return verdict === "fail" ? cssVar("--status-critical")
+    : verdict === "alert" ? cssVar("--status-warning")
+      : verdict === "ok" ? cssVar("--series-1") : cssVar("--text-muted");
+}
+
+/* ---------- tiles do set ---------- */
+function renderRunTiles(rows) {
+  const el = document.getElementById("run-tiles");
+  el.textContent = "";
+  const s = runSummary(rows);
+  const first = rows[0];
+  const gates = rows.map(r => gateAgainstHistory(r, RUN_GATE_METRIC, null));
+  const count = v => gates.filter(g => g.verdict === v).length;
+  const worst = s.failed ? "fail"
+    : count("fail") ? "fail" : count("alert") ? "alert" : count("ok") ? "ok" : "insufficient";
+  const gm = VERDICT_PILL[worst];
+
+  tileInto(el, {
+    hero: true, label: "Duração do set",
+    value: fmtDur(s.duration),
+    foot: `${fmtDateTime(first.started_at)} · ${first.commit_short || (first.commit || "").slice(0, 12)}` +
+      `${first.tree_dirty ? " (árvore suja)" : ""} · ${first.branch || ""} · ` +
+      `${first.environment || ""} · ${(first.env && first.env.build_type) || ""}`,
+    delta: { cls: "", text: `soma das durações dos ${s.cases} caso(s) · ${s.phases} fase(s) medida(s)` },
+  });
+  tileInto(el, {
+    label: `Veredito do set (${METRICS[RUN_GATE_METRIC].label.toLowerCase()})`, value: "",
+    pill: { cls: gm[0], text: s.failed ? "reprovado" : gm[1] },
+    foot: s.failed ? `${s.failed} caso(s) com status != completed`
+      : `${count("ok")} ok · ${count("alert")} alerta · ${count("fail")} reprovado · ${count("insufficient")} sem histórico`,
+  });
+  tileInto(el, {
+    label: "Operações", value: fmtCompact(s.ops),
+    foot: s.duration ? `${fmtCompact(s.ops / (s.duration / 1e9))} obj/s agregado no set` : "",
+  });
+  tileInto(el, {
+    label: "Disco de pico", value: fmtBytes(s.disk),
+    foot: s.diskCase ? `pior caso: ${s.diskCase}` : "",
+  });
+  tileInto(el, {
+    label: "RSS de pico", value: fmtBytes(s.rss),
+    foot: s.rssCase ? `pior caso: ${s.rssCase}` : "",
+  });
+  tileInto(el, {
+    label: "Write amplification (pior)", value: s.wa === null ? "—" : fmtTwo(s.wa), unit: s.wa === null ? "" : "×",
+    foot: s.waCase ? `pior caso: ${s.waCase}` : "",
+  });
+  tileInto(el, {
+    label: "Casos com falha", value: fmtInt(s.failed),
+    foot: s.failed ? "corrigir antes de ler as taxas"
+      : s.incomparable ? `${s.incomparable} marcado(s) comparable=false` : "nenhum",
+  });
+}
+
+/* ---------- tabela dos casos do set ---------- */
+function caseOps(r) {                       // throughput agregado do caso
+  const t = num(r.totals && r.totals.duration_ns);
+  const ops = (r.phases || []).reduce((a, p) => a + (num(p.operations) || 0), 0);
+  return t ? ops / (t / 1e9) : null;
+}
+function worstPhaseLatency(r, key) {
+  const vals = (r.phases || []).map(p => num(p.latency_ns && p.latency_ns[key])).filter(v => v !== null);
+  return vals.length ? Math.max.apply(null, vals) : null;
+}
+function lastPhase(r) {
+  const ph = r.phases || [];
+  return ph.length ? ph[ph.length - 1] : null;
+}
+const RUN_COLUMNS = [
+  { key: "case_id", label: "Caso", left: true, get: r => r.case_id },
+  { key: "scale", label: "Escala", left: true, get: r => r.scale || "", sort: r => num(r.objects) },
+  { key: "objects", label: "Objetos", get: r => num(r.objects) === null ? "—" : fmtCompact(r.objects), sort: r => num(r.objects) },
+  { key: "phases", label: "Fases", get: r => fmtInt((r.phases || []).length), sort: r => (r.phases || []).length },
+  { key: "duration", label: "Duração", get: r => fmtDur(r.totals && r.totals.duration_ns), sort: r => num(r.totals && r.totals.duration_ns) },
+  { key: "ops", label: "obj/s agregado", get: r => { const v = caseOps(r); return v === null ? "—" : fmtCompact(v); }, sort: r => caseOps(r) },
+  { key: "p99", label: "p99 (pior fase)", get: r => fmtUnmeasured(worstPhaseLatency(r, "p99"), fmtLat), sort: r => worstPhaseLatency(r, "p99") },
+  { key: "disk", label: "Disco pico", get: r => fmtBytes(r.totals && r.totals.peak_disk_bytes), sort: r => num(r.totals && r.totals.peak_disk_bytes) },
+  { key: "wal", label: "WAL (fim)", get: r => fmtBytes(lastPhase(r) && lastPhase(r).wal_bytes), sort: r => num(lastPhase(r) && lastPhase(r).wal_bytes) },
+  { key: "wa", label: "WA", get: r => fmtUnmeasured(r.totals && r.totals.write_amplification, v => fmtTwo(v) + "×"), sort: r => num(r.totals && r.totals.write_amplification) },
+  { key: "dmed", label: "Δ mediana (duração)", get: r => fmtSignedPct(gateAgainstHistory(r, RUN_GATE_METRIC, null).rel), sort: r => gateAgainstHistory(r, RUN_GATE_METRIC, null).rel },
+  // Um caso que não completou não tem veredito de desempenho a dar: o número
+  // existe mas descreve uma execução inválida (mesma regra do ponto vermelho
+  // na tendência).
+  { key: "gate", label: "Gate", left: true, sort: r => gateAgainstHistory(r, RUN_GATE_METRIC, null).verdict,
+    get: r => r.status !== "completed" ? "execução falhou" : VERDICT_PILL[gateAgainstHistory(r, RUN_GATE_METRIC, null).verdict][1] },
+  { key: "status", label: "Status", left: true, get: r => r.status + (r.comparable === false ? " · não comparável" : "") },
+];
+
+function renderRunTable(rows) {
+  buildHead(document.getElementById("run-thead"), RUN_COLUMNS, state.runSort);
+  const tbody = document.getElementById("run-tbody");
+  tbody.textContent = "";
+  for (const r of sortRows(rows, RUN_COLUMNS, state.runSort, null)) {
+    const tr = document.createElement("tr");
+    if (state.selectedCase && rowKey(state.selectedCase) === rowKey(r)) tr.className = "sel";
+    for (const c of RUN_COLUMNS) {
+      const td = document.createElement("td");
+      td.className = c.left ? "l" : "";
+      td.textContent = c.get(r, null);
+      if (c.key === "dmed") {
+        const g = gateAgainstHistory(r, RUN_GATE_METRIC, null);
+        if (g.rel !== null) td.className += g.worse > 0 ? " delta-bad" : " delta-good";
+      }
+      if ((c.key === "status" || c.key === "gate") && r.status !== "completed") td.className += " delta-bad";
+      if (c.key === "gate" && r.status === "completed" &&
+          gateAgainstHistory(r, RUN_GATE_METRIC, null).verdict === "fail") td.className += " delta-bad";
+      tr.appendChild(td);
+    }
+    tr.addEventListener("click", () => selectCase(r));
+    tbody.appendChild(tr);
+  }
+}
+
+/* ---------- este set contra o próprio histórico ---------- */
+function renderRunDeltas(rows) {
+  const host = document.getElementById("run-delta-plot");
+  host.textContent = "";
+  const legend = document.getElementById("run-delta-legend");
+  legend.textContent = "";
+  const def = METRICS[RUN_GATE_METRIC];
+  const items = rows.map(r => ({ row: r, g: gateAgainstHistory(r, RUN_GATE_METRIC, null) }))
+    .filter(it => it.g.rel !== null)
+    .sort((a, b) => b.g.rel - a.g.rel);
+  document.getElementById("run-delta-sub").textContent =
+    `${def.label} de cada caso vs a mediana das 5 execuções anteriores da mesma série (§13.7) · ` +
+    `${items.length} de ${rows.length} caso(s) com histórico suficiente`;
+  if (!items.length) {
+    const p = document.createElement("p"); p.className = "empty";
+    p.textContent = "Nenhum caso deste set tem 3+ execuções anteriores comparáveis na mesma série — sem base, o gate não emite veredito (mesma regra do CLI).";
+    host.appendChild(p);
+    return;
+  }
+
+  const rowH = 26, W = Math.max(320, host.clientWidth || 420);
+  const M = { t: 12, r: 46, b: 26, l: 152 };
+  const ih = items.length * rowH, H = ih + M.t + M.b;
+  const iw = W - M.l - M.r;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+  // "pior" fica sempre à direita: o eixo é o desvio relativo, não o valor.
+  const maxAbs = Math.max(def.fail * 1.5, ...items.map(it => Math.abs(it.g.rel) * 1.15));
+  const x = v => M.l + iw / 2 + (v / maxAbs) * (iw / 2);
+  const zero = x(0);
+
+  for (const [ratio, cssName, label] of [[def.alert, "--status-warning", "alerta"], [def.fail, "--status-critical", "falha"]]) {
+    const bx = x(ratio);
+    svg("line", { x1: bx, x2: bx, y1: M.t, y2: M.t + ih, stroke: cssVar(cssName), "stroke-width": 1.5, "stroke-dasharray": "5 4", opacity: 0.9 }, s);
+    text(s, bx, M.t + ih + 16, label, { "text-anchor": "middle", class: "lbl" });
+  }
+  svg("line", { class: "axisline", x1: zero, x2: zero, y1: M.t, y2: M.t + ih }, s);
+  text(s, zero, M.t + ih + 16, "mediana", { "text-anchor": "middle", class: "lbl" });
+
+  items.forEach((it, i) => {
+    const yTop = M.t + i * rowH, barH = 13;
+    const verdict = it.row.status !== "completed" ? "fail" : it.g.verdict;
+    const color = verdictColor(verdict);
+    const short = it.row.case_id.replace(/^load\./, "");
+    text(s, M.l - 8, yTop + barH / 2 + 4, short.length > 26 ? short.slice(0, 25) + "…" : short,
+         { "text-anchor": "end", class: "lbl" });
+    const bx = x(it.g.rel);
+    const rect = svg("rect", {
+      x: Math.min(zero, bx), y: yTop, width: Math.max(2, Math.abs(bx - zero)), height: barH,
+      rx: 3, fill: color,
+    }, s);
+    const right = bx >= zero;
+    text(s, bx + (right ? 5 : -5), yTop + barH / 2 + 4, fmtSignedPct(it.g.rel),
+         { "text-anchor": right ? "start" : "end", class: "lbl" });
+    const rows2 = [
+      { value: def.fmt(it.g.value) + " " + def.unit, name: def.label, color },
+      { value: def.fmt(it.g.ref) + " " + def.unit, name: "mediana das 5 anteriores" },
+      { value: fmtSignedPct(it.g.rel), name: "vs mediana" },
+      { value: VERDICT_PILL[verdict][1], name: `${it.g.points} ponto(s) anteriores na série` },
+    ];
+    rect.addEventListener("pointerenter", e => showTip(e, it.row.case_id, rows2));
+    rect.addEventListener("pointermove", moveTip);
+    rect.addEventListener("pointerleave", hideTip);
+    rect.addEventListener("click", () => selectCase(it.row));
+  });
+
+  legendInto(legend, [
+    { kind: "rect", color: cssVar("--series-1"), label: "dentro do limiar" },
+    { kind: "rect", color: cssVar("--status-warning"), label: `alerta ${nf0.format(def.alert * 100)}%` },
+    { kind: "rect", color: cssVar("--status-critical"), label: `falha ${nf0.format(def.fail * 100)}%` },
+  ]);
+  const note = document.createElement("span");
+  note.className = "item";
+  note.textContent = "À direita = mais lento que o histórico.";
+  legend.appendChild(note);
+}
+
+/* ---------- composição por fase do caso selecionado ---------- */
+function renderRunPhaseBars(row) {
+  const host = document.getElementById("run-phase-plot");
+  host.textContent = "";
+  const legend = document.getElementById("run-phase-legend");
+  legend.textContent = "";
+  const sub = document.getElementById("run-phase-sub");
+  const phases = (row.phases || []).filter(p => num(p.duration_ns) !== null);
+  const total = phases.reduce((a, p) => a + p.duration_ns, 0);
+  sub.textContent = `${row.case_id} · ${fmtDur(row.totals && row.totals.duration_ns)} · ${phases.length} fase(s)`;
+  if (!phases.length || !total) {
+    const p = document.createElement("p"); p.className = "empty";
+    p.textContent = "Este caso não registrou fases com duração — nada a compor.";
+    host.appendChild(p);
+    return;
+  }
+
+  const rowH = 26, W = Math.max(320, host.clientWidth || 420);
+  const M = { t: 12, r: 74, b: 22, l: 104 };
+  const ih = phases.length * rowH, H = ih + M.t + M.b;
+  const iw = W - M.l - M.r;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+  const maxDur = Math.max.apply(null, phases.map(p => p.duration_ns));
+
+  phases.forEach((p, i) => {
+    const yTop = M.t + i * rowH, barH = 14;
+    const color = cssVar(SERIES_VARS[i % SERIES_VARS.length]);
+    text(s, M.l - 8, yTop + barH / 2 + 4, PHASE_LABEL[p.phase] || p.phase, { "text-anchor": "end", class: "lbl" });
+    const w = Math.max(2, (p.duration_ns / maxDur) * iw);
+    const rect = svg("rect", { x: M.l, y: yTop, width: w, height: barH, rx: 3, fill: color }, s);
+    const ops = fmtUnmeasured(p.ops_per_second, v => fmtCompact(v) + " obj/s");
+    text(s, M.l + w + 6, yTop + barH / 2 + 4, ops === "—" ? fmtDur(p.duration_ns) : ops, { class: "lbl" });
+    const rows2 = [
+      { value: fmtDur(p.duration_ns), name: `${nf0.format((p.duration_ns / total) * 100)}% da duração do caso`, color },
+      { value: ops, name: "throughput da fase" },
+      { value: fmtUnmeasured(p.latency_ns && p.latency_ns.p50, fmtLat), name: "p50" },
+      { value: fmtUnmeasured(p.latency_ns && p.latency_ns.p99, fmtLat), name: "p99" },
+      { value: fmtInt(p.errors || 0), name: "erros" },
+    ];
+    rect.addEventListener("pointerenter", e => showTip(e, `${row.case_id} · ${p.phase}`, rows2));
+    rect.addEventListener("pointermove", moveTip);
+    rect.addEventListener("pointerleave", hideTip);
+  });
+  text(s, M.l, H - 6, "0", {});
+  text(s, M.l + iw, H - 6, fmtDur(maxDur), { "text-anchor": "end" });
+
+  const note = document.createElement("span");
+  note.className = "item";
+  note.textContent = "Barras em duração absoluta (a maior fase preenche a faixa); o rótulo é o throughput da fase.";
+  legend.appendChild(note);
+}
+
+/* ---------- métricas por fase (tudo que o rollup mediu) ---------- */
+function pct01(v) { const n = num(v); return (n === null || n < 0) ? "—" : nf1.format(n * 100) + "%"; }
+function optInt(v) { const n = num(v); return n === null ? "—" : fmtInt(n); }
+const PHASE_COLUMNS = [
+  { label: "Fase", left: true, get: p => PHASE_LABEL[p.phase] || p.phase, total: () => "Totais / fim do caso" },
+  { label: "Operações", get: p => optInt(p.operations), total: (ph) => optInt(ph.reduce((a, p) => a + (num(p.operations) || 0), 0)) },
+  { label: "Duração", get: p => fmtDur(p.duration_ns), total: (ph, r) => fmtDur(r.totals && r.totals.duration_ns) },
+  { label: "Share", get: (p, t) => t ? nf0.format((p.duration_ns / t) * 100) + "%" : "—", total: () => "100%" },
+  { label: "obj/s", get: p => fmtUnmeasured(p.ops_per_second, fmtCompact), total: (ph, r) => fmtUnmeasured(caseOps(r), fmtCompact) },
+  { label: "p50", get: p => fmtUnmeasured(p.latency_ns && p.latency_ns.p50, fmtLat) },
+  { label: "p95", get: p => fmtUnmeasured(p.latency_ns && p.latency_ns.p95, fmtLat) },
+  { label: "p99", get: p => fmtUnmeasured(p.latency_ns && p.latency_ns.p99, fmtLat) },
+  { label: "p99.9", get: p => fmtUnmeasured(p.latency_ns && p.latency_ns.p999, fmtLat) },
+  { label: "Bytes/obj", get: p => fmtUnmeasured(p.bytes_per_object, fmtOne) },
+  { label: "DB", get: p => fmtBytes(p.db_bytes), total: (ph) => fmtBytes(ph.length ? ph[ph.length - 1].db_bytes : null) },
+  { label: "WAL", get: p => fmtBytes(p.wal_bytes), total: (ph) => fmtBytes(ph.length ? ph[ph.length - 1].wal_bytes : null) },
+  { label: "RSS pico", get: p => fmtBytes(p.peak_rss_bytes), total: (ph, r) => fmtBytes(r.totals && r.totals.peak_rss_bytes) },
+  { label: "Pág. lidas", get: p => optInt(p.pages_read), total: (ph) => optInt(ph.reduce((a, p) => a + (num(p.pages_read) || 0), 0)) },
+  { label: "Pág. escritas", get: p => optInt(p.pages_written), total: (ph) => optInt(ph.reduce((a, p) => a + (num(p.pages_written) || 0), 0)) },
+  { label: "Pág. reusadas", get: p => optInt(p.pages_reused), total: (ph) => optInt(ph.reduce((a, p) => a + (num(p.pages_reused) || 0), 0)) },
+  { label: "Versões retidas", get: p => optInt(p.retained_versions) },
+  { label: "Cache hit", get: p => pct01(p.cache_hit_rate) },
+  { label: "Erros", get: p => optInt(p.errors), total: (ph) => optInt(ph.reduce((a, p) => a + (num(p.errors) || 0), 0)) },
+];
+
+function renderPhaseTable(row) {
+  const thead = document.getElementById("phase-thead");
+  thead.textContent = "";
+  for (const c of PHASE_COLUMNS) {
+    const th = document.createElement("th");
+    th.className = c.left ? "l" : "";
+    th.style.cursor = "default";
+    th.textContent = c.label;
+    thead.appendChild(th);
+  }
+  const phases = row.phases || [];
+  const total = phases.reduce((a, p) => a + (num(p.duration_ns) || 0), 0);
+  const tbody = document.getElementById("phase-tbody");
+  tbody.textContent = "";
+  for (const p of phases) {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "default";
+    for (const c of PHASE_COLUMNS) {
+      const td = document.createElement("td");
+      td.className = c.left ? "l" : "";
+      td.textContent = c.get(p, total);
+      if (c.label === "Erros" && (num(p.errors) || 0) > 0) td.className += " delta-bad";
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  const tfoot = document.getElementById("phase-tfoot");
+  tfoot.textContent = "";
+  if (phases.length) {
+    const tr = document.createElement("tr");
+    for (const c of PHASE_COLUMNS) {
+      const td = document.createElement("td");
+      td.className = c.left ? "l" : "";
+      td.textContent = c.total ? c.total(phases, row) : "—";
+      tr.appendChild(td);
+    }
+    tfoot.appendChild(tr);
+  }
+
+  document.getElementById("run-detail-title").textContent = `Métricas por fase — ${row.case_id}`;
+  const sub = document.getElementById("run-detail-sub");
+  sub.textContent = "";
+  const t = row.totals || {};
+  const line = (txt) => { const d = document.createElement("div"); d.textContent = txt; sub.appendChild(d); };
+  const times = v => fmtUnmeasured(v, x => fmtTwo(x) + "×");
+  line(`Totais: disco de pico ${fmtBytes(t.peak_disk_bytes)} · RSS de pico ${fmtBytes(t.peak_rss_bytes)} · ` +
+       `recuperado ${fmtBytes(t.reclaimed_bytes)} · WA ${times(t.write_amplification)} · SA ${times(t.space_amplification)}`);
+  const params = row.params || {};
+  line("Parâmetros: " + (Object.keys(params).length
+    ? Object.entries(params).map(([k, v]) => `${k}=${v}`).join(" · ")
+    : "—") + ` · semente ${row.seed || "—"}`);
+  line(`Validações: ${(row.validations || []).join(", ") || "nenhuma registrada"} · ` +
+       `dataset ${row.dataset_id || "—"} v${row.dataset_version || "?"} · workload v${row.workload_version || "?"}`);
+  const w = row.windows;
+  if (w) {
+    line(`Janelas: ${num(w.first_ops_per_second) === null ? "—" : fmtCompact(w.first_ops_per_second)} → ` +
+         `${num(w.last_ops_per_second) === null ? "—" : fmtCompact(w.last_ops_per_second)} obj/s ` +
+         `(inclinação ${num(w.slope_ops_per_second_per_min) === null ? "—" : fmtCompact(w.slope_ops_per_second_per_min)} obj/s por min) · ` +
+         `p99 ${fmtLat(w.first_p99_ns)} → ${fmtLat(w.last_p99_ns)}`);
+  }
+  line(`Bruto: ${row.raw_file || "—"}${row.raw_sha256 ? ` · sha256 ${String(row.raw_sha256).slice(0, 12)}…` : ""}`);
+  line("“—” = campo não registrado por este workload (ausente ou 0 no rollup), não medição igual a zero.");
+
+  const detail = document.getElementById("run-detail");
+  detail.textContent = "";
+  const d = document.createElement("details");
+  const sum = document.createElement("summary");
+  sum.textContent = "Rollup completo (JSON)";
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(row, null, 2);
+  d.append(sum, pre);
+  detail.appendChild(d);
+}
+
+function selectCase(row) {
+  state.selectedCase = row;
+  state.focus = { row, phase: null };
+  render();
+}
+
+/* ---------- apagar o set ---------- */
+function askDeleteRun(run) {
+  const box = document.getElementById("run-confirm");
+  box.hidden = false;
+  box.className = "confirm";
+  box.textContent = "";
+  const rawFiles = uniq(run.rows.map(r => r.raw_file));
+
+  const h = document.createElement("div");
+  h.textContent = `Apagar ${run.rows.length} rollup(s) deste set (${run.run_id})?`;
+  h.style.fontWeight = "600";
+  const why = document.createElement("div");
+  why.textContent = "O painel não escreve em disco: o set sai desta visão e você baixa um " +
+    "series.jsonl sem ele (as outras linhas saem byte a byte). §13.8 trata rollups como memória do " +
+    "projeto — apagar é uma decisão sua, registrada por você, não um efeito colateral de abrir o painel.";
+  why.className = "muted";
+  box.append(h, why);
+  if (rawFiles.length) {
+    const p = document.createElement("div");
+    p.textContent = "Brutos correspondentes em load-results/ (removê-los é uma etapa separada):";
+    const ul = document.createElement("ul");
+    for (const f of rawFiles) {
+      const li = document.createElement("li");
+      const code = document.createElement("code"); code.textContent = f;
+      li.appendChild(code); ul.appendChild(li);
+    }
+    box.append(p, ul);
+  }
+  const row = document.createElement("div");
+  row.className = "row";
+  const yes = document.createElement("button");
+  yes.className = "danger"; yes.textContent = "Apagar este set";
+  yes.addEventListener("click", () => { box.hidden = true; deleteRun(run.run_id); });
+  const no = document.createElement("button");
+  no.textContent = "Cancelar";
+  no.addEventListener("click", () => { box.hidden = true; });
+  row.append(yes, no);
+  box.appendChild(row);
+}
+
+function deleteRun(runId) {
+  const rows = state.rows.filter(r => r.run_id === runId);
+  if (!rows.length) return;
+  state.removed.push({ run_id: runId, label: runLabel(rows), rows });
+  for (const r of rows) state.removedKeys.add(rowKey(r));
+  state.rows = state.rows.filter(r => r.run_id !== runId);
+  state.runId = null;
+  state.selectedCase = null;
+  state.selectedRun = null;
+  state.focus = null;
+  if (state.cmpA === runId) state.cmpA = null;
+  if (state.cmpB === runId) state.cmpB = null;
+  document.getElementById("detail").textContent = "";
+  afterDataChange();
+}
+
+function undoRemovals() {
+  const back = state.removed.flatMap(x => x.rows);
+  if (!back.length) return;
+  state.removed = [];
+  state.removedKeys.clear();
+  state.rows = state.rows.concat(back)
+    .sort((a, b) => parseTimestamp(a.started_at) - parseTimestamp(b.started_at));
+  afterDataChange();
+}
+
+// Reemite o arquivo carregado sem os sets removidos, preservando as linhas
+// restantes exatamente como vieram.
+function exportSeriesWithoutRemoved() {
+  const kept = state.sourceLines.filter(l => !state.removedKeys.has(l.key));
+  const text = kept.map(l => l.text).join("\n") + (kept.length ? "\n" : "");
+  downloadBlob(new Blob([text], { type: "application/x-ndjson;charset=utf-8" }),
+               state.sourceName || "series.jsonl");
+}
+
+function renderRemovedBar() {
+  const el = document.getElementById("removed");
+  el.textContent = "";
+  if (!state.removed.length) return;
+  const d = document.createElement("div");
+  d.className = "banner err removedbar";
+  const s = document.createElement("strong");
+  s.textContent = `${state.removed.length} set(s) fora da visão:`;
+  const t = document.createElement("span");
+  t.textContent = state.removed.map(x => x.label).join(" | ") +
+    ` — ${state.removed.reduce((a, x) => a + x.rows.length, 0)} rollup(s). Nada foi escrito em disco.`;
+  d.append(s, t);
+
+  const dl = document.createElement("button");
+  dl.className = "primary";
+  dl.textContent = `Baixar ${state.sourceName} sem eles`;
+  dl.addEventListener("click", exportSeriesWithoutRemoved);
+  if (!state.sourceLines.length) {
+    dl.disabled = true;
+    dl.title = "A série de exemplo não vem de arquivo nenhum — não há o que reexportar.";
+  }
+  const un = document.createElement("button");
+  un.textContent = "Desfazer";
+  un.addEventListener("click", undoRemovals);
+  d.append(dl, un);
+
+  const det = document.createElement("details");
+  const sum = document.createElement("summary");
+  sum.textContent = "Ou efetivar no terminal (mantendo um backup)";
+  const pre = document.createElement("pre");
+  const runs = state.removed.map(x => x.run_id);
+  const psFilter = runs.map(r => `$_ -notmatch '"run_id":"${r}"'`).join(" -and ");
+  const shFilter = runs.map(r => `-e '"run_id":"${r}"'`).join(" ");
+  const raws = uniq(state.removed.flatMap(x => x.rows.map(r => r.raw_file)));
+  const cmd = [
+    "# PowerShell (na raiz do repositório)",
+    "Copy-Item load-history\\series.jsonl load-history\\series.jsonl.bak",
+    `[IO.File]::WriteAllLines("$PWD\\load-history\\series.jsonl", (Get-Content load-history\\series.jsonl.bak | Where-Object { ${psFilter} }))`,
+    "",
+    "# bash",
+    "cp load-history/series.jsonl load-history/series.jsonl.bak",
+    `grep -v ${shFilter} load-history/series.jsonl.bak > load-history/series.jsonl`,
+  ];
+  if (raws.length) {
+    cmd.push("", "# brutos da(s) campanha(s), se também não forem mais necessários:",
+             ...raws.map(f => `#   load-results/${f}`));
+  }
+  pre.textContent = cmd.join("\n");
+  det.append(sum, pre);
+  d.appendChild(det);
+  el.appendChild(d);
+}
+
+/* ---------- CSV do set ---------- */
+function exportRunCsv(run) {
+  const head = ["run_id", "started_at", "case_id", "workload", "target", "scale", "objects", "phase",
+    "operations", "duration_ns", "ops_per_second", "p50_ns", "p95_ns", "p99_ns", "p999_ns",
+    "bytes_per_object", "db_bytes", "wal_bytes", "peak_rss_bytes", "pages_read", "pages_written",
+    "pages_reused", "retained_versions", "cache_hit_rate", "errors", "case_duration_ns",
+    "case_peak_disk_bytes", "write_amplification", "status", "gate_total_duration", "delta_median"];
+  const dec = v => (v === null || v === undefined) ? "" : String(v).replace(".", ",");
+  const lines = [head.join(";")];
+  for (const r of run.rows) {
+    const g = gateAgainstHistory(r, RUN_GATE_METRIC, null);
+    const t = r.totals || {};
+    for (const p of (r.phases || [])) {
+      const l = p.latency_ns || {};
+      lines.push([r.run_id, r.started_at, r.case_id, r.workload, r.target, r.scale, r.objects, p.phase,
+        p.operations, p.duration_ns, dec(p.ops_per_second), l.p50, l.p95, l.p99, l.p999,
+        dec(p.bytes_per_object), p.db_bytes, p.wal_bytes, p.peak_rss_bytes, p.pages_read,
+        p.pages_written, p.pages_reused, p.retained_versions, dec(p.cache_hit_rate), p.errors,
+        t.duration_ns, t.peak_disk_bytes, dec(t.write_amplification), r.status,
+        VERDICT_PILL[g.verdict][1], dec(g.rel)]
+        .map(x => (x === undefined || x === null) ? "" : String(x)).join(";"));
+    }
+  }
+  downloadBlob(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }),
+               `modb-load-set-${run.run_id}.csv`);
+}
+
+/* ---------- render do modo ---------- */
+function renderRun() {
+  const run = currentRun();
+  document.getElementById("run-confirm").hidden = true;
+  if (!run) return;
+  state.runId = run.run_id;
+  const rows = run.rows;
+  const first = rows[0];
+  document.getElementById("run-sub").textContent =
+    `${run.run_id} · ${fmtDateTime(first.started_at)} · ${rows.length} caso(s) · ` +
+    `${uniq(rows.map(r => r.series_key)).length} série(s) · clique num caso para abrir as fases`;
+  // Análise primeiro: os achados definem em qual caso vale a pena olhar, e o
+  // foco só cai no "caso mais pesado" quando não há nada a apontar.
+  const analysis = analyzeRun(rows);
+  renderFindings(analysis, {
+    label: `${runLabel(rows)} · ${rows.length} caso(s) neste set`,
+    kind: "run", rows, metric: RUN_GATE_METRIC, phase: null,
+    metricLabel: METRICS[RUN_GATE_METRIC].label,
+  });
+  const suggested = analysis.findings.find(f => f.focus && f.focus.row &&
+    rows.some(r => rowKey(r) === rowKey(f.focus.row)));
+  if (!state.selectedCase || !rows.some(r => rowKey(r) === rowKey(state.selectedCase))) {
+    state.selectedCase = suggested ? suggested.focus.row
+      : rows.slice().sort((a, b) =>
+        (num(b.totals && b.totals.duration_ns) || 0) - (num(a.totals && a.totals.duration_ns) || 0))[0];
+    state.focus = { row: state.selectedCase, phase: suggested ? suggested.focus.phase : null };
+  }
+  document.getElementById("diag-card").hidden = false;
+  renderDiagnosis(state.selectedCase, RUN_GATE_METRIC, state.focus && state.focus.phase);
+
+  renderRunTiles(rows);
+  renderRunTable(rows);
+  renderRunDeltas(rows);
+  renderRunPhaseBars(state.selectedCase);
+  renderPhaseTable(state.selectedCase);
+}
+
+/* =====================================================================
+ * Análise — o painel conclui, e cada conclusão carrega a evidência
+ * ---------------------------------------------------------------------
+ * Regra desta seção: nenhum achado é emitido sem (a) o número, (b) a base
+ * contra a qual ele foi comparado e (c) o ruído da própria série. Um delta
+ * que não passa do ruído natural entre execuções idênticas não é resultado,
+ * é dispersão -- dizer "reprovado" nesse caso treina quem lê a ignorar o
+ * painel.
+ * ===================================================================== */
+const SEV_RANK = { critical: 0, serious: 1, warning: 2, gain: 3, info: 4 };
+function mkFinding(sev, head, evidence, why, focus) {
+  // Evidência sem valor medido não é evidência: entulha a linha e sugere que
+  // se olhou um número que não existe.
+  const ev = (evidence || []).filter(e => e && e.v && e.v !== "—" && e.v !== "");
+  return { sev, head, evidence: ev, why: why || "", focus: focus || null };
+}
+function shortCase(id) { return String(id || "").replace(/^load\./, ""); }
+function totalErrors(r) { return (r.phases || []).reduce((a, p) => a + (num(p.errors) || 0), 0); }
+
+// Janela recente da mesma série (§13.4) + dispersão dela. `ref` é a mediana
+// dos até 5 anteriores (a base do gate); `cv` usa até 10 para estimar ruído,
+// que precisa de mais pontos do que uma mediana.
+function trailingStats(row, metricKey, phaseName) {
+  const prev = historyBefore(row).map(r => valueOf(r, metricKey, phaseName)).filter(v => v !== null);
+  const win = prev.slice(-5);
+  return {
+    all: prev, window: win,
+    ref: win.length >= 3 ? median(win) : null,
+    cv: prev.length >= 4 ? cvOf(prev.slice(-10)) : null,
+  };
+}
+function classifyDelta(rel, def, cv) {
+  const worse = def.better === "up" ? -rel : rel;
+  const noise = cv === null ? null : 2 * cv;
+  // Com o filtro desligado o painel volta à leitura de limiar puro -- é o que
+  // o CLI faz, e serve para conferir um contra o outro (§16).
+  const overNoise = (!state.noiseGate || noise === null) ? true : Math.abs(rel) > noise;
+  const level = worse >= def.fail ? "fail"
+    : worse >= def.alert ? "alert"
+      : worse <= -def.fail ? "gain" : "flat";
+  return { worse, noise, overNoise, level };
+}
+
+// Quanto cada fase contribuiu para a diferença de duração do caso: a soma
+// dos diffs é a diferença do caso, e o share aponta a responsável. É a
+// pergunta seguinte a "o caso ficou mais lento".
+function phaseAttribution(row) {
+  const prev = historyBefore(row);
+  const rows = (row.phases || []).map(p => {
+    const hist = prev.map(r => {
+      const q = phaseOf(r, p.phase);
+      return q ? num(q.duration_ns) : null;
+    }).filter(v => v !== null).slice(-5);
+    const ref = hist.length >= 3 ? median(hist) : null;
+    const now = num(p.duration_ns);
+    return { phase: p.phase, now, ref, diff: (ref === null || now === null) ? null : now - ref };
+  });
+  const totalDiff = rows.reduce((a, x) => a + (x.diff || 0), 0);
+  for (const x of rows) x.share = (totalDiff && x.diff !== null) ? x.diff / totalDiff : null;
+  return { rows, totalDiff, comparable: rows.some(x => x.diff !== null) };
+}
+
+// O que mais se moveu junto na mesma fase: separa hipótese de I/O (páginas,
+// WAL), de tamanho (bytes/objeto) e de memória (RSS). Sem isso, "ficou mais
+// lento" não sugere onde olhar.
+const MOVED_FIELDS = [
+  ["pages_written", "páginas escritas"], ["pages_read", "páginas lidas"],
+  ["wal_bytes", "WAL"], ["bytes_per_object", "bytes/objeto"], ["peak_rss_bytes", "RSS"],
+];
+function movedWith(row, phaseName) {
+  const cur = phaseOf(row, phaseName);
+  if (!cur) return [];
+  const prev = historyBefore(row);
+  const out = [];
+  for (const [field, label] of MOVED_FIELDS) {
+    const now = num(cur[field]);
+    if (now === null || now === 0) continue;
+    const hist = prev.map(r => {
+      const q = phaseOf(r, phaseName);
+      const v = q ? num(q[field]) : null;
+      return (v === null || v === 0) ? null : v;
+    }).filter(v => v !== null).slice(-5);
+    if (hist.length < 3) continue;
+    const ref = median(hist);
+    if (!ref) continue;
+    const rel = (now - ref) / ref;
+    if (Math.abs(rel) >= 0.05) out.push({ label, rel });
+  }
+  return out.sort((a, b) => Math.abs(b.rel) - Math.abs(a.rel));
+}
+
+// Cauda que abriu sem a mediana se mover = contenção/pausa, não custo por
+// operação. O quociente p99/p50 é o que separa os dois casos.
+function tailWidening(row) {
+  const out = [];
+  for (const p of (row.phases || [])) {
+    const p50 = num(p.latency_ns && p.latency_ns.p50), p99 = num(p.latency_ns && p.latency_ns.p99);
+    if (!p50 || !p99) continue;
+    const hist = historyBefore(row).map(r => {
+      const q = phaseOf(r, p.phase);
+      const a = num(q && q.latency_ns && q.latency_ns.p50), b = num(q && q.latency_ns && q.latency_ns.p99);
+      return (a && b) ? b / a : null;
+    }).filter(v => v !== null).slice(-5);
+    if (hist.length < 3) continue;
+    const ref = median(hist);
+    if (!ref) continue;
+    const nowRatio = p99 / p50;
+    const rel = (nowRatio - ref) / ref;
+    const p50hist = historyBefore(row).map(r => {
+      const q = phaseOf(r, p.phase);
+      return num(q && q.latency_ns && q.latency_ns.p50);
+    }).filter(v => v !== null && v !== 0).slice(-5);
+    const p50ref = p50hist.length >= 3 ? median(p50hist) : null;
+    if (rel >= 0.25) out.push({ phase: p.phase, nowRatio, ref, rel, p50, p99, p50rel: p50ref ? (p50 - p50ref) / p50ref : null });
+  }
+  return out.sort((a, b) => b.rel - a.rel);
+}
+
+// Degradação dentro da própria execução (§8, campo `windows`): throughput
+// caindo do início ao fim é custo que cresce com o volume acumulado, coisa
+// que nenhuma média do caso mostra.
+function windowDecay(row) {
+  const w = row.windows;
+  if (!w) return null;
+  const first = num(w.first_ops_per_second), last = num(w.last_ops_per_second);
+  if (!first || !last) return null;
+  return {
+    drop: (last - first) / first, first, last,
+    p99first: num(w.first_p99_ns), p99last: num(w.last_p99_ns),
+    slope: num(w.slope_ops_per_second_per_min),
+  };
+}
+
+// Custo por objeto ao longo das escalas: ajusta duração ~ objetos^b no
+// mesmo workload/alvo/ambiente. b≈1 é linear; b>1 é o volume ficando mais
+// caro por objeto, que é a pergunta do §4.1.
+function scaleFit(anchor, pool) {
+  if (!anchor) return { pts: [], fit: null };
+  const byObjects = new Map();
+  for (const r of pool) {
+    if (r.workload !== anchor.workload || r.target !== anchor.target) continue;
+    if (anchor.environment && r.environment !== anchor.environment) continue;
+    if (r.status !== "completed" || !num(r.objects)) continue;
+    if (!num(r.totals && r.totals.duration_ns)) continue;
+    const cur = byObjects.get(r.objects);
+    if (!cur || parseTimestamp(r.started_at) > parseTimestamp(cur.started_at)) byObjects.set(r.objects, r);
+  }
+  const pts = Array.from(byObjects.values())
+    .map(r => ({ x: r.objects, y: r.totals.duration_ns, row: r }))
+    .sort((a, b) => a.x - b.x);
+  return { pts, fit: fitPower(pts) };
+}
+
+/* ---------- achados de uma execução ---------- */
+function analyzeRun(rows) {
+  const def = METRICS[RUN_GATE_METRIC];
+  const findings = [];
+  const noHistory = [], noisy = [], suppressed = [];
+  let stable = 0;
+
+  for (const r of rows) {
+    if (r.status !== "completed") {
+      findings.push(mkFinding("critical",
+        `${shortCase(r.case_id)} não completou (status ${r.status})`,
+        [{ k: "erros", v: fmtInt(totalErrors(r)) }, { k: "fases medidas", v: fmtInt((r.phases || []).length) }],
+        "Enquanto o status não for completed, nenhum número deste caso é publicável (§9) — nem para comparação.",
+        { row: r, phase: null }));
+      continue;
+    }
+    const errs = totalErrors(r);
+    if (errs > 0) {
+      findings.push(mkFinding("serious",
+        `${shortCase(r.case_id)} completou com ${fmtInt(errs)} erro(s) registrados`,
+        [{ k: "validações", v: (r.validations || []).join(", ") || "nenhuma" }],
+        "Status completed com erro em fase é contradição: verifique a validação antes de usar as taxas.",
+        { row: r, phase: null }));
+    }
+
+    const value = valueOf(r, RUN_GATE_METRIC, null);
+    const st = trailingStats(r, RUN_GATE_METRIC, null);
+    if (st.ref === null || value === null) { noHistory.push(r); continue; }
+    const rel = (value - st.ref) / st.ref;
+    const cls = classifyDelta(rel, def, st.cv);
+    // Com o filtro de ruído desligado, `overNoise` é verdadeiro por decreto --
+    // a justificativa tem de dizer o que o delta realmente passou, senão o
+    // painel afirma uma coisa que ele mesmo não verificou.
+    const beatsNoise = cls.noise === null ? null : Math.abs(rel) > cls.noise;
+    const noiseNote = cls.noise === null
+      ? "ruído da série ainda não estimável (precisa de 4+ execuções anteriores)"
+      : `ruído da série ±${nf1.format(cls.noise * 100)}%`;
+
+    if (cls.level === "flat") {
+      stable++;
+      if (cls.noise !== null && cls.noise >= def.alert) noisy.push({ row: r, noise: cls.noise });
+      continue;
+    }
+    if ((cls.level === "fail" || cls.level === "alert") && !cls.overNoise) {
+      suppressed.push({ row: r, rel, noise: cls.noise });
+      continue;
+    }
+
+    const attr = phaseAttribution(r);
+    const ordered = attr.rows.filter(x => x.diff !== null).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+    const top = ordered[0] || null;
+    const ev = [
+      { k: "duração", v: fmtSignedPct(rel) },
+      { k: "agora", v: def.fmt(value) + " " + def.unit },
+      { k: `mediana de ${st.window.length}`, v: def.fmt(st.ref) + " " + def.unit },
+    ];
+    if (top && top.share !== null && Math.abs(top.share) >= 0.4) {
+      ev.push({ k: `fase ${PHASE_LABEL[top.phase] || top.phase}`, v: `${nf0.format(Math.abs(top.share) * 100)}% da diferença` });
+    }
+    for (const m of (top ? movedWith(r, top.phase) : []).slice(0, 3)) {
+      ev.push({ k: m.label, v: fmtSignedPct(m.rel) });
+    }
+
+    if (cls.level === "gain") {
+      findings.push(mkFinding("gain",
+        `${shortCase(r.case_id)} ficou ${fmtSignedPct(-Math.abs(rel))} mais rápido que a mediana anterior`,
+        ev,
+        `Ganho acima do ruído (${noiseNote}) — vale confirmar que a validação continua passando antes de comemorar.`,
+        { row: r, phase: top && top.phase }));
+    } else {
+      const limit = nf0.format((cls.level === "fail" ? def.fail : def.alert) * 100);
+      findings.push(mkFinding(cls.level === "fail" ? "critical" : "serious",
+        `${shortCase(r.case_id)} está ${fmtSignedPct(rel)} mais lento que a mediana das ${st.window.length} execuções anteriores`,
+        ev,
+        (beatsNoise === false
+          ? `Limiar ${limit}% estourado, mas o delta não passa da dispersão da série (±${nf1.format(cls.noise * 100)}%) — o filtro de ruído está desligado.`
+          : `Limiar ${limit}% e ${noiseNote}: o delta passa dos dois.`) + " " +
+        (top ? `A fase ${PHASE_LABEL[top.phase] || top.phase} responde pela maior parte.` : ""),
+        { row: r, phase: top && top.phase }));
+    }
+  }
+
+  // Sinais que não dependem de histórico do caso. Coletados em baldes: o
+  // mesmo sintoma em 12 casos não são 12 achados, é um padrão sistêmico -- e
+  // dizer isso vale mais do que repetir a mesma frase doze vezes (era a
+  // diferença entre analisar e despejar).
+  const decays = [], amps = [], tails = [];
+  for (const r of rows.filter(r => r.status === "completed")) {
+    const tail = tailWidening(r)[0];
+    if (tail) tails.push({ row: r, ...tail });
+    const dec = windowDecay(r);
+    if (dec && dec.drop <= -0.2) decays.push({ row: r, ...dec });
+    const wa = num(r.totals && r.totals.write_amplification);
+    if (wa !== null && wa >= 3) amps.push({ row: r, wa });
+  }
+
+  tails.sort((a, b) => b.rel - a.rel);
+  if (tails.length >= 3) {
+    const w = tails[0];
+    findings.push(mkFinding("serious",
+      `${tails.length} casos com a cauda de latência mais larga que o histórico — pior: ${shortCase(w.row.case_id)} (${fmtSignedPct(w.rel)})`,
+      tails.slice(0, 3).map(t => ({ k: shortCase(t.row.case_id), v: `p99/p50 ${fmtOne(t.nowRatio)}× (era ${fmtOne(t.ref)}×)` })),
+      "Cauda abrindo em vários casos ao mesmo tempo aponta para causa comum (checkpoint, fsync, contenção de lock), não para o algoritmo de cada workload.",
+      { row: w.row, phase: w.phase }));
+  } else {
+    for (const t of tails) {
+      findings.push(mkFinding("serious",
+        `a cauda de ${PHASE_LABEL[t.phase] || t.phase} em ${shortCase(t.row.case_id)} abriu ${fmtSignedPct(t.rel)}`,
+        [
+          { k: "p99/p50 agora", v: fmtOne(t.nowRatio) + "×" },
+          { k: "antes", v: fmtOne(t.ref) + "×" },
+          { k: "p50", v: t.p50rel === null ? "" : fmtSignedPct(t.p50rel) },
+          { k: "p99", v: fmtLat(t.p99) },
+        ],
+        t.p50rel !== null && Math.abs(t.p50rel) < 0.05
+          ? "A mediana ficou onde estava e só a cauda cresceu: sintoma de contenção, pausa de checkpoint ou fsync, não de custo por operação."
+          : "Cauda e mediana se moveram juntas: provavelmente custo por operação, não contenção.",
+        { row: t.row, phase: t.phase }));
+    }
+  }
+
+  decays.sort((a, b) => a.drop - b.drop);
+  if (decays.length >= 3) {
+    const w = decays[0];
+    const scales = uniq(decays.map(d => d.row.scale));
+    findings.push(mkFinding("serious",
+      `${decays.length} casos perdem mais de 20% do throughput dentro da própria execução — pior: ${shortCase(w.row.case_id)} (${fmtSignedPct(w.drop)})`,
+      decays.slice(0, 3).map(d => ({ k: shortCase(d.row.case_id), v: `${fmtCompact(d.first)} → ${fmtCompact(d.last)} obj/s` }))
+        .concat([{ k: "escalas afetadas", v: scales.join(", ") }]),
+      "O mesmo padrão em workloads diferentes é característica do motor no volume — índice/WAL/cache encarecendo à medida que a base cresce — e não de um workload específico. " +
+      "Nenhuma média por caso mostra isso; só as janelas.",
+      { row: w.row, phase: null }));
+  } else {
+    for (const d of decays) {
+      findings.push(mkFinding("warning",
+        `${shortCase(d.row.case_id)} perde ${fmtSignedPct(d.drop)} de throughput do início ao fim da própria execução`,
+        [
+          { k: "1ª janela", v: fmtCompact(d.first) + " obj/s" },
+          { k: "última", v: fmtCompact(d.last) + " obj/s" },
+          { k: "p99", v: `${fmtLat(d.p99first)} → ${fmtLat(d.p99last)}` },
+        ],
+        "A média do caso esconde isso: o custo cresce com o volume já acumulado (índice, WAL, cache) dentro da mesma execução.",
+        { row: d.row, phase: null }));
+    }
+  }
+
+  amps.sort((a, b) => b.wa - a.wa);
+  if (amps.length >= 3) {
+    findings.push(mkFinding("warning",
+      `${amps.length} casos escrevem 3× ou mais o volume lógico — pior: ${shortCase(amps[0].row.case_id)} (${fmtTwo(amps[0].wa)}×)`,
+      amps.slice(0, 3).map(a => ({ k: shortCase(a.row.case_id), v: fmtTwo(a.wa) + "×" })),
+      "Escrita física dominando em vários casos: WAL, reescrita de página e checkpoint valem mais que o algoritmo neste recorte.",
+      { row: amps[0].row, phase: null }));
+  } else {
+    for (const a of amps) {
+      findings.push(mkFinding("warning",
+        `${shortCase(a.row.case_id)} escreve ${fmtTwo(a.wa)}× o volume lógico`,
+        [
+          { k: "amplificação de espaço", v: fmtUnmeasured(a.row.totals.space_amplification, v => fmtTwo(v) + "×") },
+          { k: "disco de pico", v: fmtBytes(a.row.totals.peak_disk_bytes) },
+        ],
+        "Acima de 3× a escrita física dominou o custo: WAL, reescrita de página e checkpoint valem mais que o algoritmo aqui.",
+        { row: a.row, phase: null }));
+    }
+  }
+
+  // Escala: uma vez por (workload, alvo, ambiente) presente no set
+  const anchors = new Map();
+  for (const r of rows) {
+    const k = [r.workload, r.target, r.environment].join("|");
+    if (!anchors.has(k)) anchors.set(k, r);
+  }
+  const supers = [];
+  for (const anchor of anchors.values()) {
+    const { pts, fit } = scaleFit(anchor, state.rows);
+    if (!fit || fit.n < 3 || fit.r2 < 0.9 || fit.b < 1.15) continue;
+    supers.push({ anchor, pts, fit, span: pts[pts.length - 1].x / pts[0].x });
+  }
+  supers.sort((a, b) => b.fit.b - a.fit.b);
+  if (supers.length >= 3) {
+    const w = supers[0];
+    findings.push(mkFinding("warning",
+      `${supers.length} combinações workload/alvo crescem super-linearmente — pior: ${w.anchor.workload} · ${w.anchor.target} (n^${fmtTwo(w.fit.b)})`,
+      supers.slice(0, 3).map(s => ({ k: `${s.anchor.workload} · ${s.anchor.target}`, v: `n^${fmtTwo(s.fit.b)}` })),
+      "Custo por objeto constante seria n^1,00 (§4.1). Aparecendo em vários workloads, o custo é do armazenamento, não da lógica de cada um.",
+      { row: w.anchor, phase: null }));
+  } else {
+    for (const s of supers) {
+      findings.push(mkFinding("warning",
+        `${s.anchor.workload} · ${s.anchor.target}: o tempo cresce como n^${fmtTwo(s.fit.b)}, não linearmente`,
+        [
+          { k: "escalas", v: s.pts.map(p => p.row.scale).join(" → ") },
+          { k: "custo por objeto", v: `×${fmtTwo(Math.pow(s.span, s.fit.b - 1))} no intervalo` },
+          { k: "r²", v: fmtTwo(s.fit.r2) },
+        ],
+        "Custo por objeto constante seria n^1,00 (§4.1). Acima disso, dobrar o volume mais que dobra o tempo.",
+        { row: s.anchor, phase: null }));
+    }
+  }
+
+  if (suppressed.length) {
+    findings.push(mkFinding("info",
+      `${suppressed.length} caso(s) estouraram o limiar mas ficaram dentro do ruído da série`,
+      suppressed.slice(0, 4).map(s => ({ k: shortCase(s.row.case_id), v: `${fmtSignedPct(s.rel)} vs ±${nf1.format(s.noise * 100)}%` })),
+      "Limiar fixo em série dispersa gera alarme falso: para julgar estes casos é preciso reduzir a variação (mesma máquina ociosa, mais repetições) ou aceitar um limiar maior.",
+      null));
+  }
+  if (noisy.length) {
+    findings.push(mkFinding("info",
+      `${noisy.length} caso(s) variam mais entre execuções do que o próprio limiar de alerta`,
+      noisy.slice(0, 4).map(s => ({ k: shortCase(s.row.case_id), v: `±${nf1.format(s.noise * 100)}%` })),
+      "Um único ponto nessas séries não decide nada: o gate só passa a significar algo com repetição (--repeat) ou ambiente mais estável.",
+      null));
+  }
+  if (noHistory.length) {
+    findings.push(mkFinding("info",
+      `${noHistory.length} caso(s) sem base de comparação nesta série`,
+      [{ k: "mínimo", v: "3 execuções comparáveis anteriores" }],
+      "Este set fica registrado, não julgado: são os primeiros pontos dessas séries (ou o series_key mudou — host, compilador, build).",
+      null));
+  }
+
+  return { findings: findings.sort((a, b) => SEV_RANK[a.sev] - SEV_RANK[b.sev]), stable, cases: rows.length };
+}
+
+/* ---------- achados da série (modo histórico) ---------- */
+function analyzeSeries(caseRows, metricKey, phaseName) {
+  const def = METRICS[metricKey];
+  const findings = [];
+  const values = caseRows.map(r => valueOf(r, metricKey, phaseName));
+  const last = (() => { for (let i = caseRows.length - 1; i >= 0; i--) if (values[i] !== null) return i; return -1; })();
+  if (last < 0) {
+    return { findings: [mkFinding("info", "Nenhum ponto desta série tem valor para a métrica e fase escolhidas",
+      [], "Troque a fase ou a métrica — este caso não mede isso.", null)], stable: 0, cases: caseRows.length };
+  }
+  const row = caseRows[last];
+  const st = trailingStats(row, metricKey, phaseName);
+  const rel = st.ref ? (values[last] - st.ref) / st.ref : null;
+  const cls = rel === null ? null : classifyDelta(rel, def, st.cv);
+
+  if (cls && (cls.level === "fail" || cls.level === "alert") && cls.overNoise) {
+    findings.push(mkFinding(cls.level === "fail" ? "critical" : "serious",
+      `o último ponto está ${fmtSignedPct(rel)} ${def.better === "up" ? "abaixo" : "acima"} da mediana das ${st.window.length} execuções anteriores`,
+      [
+        { k: def.label.toLowerCase(), v: def.fmt(values[last]) + " " + def.unit },
+        { k: "mediana anterior", v: def.fmt(st.ref) + " " + def.unit },
+        { k: "commit", v: row.commit_short || (row.commit || "").slice(0, 12) },
+      ],
+      `Limiar ${nf0.format((cls.level === "fail" ? def.fail : def.alert) * 100)}%; ` +
+      (cls.noise === null ? "ruído ainda não estimável (precisa de 4+ execuções anteriores)."
+        : Math.abs(rel) > cls.noise ? `ruído da série ±${nf1.format(cls.noise * 100)}% — o delta passa dos dois.`
+          : `o delta não passa da dispersão da série (±${nf1.format(cls.noise * 100)}%): o filtro de ruído está desligado.`),
+      { row, phase: phaseName }));
+  } else if (cls && (cls.level === "fail" || cls.level === "alert")) {
+    findings.push(mkFinding("info",
+      `o último ponto estourou o limiar (${fmtSignedPct(rel)}) mas não o ruído da série (±${nf1.format(cls.noise * 100)}%)`,
+      [{ k: "pontos na janela", v: fmtInt(st.window.length) }],
+      "Não é regressão detectável: é a dispersão normal desta série. Repita o caso antes de investigar código.",
+      { row, phase: phaseName }));
+  } else if (cls && cls.level === "gain") {
+    findings.push(mkFinding("gain", `o último ponto está ${fmtSignedPct(rel)} melhor que a mediana anterior`,
+      [{ k: def.label.toLowerCase(), v: def.fmt(values[last]) + " " + def.unit }],
+      "Ganho acima do ruído — confirme que as validações continuam passando.", { row, phase: phaseName }));
+  }
+
+  const drift = driftFor(values, def);
+  if (drift.verdict === "fail" || drift.verdict === "alert") {
+    findings.push(mkFinding(drift.verdict === "fail" ? "serious" : "warning",
+      `deriva lenta: a mediana recente está ${fmtSignedPct((drift.recent - drift.old) / drift.old)} pior que a de ${drift.span} execuções atrás`,
+      [
+        { k: "mediana das 5 últimas", v: def.fmt(drift.recent) + " " + def.unit },
+        { k: "mediana antiga", v: def.fmt(drift.old) + " " + def.unit },
+      ],
+      "Nenhum passo individual estourou o gate — é exatamente o caso que o gate por execução não pega (§13.7).",
+      { row, phase: phaseName }));
+  }
+
+  const tailK = Math.min(5, caseRows.length);
+  const recent = caseRows.slice(-tailK);
+  if (recent.length >= 2 && uniq(recent.map(r => r.series_key)).length > 1) {
+    findings.push(mkFinding("warning",
+      "houve quebra de série nos últimos pontos: eles não são comparáveis com o que vem antes",
+      [{ k: "series_key distintas", v: fmtInt(uniq(recent.map(r => r.series_key)).length) },
+       { k: "no recorte", v: `últimas ${recent.length} execuções` }],
+      "Host, compilador, build ou versão de formato mudaram (§13.4). A mediana reinicia na quebra; a diferença visual ali não é regressão.",
+      { row, phase: phaseName }));
+  }
+
+  if (st.cv !== null && 2 * st.cv >= def.alert) {
+    findings.push(mkFinding("info",
+      `esta série varia ±${nf1.format(2 * st.cv * 100)}% entre execuções — mais que o limiar de alerta (${nf0.format(def.alert * 100)}%)`,
+      [{ k: "pontos considerados", v: fmtInt(Math.min(10, st.all.length)) }],
+      "Com essa dispersão, um único ponto não decide nada. Repetição (--repeat) ou máquina mais estável antes de apertar o limiar.",
+      { row, phase: phaseName }));
+  }
+
+  const failed = caseRows.filter(r => r.status !== "completed");
+  if (failed.length) {
+    findings.push(mkFinding("critical",
+      `${failed.length} execução(ões) deste caso não completaram`,
+      [{ k: "mais recente", v: fmtDateTime(failed[failed.length - 1].started_at) }],
+      "Aparecem em vermelho e ficam fora de toda mediana — mas enquanto existirem, as taxas descrevem um caso que às vezes quebra.",
+      { row: failed[failed.length - 1], phase: phaseName }));
+  }
+
+  const { pts, fit } = scaleFit(row, state.rows);
+  if (fit && fit.n >= 3 && fit.r2 >= 0.9 && fit.b >= 1.15) {
+    const span = pts[pts.length - 1].x / pts[0].x;
+    findings.push(mkFinding("warning",
+      `o tempo cresce como n^${fmtTwo(fit.b)} entre as escalas medidas`,
+      [{ k: "escalas", v: pts.map(p => p.row.scale).join(" → ") },
+       { k: "custo por objeto", v: `×${fmtTwo(Math.pow(span, fit.b - 1))}` },
+       { k: "r²", v: fmtTwo(fit.r2) }],
+      "Custo por objeto constante seria n^1,00 (§4.1).", { row, phase: phaseName }));
+  }
+
+  const dec = windowDecay(row);
+  if (dec && dec.drop <= -0.2) {
+    findings.push(mkFinding("warning",
+      `na execução mais recente o throughput cai ${fmtSignedPct(dec.drop)} do início ao fim`,
+      [{ k: "1ª janela", v: fmtCompact(dec.first) + " obj/s" }, { k: "última", v: fmtCompact(dec.last) + " obj/s" }],
+      "Degradação dentro da execução, invisível em qualquer média do caso.", { row, phase: phaseName }));
+  }
+
+  return { findings: findings.sort((a, b) => SEV_RANK[a.sev] - SEV_RANK[b.sev]), stable: 0, cases: caseRows.length, anchor: row };
+}
+
+/* ---------- render dos achados ---------- */
+const MAX_FINDINGS = 12;
+// `ctx` = { label, kind: "run"|"series", rows, metric, phase, metricLabel }.
+// Guardado em state para a exportação -- que precisa de TODOS os achados e
+// dos números que os sustentam, não do que coube na tela.
+function renderFindings(result, ctx) {
+  const list = document.getElementById("findings-list");
+  list.textContent = "";
+  state.lastAnalysis = Object.assign({ result }, ctx);
+  document.getElementById("findings-sub").textContent = ctx.label;
+
+  const items = result.findings;
+  const shown = items.slice(0, MAX_FINDINGS);
+  const worst = shown.length ? shown[0].sev : null;
+  document.getElementById("findings-title").textContent =
+    worst === "critical" ? "Leitura — há regressão ou falha"
+      : worst === "serious" ? "Leitura — há sinal para investigar"
+        : worst === "warning" ? "Leitura — pontos de atenção"
+          : worst === "gain" ? "Leitura — melhora acima do ruído"
+            : "Leitura — nada acima do ruído";
+
+  if (!shown.length) {
+    const p = document.createElement("p");
+    p.className = "none";
+    p.textContent = `Nada acima do ruído: ${result.stable} caso(s) estáveis de ${result.cases}. ` +
+      "Estável aqui significa dentro do limiar E dentro da dispersão da própria série.";
+    list.appendChild(p);
+    syncPromptBox();
+    return;
+  }
+
+  for (const f of shown) {
+    const item = document.createElement("div");
+    item.className = "item";
+    const dot = document.createElement("span");
+    dot.className = "sev " + f.sev;
+    const txt = document.createElement("div");
+    txt.className = "txt";
+    const head = document.createElement("div");
+    head.className = "head";
+    head.textContent = f.head;
+    txt.appendChild(head);
+    if (f.evidence.length) {
+      const ev = document.createElement("div");
+      ev.className = "ev";
+      f.evidence.forEach((e, i) => {
+        if (i) ev.appendChild(document.createTextNode(" · "));
+        ev.appendChild(document.createTextNode(e.k + " "));
+        const b = document.createElement("b"); b.textContent = e.v;
+        ev.appendChild(b);
+      });
+      txt.appendChild(ev);
+    }
+    if (f.why) {
+      const why = document.createElement("div");
+      why.className = "why";
+      why.textContent = f.why;
+      txt.appendChild(why);
+    }
+    item.append(dot, txt);
+    if (f.focus && f.focus.row) {
+      const btn = document.createElement("button");
+      btn.className = "act";
+      btn.textContent = "Investigar";
+      btn.addEventListener("click", () => {
+        state.focus = { row: f.focus.row, phase: f.focus.phase || null };
+        state.selectedCase = f.focus.row;
+        render();
+        document.getElementById("diag-card").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      item.appendChild(btn);
+    }
+    list.appendChild(item);
+  }
+  if (items.length > shown.length) {
+    const more = document.createElement("p");
+    more.className = "none";
+    more.textContent = `+${items.length - shown.length} achado(s) de menor gravidade não listados aqui (a exportação leva todos) — ` +
+      "o recorte atual tem mais sinal do que caberia ler de uma vez.";
+    list.appendChild(more);
+  }
+  syncPromptBox();
+}
+
+/* =====================================================================
+ * Diagnóstico — cinco perguntas, uma por gráfico
+ * ===================================================================== */
+function emptyPlot(hostId, msg) {
+  const host = document.getElementById(hostId);
+  host.textContent = "";
+  const p = document.createElement("p");
+  p.className = "empty";
+  p.textContent = msg;
+  host.appendChild(p);
+}
+function fmtDurSigned(ns) { return (ns < 0 ? "−" : "+") + fmtDur(Math.abs(ns)); }
+
+// 1. Onde foi o tempo: diferença por fase contra a mediana histórica.
+function renderAttribution(row) {
+  const legend = document.getElementById("attr-legend");
+  legend.textContent = "";
+  const a = phaseAttribution(row);
+  const items = a.rows.filter(x => x.diff !== null);
+  document.getElementById("attr-sub").textContent = items.length
+    ? `${shortCase(row.case_id)} · diferença de duração por fase vs a mediana das anteriores · total ${fmtDurSigned(a.totalDiff)}`
+    : `${shortCase(row.case_id)} · sem histórico por fase para atribuir`;
+  if (!items.length) {
+    emptyPlot("attr-plot", "Precisa de 3+ execuções anteriores da mesma série para saber quanto cada fase mudou.");
+    return;
+  }
+  const host = document.getElementById("attr-plot");
+  host.textContent = "";
+  const rowH = 24, W = Math.max(280, host.clientWidth || 360);
+  const M = { t: 10, r: 66, b: 20, l: 96 };
+  const ih = items.length * rowH, H = ih + M.t + M.b;
+  const iw = W - M.l - M.r;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+  const maxAbs = Math.max.apply(null, items.map(x => Math.abs(x.diff))) || 1;
+  const x = v => M.l + iw / 2 + (v / maxAbs) * (iw / 2 - 4);
+  const zero = x(0);
+  svg("line", { class: "axisline", x1: zero, x2: zero, y1: M.t, y2: M.t + ih }, s);
+  items.forEach((it, i) => {
+    const yTop = M.t + i * rowH, barH = 13;
+    const worse = it.diff > 0;
+    const color = worse ? cssVar("--status-critical") : cssVar("--delta-good");
+    text(s, M.l - 8, yTop + barH / 2 + 4, PHASE_LABEL[it.phase] || it.phase, { "text-anchor": "end", class: "lbl" });
+    const bx = x(it.diff);
+    const rect = svg("rect", { x: Math.min(zero, bx), y: yTop, width: Math.max(2, Math.abs(bx - zero)), height: barH, rx: 3, fill: color }, s);
+    text(s, bx + (worse ? 5 : -5), yTop + barH / 2 + 4, fmtDurSigned(it.diff),
+         { "text-anchor": worse ? "start" : "end", class: "lbl" });
+    const rows2 = [
+      { value: fmtDur(it.now), name: "agora", color },
+      { value: fmtDur(it.ref), name: "mediana anterior" },
+      { value: it.share === null ? "—" : nf0.format(it.share * 100) + "%", name: "da diferença do caso" },
+    ];
+    rect.addEventListener("pointerenter", e => showTip(e, PHASE_LABEL[it.phase] || it.phase, rows2));
+    rect.addEventListener("pointermove", moveTip);
+    rect.addEventListener("pointerleave", hideTip);
+  });
+  const note = document.createElement("span");
+  note.className = "item";
+  note.textContent = "À direita = a fase levou mais tempo que o histórico. A soma das barras é a diferença do caso.";
+  legend.appendChild(note);
+}
+
+// 2. Forma da latência: p50→p99.9 desta execução contra a mediana anterior.
+function renderLatencyShape(row, phaseName) {
+  const legend = document.getElementById("shape-legend");
+  legend.textContent = "";
+  const phases = row.phases || [];
+  const pick = phases.find(p => p.phase === phaseName) ||
+    phases.slice().sort((a, b) => (num(b.duration_ns) || 0) - (num(a.duration_ns) || 0))[0];
+  const keys = [["p50", "p50"], ["p95", "p95"], ["p99", "p99"], ["p999", "p99.9"]];
+  const cur = pick && pick.latency_ns ? keys.map(([k, l]) => ({ k, l, v: num(pick.latency_ns[k]) })) : [];
+  const have = cur.filter(c => c.v);
+  if (!pick || !have.length) {
+    document.getElementById("shape-sub").textContent = `${shortCase(row.case_id)} · sem latência registrada`;
+    emptyPlot("shape-plot", "Este workload não registra percentis de latência por operação (0 no rollup).");
+    return;
+  }
+  const prev = historyBefore(row);
+  const ref = {};
+  for (const [k] of keys) {
+    const hist = prev.map(r => {
+      const q = phaseOf(r, pick.phase);
+      return num(q && q.latency_ns && q.latency_ns[k]);
+    }).filter(v => v !== null && v !== 0).slice(-5);
+    ref[k] = hist.length >= 3 ? median(hist) : null;
+  }
+  const tail = have.find(c => c.k === "p99") && have.find(c => c.k === "p50")
+    ? have.find(c => c.k === "p99").v / have.find(c => c.k === "p50").v : null;
+  document.getElementById("shape-sub").textContent =
+    `${shortCase(row.case_id)} · fase ${PHASE_LABEL[pick.phase] || pick.phase}` +
+    (tail ? ` · cauda p99/p50 ${fmtOne(tail)}×` : "");
+
+  const host = document.getElementById("shape-plot");
+  host.textContent = "";
+  const rowH = 24, W = Math.max(280, host.clientWidth || 360);
+  const M = { t: 10, r: 62, b: 20, l: 52 };
+  const ih = have.length * rowH, H = ih + M.t + M.b;
+  const iw = W - M.l - M.r;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+  // Escala log: p50 e p99.9 costumam diferir por ordens de grandeza, e numa
+  // escala linear o p50 vira um traço invisível.
+  const all = have.map(c => c.v).concat(Object.values(ref).filter(v => v));
+  const lo = Math.log10(Math.min.apply(null, all)), hi = Math.log10(Math.max.apply(null, all) * 1.15);
+  const x = v => M.l + ((Math.log10(v) - lo) / (hi - lo || 1)) * iw;
+  have.forEach((c, i) => {
+    const yTop = M.t + i * rowH, barH = 12;
+    text(s, M.l - 8, yTop + barH / 2 + 4, c.l, { "text-anchor": "end", class: "lbl" });
+    const w = Math.max(2, x(c.v) - M.l);
+    const worse = ref[c.k] && c.v > ref[c.k] * 1.05;
+    const color = worse ? cssVar("--status-warning") : cssVar("--series-1");
+    svg("rect", { x: M.l, y: yTop, width: w, height: barH, rx: 3, fill: color, opacity: 0.9 }, s);
+    if (ref[c.k]) {
+      const rx = x(ref[c.k]);
+      svg("line", { x1: rx, x2: rx, y1: yTop - 2, y2: yTop + barH + 2, stroke: cssVar("--text-primary"), "stroke-width": 2, opacity: 0.75 }, s);
+    }
+    text(s, M.l + w + 6, yTop + barH / 2 + 4, fmtLat(c.v), { class: "lbl" });
+  });
+  legendInto(legend, [
+    { kind: "rect", color: cssVar("--series-1"), label: "esta execução" },
+    { kind: "rect", color: cssVar("--text-primary"), label: "mediana anterior (marca)" },
+  ]);
+  const note = document.createElement("span");
+  note.className = "item";
+  note.textContent = "Eixo logarítmico. Cauda crescendo com p50 parado = contenção, não custo por operação.";
+  legend.appendChild(note);
+}
+
+// 3. Sinal ou ruído: o ponto contra a dispersão real da série.
+function renderNoise(row, metricKey, phaseName) {
+  const legend = document.getElementById("noise-legend");
+  legend.textContent = "";
+  const def = METRICS[metricKey];
+  const st = trailingStats(row, metricKey, phaseName);
+  const value = valueOf(row, metricKey, phaseName);
+  const hist = st.all.slice(-10);
+  document.getElementById("noise-sub").textContent =
+    `${shortCase(row.case_id)} · ${def.label.toLowerCase()} · ${hist.length} execução(ões) anteriores`;
+  if (value === null || hist.length < 3) {
+    emptyPlot("noise-plot", "Precisa de 3+ execuções anteriores comparáveis para saber o que é ruído nesta série.");
+    return;
+  }
+  const host = document.getElementById("noise-plot");
+  host.textContent = "";
+  const W = Math.max(280, host.clientWidth || 360), H = 170;
+  const M = { t: 12, r: 54, b: 24, l: 56 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+  const med = median(hist), sd = stdevOf(hist);
+  // Mesmo mínimo que o veredito usa (trailingStats): com 3 pontos um 2σ sai
+  // por sorte -- desenhar a faixa aqui e o achado dizer "ruído não estimável"
+  // seria o painel se contradizendo na mesma tela.
+  const band = (hist.length >= 4 && sd !== null) ? 2 * sd : 0;
+  const all = hist.concat([value, med + band, med - band]);
+  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  const pad = (hi - lo) * 0.15 || Math.abs(hi) * 0.1 || 1;
+  lo -= pad; hi += pad;
+  const n = hist.length;
+  const x = i => M.l + (n === 0 ? iw / 2 : (i * iw) / n);
+  const y = v => M.t + ih - ((v - lo) / (hi - lo)) * ih;
+  for (const t of niceTicks(lo, hi, 3)) {
+    if (t < lo || t > hi) continue;
+    svg("line", { class: "gridline", x1: M.l, x2: M.l + iw, y1: y(t), y2: y(t) }, s);
+    text(s, M.l - 6, y(t) + 4, def.fmt(t), { "text-anchor": "end" });
+  }
+  if (band) {
+    svg("rect", { x: M.l, y: y(med + band), width: iw, height: Math.abs(y(med - band) - y(med + band)),
+                  fill: cssVar("--text-muted"), opacity: 0.16 }, s);
+  }
+  svg("line", { x1: M.l, x2: M.l + iw, y1: y(med), y2: y(med), stroke: cssVar("--text-muted"), "stroke-width": 2, opacity: 0.7 }, s);
+  hist.forEach((v, i) => {
+    svg("circle", { cx: x(i), cy: y(v), r: 3.5, fill: cssVar("--text-secondary"), opacity: 0.85 }, s);
+  });
+  const inBand = band ? Math.abs(value - med) <= band : false;
+  const color = inBand ? cssVar("--series-1") : cssVar("--status-critical");
+  svg("circle", { cx: x(n), cy: y(value), r: 6.5, fill: cssVar("--surface-1") }, s);
+  svg("circle", { cx: x(n), cy: y(value), r: 5, fill: color }, s);
+  text(s, M.l + iw + 6, y(value) + 4, def.fmt(value), { class: "lbl", "font-weight": "600" });
+  text(s, M.l, H - 6, "anteriores", { class: "lbl" });
+  text(s, M.l + iw, H - 6, "agora", { "text-anchor": "end", class: "lbl" });
+
+  legendInto(legend, [
+    { kind: "dot", color: cssVar("--text-secondary"), label: "execuções anteriores" },
+  ].concat(band ? [{ kind: "rect", color: cssVar("--text-muted"), label: "faixa de ruído (mediana ±2σ)" }] : [])
+    .concat([{ kind: "dot", color, label: band ? (inBand ? "dentro do ruído" : "fora do ruído") : "esta execução" }]));
+  const note = document.createElement("span");
+  note.className = "item";
+  note.textContent = !band
+    ? `Com ${hist.length} pontos anteriores não há estimativa de dispersão confiável: o veredito usa só o limiar da métrica (${nf0.format(def.alert * 100)}% alerta / ${nf0.format(def.fail * 100)}% falha).`
+    : inBand
+      ? "Este ponto é indistinguível da variação normal da série: não decide nada sozinho."
+      : `Este ponto sai da dispersão da série (±${nf1.format((band / Math.abs(med)) * 100)}%): é sinal, não dispersão.`;
+  legend.appendChild(note);
+}
+
+// 4. Dentro da execução: primeira janela contra a última, normalizado.
+function renderWindows(row) {
+  const legend = document.getElementById("win-legend");
+  legend.textContent = "";
+  const w = row.windows;
+  const dec = windowDecay(row);
+  document.getElementById("win-sub").textContent = dec
+    ? `${shortCase(row.case_id)} · 1ª janela → última janela da mesma execução`
+    : `${shortCase(row.case_id)} · sem janelas registradas`;
+  if (!dec) {
+    emptyPlot("win-plot", "Esta execução não gravou `windows` — sem elas não se vê degradação dentro do próprio caso.");
+    return;
+  }
+  const host = document.getElementById("win-plot");
+  host.textContent = "";
+  const W = Math.max(280, host.clientWidth || 360), H = 170;
+  const M = { t: 14, r: 58, b: 26, l: 44 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+  // Duas grandezas com unidades diferentes (obj/s e ns) só cabem no mesmo
+  // eixo normalizadas pela primeira janela: o que interessa é a direção e o
+  // tamanho da mudança dentro da execução, não o valor absoluto.
+  const series = [
+    { label: "throughput", a: 1, b: dec.last / dec.first, color: cssVar("--series-1"),
+      va: fmtCompact(dec.first) + " obj/s", vb: fmtCompact(dec.last) + " obj/s" },
+  ];
+  if (dec.p99first && dec.p99last) {
+    series.push({ label: "p99", a: 1, b: dec.p99last / dec.p99first, color: cssVar("--series-2"),
+                  va: fmtLat(dec.p99first), vb: fmtLat(dec.p99last) });
+  }
+  const vals = series.flatMap(x => [x.a, x.b]).concat([1]);
+  let lo = Math.min.apply(null, vals) * 0.9, hi = Math.max.apply(null, vals) * 1.1;
+  const y = v => M.t + ih - ((v - lo) / (hi - lo || 1)) * ih;
+  const xa = M.l + 6, xb = M.l + iw - 6;
+  svg("line", { class: "gridline", x1: M.l, x2: M.l + iw, y1: y(1), y2: y(1) }, s);
+  text(s, M.l - 6, y(1) + 4, "100%", { "text-anchor": "end" });
+  for (const it of series) {
+    svg("path", { d: `M${xa},${y(it.a)}L${xb},${y(it.b)}`, fill: "none", stroke: it.color, "stroke-width": 2.5 }, s);
+    svg("circle", { cx: xa, cy: y(it.a), r: 4, fill: it.color }, s);
+    svg("circle", { cx: xb, cy: y(it.b), r: 4, fill: it.color }, s);
+    text(s, xb + 6, y(it.b) + 4, nf0.format(it.b * 100) + "%", { class: "lbl", "font-weight": "600" });
+  }
+  text(s, xa, H - 8, "início", { "text-anchor": "middle", class: "lbl" });
+  text(s, xb, H - 8, "fim", { "text-anchor": "middle", class: "lbl" });
+  legendInto(legend, series.map(it => ({ kind: "line", color: it.color, label: `${it.label}: ${it.va} → ${it.vb}` })));
+  const note = document.createElement("span");
+  note.className = "item";
+  note.textContent = dec.drop <= -0.2
+    ? "O caso fica mais caro à medida que acumula volume — a média da execução esconde isso."
+    : "Throughput estável do começo ao fim: o custo por objeto não cresce dentro da execução.";
+  legend.appendChild(note);
+}
+
+// 5. Custo por objeto vs escala, com o expoente ajustado.
+function renderScaleCost(row) {
+  const legend = document.getElementById("cost-legend");
+  legend.textContent = "";
+  const { pts, fit } = scaleFit(row, state.rows);
+  const label = [row.workload, row.target, row.environment].filter(Boolean).join(" · ");
+  document.getElementById("cost-sub").textContent = pts.length >= 2
+    ? `${label} · execução mais recente de cada escala`
+    : `${label} · uma única escala medida`;
+  if (pts.length < 2) {
+    emptyPlot("cost-plot", "Só há uma escala medida para este workload/alvo/ambiente — rode outra escala para saber se o custo por objeto se mantém.");
+    return;
+  }
+  const host = document.getElementById("cost-plot");
+  host.textContent = "";
+  const W = Math.max(280, host.clientWidth || 360), H = 180;
+  const M = { t: 14, r: 22, b: 30, l: 58 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const s = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img" }, host);
+  const cost = pts.map(p => ({ x: p.x, y: p.y / p.x, row: p.row }));   // ns por objeto
+  const lx = v => Math.log10(v);
+  const x0 = lx(cost[0].x), x1 = lx(cost[cost.length - 1].x);
+  const x = v => M.l + ((lx(v) - x0) / (x1 - x0 || 1)) * iw;
+  const vals = cost.map(c => c.y);
+  let lo = Math.min.apply(null, vals) * 0.85, hi = Math.max.apply(null, vals) * 1.15;
+  const y = v => M.t + ih - ((v - lo) / (hi - lo || 1)) * ih;
+  for (const t of niceTicks(lo, hi, 3)) {
+    if (t < lo || t > hi) continue;
+    svg("line", { class: "gridline", x1: M.l, x2: M.l + iw, y1: y(t), y2: y(t) }, s);
+    text(s, M.l - 6, y(t) + 4, fmtLat(t), { "text-anchor": "end" });
+  }
+  // Referência: custo por objeto da menor escala mantido em todas.
+  svg("line", { x1: M.l, x2: M.l + iw, y1: y(cost[0].y), y2: y(cost[0].y),
+                stroke: cssVar("--text-muted"), "stroke-width": 2, "stroke-dasharray": "5 4", opacity: 0.8 }, s);
+  text(s, M.l + 4, y(cost[0].y) - 6, "custo constante (n^1,00)", { class: "lbl" });
+  const d = cost.map((c, i) => `${i ? "L" : "M"}${x(c.x).toFixed(1)},${y(c.y).toFixed(1)}`).join("");
+  svg("path", { d, fill: "none", stroke: cssVar("--series-1"), "stroke-width": 2 }, s);
+  cost.forEach(c => {
+    svg("circle", { cx: x(c.x), cy: y(c.y), r: 6, fill: cssVar("--surface-1") }, s);
+    const dot = svg("circle", { cx: x(c.x), cy: y(c.y), r: 4.5, fill: cssVar("--series-1") }, s);
+    text(s, x(c.x), M.t + ih + 15, c.row.scale, { "text-anchor": "middle" });
+    const rows2 = [
+      { value: fmtLat(c.y), name: "por objeto", color: cssVar("--series-1") },
+      { value: fmtDur(c.y * c.x), name: "duração do caso" },
+      { value: fmtSignedPct((c.y - cost[0].y) / cost[0].y), name: `vs escala ${cost[0].row.scale}` },
+    ];
+    dot.addEventListener("pointerenter", e => showTip(e, c.row.case_id, rows2));
+    dot.addEventListener("pointermove", moveTip);
+    dot.addEventListener("pointerleave", hideTip);
+  });
+  const note = document.createElement("span");
+  note.className = "item";
+  if (fit) {
+    const span = cost[cost.length - 1].x / cost[0].x;
+    note.textContent = `Ajuste: duração ~ n^${fmtTwo(fit.b)} (r² ${fmtTwo(fit.r2)}) — ` +
+      (fit.b >= 1.15 ? `o custo por objeto cresce ×${fmtTwo(Math.pow(span, fit.b - 1))} de ${cost[0].row.scale} a ${cost[cost.length - 1].row.scale}.`
+        : fit.b <= 0.9 ? "o custo por objeto cai com o volume (amortização de custo fixo)."
+          : "escala praticamente linear no intervalo medido.");
+  } else {
+    note.textContent = `Custo por objeto ${fmtSignedPct((cost[cost.length - 1].y - cost[0].y) / cost[0].y)} de ${cost[0].row.scale} a ${cost[cost.length - 1].row.scale} (3+ escalas para ajustar o expoente).`;
+  }
+  legend.appendChild(note);
+}
+
+function renderDiagnosis(row, metricKey, phaseName) {
+  document.getElementById("diag-title").textContent = `Diagnóstico — ${shortCase(row.case_id)}`;
+  document.getElementById("diag-sub").textContent =
+    `${fmtDateTime(row.started_at)} · ${row.commit_short || (row.commit || "").slice(0, 12)} · ` +
+    `${row.environment || ""} · ${(row.env && row.env.build_type) || ""} · ` +
+    `série ${(row.series_key || "").slice(0, 8)} · clique em "Investigar" num achado para trocar o foco`;
+  renderAttribution(row);
+  renderLatencyShape(row, phaseName);
+  renderNoise(row, metricKey, phaseName);
+  renderWindows(row);
+  renderScaleCost(row);
+}
+
+/* =====================================================================
+ * Comparação A ↔ B — duas execuções, junta por caso
+ * ===================================================================== */
+function runById(id) { return runsIndex().find(r => r.run_id === id) || null; }
+function buildCompareSelects() {
+  const runs = runsIndex();
+  for (const [id, key, fallback] of [["f-cmp-a", "cmpA", 1], ["f-cmp-b", "cmpB", 0]]) {
+    const sel = document.getElementById(id);
+    const prev = state[key];
+    sel.textContent = "";
+    for (const run of runs) {
+      const o = document.createElement("option");
+      o.value = run.run_id; o.textContent = runLabel(run.rows);
+      sel.appendChild(o);
+    }
+    if (runs.some(r => r.run_id === prev)) sel.value = prev;
+    else {
+      // Padrão útil: B = execução mais recente, A = a anterior.
+      const pick = runs[Math.min(fallback, runs.length - 1)];
+      state[key] = pick ? pick.run_id : null;
+      if (state[key]) sel.value = state[key];
+    }
+  }
+}
+const CMP_METRICS = [
+  { key: "duration", label: "Duração", better: "down", get: r => num(r.totals && r.totals.duration_ns), fmt: fmtDur },
+  { key: "ops", label: "obj/s", better: "up", get: r => caseOps(r), fmt: v => fmtCompact(v) },
+  { key: "p99", label: "p99 (pior fase)", better: "down", get: r => worstPhaseLatency(r, "p99"), fmt: fmtLat },
+  { key: "disk", label: "Disco de pico", better: "down", get: r => num(r.totals && r.totals.peak_disk_bytes), fmt: fmtBytes },
+  { key: "wal", label: "WAL (fim)", better: "down", get: r => num(lastPhase(r) && lastPhase(r).wal_bytes), fmt: fmtBytes },
+];
+function renderCompare() {
+  const A = runById(state.cmpA), B = runById(state.cmpB);
+  const verdict = document.getElementById("cmp-verdict");
+  const thead = document.getElementById("cmp-thead");
+  const tbody = document.getElementById("cmp-tbody");
+  verdict.textContent = ""; thead.textContent = ""; tbody.textContent = "";
+  document.getElementById("cmp-detail").textContent = "";
+  if (!A || !B) {
+    document.getElementById("cmp-sub").textContent = "Escolha duas execuções para comparar.";
+    return;
+  }
+  const a0 = A.rows[0], b0 = B.rows[0];
+  document.getElementById("cmp-title").textContent = "Comparação A ↔ B";
+  document.getElementById("cmp-sub").textContent =
+    `A: ${fmtDateTime(a0.started_at)} · ${a0.commit_short || ""} · ${a0.branch || ""} — ` +
+    `B: ${fmtDateTime(b0.started_at)} · ${b0.commit_short || ""} · ${b0.branch || ""}`;
+  if (A.run_id === B.run_id) {
+    document.getElementById("cmp-sub").textContent = "A e B são a mesma execução — escolha duas diferentes.";
+    return;
+  }
+
+  const byCaseA = new Map(A.rows.map(r => [r.case_id, r]));
+  const byCaseB = new Map(B.rows.map(r => [r.case_id, r]));
+  const common = Array.from(byCaseA.keys()).filter(k => byCaseB.has(k));
+  const onlyA = Array.from(byCaseA.keys()).filter(k => !byCaseB.has(k));
+  const onlyB = Array.from(byCaseB.keys()).filter(k => !byCaseA.has(k));
+
+  // Ruído por caso: o mesmo critério do resto do painel. Sem ele, um diff
+  // A↔B é só subtração -- e toda subtração parece significativa.
+  const items = common.map(id => {
+    const ra = byCaseA.get(id), rb = byCaseB.get(id);
+    const st = trailingStats(rb, RUN_GATE_METRIC, null);
+    const noise = st.cv === null ? null : 2 * st.cv;
+    const va = num(ra.totals && ra.totals.duration_ns), vb = num(rb.totals && rb.totals.duration_ns);
+    const rel = (va && vb) ? (vb - va) / va : null;
+    const sameSeries = ra.series_key === rb.series_key;
+    const failed = ra.status !== "completed" || rb.status !== "completed";
+    let level = "flat";
+    if (rel !== null) {
+      const over = (state.noiseGate && noise !== null)
+        ? Math.abs(rel) > noise
+        : Math.abs(rel) >= METRICS[RUN_GATE_METRIC].alert;
+      if (over && rel > 0) level = "worse";
+      else if (over && rel < 0) level = "better";
+    }
+    return { id, ra, rb, rel, noise, sameSeries, failed, level };
+  }).sort((x, y) => Math.abs(y.rel || 0) - Math.abs(x.rel || 0));
+
+  const worse = items.filter(i => i.level === "worse").length;
+  const better = items.filter(i => i.level === "better").length;
+  const flat = items.filter(i => i.level === "flat").length;
+  const mixed = items.filter(i => !i.sameSeries).length;
+  const failed = items.filter(i => i.failed).length;
+
+  const box = document.createElement("div");
+  box.className = "findings";
+  const add = (sev, head, why) => {
+    const item = document.createElement("div"); item.className = "item";
+    const dot = document.createElement("span"); dot.className = "sev " + sev;
+    const txt = document.createElement("div"); txt.className = "txt";
+    const h = document.createElement("div"); h.className = "head"; h.textContent = head;
+    txt.appendChild(h);
+    if (why) { const w = document.createElement("div"); w.className = "why"; w.textContent = why; txt.appendChild(w); }
+    item.append(dot, txt); box.appendChild(item);
+  };
+  add(worse ? "critical" : better ? "gain" : "info",
+    `De ${items.length} caso(s) em comum: ${worse} pioraram, ${better} melhoraram, ${flat} indistinguíveis do ruído.`,
+    "Piorou/melhorou aqui significa fora da faixa de ruído da própria série do caso (±2σ), não apenas diferente de zero.");
+  if (mixed) {
+    add("warning", `${mixed} caso(s) têm series_key diferente entre A e B.`,
+      "Host, compilador, build ou versão de formato mudaram entre as duas execuções (§13.4): a diferença nesses casos não é atribuível ao código.");
+  }
+  if (failed) add("critical", `${failed} caso(s) não completaram em uma das pontas.`, "Comparar contra uma execução que falhou não diz nada sobre desempenho.");
+  if (onlyA.length || onlyB.length) {
+    add("info", `${onlyA.length} caso(s) só em A e ${onlyB.length} só em B.`,
+      "Os seletores das duas campanhas foram diferentes — a comparação cobre só a interseção.");
+  }
+  verdict.appendChild(box);
+
+  const cols = [{ label: "Caso", left: true }, { label: "Escala", left: true }]
+    .concat(CMP_METRICS.flatMap(m => [{ label: m.label + " A" }, { label: m.label + " B" }, { label: "Δ" }]))
+    .concat([{ label: "Ruído ±" }, { label: "Série", left: true }]);
+  for (const c of cols) {
+    const th = document.createElement("th");
+    th.className = c.left ? "l" : "";
+    th.style.cursor = "default";
+    th.textContent = c.label;
+    thead.appendChild(th);
+  }
+  for (const it of items) {
+    const tr = document.createElement("tr");
+    const cell = (txt, cls) => {
+      const td = document.createElement("td");
+      td.className = cls || "";
+      td.textContent = txt;
+      tr.appendChild(td);
+      return td;
+    };
+    cell(shortCase(it.id), "l");
+    cell(it.ra.scale || "", "l");
+    for (const m of CMP_METRICS) {
+      const va = m.get(it.ra), vb = m.get(it.rb);
+      cell(va === null || va === 0 ? "—" : m.fmt(va));
+      cell(vb === null || vb === 0 ? "—" : m.fmt(vb));
+      const rel = (va && vb) ? (vb - va) / va : null;
+      const td = cell(fmtSignedPct(rel));
+      if (rel !== null && Math.abs(rel) >= 0.01) {
+        const good = m.better === "up" ? rel > 0 : rel < 0;
+        td.className = good ? "delta-good" : "delta-bad";
+      }
+    }
+    cell(it.noise === null ? "—" : nf1.format(it.noise * 100) + "%");
+    cell(it.sameSeries ? "igual" : "diferente", it.sameSeries ? "l" : "l delta-bad");
+    tr.addEventListener("click", () => {
+      state.focus = { row: it.rb, phase: null };
+      state.selectedCase = it.rb;
+      const el = document.getElementById("cmp-detail");
+      el.textContent = "";
+      const h = document.createElement("div");
+      h.className = "sub";
+      h.textContent = `${it.id} — A: ${fmtDur(num(it.ra.totals && it.ra.totals.duration_ns))} · B: ${fmtDur(num(it.rb.totals && it.rb.totals.duration_ns))}`;
+      const pre = document.createElement("pre");
+      const rowsTxt = PHASE_ORDER.concat(uniq((it.ra.phases || []).concat(it.rb.phases || []).map(p => p.phase)))
+        .filter((v, i, a) => a.indexOf(v) === i)
+        .map(name => {
+          const pa = phaseOf(it.ra, name), pb = phaseOf(it.rb, name);
+          if (!pa && !pb) return null;
+          const da = num(pa && pa.duration_ns), db = num(pb && pb.duration_ns);
+          const rel = (da && db) ? (db - da) / da : null;
+          return `${(PHASE_LABEL[name] || name).padEnd(16)} A ${fmtDur(da).padStart(9)}   B ${fmtDur(db).padStart(9)}   ${fmtSignedPct(rel)}`;
+        }).filter(Boolean);
+      pre.textContent = rowsTxt.join("\n") || "sem fases em comum";
+      el.append(h, pre);
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+/* =====================================================================
+ * Exportação dos achados como prompt
+ * ---------------------------------------------------------------------
+ * Quem recebe o texto não conhece o moDb, não sabe o que é `series_key`
+ * nem por que `0` num p99 não é zero. Sem isso o modelo preenche a lacuna
+ * chutando, e a resposta descreve um sistema que não existe. Então o texto
+ * carrega: o que foi medido, o vocabulário, as regras de leitura, TODOS os
+ * achados (não só os que cabem na tela), os números que os sustentam, as
+ * ressalvas que invalidam parte da leitura, e o pedido -- incluindo o que
+ * não aceitar como resposta.
+ * ===================================================================== */
+function mdEscape(s) { return String(s === null || s === undefined ? "" : s).replace(/\|/g, "\\|"); }
+function mdTable(headers, rows) {
+  if (!rows.length) return "_sem linhas_\n";
+  return `| ${headers.join(" | ")} |\n| ${headers.map(() => "---").join(" | ")} |\n` +
+    rows.map(r => `| ${r.map(mdEscape).join(" | ")} |`).join("\n") + "\n";
+}
+const SEV_TAG = {
+  critical: "CRÍTICO", serious: "GRAVE", warning: "ATENÇÃO",
+  gain: "MELHORA", info: "CONTEXTO",
+};
+
+function distinctParams(rows) {
+  const keys = ["payload", "batch", "concurrency", "readers", "durability", "cache", "primary_storage"];
+  return keys.map(k => {
+    const vals = uniq(rows.map(r => r.params && r.params[k]).map(v => v === undefined || v === null ? "" : String(v)));
+    return vals.length ? `${k}=${vals.join("|")}` : null;
+  }).filter(Boolean).join(" · ");
+}
+
+// Ressalvas que mudam o que se pode concluir -- escritas pelo painel, não
+// deixadas para o leitor descobrir (ou para o modelo ignorar).
+function promptCaveats(rows) {
+  const out = [];
+  const builds = uniq(rows.map(r => r.env && r.env.build_type));
+  if (builds.some(b => b && b !== "Release")) {
+    out.push(`Build **${builds.join("/")}**: números absolutos não representam produção (sem otimização, com asserções). ` +
+      "Comparações entre execuções do mesmo build continuam válidas; recomendações que dependam de custo absoluto precisam ser remedidas em Release.");
+  }
+  const san = uniq(rows.map(r => r.env && r.env.sanitizers)).filter(s => s && s !== "none");
+  if (san.length) out.push(`Sanitizers ativos (${san.join(", ")}): latência e RSS estão inflados por instrumentação.`);
+  if (rows.some(r => r.tree_dirty)) out.push("Pelo menos uma execução rodou com a árvore de trabalho suja: o commit citado não descreve exatamente o código medido.");
+  const incomp = rows.filter(r => r.comparable === false).length;
+  if (incomp) out.push(`${incomp} execução(ões) marcadas \`comparable=false\`: aparecem nas tabelas, mas ficam fora de toda mediana.`);
+  const failed = rows.filter(r => r.status !== "completed").length;
+  if (failed) out.push(`${failed} execução(ões) não completaram: nenhum número delas é publicável.`);
+  const hosts = uniq(rows.map(r => r.env && r.env.host_class));
+  if (hosts.length > 1) out.push(`Mais de uma classe de host no recorte (${hosts.join(", ")}): comparações entre elas não são válidas.`);
+  const noWindows = rows.filter(r => !r.windows).length;
+  if (noWindows) out.push(`${noWindows} de ${rows.length} execução(ões) não gravaram janelas intra-execução: para elas não dá para saber se o custo cresce durante o caso.`);
+  return out;
+}
+
+function promptFindings(findings) {
+  return findings.map((f, i) => {
+    const lines = [`### ${i + 1}. [${SEV_TAG[f.sev] || f.sev}] ${f.head}`];
+    if (f.evidence.length) lines.push(`- Evidência: ${f.evidence.map(e => `${e.k} **${e.v}**`).join(" · ")}`);
+    if (f.why) lines.push(`- Leitura do painel: ${f.why}`);
+    if (f.focus && f.focus.row) {
+      lines.push(`- Caso: \`${f.focus.row.case_id}\`` +
+        (f.focus.phase ? `, fase \`${f.focus.phase}\`` : "") +
+        ` · série \`${(f.focus.row.series_key || "").slice(0, 8)}\``);
+    }
+    return lines.join("\n");
+  }).join("\n\n");
+}
+
+function promptCaseTable(rows) {
+  const shown = rows.slice(0, 40);
+  const body = shown.map(r => {
+    const g = gateAgainstHistory(r, RUN_GATE_METRIC, null);
+    return [
+      r.case_id, r.scale || "", num(r.objects) === null ? "" : fmtInt(r.objects),
+      fmtDur(r.totals && r.totals.duration_ns),
+      fmtUnmeasured(caseOps(r), fmtCompact),
+      fmtUnmeasured(worstPhaseLatency(r, "p99"), fmtLat),
+      fmtBytes(r.totals && r.totals.peak_disk_bytes),
+      fmtBytes(r.totals && r.totals.peak_rss_bytes),
+      fmtUnmeasured(r.totals && r.totals.write_amplification, v => fmtTwo(v) + "×"),
+      g.rel === null ? "sem base" : fmtSignedPct(g.rel),
+      r.status !== "completed" ? r.status : VERDICT_PILL[g.verdict][1],
+    ];
+  });
+  return mdTable(["caso", "escala", "objetos", "duração", "obj/s agr.", "p99 pior fase",
+                  "disco pico", "RSS pico", "WA", "Δ vs mediana", "veredito"], body) +
+    (rows.length > shown.length ? `\n_(${rows.length - shown.length} caso(s) omitidos por tamanho)_\n` : "");
+}
+
+function promptPhaseTable(rows) {
+  const body = [];
+  for (const r of rows) {
+    const total = (r.phases || []).reduce((a, p) => a + (num(p.duration_ns) || 0), 0);
+    for (const p of (r.phases || [])) {
+      body.push([
+        shortCase(r.case_id), p.phase, optInt(p.operations), fmtDur(p.duration_ns),
+        total ? nf0.format((p.duration_ns / total) * 100) + "%" : "",
+        fmtUnmeasured(p.ops_per_second, fmtCompact),
+        fmtUnmeasured(p.latency_ns && p.latency_ns.p50, fmtLat),
+        fmtUnmeasured(p.latency_ns && p.latency_ns.p99, fmtLat),
+        fmtUnmeasured(p.latency_ns && p.latency_ns.p999, fmtLat),
+        fmtUnmeasured(p.bytes_per_object, fmtOne),
+        fmtBytes(p.db_bytes), fmtBytes(p.wal_bytes),
+        optInt(p.pages_read), optInt(p.pages_written), optInt(p.pages_reused),
+        pct01(p.cache_hit_rate), optInt(p.errors),
+      ]);
+    }
+  }
+  return mdTable(["caso", "fase", "operações", "duração", "share", "obj/s", "p50", "p99", "p99.9",
+                  "bytes/obj", "DB", "WAL", "pág. lidas", "pág. escritas", "pág. reusadas",
+                  "cache hit", "erros"], body);
+}
+
+function promptWindowTable(rows) {
+  const body = rows.map(r => {
+    const d = windowDecay(r);
+    if (!d) return null;
+    return [shortCase(r.case_id), fmtCompact(d.first) + " obj/s", fmtCompact(d.last) + " obj/s",
+            fmtSignedPct(d.drop), `${fmtLat(d.p99first)} → ${fmtLat(d.p99last)}`];
+  }).filter(Boolean);
+  return body.length ? mdTable(["caso", "1ª janela", "última janela", "variação", "p99 início → fim"], body) : "";
+}
+
+function promptScaleTable(rows) {
+  const anchors = new Map();
+  for (const r of rows) {
+    const k = [r.workload, r.target, r.environment].join("|");
+    if (!anchors.has(k)) anchors.set(k, r);
+  }
+  const body = [];
+  for (const anchor of anchors.values()) {
+    const { pts, fit } = scaleFit(anchor, state.rows);
+    if (pts.length < 2) continue;
+    const span = pts[pts.length - 1].x / pts[0].x;
+    body.push([
+      `${anchor.workload} · ${anchor.target} · ${anchor.environment || ""}`,
+      pts.map(p => p.row.scale).join(" → "),
+      fit ? `n^${fmtTwo(fit.b)}` : "3+ escalas para ajustar",
+      fit ? fmtTwo(fit.r2) : "",
+      fit ? `×${fmtTwo(Math.pow(span, fit.b - 1))}` : "",
+      pts.map(p => fmtLat(p.y / p.x)).join(" → "),
+    ]);
+  }
+  return body.length ? mdTable(["workload · alvo · ambiente", "escalas", "expoente", "r²",
+                                "custo/objeto no intervalo", "ns por objeto"], body) : "";
+}
+
+function promptSeriesTable(caseRows, metricKey, phaseName) {
+  const def = METRICS[metricKey];
+  const shown = caseRows.slice(-30);
+  const vals = shown.map(r => valueOf(r, metricKey, phaseName));
+  const body = shown.map((r, i) => {
+    const prev = vals.slice(Math.max(0, i - 5), i).filter(v => v !== null);
+    const ref = prev.length >= 3 ? median(prev) : null;
+    return [
+      r.started_at, r.commit_short || (r.commit || "").slice(0, 12), r.branch || "",
+      vals[i] === null ? "—" : def.fmt(vals[i]),
+      ref === null ? "sem base" : fmtSignedPct((vals[i] - ref) / ref),
+      (r.series_key || "").slice(0, 8),
+      r.status + (r.comparable === false ? " · não comparável" : ""),
+    ];
+  });
+  return mdTable(["started_at", "commit", "branch", `${def.label} (${def.unit})`,
+                  "Δ vs mediana das 5 anteriores", "série", "status"], body) +
+    (caseRows.length > shown.length ? `\n_(${caseRows.length - shown.length} ponto(s) mais antigos omitidos)_\n` : "");
+}
+
+function buildLlmPrompt() {
+  const ctx = state.lastAnalysis;
+  if (!ctx) return "";
+  const { result, kind, rows, label } = ctx;
+  const first = rows[0] || {};
+  const env = first.env || {};
+  const findings = result.findings;
+  // Casos citados nos achados: são esses que precisam de detalhe por fase.
+  const cited = [];
+  for (const f of findings) {
+    if (f.focus && f.focus.row && rows.includes(f.focus.row) && !cited.includes(f.focus.row)) cited.push(f.focus.row);
+  }
+  const detail = (cited.length ? cited : rows.slice(0, 3)).slice(0, 8);
+  const caveats = promptCaveats(rows);
+
+  const out = [];
+  out.push("# Resultados de teste de carga do moDb — peço recomendações de melhoria");
+  out.push("");
+  out.push("Você é engenheiro de banco de dados e de desempenho. Abaixo estão os resultados de uma bateria de " +
+    "testes de carga do **moDb**, um banco de dados embarcado escrito em C++ (armazenamento em páginas, " +
+    "WAL, snapshots/MVCC, índices). Os achados foram gerados automaticamente por um painel que aplica as " +
+    "regras de leitura descritas mais abaixo. Leia tudo antes de responder e siga o pedido do final.");
+  out.push("");
+
+  out.push("## O que foi medido");
+  out.push("");
+  out.push(`- **Recorte**: ${label}`);
+  out.push(`- **Tipo de leitura**: ${kind === "run" ? "uma execução (campanha) inteira, caso a caso" : "uma série histórica de um caso ao longo do tempo"}`);
+  out.push(`- **Alvo(s)**: ${uniq(rows.map(r => r.target)).join(", ") || "—"} ` +
+    "(`embedded` = biblioteca no mesmo processo; `loopback`/`remote_*` = através da camada de rede)");
+  out.push(`- **Workloads**: ${uniq(rows.map(r => r.workload)).join(", ") || "—"}`);
+  out.push(`- **Escalas**: ${uniq(rows.map(r => r.scale)).join(", ") || "—"} (volume de registros)`);
+  out.push(`- **Ambiente**: ${uniq(rows.map(r => r.environment)).join(", ")} · classe de host ${uniq(rows.map(r => r.env && r.env.host_class)).join(", ")}` +
+    `${env.os ? ` · ${env.os}` : ""}${env.cpu_model ? ` · ${env.cpu_model}` : ""}${env.fs ? ` · fs ${env.fs}` : ""}` +
+    `${env.device_class ? ` · ${env.device_class}` : ""}${env.cores_logical ? ` · ${env.cores_logical} núcleos lógicos` : ""}` +
+    `${env.ram_gb ? ` · ${env.ram_gb} GB RAM` : ""}`);
+  out.push(`- **Build**: ${uniq(rows.map(r => r.env && r.env.build_type)).join(", ")} · compilador ${uniq(rows.map(r => r.env && r.env.compiler)).join(", ")}`);
+  out.push(`- **Parâmetros**: ${distinctParams(rows) || "—"}`);
+  out.push(`- **Commit(s)**: ${uniq(rows.map(r => r.commit_short)).join(", ")} · branch ${uniq(rows.map(r => r.branch)).join(", ")}`);
+  out.push("");
+
+  out.push("## Vocabulário deste relatório");
+  out.push("");
+  out.push("- **caso**: uma combinação workload × alvo × escala, medida de ponta a ponta.");
+  out.push("- **fase**: etapa dentro do caso (`create`, `read`, `update_inplace`, `update_grow`, `update_shrink`, " +
+    "`delete`, ou um nome próprio do workload como `mixed_oltp`). Cada fase é medida separadamente; a soma delas é a duração do caso.");
+  out.push("- **obj/s**: objetos (registros) processados por segundo. `obj/s agregado` = operações do caso ÷ duração do caso.");
+  out.push("- **p50/p95/p99/p99.9**: percentis de latência por operação.");
+  out.push("- **WA (write amplification)**: bytes fisicamente escritos ÷ bytes lógicos. **SA (space amplification)**: espaço ocupado ÷ espaço lógico.");
+  out.push("- **WAL**: write-ahead log; a coluna WAL é o tamanho dele ao fim da fase.");
+  out.push("- **janelas**: amostras periódicas dentro de uma mesma execução (primeira × última), usadas para ver se o custo cresce durante o caso.");
+  out.push("- **série (`series_key`)**: conjunto de execuções comparáveis entre si. Muda quando muda host, compilador, tipo de build ou versão de formato — comparar através de uma troca de série é comparar hardware/toolchain, não código.");
+  out.push("- **“—”**: campo que o workload não registrou (ausente ou `0` no arquivo). Não é medição igual a zero, e não deve ser interpretado como desempenho perfeito.");
+  out.push("");
+
+  out.push("## Regras de leitura já aplicadas (não as refaça de cabeça)");
+  out.push("");
+  out.push("- Um ponto é comparado com a **mediana das até 5 execuções anteriores da mesma série**, nunca com a execução imediatamente anterior.");
+  out.push("- Com menos de 3 execuções anteriores comparáveis **não há veredito** — o caso é registrado, não julgado.");
+  out.push(`- Um delta só é reportado como regressão se passar do limiar da métrica **e** da dispersão da própria série (mediana ±2σ)${state.noiseGate ? "" : " — **este filtro está desligado neste relatório**, então há achados que passam do limiar mas não do ruído"}.`);
+  out.push("- O mesmo sintoma em 3 ou mais casos é reportado uma vez só, como padrão, nomeando o pior.");
+  out.push("- Execução com `status != completed` não entra em nenhuma mediana.");
+  out.push("");
+
+  if (caveats.length) {
+    out.push("## Ressalvas que limitam as conclusões");
+    out.push("");
+    for (const c of caveats) out.push(`- ${c}`);
+    out.push("");
+  }
+
+  out.push(`## Achados (${findings.length})`);
+  out.push("");
+  out.push(findings.length ? promptFindings(findings)
+    : "_Nenhum achado acima do ruído neste recorte: todos os casos ficaram dentro do limiar e da dispersão da própria série._");
+  out.push("");
+
+  out.push("## Números de apoio");
+  out.push("");
+  if (kind === "run") {
+    out.push("### Casos desta execução");
+    out.push("");
+    out.push(promptCaseTable(rows));
+  } else {
+    out.push(`### Pontos da série (${ctx.metricLabel}, fase \`${ctx.phase}\`)`);
+    out.push("");
+    out.push(promptSeriesTable(rows, ctx.metric, ctx.phase));
+  }
+  out.push("");
+  out.push(`### Métricas por fase${cited.length ? " (casos citados nos achados)" : ""}`);
+  out.push("");
+  out.push(promptPhaseTable(detail));
+  const win = promptWindowTable(rows);
+  if (win) {
+    out.push("");
+    out.push("### Degradação dentro da execução (primeira janela × última)");
+    out.push("");
+    out.push(win);
+  }
+  const scale = promptScaleTable(rows);
+  if (scale) {
+    out.push("");
+    out.push("### Custo por objeto entre escalas");
+    out.push("");
+    out.push("Ajuste log-log de duração contra número de objetos: expoente `n^1,00` = custo por objeto constante; " +
+      "acima disso, dobrar o volume mais que dobra o tempo. `r²` diz se a lei de potência descreve os pontos.");
+    out.push("");
+    out.push(scale);
+  }
+  out.push("");
+
+  out.push("## O que eu quero de você");
+  out.push("");
+  out.push("1. **Hipóteses de causa raiz**, ranqueadas por probabilidade, cada uma amarrada aos números acima que a sustentam (cite a tabela e o valor). Diga também qual número a **refutaria**.");
+  out.push("2. **Mudanças concretas no motor** para as hipóteses mais prováveis — estrutura de dados, política de página/cache, agrupamento de WAL, checkpoint, alocação, índice — com o efeito esperado e o custo/risco de cada uma.");
+  out.push("3. **Como confirmar cada hipótese** com esta mesma bateria: qual workload, escala e parâmetro rodar, e qual métrica olharia. Os casos são selecionáveis por linha de comando (`modb_load run --workload W --scale S --target T [--repeat N]`).");
+  out.push("4. **O que não dá para concluir** com estes dados, e qual medição faltaria (contador, tracing, perfil) para fechar a lacuna.");
+  out.push("");
+  out.push("Restrições da resposta:");
+  out.push("");
+  out.push("- Não proponha afrouxar limiar, gate ou tolerância para \"passar\" — o objetivo é entender o custo, não silenciar o alarme.");
+  out.push("- Separe explicitamente **problema de medição** (ruído, build, ambiente, harness) de **problema do motor**.");
+  out.push("- Se um número acima não sustenta uma recomendação, diga isso em vez de preencher a lacuna com suposição plausível.");
+  out.push("- Seja específico com os números: \"p99 de `update_grow` triplicou enquanto p50 ficou parado\" vale mais que \"melhorar a latência\".");
+  return out.join("\n");
+}
+
+// O prompt descreve um recorte específico. Se o recorte mudar com a caixa
+// aberta, regenera -- deixar o texto anterior na tela seria oferecer para
+// copiar uma análise de outra coisa. Só o texto é reescrito: recriar os nós
+// custava ~20 ms por render, contra 0,3 ms para montar o texto.
+let promptEls = null;
+function updatePromptText() {
+  if (!promptEls) return;
+  promptEls.ta.value = buildLlmPrompt();
+  const n = state.lastAnalysis ? state.lastAnalysis.result.findings.length : 0;
+  promptEls.count.textContent = `${n} achado(s) · ${fmtInt(promptEls.ta.value.length)} caracteres`;
+}
+function syncPromptBox() {
+  if (!document.getElementById("findings-prompt").hidden) updatePromptText();
+}
+function closePromptBox() {
+  const host = document.getElementById("findings-prompt");
+  host.hidden = true;
+  host.textContent = "";
+  promptEls = null;
+}
+
+function renderPromptBox() {
+  const host = document.getElementById("findings-prompt");
+  host.hidden = false;
+  host.textContent = "";
+  const box = document.createElement("div");
+  box.className = "promptbox";
+
+  const warn = document.createElement("p");
+  warn.className = "warn";
+  const b = document.createElement("b");
+  b.textContent = "Este texto só sai da sua máquina se você colar em algum lugar. ";
+  warn.append(b, document.createTextNode(
+    "Ele contém apenas o que já está no series.jsonl — que é versionado no repositório: host_id é hash, " +
+    "sem caminhos, sem usuário, sem segredo (§13.10). Confira antes de colar."));
+
+  const ta = document.createElement("textarea");
+  ta.readOnly = true;
+  ta.value = buildLlmPrompt();
+  ta.setAttribute("aria-label", "Prompt gerado a partir dos achados");
+
+  const row = document.createElement("div");
+  row.className = "row";
+  const copy = document.createElement("button");
+  copy.className = "primary";
+  copy.textContent = "Copiar";
+  copy.addEventListener("click", () => {
+    ta.select();
+    // `execCommand` continua sendo o caminho que funciona em file://, onde a
+    // Clipboard API costuma ser negada; tenta a moderna e cai para ela.
+    const done = ok => { copy.textContent = ok ? "Copiado" : "Selecione e copie (Ctrl+C)"; setTimeout(() => { copy.textContent = "Copiar"; }, 2500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(() => done(true), () => done(document.execCommand("copy")));
+    } else {
+      done(document.execCommand("copy"));
+    }
+  });
+  const dl = document.createElement("button");
+  dl.textContent = "Baixar .md";
+  dl.addEventListener("click", () => {
+    const name = (state.lastAnalysis && state.lastAnalysis.kind === "run" ? "execucao" : "serie");
+    downloadBlob(new Blob([ta.value], { type: "text/markdown;charset=utf-8" }),
+                 `modb-load-achados-${name}.md`);
+  });
+  const close = document.createElement("button");
+  close.textContent = "Fechar";
+  close.addEventListener("click", closePromptBox);
+  const count = document.createElement("span");
+  count.className = "warn";
+  const n = state.lastAnalysis ? state.lastAnalysis.result.findings.length : 0;
+  count.textContent = `${n} achado(s) · ${fmtInt(ta.value.length)} caracteres`;
+  row.append(copy, dl, close, count);
+
+  box.append(warn, ta, row);
+  host.appendChild(box);
+  promptEls = { box, ta, count };
+}
+
+/* =====================================================================
+ * O que cada gráfico mostra
+ * ---------------------------------------------------------------------
+ * Um gráfico que precisa de alguém do lado para ser lido não serve para
+ * quem abre o painel sozinho seis meses depois. Cada entrada diz o que
+ * está desenhado, como ler o desenho e qual regra do plano ele representa
+ * -- inclusive quando o gráfico se recusa a desenhar.
+ * ===================================================================== */
+const CHART_INFO = {
+  findings: {
+    what: "Achados do recorte atual, ordenados por gravidade. Cada linha traz o número, a base contra a qual ele foi comparado e por que aquilo importa.",
+    read: "Bolinha vermelha é regressão ou falha; laranja, sinal para investigar; amarela, ponto de atenção; verde, melhora acima do ruído; cinza, informação sobre a própria leitura. “Investigar” manda o diagnóstico abaixo para aquele caso.",
+    rule: "Um delta só vira achado se passar do limiar da métrica E da dispersão da própria série (mediana ±2σ). O mesmo sintoma em 3+ casos vira um achado só, nomeando o pior — é padrão, não dez notícias. Desmarcar “exigir sinal acima do ruído” devolve a leitura de limiar puro, igual à do modb_load gate.",
+  },
+  trend: {
+    what: "Um ponto por execução do caso escolhido, no tempo, para a métrica e a fase selecionadas. A linha cinza é a mediana móvel das 5 execuções anteriores; as tracejadas são os limiares de alerta e falha aplicados sobre essa mediana.",
+    read: "Ponto que cruza a tracejada vermelha é reprovação do gate por execução. Círculo vazado é comparable=false: aparece, mas não entra em mediana nenhuma. Vermelho é execução que não completou. A linha vertical marca troca de series_key — a mediana reinicia ali de propósito.",
+    rule: "§13.7 — o ponto é comparado com a mediana das 5 anteriores, nunca com a execução imediatamente anterior; com menos de 3 pontos não há veredito.",
+  },
+  scale: {
+    what: "A execução mais recente de cada escala, restrita ao mesmo workload, alvo e ambiente do caso selecionado. Eixo x logarítmico no número de objetos.",
+    read: "A tracejada horizontal é o valor da menor escala mantido em todas: quanto mais a linha se afasta dela, mais o custo por objeto muda com o volume.",
+    rule: "§4.1 — o recorte por workload/alvo/ambiente é proposital: misturar hardware faria a curva medir outra coisa.",
+  },
+  phase: {
+    what: "Uma barra por execução (as 10 últimas) do caso, dividida pela duração de cada fase.",
+    read: "Com mais de uma fase as barras são proporcionais (a barra inteira = duração do caso) e mostram qual fase domina. Com uma fase só, viram duração absoluta, comparável entre execuções.",
+    rule: "§4.2 — cada fase é medida separadamente. Fases que o próprio workload nomeia (mixed_oltp, hold, cascade_delete) entram junto das canônicas, senão a barra somaria só parte do caso e chamaria isso de 100%.",
+  },
+  runDelta: {
+    what: "Uma barra por caso do set: quanto a duração total daquele caso se afastou da mediana das 5 execuções anteriores da mesma série.",
+    read: "À direita = mais lento que o histórico. As tracejadas são os limiares de alerta e falha. Caso sem 3 execuções anteriores comparáveis não aparece — não há base, e inventar uma seria pior que a ausência.",
+    rule: "§13.7 — mesma leitura de modb_load gate --metric total_duration para o mesmo caso.",
+  },
+  runPhase: {
+    what: "As fases do caso selecionado nesta execução, em duração absoluta; a fase mais longa preenche a faixa.",
+    read: "O rótulo à direita é o throughput da fase (ou a duração, quando o workload não registra throughput). Com o ponteiro em cima: share da duração, p50, p99 e erros.",
+    rule: "§4.2 — a duração do caso é a soma das fases; é aqui que se vê qual delas é o caso inteiro na prática.",
+  },
+  attr: {
+    what: "Diferença de duração de cada fase entre esta execução e a mediana das execuções anteriores da mesma série.",
+    read: "Barra vermelha à direita = a fase levou mais tempo do que costuma; verde à esquerda = menos. A soma das barras é a diferença do caso, então a maior barra é a responsável pelo que o achado apontou.",
+    rule: "Precisa de 3+ execuções anteriores por fase. Sem isso o gráfico não é desenhado, em vez de chutar uma base.",
+  },
+  shape: {
+    what: "p50, p95, p99 e p99.9 da fase em foco nesta execução (barras) contra a mediana das anteriores (marca vertical). Eixo logarítmico, porque p50 e p99.9 costumam diferir por ordens de grandeza.",
+    read: "Cauda crescendo com o p50 parado indica contenção, pausa de checkpoint ou fsync — não custo por operação. Cauda e mediana subindo juntas indicam o contrário. A barra fica amarela quando passa 5% acima da mediana anterior.",
+    rule: "§8 — percentis por fase. Campo valendo 0 no rollup aparece como não medido, nunca como zero medido.",
+  },
+  noise: {
+    what: "As até 10 execuções anteriores da mesma série (pontos cinza), a mediana delas (linha) e a faixa de ±2 desvios padrão (área). O ponto destacado é esta execução.",
+    read: "Dentro da faixa, o ponto é indistinguível da variação normal da série e não decide nada sozinho. Fora dela, é sinal. É este gráfico que separa “regrediu” de “a série respira”.",
+    rule: "A faixa só é desenhada com 4+ pontos anteriores: com 3, um 2σ sai por sorte, e aí o veredito usa apenas o limiar da métrica — e diz isso.",
+  },
+  win: {
+    what: "Throughput e p99 da primeira janela contra a última janela da mesma execução, normalizados pela primeira (100%).",
+    read: "Throughput descendo e p99 subindo = o caso fica mais caro à medida que acumula volume, dentro da própria execução. Linhas planas = custo por objeto estável do começo ao fim.",
+    rule: "§8, campo windows — degradação que nenhuma média da execução mostra. Execução que não gravou janelas não tem o que desenhar aqui.",
+  },
+  compare: {
+    what: "Os casos presentes nas duas execuções, com duração, obj/s, p99, disco e WAL de cada lado e o delta de B em relação a A. O bloco de cima resume quantos pioraram, melhoraram e ficaram iguais.",
+    read: "Verde é melhor em B, vermelho é pior — pela direção de cada métrica, não pelo sinal do número. Clique numa linha para abrir o mesmo comparativo fase a fase.",
+    rule: "“Piorou/melhorou” aqui é fora da faixa de ruído da própria série do caso (±2σ), não apenas diferente de zero. Caso com series_key diferente entre A e B é marcado: ali mudou host, compilador, build ou formato (§13.4), e a diferença não é atribuível ao código.",
+  },
+  cost: {
+    what: "Nanossegundos por objeto na execução mais recente de cada escala, mesmo workload/alvo/ambiente. Eixo x logarítmico.",
+    read: "A tracejada é o custo da menor escala mantido: linha plana = escala linear. Com 3+ escalas a legenda traz o expoente ajustado — n^1,00 é custo por objeto constante, acima disso dobrar o volume mais que dobra o tempo.",
+    rule: "§4.1 — ajuste log-log da duração contra o número de objetos, com r² para dizer se a lei de potência descreve mesmo os pontos ou se eles não seguem lei nenhuma.",
+  },
+};
+
+function wireInfoButtons() {
+  for (const btn of document.querySelectorAll("button.info")) {
+    const info = CHART_INFO[btn.dataset.info];
+    const target = document.getElementById(btn.dataset.target);
+    if (!info || !target) continue;
+    btn.type = "button";
+    btn.title = info.what;                       // resumo imediato, sem clique
+    btn.setAttribute("aria-label", "O que este gráfico mostra");
+    btn.setAttribute("aria-expanded", "false");
+
+    const box = document.createElement("div");
+    box.className = "infobox";
+    box.hidden = true;
+    for (const [label, txt] of [["Mostra", info.what], ["Como ler", info.read], ["Regra", info.rule]]) {
+      const line = document.createElement("div");
+      const b = document.createElement("b");
+      b.textContent = label + ": ";
+      line.append(b, document.createTextNode(txt));
+      box.appendChild(line);
+    }
+    target.parentNode.insertBefore(box, target);
+    btn.addEventListener("click", () => {
+      const opening = box.hidden;
+      box.hidden = !opening;
+      btn.classList.toggle("on", opening);
+      btn.setAttribute("aria-expanded", String(opening));
+    });
+  }
 }
 
 /* =====================================================================
@@ -1182,7 +3794,9 @@ function exportCsv(rows, ctx) {
 let renderPending = false;
 function render() {
   if (!state.rows.length) return;
-  document.getElementById("content").hidden = false;
+  applyMode();
+  if (state.mode === "compare") { renderCompare(); return; }
+  if (state.mode === "run") { renderRun(); return; }
   const metric = document.getElementById("f-metric").value;
   const phase = document.getElementById("f-phase").value;
   const caseId = document.getElementById("f-case").value;
@@ -1228,6 +3842,23 @@ function render() {
         r.comparable !== false && (document.getElementById("f-failed").checked || r.status === "completed"))
     : [];
   const ctxLabel = anchor ? [anchor.workload, anchor.target, anchor.environment].filter(Boolean).join(" · ") : "";
+
+  // Análise primeiro: o que esta série está dizendo, e sobre qual ponto.
+  const analysis = analyzeSeries(caseRows, metric, phase);
+  renderFindings(analysis, {
+    label: `${caseId} · ${def.label.toLowerCase()} · fase ${PHASE_LABEL[phase] || phase} · ` +
+      `${caseRows.length} ponto(s) no recorte`,
+    kind: "series", rows: caseRows, metric, phase, metricLabel: def.label,
+  });
+  const focusRow = (state.focus && caseRows.some(r => rowKey(r) === rowKey(state.focus.row)))
+    ? state.focus.row : analysis.anchor;
+  const diag = document.getElementById("diag-card");
+  if (focusRow) {
+    diag.hidden = false;
+    renderDiagnosis(focusRow, metric, (state.focus && state.focus.phase) || phase);
+  } else {
+    diag.hidden = true;
+  }
 
   renderTiles(caseRows, scoped, metric, phase);
   renderTrend(caseRows, metric, phase);
@@ -1362,7 +3993,8 @@ function demoSeries() {
 document.getElementById("pick").addEventListener("click", () => document.getElementById("file").click());
 document.getElementById("file").addEventListener("change", e => readFiles(e.target.files));
 document.getElementById("demo").addEventListener("click", () => {
-  state.demo = true; state.rows = [];
+  state.demo = true;
+  resetData("series.jsonl");
   ingest(demoSeries(), []);
 });
 const dz = document.getElementById("dropzone");
@@ -1377,9 +4009,59 @@ document.addEventListener("drop", e => {
 for (const id of ["f-period", "f-workload", "f-target", "f-scale", "f-environment", "f-host", "f-comparable", "f-failed"]) {
   document.getElementById(id).addEventListener("change", () => { refreshDependentFilters(); render(); });
 }
-for (const id of ["f-case", "f-phase", "f-metric"]) {
+// Trocar de caso muda quais fases existem: sem reconstruir o seletor, ficaria
+// selecionada uma fase que o novo caso não mede.
+document.getElementById("f-case").addEventListener("change", () => {
+  state.focus = null;
+  refreshDependentFilters();
+  render();
+});
+for (const id of ["f-phase", "f-metric"]) {
   document.getElementById(id).addEventListener("change", render);
 }
+document.getElementById("f-mode").addEventListener("change", e => {
+  state.mode = e.target.value;
+  document.getElementById("run-confirm").hidden = true;
+  render();
+});
+document.getElementById("f-run").addEventListener("change", e => {
+  state.runId = e.target.value;
+  state.selectedCase = null;
+  document.getElementById("run-confirm").hidden = true;
+  render();
+});
+for (const id of ["f-cmp-a", "f-cmp-b"]) {
+  document.getElementById(id).addEventListener("change", e => {
+    state[id === "f-cmp-a" ? "cmpA" : "cmpB"] = e.target.value;
+    render();
+  });
+}
+document.getElementById("cmp-swap").addEventListener("click", () => {
+  const a = state.cmpA;
+  state.cmpA = state.cmpB; state.cmpB = a;
+  document.getElementById("f-cmp-a").value = state.cmpA || "";
+  document.getElementById("f-cmp-b").value = state.cmpB || "";
+  render();
+});
+document.getElementById("findings-export").addEventListener("click", () => {
+  const host = document.getElementById("findings-prompt");
+  if (!host.hidden) { closePromptBox(); return; }
+  renderPromptBox();
+  host.scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
+document.getElementById("f-noise").addEventListener("change", e => {
+  state.noiseGate = e.target.checked;
+  gateCache.clear();
+  render();
+});
+document.getElementById("run-csv").addEventListener("click", () => {
+  const run = currentRun();
+  if (run) exportRunCsv(run);
+});
+document.getElementById("run-delete").addEventListener("click", () => {
+  const run = currentRun();
+  if (run) askDeleteRun(run);
+});
 document.getElementById("csv").addEventListener("click", () => {
   const metric = document.getElementById("f-metric").value;
   const phase = document.getElementById("f-phase").value;
@@ -1394,6 +4076,8 @@ document.getElementById("theme-toggle").addEventListener("click", () => {
 });
 addEventListener("resize", scheduleRender);
 
+wireInfoButtons();
+
 /* ?src=... : funciona quando a pasta é servida por HTTP (file:// bloqueia fetch) */
 (function boot() {
   const src = new URLSearchParams(location.search).get("src");
@@ -1404,7 +4088,8 @@ addEventListener("resize", scheduleRender);
   }).then(t => {
     const p = parseJsonl(t, src);
     state.demo = false;
-    ingest(p.rows, p.bad, `${p.rows.length} ponto(s) de ${src}.`);
+    resetData(src.split(/[\\/]/).pop() || "series.jsonl");
+    ingest(p.rows, p.bad, `${p.rows.length} ponto(s) de ${src}.`, p.lines);
   }).catch(err => {
     banners([{
       cls: "err", strong: `Não foi possível ler ${src}:`,

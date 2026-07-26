@@ -1195,6 +1195,9 @@ indexes by default, `--no-index` turns it off) to become a rollup in
 
 The panel is a visual reading of this chapter's rules, not decoration:
 
+Under the analysis layer, the data layers stay available (they are what the
+findings are computed from):
+
 | element | rule it makes visible |
 |---|---|
 | trend with moving median and drawn alert/fail thresholds | §13.7: the point is compared against the median of the last 5, not the previous one |
@@ -1210,6 +1213,126 @@ verdict, points with `comparable=false` appear but are excluded from the
 calculation, failures appear in red instead of vanishing, and "today" is
 the series' most recent point — not the machine's clock, so old history
 stays legible.
+
+#### The panel states conclusions, and each one carries its evidence
+
+The page opens with **Leitura**: findings for the current selection, ranked
+by severity, not a wall of numbers to interpret. Every finding has the same
+three parts — the claim with its number, the evidence line (what it was
+compared against, what else moved), and *why it matters*. A finding never
+appears without the base it was measured against.
+
+Two rules keep it from becoming an alarm generator:
+
+- **Noise before threshold.** A delta is only reported when it exceeds both
+  the metric's threshold *and* the series' own dispersion (mediana ±2σ over
+  the last up-to-10 comparable points). A series that swings ±19% on its own
+  cannot have a 10% regression detected in it, and saying otherwise teaches
+  the reader to ignore the panel. Cases that trip the threshold but not the
+  noise are reported as exactly that, together with the way out (`--repeat`,
+  a quieter machine, or a wider threshold). The "exigir sinal acima do ruído"
+  checkbox turns the filter off and restores the pure-threshold reading —
+  which is what `modb_load gate` does, so the two can be checked against
+  each other (§16).
+- **Pattern over repetition.** The same symptom in three or more cases is
+  reported once, as a pattern, naming the worst case and the affected
+  scales — a throughput decay present in ten unrelated workloads is a
+  property of the engine at that volume, and that sentence is worth more
+  than the same sentence ten times.
+
+What the engine looks for, beyond the per-run gate: phase attribution (which
+phase accounts for the extra time), tail widening (p99/p50 growing while p50
+holds — contention, not per-operation cost), intra-run decay (`windows`:
+throughput falling from the first to the last window), super-linear scaling
+(log-log fit of duration against object count, reported as `n^b` with r²),
+write amplification above 3×, series breaks in the recent points, slow drift,
+and cases with no comparison base at all.
+
+**Exportar para LLM…**, in the findings header, builds a self-contained
+text — shown in a box before anything leaves the page — meant to be pasted
+into a language model to ask for improvement recommendations. It carries
+what was measured (target, workloads, scales, environment, build,
+parameters, commit), the vocabulary (what a phase, `series_key`, WA or a
+`—` means), the reading rules already applied, the caveats that limit the
+conclusions (Debug build, dirty tree, runs without windows, incomparable
+points), **all** findings — not only the ones that fit on screen — and the
+supporting tables: per-case numbers, per-phase metrics for the cases the
+findings cite, intra-run decay, and the fitted scaling exponents. It closes
+with the request, including what not to accept as an answer: no loosening
+thresholds to make the gate pass, separate measurement problems from engine
+problems, and say what the data does not support instead of filling the gap
+with a plausible guess. Copy, or download as `.md`. Nothing is sent
+anywhere by the panel itself — the text only leaves the machine if the
+person pastes it somewhere, and it contains only what `series.jsonl`
+already holds, which is versioned in the repository (§13.10).
+
+Every chart, the findings panel and the comparison carry an **information
+icon** next to their title. It opens a note in place with three lines —
+*Mostra* (what is plotted: marks, axes, what each element is), *Como ler*
+(how to read it, including what a healthy picture looks like) and *Regra*
+(the rule from this chapter that the chart encodes, and when the chart
+refuses to draw rather than guess a baseline). A chart that needs someone
+sitting next to you to be read is useless to whoever opens the panel alone
+six months from now.
+
+**Diagnóstico** answers the follow-up questions for the focused case — the
+one the worst finding points at, or whichever case you click:
+
+| chart | question |
+|---|---|
+| onde foi o tempo | which phase absorbed the difference, in absolute duration, against that phase's own median (the bars sum to the case's difference) |
+| forma da latência | p50→p99.9 of this run against the previous median, on a log axis: did the tail move, the median, or both |
+| sinal ou ruído | this point against the series' actual dispersion — the chart that says whether there is anything to investigate |
+| dentro da execução | first window vs last, normalized: does the case get more expensive as it accumulates volume |
+| custo por objeto vs escala | ns per object across scales with the fitted exponent — `n^1,00` is constant cost (§4.1) |
+
+**Comparar (A ↔ B)** joins two campaigns by `case_id` and answers "did my
+patch change anything": per-case deltas for duration, obj/s, p99, peak disk
+and WAL, with the same noise rule deciding what counts as worse or better,
+a per-phase breakdown on click, and an explicit warning for cases whose
+`series_key` differs between the two sides — there, the difference is not
+attributable to the code (§13.4).
+
+#### Reading a single campaign
+
+The "Mode" selector switches between `Histórico (série)` — everything
+above — and `Uma execução (set)`: one `run_id`, which is exactly one
+campaign, with the cases it actually ran and nothing else (the series
+filters are hidden there, since hiding cases inside a set would suggest
+the campaign ran less than it did). "Ver só esta execução", in the
+history table's detail panel, jumps straight from a point to its set.
+
+The set view answers "how did this run go", not "how is the project
+trending":
+
+| element | what it makes readable |
+|---|---|
+| set tiles | total duration, aggregate obj/s, operations, peak disk, peak RSS, worst write amplification, and a set-wide verdict (worst per-case verdict; any case with `status != completed` fails the set on its own) |
+| case table | one row per case: duration, aggregate obj/s, worst-phase p99, peak disk, final WAL, WA, Δ against the median of the 5 previous runs of the *same series*, and per-case gate |
+| "this set vs its own history" chart | the same Δ as diverging bars with the alert/fail thresholds drawn — worse is always to the right, so a regression in one case doesn't hide behind 20 healthy ones |
+| per-phase composition | the selected case's phases in absolute duration, labeled with each phase's throughput |
+| per-phase metric table | every field the rollup measured per phase (p50/p95/p99/p99.9, bytes/object, DB, WAL, peak RSS, pages read/written/reused, retained versions, cache hit, errors) plus the case totals, parameters, validations, sliding windows and the raw file's hash — this is the only place the panel shows them |
+
+The per-case verdict uses `total_duration` against the median of the up-to-5
+previous comparable points of the same `series_key`, strictly before this
+run: the same reading as `modb_load gate --metric total_duration`, so §16's
+"if they diverge, one of the two is wrong" still applies. A field worth
+exactly `0` where no measurement can be zero (latency, throughput,
+bytes/object, amplification) is shown as `—`: the rollup has no sentinel of
+its own and writes `0` when the workload didn't collect it, and printing
+"0 ns" would invite comparing a non-measurement against a measurement.
+
+#### Removing a set
+
+"Apagar este set…", in the set view, asks for confirmation (naming the
+`run_id`, how many rollups it has and which raw files correspond to it) and
+then takes those rollups out of the loaded view. **It never writes to
+disk** — §13.8 keeps rollups as the project's memory, so the panel offers
+what it can honestly offer: "Desfazer", a `series.jsonl` download without
+the removed sets (every other line byte for byte, in the original order),
+and the equivalent PowerShell/bash one-liners, with a backup, for whoever
+decides to make it permanent. Deleting history stays a human decision that
+lands in a commit, not a side effect of opening a panel.
 
 ## 14. Artifacts to implement
 
@@ -1425,7 +1548,17 @@ Specifically for the historical series:
   PR (on the order of KB per month of regular use);
 - the dashboard (§13.11) opens the real `series.jsonl` with no conversion,
   and shows the same reading as `modb_load trend`/`gate` for the same case
-  and metric — if they diverge, one of the two is wrong.
+  and metric — if they diverge, one of the two is wrong;
+- the dashboard reads a single campaign (`run_id`) in isolation, with every
+  per-phase field the rollup measured and a per-case verdict against that
+  case's own history, and removing a set from the panel writes nothing to
+  disk: it produces a `series.jsonl` without that set and leaves the
+  decision — and the commit — to a person;
+- the dashboard opens on conclusions, not on numbers: every finding names
+  what it was compared against, no delta inside the series' own dispersion
+  is reported as a regression, a symptom repeated across three or more cases
+  is reported once as a pattern, and turning the noise filter off reproduces
+  `modb_load gate`'s pure-threshold reading for the same case and metric.
 
 ## 17. Risks and open questions
 
