@@ -28,7 +28,12 @@ repeat: 1
 max_duration:
 max_disk_gb:
 max_rss_mb:
-accept_unknown_budget: false
+# A tabela de calibração (§10) só cobre a escada básica (create_only,
+# create_delete_*, crud_full) -- os workloads de §4.2.1 (read_hotspot,
+# mixed_oltp, snapshot_hold, blob_lifecycle, cascade_delete,
+# oversubscribed_churn) listados abaixo nunca tiveram medição de
+# calibração. Sem isto, `run` recusa o lote inteiro por causa deles.
+accept_unknown_budget: true
 dry_run: false
 
 scale:
