@@ -240,9 +240,9 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | P | `cascade_delete` | 7 | ✅ | `18fa1ea` · 2026-07-25 |
 | Q | `oversubscribed_churn`, perfil `load-behavior` | 7 | ✅ | `0c595a2` · 2026-07-25 |
 | R | Harness kill/restart, `restart_recovery` | 7 | ✅ | `aa3985a` · 2026-07-25 (simulado via failpoint em processo + reabertura real; sem kill de processo de verdade -- ver §17 risco 13 e docs/PLANO_TESTES_DE_CARGA.md §4.2.1) |
-| K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ⬜ | depende de M, N, O, P, Q |
+| K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ✅ | `485385b` · 2026-07-25 (pairwise só em payload/concurrency, os únicos com dispatch real; load-soak sem duração-alvo -- ver docs/PLANO_TESTES_DE_CARGA.md §6.2) |
 
-Progresso: **19/20**.
+Progresso: **20/20**. Todas as subfases do plano de execução concluídas.
 
 ## 6. O que não está neste plano, de propósito
 
