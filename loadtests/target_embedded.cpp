@@ -111,10 +111,15 @@ public:
         }
         ++ops_in_window_;
         latencies_in_window_.push_back(latency_ns);
+        rss_.sample();
         if (now - window_start_ >= interval_) {
             emit(now);
         }
     }
+
+    // Pico de RSS da fase, amostrado ao longo dela -- não o pico monotônico do
+    // processo (docs-process/PLANO_PROFILING.md §3, M2).
+    [[nodiscard]] std::uint64_t rss_peak_bytes() { return rss_.peak(); }
 
     // Fecha a última janela parcial, se sobrou alguma operação não emitida --
     // mas só quando pelo menos uma janela completa já fechou antes (§8: fase
@@ -147,7 +152,9 @@ private:
         window.p99_ns = latencies_in_window_.empty()
                           ? 0.0
                           : percentile_sorted(latencies_in_window_, 0.99);
-        window.peak_rss_bytes = peak_rss_bytes();
+        // Snapshot do RSS no fechamento da janela: uma série temporal quer a
+        // curva, não uma marca de água monotônica que nunca desce.
+        window.peak_rss_bytes = current_rss_bytes();
         window.db_bytes = db_bytes_getter_ ? db_bytes_getter_() : 0;
 
         if (window_count_ == 0) {
@@ -175,6 +182,9 @@ private:
     std::uint64_t window_count_{0};
     ProgressWindow first_window_;
     ProgressWindow last_window_;
+    // Construído junto com o tracker, que tem exatamente o tempo de vida da
+    // fase -- daí o piso ser o RSS no início dela.
+    RssTracker rss_;
 };
 
 // Preenche CaseRunResult::WindowsSummary a partir da PRIMEIRA fase do caso
@@ -351,7 +361,7 @@ CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const Worklo
         params.object_count > 0 ? db_bytes_after / params.object_count : 0;
     outcome.phase.errors = errors;
     outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
-    outcome.phase.peak_rss_bytes = peak_rss_bytes();
+    outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
     outcome.phase.db_bytes = db_bytes_after;
     outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     outcome.phase.pages_read = pages_read_after - pages_read_before;
@@ -463,7 +473,7 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
     outcome.phase.bytes_per_object = 0;   // delete não escreve conteúdo lógico por objeto
     outcome.phase.errors = errors;
     outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
-    outcome.phase.peak_rss_bytes = peak_rss_bytes();
+    outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
     outcome.phase.db_bytes = db_bytes_after;
     outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     // O motor não expõe uma razão de fragmentação na API pública hoje (§4.2
@@ -604,7 +614,7 @@ ReadPhaseOutcome perform_read_phase(AttachedDatabase& attached, const std::vecto
     outcome.phase.bytes_per_object = object_count > 0 ? db_bytes / object_count : 0;
     outcome.phase.errors = errors;
     outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
-    outcome.phase.peak_rss_bytes = peak_rss_bytes();
+    outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
     outcome.phase.db_bytes = db_bytes;
     outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     outcome.phase.pages_read = pages_read_after - pages_read_before;
@@ -722,7 +732,7 @@ UpdatePhaseOutcome perform_update_phase(
     outcome.phase.bytes_per_object = ids.size() > 0 ? db_bytes / ids.size() : 0;
     outcome.phase.errors = errors;
     outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
-    outcome.phase.peak_rss_bytes = peak_rss_bytes();
+    outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
     outcome.phase.db_bytes = db_bytes;
     outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     outcome.phase.pages_read = pages_read_after - pages_read_before;
@@ -1101,6 +1111,7 @@ CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
     std::ostringstream expected_stream, actual_stream;
     std::uint64_t errors = 0;
 
+    RssTracker rss;
     const auto read_start = std::chrono::steady_clock::now();
     for (std::uint64_t i = 0; i < read_count; ++i) {
         const auto rank = sampler.next();
@@ -1115,6 +1126,7 @@ CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
         }
         const auto op_end = std::chrono::steady_clock::now();
         latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+        rss.sample();
 
         if (!handle || !value) {
             ++errors;
@@ -1144,7 +1156,7 @@ CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
                                        : 0.0;
     phase.errors = errors;
     phase.latency_ns = percentiles_of(std::move(latencies_ns));
-    phase.peak_rss_bytes = peak_rss_bytes();
+    phase.peak_rss_bytes = rss.peak();
     phase.db_bytes = size_error ? 0 : db_bytes;
     phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     phase.cache_hit_rate = hit_rate;
@@ -1234,6 +1246,7 @@ CaseRunResult run_range_scan_sweep_embedded(const WorkloadParams& params,
 
         std::uint64_t actual_count = 0;
         std::uint64_t errors = 0;
+        RssTracker rss;   // uma fase por seletividade, um tracker por fase
         const auto scan_start = std::chrono::steady_clock::now();
         for (auto& row : std::move(query).stream()) {
             if (row) {
@@ -1241,6 +1254,7 @@ CaseRunResult run_range_scan_sweep_embedded(const WorkloadParams& params,
             } else {
                 ++errors;
             }
+            rss.sample();
         }
         const auto scan_end = std::chrono::steady_clock::now();
 
@@ -1262,7 +1276,7 @@ CaseRunResult run_range_scan_sweep_embedded(const WorkloadParams& params,
         phase.ops_per_second = scan_ns > 0 ? (static_cast<double>(actual_count) * 1'000'000'000.0) /
                                                 static_cast<double>(scan_ns)
                                            : 0.0;
-        phase.peak_rss_bytes = peak_rss_bytes();
+        phase.peak_rss_bytes = rss.peak();
         result.phases.push_back(phase);
     }
 
@@ -1440,6 +1454,11 @@ CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
     const auto total_ops = std::max<std::uint64_t>(params.object_count * 5, 1000);
     const auto ops_per_thread = total_ops / concurrency;
 
+    // Sessões concorrentes: amostrar por operação exigiria um tracker
+    // compartilhado entre threads. Aqui o RSS cresce monotonicamente (a
+    // contabilidade em memória só acumula), então limitar por início/fim
+    // captura o pico sem sincronização.
+    RssTracker rss;
     const auto mixed_start = std::chrono::steady_clock::now();
     {
         std::vector<std::thread> threads;
@@ -1527,7 +1546,7 @@ CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
                                        : 0.0;
     phase.errors = state.errors;
     phase.latency_ns = percentiles_of(std::move(state.latencies_ns));
-    phase.peak_rss_bytes = peak_rss_bytes();
+    phase.peak_rss_bytes = rss.peak();
     std::error_code size_error;
     const auto db_bytes = std::filesystem::file_size(db_path, size_error);
     phase.db_bytes = size_error ? 0 : db_bytes;
@@ -1619,8 +1638,10 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
     const auto filler_bytes = filler_bytes_for_payload(params.payload);
     std::uint64_t churn_errors = 0;
 
+    RssTracker rss;
     const auto hold_start = std::chrono::steady_clock::now();
     for (std::size_t i = 0; i < n; ++i) {
+        rss.sample();   // retenção MVCC é justamente onde o RSS por fase importa
         const auto logical_id = i + 1;
         if (i < update_end) {
             const auto new_value = generate_user_ex(params.seed, logical_id, filler_bytes,
@@ -1773,7 +1794,7 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
     phase.phase = "hold";
     phase.operations = n;
     phase.duration_ns = ns_between(hold_start, hold_end);
-    phase.peak_rss_bytes = peak_rss_bytes();
+    phase.peak_rss_bytes = rss.peak();
     phase.db_bytes = size_error ? 0 : db_bytes;
     phase.retained_versions = retained_while_open;
     phase.errors = churn_errors;
@@ -1846,8 +1867,10 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     std::uint64_t errors = 0;
 
     // create
+    RssTracker create_rss;
     const auto create_start = std::chrono::steady_clock::now();
     for (const auto& size : sizes) {
+        create_rss.sample();
         const auto content = deterministic_blob_pattern(params.seed ^ 0x8106'0001ULL, size.bytes);
         auto tx = attached.database->begin();
         if (!tx) {
@@ -1874,14 +1897,16 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     create_phase.operations = lifecycles.size();
     create_phase.duration_ns = ns_between(create_start, create_end);
     create_phase.db_bytes = size_error ? 0 : db_bytes_after_create;
-    create_phase.peak_rss_bytes = peak_rss_bytes();
+    create_phase.peak_rss_bytes = create_rss.peak();
     result.phases.push_back(create_phase);
 
     // read: buffer inteiro (`read`) e streaming por chunks (`read_chunks`) --
     // os dois precisam bater byte a byte com o que foi escrito.
     std::uint64_t read_mismatches = 0;
+    RssTracker read_rss;
     const auto read_start = std::chrono::steady_clock::now();
     for (const auto& lc : lifecycles) {
+        read_rss.sample();
         auto full = blobs.read(lc.id);
         if (!full || *full != lc.current_content) {
             ++read_mismatches;
@@ -1903,14 +1928,16 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     read_phase.operations = lifecycles.size();
     read_phase.duration_ns = ns_between(read_start, read_end);
     read_phase.errors = read_mismatches;
-    read_phase.peak_rss_bytes = peak_rss_bytes();
+    read_phase.peak_rss_bytes = read_rss.peak();
     result.phases.push_back(read_phase);
 
     // grow: reescreve cada blob com 1,5x o conteúdo original (conteúdo novo,
     // não uma extensão do antigo -- rewrite não concatena).
     std::uint64_t grow_mismatches = 0;
+    RssTracker grow_rss;
     const auto grow_start = std::chrono::steady_clock::now();
     for (auto& lc : lifecycles) {
+        grow_rss.sample();
         const auto grown_size = lc.current_content.size() + lc.current_content.size() / 2;
         const auto grown = deterministic_blob_pattern(params.seed ^ 0x8106'0002ULL, grown_size);
         auto tx = attached.database->begin();
@@ -1939,13 +1966,15 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     grow_phase.duration_ns = ns_between(grow_start, grow_end);
     grow_phase.errors = grow_mismatches;
     grow_phase.db_bytes = grow_size_error ? 0 : db_bytes_after_grow;
-    grow_phase.peak_rss_bytes = peak_rss_bytes();
+    grow_phase.peak_rss_bytes = grow_rss.peak();
     result.phases.push_back(grow_phase);
 
     // shrink: reescreve com a metade do conteúdo pós-grow.
     std::uint64_t shrink_mismatches = 0;
+    RssTracker shrink_rss;
     const auto shrink_start = std::chrono::steady_clock::now();
     for (auto& lc : lifecycles) {
+        shrink_rss.sample();
         const auto shrunk_size = std::max<std::size_t>(1, lc.current_content.size() / 2);
         const auto shrunk = deterministic_blob_pattern(params.seed ^ 0x8106'0003ULL, shrunk_size);
         auto tx = attached.database->begin();
@@ -1971,7 +2000,7 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     shrink_phase.operations = lifecycles.size();
     shrink_phase.duration_ns = ns_between(shrink_start, shrink_end);
     shrink_phase.errors = shrink_mismatches;
-    shrink_phase.peak_rss_bytes = peak_rss_bytes();
+    shrink_phase.peak_rss_bytes = shrink_rss.peak();
     result.phases.push_back(shrink_phase);
 
     // delete: remove todos e confirma que nenhum lê de volta.
@@ -1979,8 +2008,10 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     std::uint64_t delete_errors = 0;
     std::error_code pre_delete_size_error;
     const auto db_bytes_before_delete = std::filesystem::file_size(db_path, pre_delete_size_error);
+    RssTracker delete_rss;
     const auto delete_start = std::chrono::steady_clock::now();
     for (const auto& lc : lifecycles) {
+        delete_rss.sample();
         auto tx = attached.database->begin();
         if (!tx) {
             ++delete_errors;
@@ -2011,7 +2042,7 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     delete_phase.duration_ns = ns_between(delete_start, delete_end);
     delete_phase.errors = delete_errors;
     delete_phase.db_bytes = post_delete_size_error ? 0 : db_bytes_after_delete;
-    delete_phase.peak_rss_bytes = peak_rss_bytes();
+    delete_phase.peak_rss_bytes = delete_rss.peak();
     result.phases.push_back(delete_phase);
 
     result.all_deleted = still_resolving == 0 && delete_errors == 0;
@@ -2162,6 +2193,9 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
     ObjectId root_id;
     std::uint64_t total_created = 0;
 
+    // A recursão de build_hierarchy_subtree não tem ponto de tick por nó, então
+    // aqui o pico é limitado por início/fim da fase.
+    RssTracker create_rss;
     const auto create_start = std::chrono::steady_clock::now();
     {
         auto first_tx = attached.database->begin();
@@ -2204,7 +2238,7 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
     create_phase.operations = total_created;
     create_phase.duration_ns = ns_between(create_start, create_end);
     create_phase.db_bytes = size_error ? 0 : db_bytes_after_create;
-    create_phase.peak_rss_bytes = peak_rss_bytes();
+    create_phase.peak_rss_bytes = create_rss.peak();
     result.phases.push_back(create_phase);
 
     if (live_before_delete != total_created) {
@@ -2216,6 +2250,9 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
 
     // cascade_delete (raiz): uma única chamada -- o motor cai em cascata
     // por composição, nenhum passeio manual do grafo aqui (§4.2.1).
+    // Remoção em cascata é UMA chamada atômica do motor: sem ponto de tick
+    // interno, o pico é limitado por início/fim.
+    RssTracker delete_rss;
     const auto delete_start = std::chrono::steady_clock::now();
     auto tx = attached.database->begin();
     if (!tx) {
@@ -2260,7 +2297,7 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
     delete_phase.phase = "cascade_delete";
     delete_phase.operations = total_created;
     delete_phase.duration_ns = ns_between(delete_start, delete_end);
-    delete_phase.peak_rss_bytes = peak_rss_bytes();
+    delete_phase.peak_rss_bytes = delete_rss.peak();
     result.phases.push_back(delete_phase);
 
     result.total_duration_ns = create_phase.duration_ns + delete_phase.duration_ns;
