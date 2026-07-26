@@ -6,6 +6,7 @@
 #include "runner/sha256.hpp"
 #include "user_type.hpp"
 
+#include "modb/object/blob_store.hpp"
 #include "modb/object/database.hpp"
 #include "modb/query/planner.hpp"
 #include "modb/storage/buffer_pool.hpp"
@@ -1745,6 +1746,256 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
     // continua disponível para quem ler este código, só não persiste no
     // schema (nenhum campo hoje representa "registros recuperados pelo GC").
     (void)reclaimed;
+    result.status = "completed";
+    result.ok = true;
+    return result;
+}
+
+namespace {
+
+std::vector<std::byte> deterministic_blob_pattern(std::uint64_t seed, std::size_t bytes) {
+    std::vector<std::byte> data;
+    data.reserve(bytes);
+    std::mt19937_64 rng(seed);
+    std::uniform_int_distribution<int> byte_dist(0, 255);
+    for (std::size_t i = 0; i < bytes; ++i) {
+        data.push_back(static_cast<std::byte>(byte_dist(rng)));
+    }
+    return data;
+}
+
+} // namespace
+
+CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
+                                          std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "blob_lifecycle");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    AttachedDatabase attached;
+    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+        result.status = "failed";
+        result.error = setup.error;
+        return result;
+    }
+
+    // Tamanhos representativos -- reduzidos de 1/16/256 MiB (§4.2.1) para
+    // 64 KiB/1 MiB/16 MiB nesta subfase (256 MiB por caso deixaria a
+    // verificação de rotina minutos mais lenta sem exercitar nenhum código
+    // adicional -- a cadeia de páginas BLBP já é exercitada de sobra a
+    // partir de poucas centenas de KiB).
+    const struct { const char* label; std::size_t bytes; } sizes[] = {
+        {"64KiB", 64 * 1024},
+        {"1MiB", 1024 * 1024},
+        {"16MiB", 16 * 1024 * 1024},
+    };
+
+    // Blob "solto", sem objeto pai que o referencie -- BlobStore não exige
+    // um (ADR permite blobs órfãos, usados por outras coleções por cima).
+    auto blobs = attached.database->blobs();
+
+    struct BlobLifecycle {
+        std::string label;
+        BlobId id{};
+        std::vector<std::byte> current_content;
+    };
+    std::vector<BlobLifecycle> lifecycles;
+    std::uint64_t errors = 0;
+
+    // create
+    const auto create_start = std::chrono::steady_clock::now();
+    for (const auto& size : sizes) {
+        const auto content = deterministic_blob_pattern(params.seed ^ 0x8106'0001ULL, size.bytes);
+        auto tx = attached.database->begin();
+        if (!tx) {
+            ++errors;
+            continue;
+        }
+        auto id = blobs.create(content);
+        if (!id || !tx->commit()) {
+            ++errors;
+            continue;
+        }
+        lifecycles.push_back({size.label, *id, content});
+    }
+    const auto create_end = std::chrono::steady_clock::now();
+    if (errors > 0 || lifecycles.size() != std::size(sizes)) {
+        result.status = "failed";
+        result.error = "blob_lifecycle: " + std::to_string(errors) + " erro(s) na criação";
+        return result;
+    }
+    std::error_code size_error;
+    const auto db_bytes_after_create = std::filesystem::file_size(db_path, size_error);
+    PhaseMetrics create_phase;
+    create_phase.phase = "create";
+    create_phase.operations = lifecycles.size();
+    create_phase.duration_ns = ns_between(create_start, create_end);
+    create_phase.db_bytes = size_error ? 0 : db_bytes_after_create;
+    create_phase.peak_rss_bytes = peak_rss_bytes();
+    result.phases.push_back(create_phase);
+
+    // read: buffer inteiro (`read`) e streaming por chunks (`read_chunks`) --
+    // os dois precisam bater byte a byte com o que foi escrito.
+    std::uint64_t read_mismatches = 0;
+    const auto read_start = std::chrono::steady_clock::now();
+    for (const auto& lc : lifecycles) {
+        auto full = blobs.read(lc.id);
+        if (!full || *full != lc.current_content) {
+            ++read_mismatches;
+            continue;
+        }
+        std::vector<std::byte> streamed;
+        streamed.reserve(lc.current_content.size());
+        auto streamed_ok = blobs.read_chunks(lc.id, [&](std::span<const std::byte> chunk) -> Result<void> {
+            streamed.insert(streamed.end(), chunk.begin(), chunk.end());
+            return {};
+        });
+        if (!streamed_ok || streamed != lc.current_content) {
+            ++read_mismatches;
+        }
+    }
+    const auto read_end = std::chrono::steady_clock::now();
+    PhaseMetrics read_phase;
+    read_phase.phase = "read";
+    read_phase.operations = lifecycles.size();
+    read_phase.duration_ns = ns_between(read_start, read_end);
+    read_phase.errors = read_mismatches;
+    read_phase.peak_rss_bytes = peak_rss_bytes();
+    result.phases.push_back(read_phase);
+
+    // grow: reescreve cada blob com 1,5x o conteúdo original (conteúdo novo,
+    // não uma extensão do antigo -- rewrite não concatena).
+    std::uint64_t grow_mismatches = 0;
+    const auto grow_start = std::chrono::steady_clock::now();
+    for (auto& lc : lifecycles) {
+        const auto grown_size = lc.current_content.size() + lc.current_content.size() / 2;
+        const auto grown = deterministic_blob_pattern(params.seed ^ 0x8106'0002ULL, grown_size);
+        auto tx = attached.database->begin();
+        if (!tx) {
+            ++grow_mismatches;
+            continue;
+        }
+        auto rewritten = blobs.rewrite(lc.id, grown);
+        if (!rewritten || !tx->commit()) {
+            ++grow_mismatches;
+            continue;
+        }
+        lc.id = *rewritten;
+        lc.current_content = grown;
+        auto read_back = blobs.read(lc.id);
+        if (!read_back || *read_back != lc.current_content) {
+            ++grow_mismatches;
+        }
+    }
+    const auto grow_end = std::chrono::steady_clock::now();
+    std::error_code grow_size_error;
+    const auto db_bytes_after_grow = std::filesystem::file_size(db_path, grow_size_error);
+    PhaseMetrics grow_phase;
+    grow_phase.phase = "update_grow";
+    grow_phase.operations = lifecycles.size();
+    grow_phase.duration_ns = ns_between(grow_start, grow_end);
+    grow_phase.errors = grow_mismatches;
+    grow_phase.db_bytes = grow_size_error ? 0 : db_bytes_after_grow;
+    grow_phase.peak_rss_bytes = peak_rss_bytes();
+    result.phases.push_back(grow_phase);
+
+    // shrink: reescreve com a metade do conteúdo pós-grow.
+    std::uint64_t shrink_mismatches = 0;
+    const auto shrink_start = std::chrono::steady_clock::now();
+    for (auto& lc : lifecycles) {
+        const auto shrunk_size = std::max<std::size_t>(1, lc.current_content.size() / 2);
+        const auto shrunk = deterministic_blob_pattern(params.seed ^ 0x8106'0003ULL, shrunk_size);
+        auto tx = attached.database->begin();
+        if (!tx) {
+            ++shrink_mismatches;
+            continue;
+        }
+        auto rewritten = blobs.rewrite(lc.id, shrunk);
+        if (!rewritten || !tx->commit()) {
+            ++shrink_mismatches;
+            continue;
+        }
+        lc.id = *rewritten;
+        lc.current_content = shrunk;
+        auto read_back = blobs.read(lc.id);
+        if (!read_back || *read_back != lc.current_content) {
+            ++shrink_mismatches;
+        }
+    }
+    const auto shrink_end = std::chrono::steady_clock::now();
+    PhaseMetrics shrink_phase;
+    shrink_phase.phase = "update_shrink";
+    shrink_phase.operations = lifecycles.size();
+    shrink_phase.duration_ns = ns_between(shrink_start, shrink_end);
+    shrink_phase.errors = shrink_mismatches;
+    shrink_phase.peak_rss_bytes = peak_rss_bytes();
+    result.phases.push_back(shrink_phase);
+
+    // delete: remove todos e confirma que nenhum lê de volta.
+    std::uint64_t still_resolving = 0;
+    std::uint64_t delete_errors = 0;
+    std::error_code pre_delete_size_error;
+    const auto db_bytes_before_delete = std::filesystem::file_size(db_path, pre_delete_size_error);
+    const auto delete_start = std::chrono::steady_clock::now();
+    for (const auto& lc : lifecycles) {
+        auto tx = attached.database->begin();
+        if (!tx) {
+            ++delete_errors;
+            continue;
+        }
+        if (auto removed = blobs.remove(lc.id); !removed || !tx->commit()) {
+            ++delete_errors;
+            continue;
+        }
+        if (blobs.read(lc.id)) {
+            ++still_resolving;
+        }
+    }
+    const auto delete_end = std::chrono::steady_clock::now();
+    std::error_code post_delete_size_error;
+    const auto db_bytes_after_delete = std::filesystem::file_size(db_path, post_delete_size_error);
+    // Honesto: o MVP de BlobStore não tem free list (páginas removidas ficam
+    // órfãs no arquivo, comentário de blob_store.hpp) -- "espaço recuperado"
+    // não é um encolhimento de arquivo aqui, é só a diferença (quase sempre
+    // 0 ou negativa) entre antes e depois do delete. Não inventamos um
+    // reclaimed_bytes positivo que o motor não entrega.
+    const auto reclaimed = db_bytes_before_delete > db_bytes_after_delete
+                              ? db_bytes_before_delete - db_bytes_after_delete
+                              : 0;
+    PhaseMetrics delete_phase;
+    delete_phase.phase = "delete";
+    delete_phase.operations = lifecycles.size();
+    delete_phase.duration_ns = ns_between(delete_start, delete_end);
+    delete_phase.errors = delete_errors;
+    delete_phase.db_bytes = post_delete_size_error ? 0 : db_bytes_after_delete;
+    delete_phase.peak_rss_bytes = peak_rss_bytes();
+    result.phases.push_back(delete_phase);
+
+    result.all_deleted = still_resolving == 0 && delete_errors == 0;
+    result.still_resolving = still_resolving;
+    result.reclaimed_bytes = reclaimed;
+    result.hash_match =
+        read_mismatches == 0 && grow_mismatches == 0 && shrink_mismatches == 0 && result.all_deleted;
+
+    if (!result.hash_match) {
+        result.status = "failed";
+        std::ostringstream err;
+        err << "blob_lifecycle: read_mismatches=" << read_mismatches
+            << " grow_mismatches=" << grow_mismatches << " shrink_mismatches=" << shrink_mismatches
+            << " still_resolving=" << still_resolving << " delete_errors=" << delete_errors;
+        result.error = err.str();
+        return result;
+    }
+
+    result.total_duration_ns = create_phase.duration_ns + read_phase.duration_ns +
+                               grow_phase.duration_ns + shrink_phase.duration_ns +
+                               delete_phase.duration_ns;
+    result.peak_disk_bytes = grow_phase.db_bytes;   // pico esperado é logo após o grow
+    // Validação já é byte a byte em cada estágio (`read_mismatches` etc.),
+    // não por um único hash de conjunto como create_only/crud_full -- deixar
+    // expected_hash/actual_hash vazios é mais honesto que fabricar um par
+    // trivialmente igual só para preencher o campo.
     result.status = "completed";
     result.ok = true;
     return result;

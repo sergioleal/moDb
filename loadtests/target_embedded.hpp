@@ -69,4 +69,13 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
 [[nodiscard]] CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
                                                        std::filesystem::path& out_db_path);
 
+// blob_lifecycle (§4.2.1): create (via `BlobStore`) -> read (buffer inteiro
+// e streaming por chunks) -> grow -> shrink -> delete, para um conjunto
+// fixo de tamanhos representativos. Cada estágio confere o conteúdo byte a
+// byte contra o que foi escrito. Tamanhos reduzidos de 1/16/256 MiB (§4.2.1)
+// para 64 KiB/1 MiB/16 MiB nesta subfase -- ver docs/PLANO_TESTES_DE_CARGA.md
+// para o porquê.
+[[nodiscard]] CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
+                                                        std::filesystem::path& out_db_path);
+
 } // namespace modb::loadtest

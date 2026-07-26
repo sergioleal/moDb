@@ -170,6 +170,26 @@ menos o conjunto vivo atual -- versões extras que a snapshot obrigou o
 motor a reter). Verificado ao vivo em 10k objetos: `retained_versions=7666`
 durante o hold, `hash_match:true`, `all_deleted:true`.
 
+**Implementado na Subfase O**: `blob_lifecycle` sobre `BlobStore` de
+verdade -- não `dataset_user_blob` como módulo de dataset formal (§7), um
+gerador determinístico ad hoc (`deterministic_blob_pattern`, PRNG semeado
+por `seed`) direto no workload, mais simples e suficiente para o que a
+subfase precisa validar. Tamanhos reduzidos de 1/16/256 MiB (§4.2.1) para
+64 KiB/1 MiB/16 MiB -- 256 MiB por caso deixaria a rotina de verificação
+minutos mais lenta sem exercitar nenhum código adicional (a cadeia de
+páginas BLBP já é exercitada de sobra a partir de poucas centenas de KiB).
+Cinco fases (create/read/update_grow/update_shrink/delete), cada uma
+conferindo o conteúdo byte a byte (`read()` E `read_chunks()` streaming, os
+dois contra o mesmo buffer). **Achado real, não contornado**:
+`BlobStore` não tem free list (comentário do próprio código-fonte,
+`blob_store.hpp`) -- páginas removidas ficam órfãs no arquivo, então
+"espaço recuperado após delete" (invariante do §4.2.1) não é satisfeito
+por este MVP de blobs; `reclaimed_bytes` reporta a diferença real
+(tipicamente 0, nunca inventado positivo) em vez de fingir uma reclamação
+que o motor não faz. Verificado ao vivo em `--case
+load.blob_lifecycle.embedded.1k`: `hash_match:true`, `all_deleted:true`,
+`reclaimed=0` (honesto).
+
 Dois workloads adicionais dependem de infraestrutura que o harness genérico
 (`target.hpp`, §14) ainda não cobre; ficam **fora de todos os perfis** até essa
 infraestrutura existir — mesmo tratamento hoje dado a `primary_storage=wal_only`

@@ -283,6 +283,31 @@ void test_snapshot_hold(TestSuite& suite) {
     }
 }
 
+// Subfase O (§4.2.1): create -> read/stream -> grow -> shrink -> delete
+// sobre BlobStore, conferindo byte a byte em cada estágio.
+void test_blob_lifecycle(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_blob_lifecycle_embedded(small_params(work_dir), db_path);
+
+    suite.check(result.ok, "blob_lifecycle deve completar: " + result.error);
+    suite.check(result.status == "completed", "blob_lifecycle status deve ser completed");
+    suite.check(result.hash_match,
+               "leituras (buffer e streaming), grow e shrink devem conferir byte a byte: " +
+                   result.error);
+    suite.check(result.all_deleted, "todos os blobs devem estar removidos ao final");
+    suite.check(result.phases.size() == 5,
+               "blob_lifecycle deve produzir 5 fases (create/read/grow/shrink/delete)");
+    if (result.phases.size() == 5) {
+        const char* expected_names[] = {"create", "read", "update_grow", "update_shrink", "delete"};
+        for (std::size_t i = 0; i < 5; ++i) {
+            suite.check(result.phases[i].phase == expected_names[i],
+                       std::string("fase ") + std::to_string(i) + " deve se chamar '" +
+                           expected_names[i] + "'");
+        }
+    }
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -330,6 +355,7 @@ int main() {
     test_mixed_oltp_concurrent(suite);
     test_mixed_oltp_single_threaded(suite);
     test_snapshot_hold(suite);
+    test_blob_lifecycle(suite);
     test_crud_full(suite);
     return suite.finish();
 }

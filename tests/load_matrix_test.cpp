@@ -246,8 +246,10 @@ void test_known_catalogs(TestSuite& suite) {
                "mixed_oltp deve estar marcado como implementado (Subfase M)");
     suite.check(is_workload_implemented("snapshot_hold"),
                "snapshot_hold deve estar marcado como implementado (Subfase N)");
-    suite.check(!is_workload_implemented("blob_lifecycle"),
-               "blob_lifecycle (§4.2.1) ainda não deveria estar marcado como implementado");
+    suite.check(is_workload_implemented("blob_lifecycle"),
+               "blob_lifecycle deve estar marcado como implementado (Subfase O)");
+    suite.check(!is_workload_implemented("cascade_delete"),
+               "cascade_delete (§4.2.1) ainda não deveria estar marcado como implementado");
     suite.check(is_target_implemented("embedded") && is_target_implemented("loopback") &&
                    is_target_implemented("remote_colocated"),
                "embedded/loopback/remote_colocated devem estar marcados como implementados "
