@@ -96,4 +96,15 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
 [[nodiscard]] CaseRunResult run_oversubscribed_churn_embedded(const WorkloadParams& params,
                                                               std::filesystem::path& out_db_path);
 
+// restart_recovery (§4.2.1): create -> churn com um commit interrompido de
+// propósito (`Transaction::commit(CommitPhase::stop_after_commit_record)` --
+// commit durável no WAL, páginas de dados ainda não aplicadas) -> fecha e
+// REABRE o `Database` a partir do mesmo arquivo (`Database::open`, o mesmo
+// caminho de replay de WAL que uma reinicialização de processo de verdade
+// exerceria) -> verifica que o estado pós-recuperação bate com o último
+// commit durável. Simula a queda via failpoint em vez de matar um processo
+// de verdade -- ver docs/PLANO_TESTES_DE_CARGA.md para o porquê.
+[[nodiscard]] CaseRunResult run_restart_recovery_embedded(const WorkloadParams& params,
+                                                          std::filesystem::path& out_db_path);
+
 } // namespace modb::loadtest

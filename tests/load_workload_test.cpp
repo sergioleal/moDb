@@ -3,6 +3,8 @@
 #include "target_client.hpp"
 #include "target_embedded.hpp"
 
+#include "modb/object/database.hpp"
+
 #include <chrono>
 #include <filesystem>
 
@@ -357,6 +359,35 @@ void test_oversubscribed_churn(TestSuite& suite) {
     }
 }
 
+// Subfase R (§4.2.1): commit interrompido de propósito
+// (CommitPhase::stop_after_commit_record) seguido de fechar+REABRIR o banco
+// de verdade -- exercita o replay de WAL real, não uma simulação em memória.
+void test_restart_recovery(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_restart_recovery_embedded(
+        small_params(work_dir, /*object_count=*/200, /*batch=*/37), db_path);
+
+    suite.check(result.ok, "restart_recovery deve completar: " + result.error);
+    suite.check(result.status == "completed", "restart_recovery status deve ser completed");
+    suite.check(result.hash_match,
+               "estado pós-recuperação deve bater com o último commit durável: " + result.error);
+    suite.check(result.phases.size() == 2,
+               "restart_recovery deve produzir 2 fases (create + restart_recovery)");
+    if (result.phases.size() == 2) {
+        suite.check(result.phases[1].phase == "restart_recovery",
+                   "a 2a fase deve se chamar 'restart_recovery'");
+    }
+
+    // O arquivo reaberto deve continuar existindo e ser um banco válido --
+    // reabrir de novo (fora do workload) não deveria falhar.
+    suite.check(std::filesystem::exists(db_path), "o arquivo do banco deve continuar existindo");
+    auto reopened_again = modb::object::Database::open(db_path);
+    suite.check(reopened_again.has_value(),
+               "o banco deve continuar abrível normalmente depois do teste: " +
+                   (reopened_again ? std::string{} : reopened_again.error().message));
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -407,6 +438,7 @@ int main() {
     test_blob_lifecycle(suite);
     test_cascade_delete(suite);
     test_oversubscribed_churn(suite);
+    test_restart_recovery(suite);
     test_crud_full(suite);
     return suite.finish();
 }

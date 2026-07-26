@@ -453,6 +453,7 @@ add_library(modb_load_core STATIC
     loadtests/workloads/blob_lifecycle.cpp
     loadtests/workloads/cascade_delete.cpp
     loadtests/workloads/oversubscribed_churn.cpp
+    loadtests/workloads/restart_recovery.cpp
     loadtests/campaign.cpp
     loadtests/history/series_key.cpp
     loadtests/history/rollup.cpp

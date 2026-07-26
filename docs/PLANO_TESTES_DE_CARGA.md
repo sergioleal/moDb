@@ -220,6 +220,26 @@ aparentemente favorece bem o cache reduzido; degradação mais severa deve
 aparecer em escalas maiores ou com um cache ainda menor, não investigado
 mais a fundo nesta subfase.
 
+**Implementado na Subfase R (com uma simplificação deliberada)**:
+`restart_recovery`. Churn normal (commit completo) seguido de UM commit
+propositalmente interrompido via `Transaction::commit(CommitPhase::
+stop_after_commit_record)` -- durável no WAL, páginas de dados ainda não
+aplicadas, a mesma costura de teste que `tests/recovery_test.cpp` já usa --
+depois o `Database` em memória é fechado (sai de escopo, detach) e
+REABERTO do mesmo arquivo (`Database::open`), disparando o replay de WAL de
+verdade. **Simplificação**: a "queda" é simulada por failpoint dentro do
+MESMO processo, não um `kill -9`/`TerminateProcess` de um processo
+separado -- não existia harness de kill/restart de verdade em nenhum lugar
+do repositório (nem para as suítes de recuperação já existentes), e
+construí-lo do zero (spawn de processo, sincronização do ponto de queda,
+multiplataforma Windows/Linux) é um projeto à parte, não uma tarde. O que
+FICA provado é exatamente o critério de pronto do §4.2.1 ("hash lógico
+pós-recuperação == hash do último commit durável") -- o próprio caminho de
+replay de WAL do motor, não uma simulação em memória sem tocar o arquivo.
+O harness de kill real (Windows e Linux) segue como trabalho futuro (§17
+risco 13). Verificado ao vivo em `--case load.restart_recovery.embedded.1k`:
+`hash_match:true`, fase de recuperação medida em ~34ms para 1000 objetos.
+
 Dois workloads adicionais dependem de infraestrutura que o harness genérico
 (`target.hpp`, §14) ainda não cobre; ficam **fora de todos os perfis** até essa
 infraestrutura existir — mesmo tratamento hoje dado a `primary_storage=wal_only`

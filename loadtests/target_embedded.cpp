@@ -2289,4 +2289,179 @@ CaseRunResult run_oversubscribed_churn_embedded(const WorkloadParams& params,
     return result;
 }
 
+CaseRunResult run_restart_recovery_embedded(const WorkloadParams& params,
+                                            std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "restart_recovery");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    std::vector<ObjectId> ids;
+    std::unordered_map<std::uint64_t, GeneratedUser> expected;
+    PhaseMetrics create_phase;
+
+    // Escopo próprio: fecha (detach) o `Database` original ao sair, para que
+    // a reabertura logo abaixo dispare o caminho de replay de WAL de
+    // verdade, não reaproveite o objeto em memória.
+    {
+        AttachedDatabase attached;
+        if (auto setup = setup_database(attached, db_path); !setup.ok) {
+            result.status = "failed";
+            result.error = setup.error;
+            return result;
+        }
+        auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
+        if (!create_outcome.ok) {
+            result.status = "failed";
+            result.error = create_outcome.error;
+            return result;
+        }
+        create_phase = create_outcome.phase;
+        ids = create_outcome.ids;
+
+        const auto filler_bytes = filler_bytes_for_payload(params.payload);
+        const auto churn_count = std::min<std::uint64_t>(
+            ids.size(), std::max<std::uint64_t>(10, params.object_count / 10));
+        if (churn_count < 1) {
+            result.status = "failed";
+            result.error = "restart_recovery: working set pequeno demais para churn";
+            return result;
+        }
+
+        // Churn normal (commit completo) em todos menos o último -- estabelece
+        // um "último commit durável" diferente do valor de criação original.
+        for (std::uint64_t i = 0; i + 1 < churn_count; ++i) {
+            const auto logical_id = i + 1;
+            const auto new_value = generate_user_ex(params.seed, logical_id, filler_bytes,
+                                                     static_cast<std::int32_t>((logical_id + 1) % 3));
+            auto handle = attached.database->get<User>(ids[i]);
+            if (!handle) {
+                result.status = "failed";
+                result.error = "churn: get falhou no id lógico " + std::to_string(logical_id);
+                return result;
+            }
+            auto tx = attached.database->begin();
+            if (!tx || !attached.database->update(*tx, *handle, to_engine_user(new_value)) ||
+                !tx->commit()) {
+                result.status = "failed";
+                result.error = "churn: update/commit falhou no id lógico " + std::to_string(logical_id);
+                return result;
+            }
+            expected[logical_id] = new_value;
+        }
+
+        // O último: commit PROPOSITALMENTE interrompido -- durável no WAL
+        // (registro de commit gravado), mas as páginas de dados nunca
+        // chegam a ser aplicadas (`CommitPhase::stop_after_commit_record`,
+        // a mesma costura de teste que `tests/recovery_test.cpp` usa). É
+        // exatamente a janela que `restart_recovery` precisa provar que o
+        // replay de WAL cobre.
+        const auto interrupted_logical_id = churn_count;
+        const auto interrupted_value =
+            generate_user_ex(params.seed, interrupted_logical_id, filler_bytes,
+                            static_cast<std::int32_t>((interrupted_logical_id + 2) % 3));
+        auto handle = attached.database->get<User>(ids[interrupted_logical_id - 1]);
+        if (!handle) {
+            result.status = "failed";
+            result.error = "commit interrompido: get falhou";
+            return result;
+        }
+        auto tx = attached.database->begin();
+        if (!tx) {
+            result.status = "failed";
+            result.error = "commit interrompido: begin falhou: " + tx.error().message;
+            return result;
+        }
+        if (auto updated = attached.database->update(*tx, *handle, to_engine_user(interrupted_value));
+            !updated) {
+            result.status = "failed";
+            result.error = "commit interrompido: update falhou: " + updated.error().message;
+            return result;
+        }
+        auto committed = tx->commit(CommitPhase::stop_after_commit_record);
+        if (!committed) {
+            result.status = "failed";
+            result.error =
+                "commit(stop_after_commit_record) falhou: " + committed.error().message;
+            return result;
+        }
+        expected[interrupted_logical_id] = interrupted_value;
+        // `attached` sai de escopo aqui -- detach do registro; o arquivo
+        // fica exatamente como uma queda de processo real teria deixado.
+    }
+
+    // "Reinício": reabre do MESMO arquivo -- dispara o replay de WAL de
+    // verdade (o mesmo `Database::open` que um processo relançado chamaria).
+    const auto restart_start = std::chrono::steady_clock::now();
+    AttachedDatabase reopened;
+    auto opened = Database::open(db_path);
+    if (!opened) {
+        result.status = "failed";
+        result.error = "Database::open (reinício): " + opened.error().message;
+        return result;
+    }
+    reopened.database = std::make_shared<Database>(std::move(*opened));
+    auto reopened_id = DatabaseRegistry::instance().attach(reopened.database);
+    if (!reopened_id) {
+        result.status = "failed";
+        result.error = "DatabaseRegistry::attach (reinício): " + reopened_id.error().message;
+        return result;
+    }
+    reopened.id = *reopened_id;
+    if (auto bound = reopened.database->bind(user_binding()); !bound) {
+        result.status = "failed";
+        result.error = "bind(User) (reinício): " + bound.error().message;
+        return result;
+    }
+    const auto restart_end = std::chrono::steady_clock::now();
+
+    // Verificação (§4.2.1): hash lógico pós-recuperação == último commit
+    // durável -- objetos sem churn mantêm o valor de criação, os com churn
+    // (inclusive o interrompido) refletem o novo valor.
+    std::uint64_t mismatches = 0;
+    for (std::uint64_t i = 0; i < ids.size(); ++i) {
+        const auto logical_id = i + 1;
+        auto handle = reopened.database->get<User>(ids[i]);
+        Result<User> value;
+        if (handle) {
+            value = reopened.database->materialize(*handle);
+        }
+        if (!handle || !value) {
+            ++mismatches;
+            continue;
+        }
+        const auto actual_line = canonical_line(from_engine_user(*value));
+        std::string expected_line;
+        if (auto it = expected.find(logical_id); it != expected.end()) {
+            expected_line = canonical_line(it->second);
+        } else {
+            expected_line = canonical_line(generate_user(params.seed, logical_id, params.payload));
+        }
+        if (actual_line != expected_line) {
+            ++mismatches;
+        }
+    }
+
+    result.hash_match = mismatches == 0;
+    if (!result.hash_match) {
+        result.status = "failed";
+        result.error = "restart_recovery: " + std::to_string(mismatches) + "/" +
+                       std::to_string(ids.size()) +
+                       " objeto(s) não conferem com o estado esperado pós-recuperação";
+        return result;
+    }
+
+    PhaseMetrics recovery_phase;
+    recovery_phase.phase = "restart_recovery";
+    recovery_phase.operations = ids.size();
+    recovery_phase.duration_ns = ns_between(restart_start, restart_end);
+    result.phases.push_back(create_phase);
+    result.phases.push_back(recovery_phase);
+    result.total_duration_ns = create_phase.duration_ns + recovery_phase.duration_ns;
+    result.peak_disk_bytes = create_phase.db_bytes;
+    result.status = "completed";
+    result.ok = true;
+    return result;
+}
+
 } // namespace modb::loadtest

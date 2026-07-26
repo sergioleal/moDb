@@ -252,8 +252,8 @@ void test_known_catalogs(TestSuite& suite) {
                "cascade_delete deve estar marcado como implementado (Subfase P)");
     suite.check(is_workload_implemented("oversubscribed_churn"),
                "oversubscribed_churn deve estar marcado como implementado (Subfase Q)");
-    suite.check(!is_workload_implemented("restart_recovery"),
-               "restart_recovery (§4.2.1) ainda não deveria estar marcado como implementado");
+    suite.check(is_workload_implemented("restart_recovery"),
+               "restart_recovery deve estar marcado como implementado (Subfase R)");
     suite.check(is_target_implemented("embedded") && is_target_implemented("loopback") &&
                    is_target_implemented("remote_colocated"),
                "embedded/loopback/remote_colocated devem estar marcados como implementados "

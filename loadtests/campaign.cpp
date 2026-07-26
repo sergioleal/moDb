@@ -10,6 +10,7 @@
 #include "workloads/cascade_delete.hpp"
 #include "workloads/create_only.hpp"
 #include "workloads/oversubscribed_churn.hpp"
+#include "workloads/restart_recovery.hpp"
 #include "workloads/crud_full.hpp"
 #include "workloads/mixed_oltp.hpp"
 #include "workloads/read_hotspot.hpp"
@@ -200,6 +201,8 @@ bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, s
         run_result = run_cascade_delete(c, work_dir, seed, on_progress, db_path);
     } else if (c.workload == "oversubscribed_churn") {
         run_result = run_oversubscribed_churn(c, work_dir, seed, on_progress, db_path);
+    } else if (c.workload == "restart_recovery") {
+        run_result = run_restart_recovery(c, work_dir, seed, on_progress, db_path);
     } else {
         run_result.status = "unimplemented";
         run_result.error = "dispatch ausente para workload '" + c.workload + "'";
