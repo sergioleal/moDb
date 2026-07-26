@@ -28,6 +28,10 @@ struct GateResult {
     // falha imediata, nunca uma comparação de limiar).
     std::string point_verdict{"insufficient"};
     double point_vs_median{};
+    // true só quando `point_vs_median` veio de uma comparação de verdade
+    // (status=="completed" no último ponto) -- um "fail" por status
+    // divergente não tem percentual nenhum por trás (§9/§13.7).
+    bool point_measured{false};
 
     // "ok" | "fail" | "insufficient" -- um só limiar (15%), sem tier de alerta.
     std::string drift_verdict{"insufficient"};

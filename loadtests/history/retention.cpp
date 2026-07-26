@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 
 namespace modb::loadtest {
@@ -110,6 +111,28 @@ PruneResult prune_raw_files(const PruneOptions& options) {
                                    " mais recentes, não é failed nem baseline";
             }
             result.candidates.push_back(std::move(candidate));
+        }
+    }
+
+    // `raw_file` é o arquivo de campanha inteiro, compartilhado por TODAS as
+    // séries que tiveram algum caso naquela campanha (rollup.cpp emite um
+    // rollup por caso, todos citando o mesmo raw_file) -- mas cada série
+    // acima decidiu kept/not-kept olhando só a PRÓPRIA janela de recência,
+    // sem saber que outra série ainda depende do mesmo arquivo. Uma campanha
+    // "velha" para a série A mas ainda entre as N mais recentes da série B
+    // não pode ser apagada: uni os vereditos por raw_file antes de decidir
+    // (e antes de reportar em modo dry-run, para não prometer uma remoção
+    // que não vai acontecer).
+    std::set<std::string> raw_files_kept_by_any_series;
+    for (const auto& candidate : result.candidates) {
+        if (candidate.kept && !candidate.raw_file.empty()) {
+            raw_files_kept_by_any_series.insert(candidate.raw_file);
+        }
+    }
+    for (auto& candidate : result.candidates) {
+        if (!candidate.kept && raw_files_kept_by_any_series.contains(candidate.raw_file)) {
+            candidate.kept = true;
+            candidate.reason = "raw_file compartilhado por outra série que ainda o mantém";
         }
     }
 

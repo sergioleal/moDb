@@ -1079,6 +1079,12 @@ CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
     }
     result.phases.push_back(create_outcome.phase);
 
+    if (params.object_count == 0) {
+        result.status = "failed";
+        result.error = "read_hotspot: object_count=0 -- nada para amostrar";
+        return result;
+    }
+
     // Leituras enviesadas por Zipf sobre o working set inteiro -- 3x o
     // tamanho do working set é um múltiplo arbitrário, mas o bastante para
     // um rank "quente" (baixo) ser reamostrado muitas vezes e pressionar o
@@ -1155,11 +1161,22 @@ CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
 
     result.peak_disk_bytes = phase.db_bytes;
     result.total_duration_ns = create_outcome.phase.duration_ns + read_ns;
+    // read_hotspot só lê -- `write_amplification` (convenção compartilhada
+    // com create_only/crud_full/oversubscribed_churn, §8) é bytes escritos
+    // DURANTE a fase medida, não o tamanho total do arquivo (isso é
+    // `space_amplification`). Um valor perto de 0 aqui é o sinal correto
+    // (nenhuma escrita nova nesta fase), não um bug.
+    const auto bytes_written_during_read = phase.db_bytes > create_outcome.phase.db_bytes
+                                              ? phase.db_bytes - create_outcome.phase.db_bytes
+                                              : 0;
     result.write_amplification = create_outcome.logical_bytes > 0
+                                    ? static_cast<double>(bytes_written_during_read) /
+                                          static_cast<double>(create_outcome.logical_bytes)
+                                    : 0.0;
+    result.space_amplification = create_outcome.logical_bytes > 0
                                     ? static_cast<double>(phase.db_bytes) /
                                           static_cast<double>(create_outcome.logical_bytes)
                                     : 0.0;
-    result.space_amplification = result.write_amplification;
     result.status = "completed";
     result.ok = true;
     return result;
@@ -1289,8 +1306,15 @@ void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, 
 
     for (std::uint64_t i = 0; i < ops; ++i) {
         const double r = action(rng);
-        std::lock_guard<std::mutex> lock(state.mutex);
         const auto op_start = std::chrono::steady_clock::now();
+        // A operação inteira roda dentro de try/catch: qualquer exceção
+        // (ex.: um `.at()` sem chave por um bug de invariante) escapando de
+        // uma thread de worker chamaria std::terminate no processo inteiro
+        // em vez de só falhar o caso -- pior que qualquer erro que a própria
+        // lógica já trata. `lock` já foi liberado pelo unwind quando o catch
+        // roda, então reacquire só para contabilizar com segurança.
+        try {
+        std::lock_guard<std::mutex> lock(state.mutex);
 
         if (r < 0.05) {
             // create (5%)
@@ -1368,6 +1392,10 @@ void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, 
 
         const auto op_end = std::chrono::steady_clock::now();
         state.latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            ++state.errors;
+        }
     }
 }
 
@@ -1640,9 +1668,15 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
         return result;
     }
 
+    // Baseline de registros vivos "esperados" agora: sobreviventes do working
+    // set original (n menos os deletados) MAIS os `extra_count` objetos
+    // criados fora dele -- sem somar `extra_count` aqui, cada um deles seria
+    // contado como se fosse uma versão antiga retida pela snapshot aberta,
+    // inflando `retained_versions` por exatamente esse tanto.
+    const auto live_baseline = (n - (delete_end - update_end)) + extra_count;
     const auto retained_while_open =
-        attached.database->data_record_count() > (n - (delete_end - update_end))
-            ? attached.database->data_record_count() - (n - (delete_end - update_end))
+        attached.database->data_record_count() > live_baseline
+            ? attached.database->data_record_count() - live_baseline
             : 0;
 
     // Releitura pela MESMA snapshot ainda aberta -- deve bater byte a byte
@@ -1664,7 +1698,12 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
     const auto hold_end = std::chrono::steady_clock::now();
 
     auto gc = attached.database->collect_garbage();
-    const auto reclaimed = gc ? *gc : 0;
+    if (!gc) {
+        result.status = "failed";
+        result.error = "snapshot_hold: collect_garbage() após fechar a snapshot: " + gc.error().message;
+        return result;
+    }
+    const auto reclaimed = *gc;
 
     // Depois de fechar: uma leitura NORMAL (sem snapshot) deve refletir o
     // churn -- prova que a snapshot não vazou isolamento além do seu escopo.
@@ -2318,6 +2357,11 @@ CaseRunResult run_restart_recovery_embedded(const WorkloadParams& params,
         }
         create_phase = create_outcome.phase;
         ids = create_outcome.ids;
+        // Registrado já aqui, não só no fim: as ~10 saídas de erro entre
+        // este ponto e o fim da função (churn, commit interrompido,
+        // reabertura) não podem deixar um caso falho reportar zero fases
+        // quando a criação em si já terminou com sucesso.
+        result.phases.push_back(create_phase);
 
         const auto filler_bytes = filler_bytes_for_payload(params.payload);
         const auto churn_count = std::min<std::uint64_t>(
@@ -2455,7 +2499,6 @@ CaseRunResult run_restart_recovery_embedded(const WorkloadParams& params,
     recovery_phase.phase = "restart_recovery";
     recovery_phase.operations = ids.size();
     recovery_phase.duration_ns = ns_between(restart_start, restart_end);
-    result.phases.push_back(create_phase);
     result.phases.push_back(recovery_phase);
     result.total_duration_ns = create_phase.duration_ns + recovery_phase.duration_ns;
     result.peak_disk_bytes = create_phase.db_bytes;

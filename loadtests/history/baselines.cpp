@@ -74,12 +74,24 @@ bool append_baseline(const std::filesystem::path& path, const BaselineEntry& ent
     }
     oss << "]}\n";
 
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return false;
+    // Grava num arquivo temporário e só então renomeia por cima do original
+    // -- truncar e escrever direto em `path` deixaria uma janela onde uma
+    // queda ou disco cheio no meio da escrita perde TODAS as baselines já
+    // marcadas, não só a nova (contradiria o próprio nome "append-only").
+    const auto temp_path = path.string() + ".tmp";
+    {
+        std::ofstream out(temp_path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            return false;
+        }
+        out << oss.str();
+        if (!out) {
+            return false;
+        }
     }
-    out << oss.str();
-    return static_cast<bool>(out);
+    std::error_code ec;
+    std::filesystem::rename(temp_path, path, ec);
+    return !ec;
 }
 
 bool is_baseline_run(const std::vector<BaselineEntry>& entries, const std::string& run_id) {

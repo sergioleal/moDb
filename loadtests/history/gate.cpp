@@ -13,19 +13,27 @@ double median_of(std::vector<double> values) {
 }
 
 // Reconstrói, na ordem original (mais antigo primeiro), os valores
-// comparáveis da MESMA série do último ponto -- a mesma condição que
-// `compute_trend` usa para alimentar sua janela de mediana móvel
-// (has_value && comparable && status=="completed"), só que aqui incluindo
-// o próprio candidato (deriva compara "as últimas 5 incluindo agora", não
-// "candidato vs. histórico anterior" como o gate pontual).
+// comparáveis da execução contínua MAIS RECENTE da série do último ponto --
+// a mesma condição que `compute_trend` usa para alimentar sua janela de
+// mediana móvel (has_value && comparable && status=="completed"), só que
+// aqui incluindo o próprio candidato (deriva compara "as últimas 5 incluindo
+// agora", não "candidato vs. histórico anterior" como o gate pontual).
+// Anda de trás para frente e PARA no primeiro `series_key` diferente -- não
+// basta comparar por igualdade de valor, porque a mesma chave poderia, em
+// tese, reaparecer depois de um `series_break` no meio (§13.4: um break no
+// caminho invalida a comparação, então não se deve olhar além dele).
 std::vector<double> series_values(const std::vector<TrendPoint>& points,
                                   const std::string& series_key) {
     std::vector<double> values;
-    for (const auto& p : points) {
-        if (p.series_key == series_key && p.has_value && p.comparable && p.status == "completed") {
-            values.push_back(p.value);
+    for (auto it = points.rbegin(); it != points.rend(); ++it) {
+        if (it->series_key != series_key) {
+            break;
+        }
+        if (it->has_value && it->comparable && it->status == "completed") {
+            values.push_back(it->value);
         }
     }
+    std::reverse(values.begin(), values.end());
     return values;
 }
 
@@ -63,6 +71,7 @@ GateResult compute_gate(const std::filesystem::path& history_path, const std::st
     } else {
         result.point_verdict = last.verdict;
         result.point_vs_median = last.vs_median;
+        result.point_measured = last.verdict != "insufficient";
         if (last.verdict == "fail") {
             result.passed = false;
         }
@@ -86,12 +95,18 @@ GateResult compute_gate(const std::filesystem::path& history_path, const std::st
                                         values.end());
             const auto reference_median = median_of(reference);
             const auto current_median = median_of(current);
-            const auto rel = (current_median - reference_median) / reference_median;
-            const auto worse = metric->better_up ? -rel : rel;
-            result.drift_ratio = rel;
-            result.drift_verdict = worse >= 0.15 ? "fail" : "ok";
-            if (result.drift_verdict == "fail") {
-                result.passed = false;
+            // Referência zero (legítima para métricas como wal_bytes/
+            // peak_disk em escalas pequenas) tornaria a razão relativa
+            // inf/nan -- sem base de comparação, fica "insufficient" em vez
+            // de um falso "fail"/"ok".
+            if (reference_median != 0.0) {
+                const auto rel = (current_median - reference_median) / reference_median;
+                const auto worse = metric->better_up ? -rel : rel;
+                result.drift_ratio = rel;
+                result.drift_verdict = worse >= 0.15 ? "fail" : "ok";
+                if (result.drift_verdict == "fail") {
+                    result.passed = false;
+                }
             }
         }
     }
@@ -104,7 +119,7 @@ std::string render_gate(const GateResult& result, const std::string& case_id,
     std::ostringstream oss;
     oss << "gate " << case_id << " " << metric_id << '\n';
     oss << "  pontual: " << result.point_verdict;
-    if (result.point_verdict != "insufficient") {
+    if (result.point_measured) {
         oss << " (" << (result.point_vs_median >= 0 ? "+" : "") << (result.point_vs_median * 100.0)
             << "% vs mediana das 5 anteriores)";
     }

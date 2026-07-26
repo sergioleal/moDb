@@ -1,5 +1,6 @@
 #include "history/rollup.hpp"
 
+#include "campaign.hpp"
 #include "environments.hpp"
 #include "history/series_key.hpp"
 #include "json_value.hpp"
@@ -106,8 +107,20 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
     bool git_dirty = false;
     std::uint64_t page_size = 0, format_version = 0, protocol_version = 0;
 
-    std::map<std::string, CaseAccumulator> cases;
-    std::vector<std::string> case_order;
+    // Chave = (case_id, posição da ocorrência) -- `--repeat N` produz N
+    // registros com o MESMO case_id (repeat_index não participa de
+    // Case::case_id(), §5), e cada ocorrência precisa virar seu próprio ponto
+    // histórico (dedup documentado é run_id+case_id+repeat_index, docs/
+    // PLANO_TESTES_DE_CARGA.md §13.9-ish). `run_case_and_record` processa um
+    // caso inteiro (case_start...case_summary/case_error) antes do próximo,
+    // então as ocorrências de um mesmo case_id nunca se interleavam -- um
+    // contador sequencial de "case_start visto" identifica cada uma sem
+    // ambiguidade.
+    using CaseKey = std::pair<std::string, std::uint64_t>;
+    std::map<CaseKey, CaseAccumulator> cases;
+    std::vector<CaseKey> case_order;
+    CaseKey current_key;
+    bool have_current = false;
 
     std::size_t line_no = 0;
     std::istringstream lines(content);
@@ -145,10 +158,13 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             protocol_version = static_cast<std::uint64_t>(v.get_number("protocol_version"));
         } else if (record == "case_start") {
             const auto case_id = v.get_string("case_id");
-            if (!cases.contains(case_id)) {
-                case_order.push_back(case_id);
+            const auto repeat_index = static_cast<std::uint64_t>(v.get_number("repeat_index"));
+            current_key = CaseKey{case_id, repeat_index};
+            have_current = true;
+            if (!cases.contains(current_key)) {
+                case_order.push_back(current_key);
             }
-            auto& acc = cases[case_id];
+            auto& acc = cases[current_key];
             acc.workload = v.get_string("workload");
             acc.target = v.get_string("target");
             acc.scale = v.get_string("scale");
@@ -161,16 +177,20 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             acc.durability = v.get_string("durability");
             acc.cache = v.get_string("cache");
             acc.primary_storage = v.get_string("primary_storage");
-            acc.repeat_index = static_cast<std::uint64_t>(v.get_number("repeat_index"));
+            acc.repeat_index = repeat_index;
         } else if (record == "phase_summary") {
-            const auto case_id = v.get_string("case_id");
-            auto& acc = cases[case_id];
+            if (!have_current) {
+                continue;
+            }
+            auto& acc = cases[current_key];
             acc.phase_json_objects.push_back(phase_summary_object(v));
             const auto phase_rss = static_cast<std::uint64_t>(v.get_number("peak_rss_bytes"));
             acc.peak_rss_bytes_across_phases = std::max(acc.peak_rss_bytes_across_phases, phase_rss);
         } else if (record == "case_summary") {
-            const auto case_id = v.get_string("case_id");
-            auto& acc = cases[case_id];
+            if (!have_current) {
+                continue;
+            }
+            auto& acc = cases[current_key];
             acc.has_summary = true;
             acc.status = v.get_string("status");
             acc.total_duration_ns = v.get_number("total_duration_ns");
@@ -192,8 +212,10 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
                 acc.windows_last_p99_ns = windows->get_number("last_p99_ns");
             }
         } else if (record == "case_error") {
-            const auto case_id = v.get_string("case_id");
-            auto& acc = cases[case_id];
+            if (!have_current) {
+                continue;
+            }
+            auto& acc = cases[current_key];
             acc.error_message = v.get_string("error");
             if (!acc.has_summary) {
                 acc.has_error_only = true;
@@ -204,14 +226,14 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
     const auto raw_sha256 = modb::bench::sha256_hex(modb::bench::sha256_text(content));
     const auto raw_file = campaign_path.filename().string();
 
-    for (const auto& case_id : case_order) {
-        const auto& acc = cases.at(case_id);
+    for (const auto& key : case_order) {
+        const auto& acc = cases.at(key);
+        const auto& case_id = key.first;
 
-        // Workload sem dispatch implementado: um case_error citando isso não
-        // é uma medição -- não vira ponto histórico (docs-process/
+        // Workload/target sem dispatch implementado: um case_error citando
+        // isso não é uma medição -- não vira ponto histórico (docs-process/
         // PLANO_IMPLEMENTACAO_CARGA.md, Subfase C).
-        if (acc.has_error_only && acc.error_message.find("ainda não implementado") !=
-                                      std::string::npos) {
+        if (acc.has_error_only && is_unimplemented_error_text(acc.error_message)) {
             continue;
         }
         if (!acc.has_summary && !acc.has_error_only) {

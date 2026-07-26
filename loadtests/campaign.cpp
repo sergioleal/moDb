@@ -35,6 +35,13 @@
 #include <system_error>
 
 namespace modb::loadtest {
+
+bool is_unimplemented_error_text(const std::string& error) {
+    return error.find("ainda não implementado") != std::string::npos ||
+           error.find("ainda não tem dispatch implementado") != std::string::npos ||
+           error.find("ainda não tem target implementado") != std::string::npos;
+}
+
 namespace {
 
 using modb::bench::collect_environment;
@@ -651,15 +658,28 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
     in.close();
 
     // Varre o arquivo uma vez: run_id/seed (run_start), a ordem oficial dos
-    // casos (case_plan), o último case_start de cada case_id (para
-    // reconstruir o Case dos pendentes) e quais case_ids já têm veredito
-    // (case_summary OU case_error -- os únicos dois records que fecham um
-    // caso). `sequence` continua de onde o arquivo parou, nunca reinicia em
-    // 0 -- senão duas linhas do mesmo arquivo colidiriam de sequência.
+    // casos (case_plan) e o veredito de cada OCORRÊNCIA já resolvida
+    // (case_summary/case_error/skipped_budget). `sequence` continua de onde o
+    // arquivo parou, nunca reinicia em 0 -- senão duas linhas do mesmo
+    // arquivo colidiriam de sequência.
+    //
+    // Identidade por posição, não por case_id: `--repeat N` produz N
+    // registros com o MESMO case_id (repeat_index não participa de
+    // Case::case_id(), §5), então um `std::set<std::string>`/`std::map<
+    // std::string, ...>` chaveado por case_id trataria a repetição 2 como
+    // "já resolvida" assim que a repetição 1 terminasse. `run_case_and_record`
+    // processa um caso por vez (case_start...veredito) antes do próximo, e
+    // `skipped_budget` ocupa uma posição do plano sem emitir case_start --
+    // então um contador sequencial de "quantas ocorrências já vimos" (uma por
+    // case_start OU skipped_budget) identifica cada ocorrência sem ambiguidade
+    // e sem depender do texto do case_id.
     std::string run_id, seed_str;
     std::vector<std::string> case_plan_ids;
-    std::map<std::string, JsonValue> case_starts;
-    std::set<std::string> resolved;
+    std::map<std::size_t, JsonValue> case_starts_by_position;
+    std::set<std::size_t> resolved_positions;
+    std::size_t next_position = 0;
+    std::size_t current_position = 0;
+    bool have_current_position = false;
     std::uint64_t sequence = 0;
     CaseTally tally;
 
@@ -693,34 +713,40 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
                 }
             }
         } else if (record == "case_start") {
-            case_starts[v.get_string("case_id")] = v;
+            current_position = next_position++;
+            have_current_position = true;
+            case_starts_by_position[current_position] = v;
         } else if (record == "case_summary") {
-            const auto case_id = v.get_string("case_id");
-            resolved.insert(case_id);
+            if (!have_current_position) {
+                continue;   // arquivo corrompido/fora de ordem -- defensivo
+            }
+            resolved_positions.insert(current_position);
             if (v.get_string("status") == "completed") {
                 ++tally.completed;
             } else {
                 ++tally.failed;
             }
         } else if (record == "case_error") {
-            const auto case_id = v.get_string("case_id");
-            if (resolved.insert(case_id).second) {
+            if (!have_current_position) {
+                continue;
+            }
+            if (resolved_positions.insert(current_position).second) {
                 const auto error_text = v.get_string("error");
-                if (error_text.find("ainda não implementado") != std::string::npos) {
+                if (is_unimplemented_error_text(error_text)) {
                     ++tally.unimplemented;
                 } else {
                     ++tally.failed;
                 }
             }
         } else if (record == "skipped_budget") {
-            // Terceiro estado terminal de um caso (além de case_summary/
-            // case_error): a decisão de pular já foi tomada e registrada, e
-            // um caso pulado nunca tem case_start (o skip acontece antes),
-            // então sem tratar isso aqui resume tentaria "retomar" um caso
-            // sem parâmetros gravados e recusaria o arquivo inteiro por um
-            // motivo que não tem nada a ver com o real.
-            const auto case_id = v.get_string("case_id");
-            if (resolved.insert(case_id).second) {
+            // Terceiro estado terminal de uma ocorrência (além de
+            // case_summary/case_error): a decisão de pular já foi tomada e
+            // registrada, e um caso pulado nunca tem case_start (o skip
+            // acontece antes) -- por isso ocupa sua própria posição no plano
+            // em vez de reusar `current_position` de uma ocorrência anterior.
+            current_position = next_position++;
+            have_current_position = true;
+            if (resolved_positions.insert(current_position).second) {
                 ++tally.skipped_budget;
             }
         }
@@ -733,15 +759,17 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
     }
 
     std::vector<Case> pending_cases;
-    for (const auto& case_id : case_plan_ids) {
-        if (resolved.contains(case_id)) {
+    for (std::size_t position = 0; position < case_plan_ids.size(); ++position) {
+        if (resolved_positions.contains(position)) {
             continue;
         }
-        auto it = case_starts.find(case_id);
-        if (it == case_starts.end()) {
-            result.error = "caso '" + case_id +
-                           "' foi interrompido antes de emitir case_start -- não há parâmetros "
-                           "efetivos gravados para retomar com segurança; rode-o isolado via --case";
+        auto it = case_starts_by_position.find(position);
+        if (it == case_starts_by_position.end()) {
+            result.error = "caso '" + case_plan_ids[position] + "' (posição " +
+                           std::to_string(position) +
+                           " do plano) foi interrompido antes de emitir case_start -- não há "
+                           "parâmetros efetivos gravados para retomar com segurança; rode-o "
+                           "isolado via --case";
             return result;
         }
         pending_cases.push_back(case_from_case_start(it->second));

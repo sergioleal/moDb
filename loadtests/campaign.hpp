@@ -17,6 +17,15 @@
 
 namespace modb::loadtest {
 
+// Um `case_error` cujo texto é uma dessas frases não é uma medição -- é uma
+// recusa de execução (workload sem dispatch nenhum, ou dispatch existente mas
+// que não cobre o alvo/dimensão pedido) já declarada como dívida conhecida
+// (docs-process/PLANO_IMPLEMENTACAO_CARGA.md, Subfase C). `resume_campaign`
+// e `rollup.cpp` compartilham esta checagem -- duas fontes de verdade
+// divergentes já causaram um caso real ser contado como "failed" (Subfase R,
+// revisão pós-implementação).
+[[nodiscard]] bool is_unimplemented_error_text(const std::string& error);
+
 struct CampaignOptions {
     std::optional<std::string> profile;
     MatrixSelectors selectors;

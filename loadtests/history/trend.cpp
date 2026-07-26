@@ -205,8 +205,12 @@ TrendResult compute_trend(const std::filesystem::path& history_path, const std::
         if (point.has_value && point.comparable && point.status == "completed") {
             std::vector<double> trailing(window.end() - static_cast<long>(std::min<std::size_t>(5, window.size())),
                                         window.end());
-            if (trailing.size() >= 3) {
-                const auto ref = median_of(trailing);
+            // ref == 0 é legítimo (ex.: wal_bytes/peak_disk em escalas
+            // pequenas) e tornaria a razão relativa inf/nan -- sem base de
+            // comparação, o veredito fica "insufficient" (valor padrão) em
+            // vez de um falso "fail"/"ok".
+            if (const auto ref = trailing.size() >= 3 ? median_of(trailing) : 0.0;
+                trailing.size() >= 3 && ref != 0.0) {
                 const auto rel = (point.value - ref) / ref;
                 const auto worse = metric->better_up ? -rel : rel;
                 point.vs_median = rel;
