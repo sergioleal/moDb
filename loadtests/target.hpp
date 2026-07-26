@@ -58,6 +58,11 @@ struct PhaseMetrics {
     // contador de páginas escritas/reutilizadas na API pública hoje. Nomeado
     // "_estimated" de propósito, para não se passar por contador real.
     std::uint64_t pages_written_estimated{};
+
+    // Subfase L (§4.2.1 `read_hotspot`): hits/(hits+misses) do buffer pool
+    // durante a fase (`database.page_file().buffer_pool().metrics()`).
+    // -1.0 = não medido nesta fase (a maioria dos workloads não mede isso).
+    double cache_hit_rate{-1.0};
 };
 
 // Parâmetros efetivos que um workload recebe do caso já resolvido pela

@@ -7,13 +7,17 @@
 #include "user_type.hpp"
 
 #include "modb/object/database.hpp"
+#include "modb/query/planner.hpp"
+#include "modb/storage/buffer_pool.hpp"
 #include "modb/storage/page.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <vector>
 
@@ -40,6 +44,36 @@ std::uint64_t logical_size_bytes(const GeneratedUser& u) {
     return sizeof(u.id) + u.login.size() + u.email.size() + u.display_name.size() +
           sizeof(u.created_at) + sizeof(u.status) + u.filler.size();
 }
+
+// Amostrador Zipf sobre ranks 1..n (§4.2.1 `read_hotspot`: "leitura
+// enviesada sobre working set fixo"). CDF pré-computada -- O(n) memória,
+// O(log n) por amostra -- suficiente para as escalas deste workload (até
+// 1M). `s` é o expoente de inclinação usual (1.0 = Zipf clássico).
+class ZipfSampler {
+public:
+    ZipfSampler(std::uint64_t n, double s, std::uint64_t seed) : rng_(seed) {
+        cumulative_.reserve(n);
+        double sum = 0.0;
+        for (std::uint64_t k = 1; k <= n; ++k) {
+            sum += 1.0 / std::pow(static_cast<double>(k), s);
+            cumulative_.push_back(sum);
+        }
+        total_ = sum;
+    }
+
+    // Rank 1-based (mesma numeração de `generate_user`'s `index`).
+    std::uint64_t next() {
+        std::uniform_real_distribution<double> dist(0.0, total_);
+        const double target = dist(rng_);
+        auto it = std::lower_bound(cumulative_.begin(), cumulative_.end(), target);
+        return static_cast<std::uint64_t>(it - cumulative_.begin()) + 1;
+    }
+
+private:
+    std::vector<double> cumulative_;
+    double total_{};
+    std::mt19937_64 rng_;
+};
 
 LatencyPercentilesNs percentiles_of(std::vector<double> latencies_ns) {
     std::sort(latencies_ns.begin(), latencies_ns.end());
@@ -1014,6 +1048,208 @@ CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
     result.space_amplification = 0.0;
     result.status = "completed";
     result.ok = true;
+    return result;
+}
+
+CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
+                                        std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "read_hotspot");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    AttachedDatabase attached;
+    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+        result.status = "failed";
+        result.error = setup.error;
+        return result;
+    }
+
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
+    if (!create_outcome.ok) {
+        result.status = "failed";
+        result.error = create_outcome.error;
+        return result;
+    }
+    result.phases.push_back(create_outcome.phase);
+
+    // Leituras enviesadas por Zipf sobre o working set inteiro -- 3x o
+    // tamanho do working set é um múltiplo arbitrário, mas o bastante para
+    // um rank "quente" (baixo) ser reamostrado muitas vezes e pressionar o
+    // buffer pool de verdade, em vez de ler cada objeto uma única vez.
+    const auto read_count = std::max<std::uint64_t>(params.object_count * 3, 1000);
+    ZipfSampler sampler(params.object_count, /*s=*/1.0, params.seed ^ 0x5A17'F000'0000'0001ULL);
+
+    auto& buffer_pool = attached.database->page_file().buffer_pool();
+    buffer_pool.reset_metrics();
+
+    std::vector<double> latencies_ns;
+    latencies_ns.reserve(read_count);
+    std::ostringstream expected_stream, actual_stream;
+    std::uint64_t errors = 0;
+
+    const auto read_start = std::chrono::steady_clock::now();
+    for (std::uint64_t i = 0; i < read_count; ++i) {
+        const auto rank = sampler.next();
+        const auto expected_user = generate_user(params.seed, rank, params.payload);
+        expected_stream << canonical_line(expected_user) << '\n';
+
+        const auto op_start = std::chrono::steady_clock::now();
+        auto handle = attached.database->get<User>(create_outcome.ids[rank - 1]);
+        Result<User> value;
+        if (handle) {
+            value = attached.database->materialize(*handle);
+        }
+        const auto op_end = std::chrono::steady_clock::now();
+        latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+
+        if (!handle || !value) {
+            ++errors;
+            continue;
+        }
+        actual_stream << canonical_line(from_engine_user(*value)) << '\n';
+    }
+    const auto read_end = std::chrono::steady_clock::now();
+    const auto metrics = buffer_pool.metrics();
+    const auto total_accesses = metrics.hits + metrics.misses;
+    const auto hit_rate = total_accesses > 0
+                             ? static_cast<double>(metrics.hits) / static_cast<double>(total_accesses)
+                             : -1.0;
+
+    std::error_code size_error;
+    const auto db_bytes = std::filesystem::file_size(db_path, size_error);
+    std::error_code wal_size_error;
+    const auto wal_bytes = std::filesystem::file_size(wal_path, wal_size_error);
+    const auto read_ns = ns_between(read_start, read_end);
+
+    PhaseMetrics phase;
+    phase.phase = "read_hotspot";
+    phase.operations = read_count;
+    phase.duration_ns = read_ns;
+    phase.ops_per_second = read_ns > 0 ? (static_cast<double>(read_count) * 1'000'000'000.0) /
+                                            static_cast<double>(read_ns)
+                                       : 0.0;
+    phase.errors = errors;
+    phase.latency_ns = percentiles_of(std::move(latencies_ns));
+    phase.peak_rss_bytes = peak_rss_bytes();
+    phase.db_bytes = size_error ? 0 : db_bytes;
+    phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
+    phase.cache_hit_rate = hit_rate;
+    result.phases.push_back(phase);
+
+    result.expected_hash = sha256_hex(sha256_text(expected_stream.str()));
+    result.actual_hash = sha256_hex(sha256_text(actual_stream.str()));
+    result.hash_match = errors == 0 && result.expected_hash == result.actual_hash;
+    if (!result.hash_match) {
+        result.status = "failed";
+        result.error = "read_hotspot: valores lidos não conferem com o esperado (" +
+                       std::to_string(errors) + " erro(s) de releitura)";
+        return result;
+    }
+
+    result.peak_disk_bytes = phase.db_bytes;
+    result.total_duration_ns = create_outcome.phase.duration_ns + read_ns;
+    result.write_amplification = create_outcome.logical_bytes > 0
+                                    ? static_cast<double>(phase.db_bytes) /
+                                          static_cast<double>(create_outcome.logical_bytes)
+                                    : 0.0;
+    result.space_amplification = result.write_amplification;
+    result.status = "completed";
+    result.ok = true;
+    return result;
+}
+
+CaseRunResult run_range_scan_sweep_embedded(const WorkloadParams& params,
+                                            std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "range_scan_sweep");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    AttachedDatabase attached;
+    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+        result.status = "failed";
+        result.error = setup.error;
+        return result;
+    }
+
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
+    if (!create_outcome.ok) {
+        result.status = "failed";
+        result.error = create_outcome.error;
+        return result;
+    }
+    result.phases.push_back(create_outcome.phase);
+
+    constexpr FieldId kIdField{1};
+    if (auto indexed = attached.database->create_index<User>(kIdField); !indexed) {
+        result.status = "failed";
+        result.error = "create_index<User>(id): " + indexed.error().message;
+        return result;
+    }
+
+    // §4.2.1: seletividade de 0,01% a 100% do working set -- cada uma vira
+    // uma fase própria (o nome já registra se o plano usou índice ou table
+    // scan, §16 "plano registrado").
+    const struct { const char* label; double selectivity; } sweeps[] = {
+        {"0.01pct", 0.0001}, {"0.1pct", 0.001}, {"1pct", 0.01},
+        {"10pct", 0.10},     {"100pct", 1.0},
+    };
+
+    for (const auto& sweep : sweeps) {
+        const auto count = std::max<std::uint64_t>(
+            1, static_cast<std::uint64_t>(std::llround(static_cast<double>(params.object_count) *
+                                                       sweep.selectivity)));
+        const std::uint64_t lo = 1;
+        const std::uint64_t hi = std::min(params.object_count, lo + count - 1);
+        const auto expected_count = hi - lo + 1;
+
+        auto query = attached.database->query<User>().between(
+            kIdField, static_cast<std::int64_t>(lo), static_cast<std::int64_t>(hi));
+        const auto plan = query.plan();
+
+        std::uint64_t actual_count = 0;
+        std::uint64_t errors = 0;
+        const auto scan_start = std::chrono::steady_clock::now();
+        for (auto& row : std::move(query).stream()) {
+            if (row) {
+                ++actual_count;
+            } else {
+                ++errors;
+            }
+        }
+        const auto scan_end = std::chrono::steady_clock::now();
+
+        if (actual_count != expected_count || errors != 0) {
+            result.status = "failed";
+            result.error = "range_scan_sweep(" + std::string(sweep.label) +
+                           "): contagem esperada=" + std::to_string(expected_count) +
+                           " obtida=" + std::to_string(actual_count) +
+                           " erros=" + std::to_string(errors);
+            return result;
+        }
+
+        PhaseMetrics phase;
+        phase.phase = std::string("scan_") + sweep.label + "_" +
+                     query::access_name(plan.access);
+        phase.operations = actual_count;
+        const auto scan_ns = ns_between(scan_start, scan_end);
+        phase.duration_ns = scan_ns;
+        phase.ops_per_second = scan_ns > 0 ? (static_cast<double>(actual_count) * 1'000'000'000.0) /
+                                                static_cast<double>(scan_ns)
+                                           : 0.0;
+        phase.peak_rss_bytes = peak_rss_bytes();
+        result.phases.push_back(phase);
+    }
+
+    result.status = "completed";
+    result.ok = true;
+    result.total_duration_ns = 0;
+    for (const auto& phase : result.phases) {
+        result.total_duration_ns += phase.duration_ns;
+    }
+    result.peak_disk_bytes = create_outcome.phase.db_bytes;
+    result.hash_match = true;   // não há hash lógico separado -- a invariante é a contagem por fase
     return result;
 }
 

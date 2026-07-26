@@ -181,6 +181,52 @@ void test_progress_window_absent_without_callback(TestSuite& suite) {
                "sem callback e com fase curta, windows.has_windows deve ficar false");
 }
 
+// Subfase L (§4.2.1): leituras enviesadas por Zipf conferindo contra o
+// esperado (na ordem lida), com taxa de acerto do buffer pool registrada.
+void test_read_hotspot(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_read_hotspot_embedded(small_params(work_dir), db_path);
+
+    suite.check(result.ok, "read_hotspot deve completar: " + result.error);
+    suite.check(result.status == "completed", "read_hotspot status deve ser completed");
+    suite.check(result.phases.size() == 2,
+               "read_hotspot deve produzir 2 fases (create + read_hotspot)");
+    if (result.phases.size() == 2) {
+        suite.check(result.phases[1].phase == "read_hotspot", "a 2a fase deve se chamar 'read_hotspot'");
+        suite.check(result.phases[1].operations == 1000,
+                   "read_hotspot deve fazer max(3x object_count, 1000) leituras -- aqui o piso de "
+                   "1000 domina (object_count=200)");
+        suite.check(result.phases[1].cache_hit_rate >= 0.0 && result.phases[1].cache_hit_rate <= 1.0,
+                   "cache_hit_rate deve ser uma fração válida quando medido");
+    }
+    suite.check(result.hash_match, "read_hotspot deve validar os valores lidos: " + result.error);
+}
+
+// Subfase L: índice por igualdade/faixa em `User.id`, uma fase por
+// seletividade, contagem exata confere e o plano é registrado no nome da fase.
+void test_range_scan_sweep(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_range_scan_sweep_embedded(small_params(work_dir), db_path);
+
+    suite.check(result.ok, "range_scan_sweep deve completar: " + result.error);
+    suite.check(result.status == "completed", "range_scan_sweep status deve ser completed");
+    suite.check(result.phases.size() == 6,
+               "range_scan_sweep deve produzir 6 fases (create + 5 seletividades)");
+    bool any_index_scan = false;
+    for (std::size_t i = 1; i < result.phases.size(); ++i) {
+        const auto& phase = result.phases[i];
+        suite.check(phase.phase.find("index_scan") != std::string::npos ||
+                       phase.phase.find("table_scan") != std::string::npos,
+                   "nome da fase deve registrar o plano (índice ou table scan): " + phase.phase);
+        if (phase.phase.find("index_scan") != std::string::npos) {
+            any_index_scan = true;
+        }
+    }
+    suite.check(any_index_scan, "ao menos uma seletividade deveria usar o índice recém-criado");
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -223,6 +269,8 @@ int main() {
     test_forward_and_reverse_are_comparable(suite);
     test_progress_window_emitted(suite);
     test_progress_window_absent_without_callback(suite);
+    test_read_hotspot(suite);
+    test_range_scan_sweep(suite);
     test_crud_full(suite);
     return suite.finish();
 }

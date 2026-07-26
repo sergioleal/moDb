@@ -38,4 +38,17 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
 [[nodiscard]] CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
                                                    std::filesystem::path& out_db_path);
 
+// read_hotspot (§4.2.1): create → leituras enviesadas por Zipf sobre o
+// working set fixo. Valida os valores lidos contra o esperado (na mesma
+// ordem em que foram lidos) e mede a taxa de acerto do buffer pool durante
+// a fase de leitura.
+[[nodiscard]] CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
+                                                      std::filesystem::path& out_db_path);
+
+// range_scan_sweep (§4.2.1): create → índice em `User.id` → uma fase de
+// scan por faixa para cada seletividade de 0,01% a 100%. Cada fase registra
+// no próprio nome se o plano usou índice ou table scan (`query::QueryPlan`).
+[[nodiscard]] CaseRunResult run_range_scan_sweep_embedded(const WorkloadParams& params,
+                                                          std::filesystem::path& out_db_path);
+
 } // namespace modb::loadtest

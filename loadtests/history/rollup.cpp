@@ -68,7 +68,8 @@ std::string phase_summary_object(const JsonValue& line) {
         << ",\"pages_written\":"
         << json_uint(static_cast<std::uint64_t>(line.get_number("pages_written_estimated")))
         << ",\"pages_reused\":null"
-        << ",\"errors\":" << json_uint(static_cast<std::uint64_t>(line.get_number("errors"))) << "}";
+        << ",\"errors\":" << json_uint(static_cast<std::uint64_t>(line.get_number("errors")))
+        << ",\"cache_hit_rate\":" << line.get_number("cache_hit_rate", -1.0) << "}";
     return oss.str();
 }
 

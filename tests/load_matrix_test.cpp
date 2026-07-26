@@ -240,8 +240,10 @@ void test_known_catalogs(TestSuite& suite) {
                "a escada create_delete_* deve estar marcada como implementada (Subfase D)");
     suite.check(is_workload_implemented("crud_full"),
                "crud_full deve estar marcado como implementado (Subfase E)");
-    suite.check(!is_workload_implemented("read_hotspot"),
-               "read_hotspot (§4.2.1) ainda não deveria estar marcado como implementado");
+    suite.check(is_workload_implemented("read_hotspot") && is_workload_implemented("range_scan_sweep"),
+               "read_hotspot/range_scan_sweep devem estar marcados como implementados (Subfase L)");
+    suite.check(!is_workload_implemented("mixed_oltp"),
+               "mixed_oltp (§4.2.1) ainda não deveria estar marcado como implementado");
     suite.check(is_target_implemented("embedded") && is_target_implemented("loopback") &&
                    is_target_implemented("remote_colocated"),
                "embedded/loopback/remote_colocated devem estar marcados como implementados "

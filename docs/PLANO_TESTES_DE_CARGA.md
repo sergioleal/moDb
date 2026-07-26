@@ -125,6 +125,17 @@ básica — estes exigem seleção explícita por `--workload` ou o perfil
 `crud_query` e `crud_relationships` — deixam de ser placeholder e passam a ter
 fases e invariantes definidos.
 
+**Implementado na Subfase L**: `read_hotspot` e `range_scan_sweep`, só
+`embedded`. `read_hotspot` usa `database.page_file().buffer_pool().metrics()`
+para o hit rate real (`PhaseMetrics.cache_hit_rate`, novo campo -- -1.0 nas
+fases que não medem isso) e um amostrador Zipf com CDF pré-computada sobre o
+working set; valida os valores lidos comparando o hash na mesma ordem em que
+foram lidos (não a ordem de criação). `range_scan_sweep` cria um índice em
+`User.id` e roda uma fase por seletividade (0,01%/0,1%/1%/10%/100%), cada
+fase nomeada com o `AccessMethod` real do `query::QueryPlan` (`scan_1pct_index_scan`,
+por exemplo) -- o "plano registrado" do critério de pronto vira parte do
+próprio nome da fase, não um campo novo no schema.
+
 Dois workloads adicionais dependem de infraestrutura que o harness genérico
 (`target.hpp`, §14) ainda não cobre; ficam **fora de todos os perfis** até essa
 infraestrutura existir — mesmo tratamento hoje dado a `primary_storage=wal_only`
