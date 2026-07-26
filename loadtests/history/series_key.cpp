@@ -23,6 +23,7 @@ std::string compute_series_key(const SeriesKeyInput& input) {
         << "cache=" << input.cache << '\n'
         << "primary_storage=" << input.primary_storage << '\n'
         << "build_type=" << input.build_type << '\n'
+        << "instrumentation=" << input.instrumentation << '\n'
         << "arch=" << input.arch << '\n'
         << "page_size=" << input.page_size << '\n'
         << "format_version=" << input.format_version << '\n'

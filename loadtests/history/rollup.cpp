@@ -19,6 +19,26 @@ using modb::bench::json_bool;
 using modb::bench::json_string;
 using modb::bench::json_uint;
 
+// Campo ausente vira `null`, nunca "" nem 0 inventado (§13.3): um zero
+// indistinguível de "medi e deu zero" envenena a série anos depois.
+std::string string_or_null(const std::string& value) {
+    return value.empty() ? "null" : json_string(value);
+}
+
+std::string uint_or_null(std::uint64_t value) {
+    return value == 0 ? "null" : json_uint(value);
+}
+
+// RAM em GB inteiros, como o schema documenta (`ram_gb`); arredonda para o mais
+// próximo porque o total físico reportado nunca é um múltiplo exato.
+std::string ram_gb_or_null(std::uint64_t ram_bytes) {
+    if (ram_bytes == 0) {
+        return "null";
+    }
+    constexpr std::uint64_t gib = 1024ULL * 1024 * 1024;
+    return json_uint((ram_bytes + gib / 2) / gib);
+}
+
 // Estado acumulado de um `case_id` enquanto a campanha é varrida linha a
 // linha -- os records de um caso não são contíguos no arquivo (case_start,
 // phase_start/phase_summary por fase, depois case_summary ou case_error).
@@ -104,8 +124,10 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
     std::string run_id, started_at;
     std::string git_commit, git_commit_short, git_branch, compiler_id, compiler_version;
     std::string build_type, arch, hostname_token, seed_str;
+    std::string instrumentation, os_name, os_version, cpu_model, fs;
     bool git_dirty = false;
     std::uint64_t page_size = 0, format_version = 0, protocol_version = 0;
+    std::uint64_t cores_physical = 0, cores_logical = 0, ram_bytes = 0;
 
     // Chave = (case_id, posição da ocorrência) -- `--repeat N` produz N
     // registros com o MESMO case_id (repeat_index não participa de
@@ -151,7 +173,15 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             compiler_id = v.get_string("compiler_id");
             compiler_version = v.get_string("compiler_version");
             build_type = v.get_string("build_type");
+            instrumentation = v.get_string("instrumentation");
             arch = v.get_string("arch");
+            os_name = v.get_string("os_name");
+            os_version = v.get_string("os_version");
+            cpu_model = v.get_string("cpu_model");
+            fs = v.get_string("fs");
+            cores_physical = static_cast<std::uint64_t>(v.get_number("cores_physical"));
+            cores_logical = static_cast<std::uint64_t>(v.get_number("cores_logical"));
+            ram_bytes = static_cast<std::uint64_t>(v.get_number("ram_bytes"));
             hostname_token = v.get_string("hostname_token");
             page_size = static_cast<std::uint64_t>(v.get_number("page_size"));
             format_version = static_cast<std::uint64_t>(v.get_number("format_version"));
@@ -226,6 +256,25 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
     const auto raw_sha256 = modb::bench::sha256_hex(modb::bench::sha256_text(content));
     const auto raw_file = campaign_path.filename().string();
 
+    // `os` do rollup é a junção legível de os_name/os_version da campanha, que
+    // são dois campos separados no record `environment`.
+    const std::string os_display = [&] {
+        if (os_name.empty()) {
+            return std::string{};
+        }
+        return os_version.empty() ? os_name : os_name + " " + os_version;
+    }();
+    // O schema documenta `sanitizers`; `instrumentation` é mais amplo (gprof,
+    // coverage). Os dois são emitidos: o campo antigo continua respondendo o que
+    // o dashboard já pergunta, o novo carrega o resto.
+    const std::string sanitizers_field = [&] {
+        if (instrumentation.empty()) {
+            return std::string{};
+        }
+        return instrumentation.find("sanitizers") != std::string::npos ? std::string{"on"}
+                                                                      : std::string{"none"};
+    }();
+
     for (const auto& key : case_order) {
         const auto& acc = cases.at(key);
         const auto& case_id = key.first;
@@ -258,6 +307,7 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
         key_input.cache = acc.cache;
         key_input.primary_storage = acc.primary_storage;
         key_input.build_type = build_type;
+        key_input.instrumentation = instrumentation;
         key_input.arch = arch;
         key_input.page_size = page_size;
         key_input.format_version = format_version;
@@ -287,11 +337,21 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             << ",\"dataset_version\":" << json_uint(key_input.dataset_version)
             << ",\"seed\":" << json_string(seed_str) << ",\"env\":{"
             << "\"host_id\":" << json_string(hostname_token)
-            << ",\"host_class\":" << json_string(host_class) << ",\"os\":null,\"arch\":"
-            << json_string(arch) << ",\"cpu_model\":null,\"cores_physical\":null"
-            << ",\"cores_logical\":null,\"ram_gb\":null,\"fs\":null,\"device_class\":null"
+            << ",\"host_class\":" << json_string(host_class)
+            << ",\"os\":" << string_or_null(os_display) << ",\"arch\":" << json_string(arch)
+            << ",\"cpu_model\":" << string_or_null(cpu_model)
+            << ",\"cores_physical\":" << uint_or_null(cores_physical)
+            << ",\"cores_logical\":" << uint_or_null(cores_logical)
+            << ",\"ram_gb\":" << ram_gb_or_null(ram_bytes)
+            << ",\"fs\":" << string_or_null(fs)
+            // device_class (nvme/ssd/hdd) exige IOCTL_STORAGE_QUERY_PROPERTY por
+            // volume; permanece não coletado em vez de adivinhado
+            // (docs-process/PLANO_PROFILING.md §8).
+            << ",\"device_class\":null"
             << ",\"build_type\":" << json_string(build_type) << ",\"compiler\":"
-            << json_string(compiler_id + " " + compiler_version) << ",\"sanitizers\":null"
+            << json_string(compiler_id + " " + compiler_version)
+            << ",\"sanitizers\":" << string_or_null(sanitizers_field)
+            << ",\"instrumentation\":" << string_or_null(instrumentation)
             << ",\"page_size\":" << json_uint(page_size)
             << ",\"format_version\":" << json_uint(format_version)
             << ",\"protocol_version\":" << json_uint(protocol_version) << "}"

@@ -11,7 +11,16 @@
 
 namespace modb::loadtest {
 
-inline constexpr std::uint32_t series_key_version = 1;
+// Versão 2 (2026-07-26): `page_size` passou a chegar aqui de fato -- a campanha
+// gravava o campo como string JSON e o rollup lia com get_number, então TODA
+// chave da versão 1 foi calculada com page_size=0. Sem a correção, corridas com
+// páginas de 4k/8k/16k colidiriam numa série só, o que quebraria justamente a
+// varredura de page size do plano de profiling. `instrumentation` entrou no
+// mesmo passo: uma corrida com -pg é 2-3x mais lenta e não pertence à série de
+// uma corrida limpa. Os pontos da versão 1 continuam válidos e não são
+// reescritos -- a camada histórica é append-only
+// (docs/PLANO_TESTES_DE_CARGA.md §13.2, docs-process/PLANO_PROFILING.md §3).
+inline constexpr std::uint32_t series_key_version = 2;
 
 struct SeriesKeyInput {
     std::string case_id;
@@ -28,8 +37,10 @@ struct SeriesKeyInput {
     std::string cache;
     std::string primary_storage;
 
-    // Classe de build, arquitetura, page size, versões de formato/protocolo.
+    // Classe de build, instrumentação, arquitetura, page size, versões de
+    // formato/protocolo.
     std::string build_type;
+    std::string instrumentation;
     std::string arch;
     std::uint64_t page_size{};
     std::uint64_t format_version{};

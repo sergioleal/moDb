@@ -54,6 +54,17 @@ using modb::bench::JsonlWriter;
 using modb::bench::make_run_id;
 using modb::bench::utc_timestamp_millis;
 
+// `filesystem_name` precisa de um caminho absoluto (no Windows, com letra de
+// unidade); `work_dir` normalmente chega relativo ("load-results").
+std::string effective_filesystem_name(const std::filesystem::path& work_dir) {
+    std::error_code ec;
+    const auto absolute = std::filesystem::absolute(work_dir, ec);
+    if (ec) {
+        return {};
+    }
+    return modb::bench::filesystem_name(absolute.string());
+}
+
 std::string case_params_json(const Case& c) {
     std::ostringstream oss;
     oss << "\"workload\":" << json_string(c.workload) << ",\"target\":" << json_string(c.target)
@@ -576,11 +587,21 @@ CampaignResult run_campaign(const CampaignOptions& options) {
             << ",\"compiler_version\":" << json_string(env_info.compiler_version)
             << ",\"cxx_standard\":" << json_string(env_info.cxx_standard)
             << ",\"build_type\":" << json_string(env_info.build_type)
+            << ",\"instrumentation\":" << json_string(env_info.instrumentation)
             << ",\"os_name\":" << json_string(env_info.os_name)
             << ",\"os_version\":" << json_string(env_info.os_version)
             << ",\"arch\":" << json_string(env_info.arch)
+            << ",\"cpu_model\":" << json_string(env_info.cpu_model)
+            << ",\"cores_physical\":" << json_uint(env_info.cores_physical)
+            << ",\"cores_logical\":" << json_uint(env_info.cores_logical)
+            << ",\"ram_bytes\":" << json_uint(env_info.ram_bytes)
+            << ",\"fs\":" << json_string(effective_filesystem_name(work_dir))
             << ",\"hostname_token\":" << json_string(env_info.hostname_token)
-            << ",\"page_size\":" << json_string(env_info.page_size)
+            // Numérico, não string: o rollup lê com get_number e uma string
+            // virava page_size=0 -- inclusive dentro da series_key, colidindo
+            // corridas de 4k/8k/16k numa série só
+            // (docs-process/PLANO_PROFILING.md §3, M3).
+            << ",\"page_size\":" << env_info.page_size
             << ",\"project_version\":" << json_string(env_info.project_version)
             << ",\"format_version\":" << json_uint(modb::storage::current_format_version)
             << ",\"protocol_version\":" << json_uint(modb::net::protocol_version) << "}";

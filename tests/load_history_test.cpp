@@ -51,8 +51,10 @@ std::string fake_campaign_jsonl(const std::string& run_id, const std::string& st
             << R"(","sequence":2,"git_commit":"abcdef0123456789","git_commit_short":"abcdef0",)"
             << R"("git_branch":"master","git_dirty":false,"compiler_id":"gcc",)"
             << R"("compiler_version":"14","cxx_standard":"26","build_type":"Debug",)"
-            << R"("os_name":"Windows","os_version":"11","arch":"x86_64",)"
-            << R"("hostname_token":"h1234567","page_size":"4096","project_version":"0.1.0",)"
+            << R"("instrumentation":"none","os_name":"Windows","os_version":"11","arch":"x86_64",)"
+            << R"("cpu_model":"Test CPU","cores_physical":8,"cores_logical":16,)"
+            << R"("ram_bytes":34359738368,"fs":"NTFS",)"
+            << R"("hostname_token":"h1234567","page_size":4096,"project_version":"0.1.0",)"
             << R"("format_version":1,"protocol_version":1})" << '\n';
     }
     oss << R"({"schema":"modb.loadtest","schema_version":1,"record":"case_start",)"
@@ -121,6 +123,60 @@ void test_series_key_stable(TestSuite& suite) {
     changed_build.build_type = "Debug";
     suite.check(compute_series_key(changed_build) != key1,
                "build_type diferente deve produzir series_key diferente");
+
+    // Guarda de regressão do defeito M3 (docs-process/PLANO_PROFILING.md §3):
+    // page_size chegava sempre 0 aqui, então corridas de 4k/8k/16k caíam na
+    // mesma série. A chave TEM de reagir ao page size.
+    auto changed_page_size = input;
+    changed_page_size.page_size = 16384;
+    suite.check(compute_series_key(changed_page_size) != key1,
+               "page_size diferente deve produzir series_key diferente");
+
+    // Um build instrumentado (-pg) é 2-3x mais lento: não pertence à série de
+    // um build limpo.
+    auto changed_instrumentation = input;
+    changed_instrumentation.instrumentation = "gprof";
+    suite.check(compute_series_key(changed_instrumentation) != key1,
+               "instrumentation diferente deve produzir series_key diferente");
+}
+
+// M3/M4: o record `environment` da campanha precisa atravessar o rollup até o
+// campo correspondente do ponto histórico. Antes, `page_size` era gravado como
+// string e lido como número (virava 0) e metade do bloco `env` era `null`
+// hardcoded, independentemente do que a campanha tivesse medido.
+void test_rollup_carries_environment(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto campaign_path = dir / "campaign.jsonl";
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+
+    write_file(campaign_path, fake_campaign_jsonl("run-env-1", "20260101T000000.000Z", 20000));
+    write_file(env_path, fake_environments_json());
+
+    auto indexed = index_campaign(campaign_path, history_path, env_path);
+    suite.check(indexed.appended == 1, "campanha válida deve gerar 1 ponto: " + indexed.error);
+
+    std::ifstream history_file(history_path);
+    std::string line;
+    std::getline(history_file, line);
+
+    const auto contains = [&](std::string_view needle) {
+        return line.find(needle) != std::string::npos;
+    };
+    suite.check(contains(R"("page_size":4096)"),
+               "page_size da campanha deve chegar ao rollup como número (M3)");
+    suite.check(contains(R"("series_key_version":2)"),
+               "series_key_version deve ser 2 depois da correção de page_size");
+    suite.check(contains(R"("os":"Windows 11")"), "os_name/os_version devem virar `os` no rollup");
+    suite.check(contains(R"("cpu_model":"Test CPU")"), "cpu_model não deve mais ser null");
+    suite.check(contains(R"("cores_physical":8)"), "cores_physical não deve mais ser null");
+    suite.check(contains(R"("cores_logical":16)"), "cores_logical não deve mais ser null");
+    suite.check(contains(R"("ram_gb":32)"), "ram_bytes deve virar ram_gb arredondado");
+    suite.check(contains(R"("fs":"NTFS")"), "fs não deve mais ser null");
+    suite.check(contains(R"("instrumentation":"none")"), "instrumentation deve ser registrada");
+    // Campo ausente continua null -- nunca "" nem 0 inventado.
+    suite.check(contains(R"("device_class":null)"),
+               "device_class permanece null enquanto não for coletado");
 }
 
 void test_index_idempotent(TestSuite& suite) {
@@ -366,8 +422,10 @@ std::string fake_campaign_two_repeats_jsonl(const std::string& run_id, const std
         << R"(","sequence":2,"git_commit":"abcdef0123456789","git_commit_short":"abcdef0",)"
         << R"("git_branch":"master","git_dirty":false,"compiler_id":"gcc",)"
         << R"("compiler_version":"14","cxx_standard":"26","build_type":"Debug",)"
-        << R"("os_name":"Windows","os_version":"11","arch":"x86_64",)"
-        << R"("hostname_token":"h1234567","page_size":"4096","project_version":"0.1.0",)"
+        << R"("instrumentation":"none","os_name":"Windows","os_version":"11","arch":"x86_64",)"
+        << R"("cpu_model":"Test CPU","cores_physical":8,"cores_logical":16,)"
+        << R"("ram_bytes":34359738368,"fs":"NTFS",)"
+        << R"("hostname_token":"h1234567","page_size":4096,"project_version":"0.1.0",)"
         << R"("format_version":1,"protocol_version":1})" << '\n';
     std::uint64_t seq = 3;
     for (int repeat_index = 0; repeat_index < 2; ++repeat_index) {
@@ -792,6 +850,7 @@ void test_trend_rejects_unknown_metric(TestSuite& suite) {
 int main() {
     TestSuite suite;
     test_series_key_stable(suite);
+    test_rollup_carries_environment(suite);
     test_index_idempotent(suite);
     test_index_rejects_missing_provenance(suite);
     test_trend_median_and_verdict(suite);
