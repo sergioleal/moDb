@@ -573,6 +573,30 @@ Para `remote_client_local`, o RTT base e a banda observada são medidos antes da
 carga e gravados em `environment`; sem isso os números de rede não são
 comparáveis entre execuções.
 
+**Implementado na Subfase I (parcial).** `scripts/run-remote-load.ps1` cobre
+1, 2, 4, 5, 7 e 8 (item 6 vem de graça do `resume` da Subfase F, que já
+funciona sobre qualquer `.partial`, remoto ou não; a checagem de espaço livre
+do item 3 é a de `run_campaign` já implementada na Subfase H, mas mede
+espaço livre em `--work-dir` LOCAL do host que executa -- quando o alvo é
+remoto, isso já roda no próprio host remoto, então a checagem vale, só não
+foi testada de verdade contra um host de verdade). O alvo `remote_colocated`
+reaproveita o dispatch de `loopback` sem nenhuma linha de código nova
+(§4.3: a diferença entre os dois é só ONDE o binário roda). `remote_client_local`
+segue **sem dispatch** -- item 3 acima (RTT/banda) não tem onde ser medido
+sem ele.
+
+Honestidade sobre o que não foi verificado: o único ambiente `kind=ssh`
+cadastrado (`linux-remoto`) tinha a chave SSH diferente da registrada em
+`known_hosts` no momento desta subfase (aviso de segurança do OpenSSH, não
+contornado de propósito -- pode ser um host reprovisionado ou algo pior, e
+não é uma decisão que este agente deveria tomar sozinho). O script foi
+escrito seguindo de perto o padrão já em produção de
+`run-remote-benchmark.ps1` e validado localmente até onde dá sem rede
+(resolução de ambiente, seleção `kind=ssh`, checagem de binário ELF) --
+**o round-trip completo por SSH nunca rodou de verdade**. Antes do primeiro
+uso real: resolver o aviso de host key (deliberadamente, não com
+`-o StrictHostKeyChecking=no`) e compilar `modb_load` para Linux.
+
 ## 12. Formato do resultado
 
 JSON Lines UTF-8, um objeto por linha, mesmo cabeçalho do plano de benchmarks com

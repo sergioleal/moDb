@@ -242,6 +242,13 @@ void test_known_catalogs(TestSuite& suite) {
                "crud_full deve estar marcado como implementado (Subfase E)");
     suite.check(!is_workload_implemented("read_hotspot"),
                "read_hotspot (§4.2.1) ainda não deveria estar marcado como implementado");
+    suite.check(is_target_implemented("embedded") && is_target_implemented("loopback") &&
+                   is_target_implemented("remote_colocated"),
+               "embedded/loopback/remote_colocated devem estar marcados como implementados "
+               "(Subfases B/G/I)");
+    suite.check(!is_target_implemented("remote_client_local"),
+               "remote_client_local ainda não deveria estar marcado como implementado (Subfase I: "
+               "sem host remoto disponível para verificar)");
 }
 
 void test_all_profiles_listable(TestSuite& suite) {

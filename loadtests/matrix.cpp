@@ -134,11 +134,13 @@ bool is_known_target(std::string_view target_id) {
 }
 
 bool is_target_implemented(std::string_view target_id) {
-    // Subfase G (versão mínima): `loopback` só tem dispatch real em
-    // `create_only` (workloads/create_only.cpp) -- os demais workloads
-    // continuam recusando `loopback` no próprio wrapper, não aqui (esta
-    // função não sabe de workload, só de alvo).
-    return target_id == "embedded" || target_id == "loopback";
+    // Subfase G/I (versões mínimas): `loopback`/`remote_colocated` só têm
+    // dispatch real em `create_only` (workloads/create_only.cpp) -- os
+    // demais workloads continuam recusando esses alvos no próprio wrapper,
+    // não aqui (esta função não sabe de workload, só de alvo).
+    // `remote_client_local` segue sem dispatch (falta host remoto de
+    // verdade para verificar, Subfase I).
+    return target_id == "embedded" || target_id == "loopback" || target_id == "remote_colocated";
 }
 
 std::string Case::case_id() const {
