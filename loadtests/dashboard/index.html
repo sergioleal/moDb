@@ -332,13 +332,30 @@ function fmtCompact(v) {
   if (a >= 1e4) return nf0.format(v / 1e3) + " k";
   return nf0.format(v);
 }
+// `started_at` (§13.3) é gravado por `utc_timestamp_millis()` no formato
+// ISO-8601 "básico" (sem separadores: "20260726T113907.719Z") -- o
+// construtor nativo `Date()` só entende a forma "estendida" (com - e :),
+// então `new Date(iso)` direto sempre virava Invalid Date pra dado real
+// (o gerador de série de exemplo usa `toISOString()`, que já produz a
+// forma estendida, então essa quebra nunca apareceu testando com ele).
+// Isso não era só cosmético: sort/filtro de período/"mais recente por
+// escala" comparavam NaN contra NaN em todo lugar que usava `new Date`
+// direto num `started_at` de verdade.
+function parseTimestamp(iso) {
+  if (typeof iso !== "string") return new Date(NaN);
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\.\d+)?Z?$/.exec(iso);
+  if (m) {
+    return new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7] || ""}Z`);
+  }
+  return new Date(iso);
+}
 function fmtDate(iso) {
-  const d = new Date(iso);
+  const d = parseTimestamp(iso);
   if (isNaN(d)) return String(iso);
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
 }
 function fmtDateTime(iso) {
-  const d = new Date(iso);
+  const d = parseTimestamp(iso);
   if (isNaN(d)) return String(iso);
   return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
@@ -447,7 +464,7 @@ function ingest(rows, bad, note) {
   }
   state.rows = Array.from(seen.values())
     .filter(r => r.started_at && r.case_id)
-    .sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
+    .sort((a, b) => parseTimestamp(a.started_at) - parseTimestamp(b.started_at));
 
   const missing = state.rows.filter(r => !r.commit || !r.series_key || !r.env || !r.env.host_class || !r.environment || !r.status);
   banners([
@@ -561,10 +578,10 @@ function applyFilters(opts) {
   const onlyComparable = document.getElementById("f-comparable").checked;
   const includeFailed = document.getElementById("f-failed").checked;
   // "hoje" é o ponto mais recente da série, não o relógio: histórico velho continua legível.
-  const newest = state.rows.length ? new Date(state.rows[state.rows.length - 1].started_at).getTime() : 0;
+  const newest = state.rows.length ? parseTimestamp(state.rows[state.rows.length - 1].started_at).getTime() : 0;
   const floor = period ? newest - period * 86400000 : -Infinity;
   return state.rows.filter(r => {
-    if (new Date(r.started_at).getTime() < floor) return false;
+    if (parseTimestamp(r.started_at).getTime() < floor) return false;
     if (g("f-workload") !== "*" && r.workload !== g("f-workload")) return false;
     if (g("f-target") !== "*" && r.target !== g("f-target")) return false;
     if (g("f-scale") !== "*" && r.scale !== g("f-scale")) return false;
@@ -832,7 +849,7 @@ function renderScale(scaleRows, metricKey, phaseName, ctxLabel) {
     const v = valueOf(r, metricKey, phaseName);
     if (v === null) continue;
     const cur = byScale.get(r.scale);
-    if (!cur || new Date(r.started_at) > new Date(cur.row.started_at)) byScale.set(r.scale, { row: r, v });
+    if (!cur || parseTimestamp(r.started_at) > parseTimestamp(cur.row.started_at)) byScale.set(r.scale, { row: r, v });
   }
   const pts = Array.from(byScale.values()).sort((a, b) => a.row.objects - b.row.objects);
   document.getElementById("scale-sub").textContent = pts.length
@@ -1063,7 +1080,7 @@ function pill(cls, txt) {
  * Tabela + detalhe + CSV
  * ===================================================================== */
 const COLUMNS = [
-  { key: "started_at", label: "Data", left: true, get: r => fmtDateTime(r.started_at), sort: r => new Date(r.started_at).getTime() },
+  { key: "started_at", label: "Data", left: true, get: r => fmtDateTime(r.started_at), sort: r => parseTimestamp(r.started_at).getTime() },
   { key: "case_id", label: "Caso", left: true, get: r => r.case_id, sort: r => r.case_id },
   { key: "commit", label: "Commit", left: true, get: r => r.commit_short || (r.commit || "").slice(0, 7), sort: r => r.commit || "" },
   { key: "environment", label: "Ambiente", left: true, get: r => r.environment || "", sort: r => r.environment || "" },
