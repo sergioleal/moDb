@@ -35,20 +35,36 @@
       }
     },
     {
-      "name": "profile-8k",
-      "displayName": "RelWithDebInfo with 8 KiB pages",
+      "name": "relwithdebinfo",
+      "displayName": "RelWithDebInfo with profiling symbols (reference build for profiling)",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MODB_ENABLE_PROFILING": "ON"
+      }
+    },
+    {
+      "name": "gprof",
+      "displayName": "RelWithDebInfo + gprof instrumentation (-pg)",
+      "inherits": "relwithdebinfo",
+      "cacheVariables": {
+        "MODB_ENABLE_GPROF": "ON",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "profile-8k",
+      "displayName": "RelWithDebInfo with 8 KiB pages",
+      "inherits": "relwithdebinfo",
+      "cacheVariables": {
         "MODB_PAGE_SIZE": "8192"
       }
     },
     {
       "name": "profile-16k",
       "displayName": "RelWithDebInfo with 16 KiB pages",
-      "inherits": "base",
+      "inherits": "relwithdebinfo",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "MODB_PAGE_SIZE": "16384"
       }
     },
@@ -97,6 +113,14 @@
       "configurePreset": "release"
     },
     {
+      "name": "relwithdebinfo",
+      "configurePreset": "relwithdebinfo"
+    },
+    {
+      "name": "gprof",
+      "configurePreset": "gprof"
+    },
+    {
       "name": "profile-8k",
       "configurePreset": "profile-8k"
     },
@@ -125,6 +149,13 @@
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "relwithdebinfo",
+      "configurePreset": "relwithdebinfo",
       "output": {
         "outputOnFailure": true
       }

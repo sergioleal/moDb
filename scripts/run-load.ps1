@@ -175,15 +175,24 @@ if ($DryRun) {
 }
 
 if (-not $BinaryPath) {
+    # Ordem deliberada: builds otimizados primeiro. Um número colhido em Debug
+    # (-O0) não descreve o produto e não é comparável com nenhum outro -- era o
+    # defeito M1 de docs-process/PLANO_PROFILING.md §3, e este default era como
+    # ele acontecia na prática.
     $candidates = @(
-        (Join-Path $PSScriptRoot '..\build\debug\modb_load.exe'),
-        (Join-Path $PSScriptRoot '..\build\release\modb_load.exe')
+        (Join-Path $PSScriptRoot '..\build\relwithdebinfo\modb_load.exe'),
+        (Join-Path $PSScriptRoot '..\build\release\modb_load.exe'),
+        (Join-Path $PSScriptRoot '..\build\debug\modb_load.exe')
     )
     $BinaryPath = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 
 if (-not $BinaryPath -or -not (Test-Path -LiteralPath $BinaryPath)) {
-    throw "modb_load.exe não encontrado em build\debug\ nem build\release\ -- compile o projeto primeiro, ou passe -BinaryPath apontando pro binário. Use -DryRun (com um só traço; '--dry-run' não é reconhecido pelo PowerShell) para só ver o comando que seria executado sem exigir o binário."
+    throw "modb_load.exe não encontrado em build\relwithdebinfo\, build\release\ nem build\debug\ -- compile o projeto primeiro (cmake --build --preset relwithdebinfo), ou passe -BinaryPath apontando pro binário. Use -DryRun (com um só traço; '--dry-run' não é reconhecido pelo PowerShell) para só ver o comando que seria executado sem exigir o binário."
+}
+
+if ((Resolve-Path -LiteralPath $BinaryPath).Path -match '\\build\\debug\\') {
+    Write-Warning "usando o binário Debug (-O0): serve para validar o harness, NAO para medir desempenho nem alimentar a série histórica. Compile 'cmake --build --preset relwithdebinfo' para números comparáveis."
 }
 
 $resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path

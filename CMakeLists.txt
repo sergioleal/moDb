@@ -13,6 +13,8 @@ option(MODB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(MODB_ENABLE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
 option(MODB_ENABLE_COVERAGE "Instrument modb with --coverage for gcov/gcovr reports (requires GCC or Clang)" OFF)
 option(MODB_ENABLE_LIBFUZZER "Build fuzz targets with Clang libFuzzer (requires Clang)" OFF)
+option(MODB_ENABLE_PROFILING "Keep frame pointers and full debug info so profilers can walk stacks" OFF)
+option(MODB_ENABLE_GPROF "Instrument with -pg for gprof (GCC/Clang; mutually exclusive with sanitizers)" OFF)
 option(MODB_ALLOW_CXX23_FALLBACK "Allow a local C++23 build when C++26 is unavailable" ON)
 # Link estático do runtime MinGW gera binários portáteis (sem DLLs), mas a
 # toolchain do CLion migrou de GCC 13 para GCC 15.2, cujo libwinpthread.a
@@ -161,6 +163,29 @@ install(FILES
     DESTINATION ${MODB_INSTALL_CMAKEDIR}
 )
 target_compile_definitions(modb PUBLIC MODB_PAGE_SIZE=${MODB_PAGE_SIZE})
+
+# Identidade do build no relatório de benchmark/carga: o nome real do build type
+# e a instrumentação ativa. Ambos entram na series_key, para uma corrida com -pg
+# (2-3x mais lenta) nunca cair na mesma série de uma corrida limpa
+# (docs-process/PLANO_PROFILING.md §3, M4).
+set(MODB_INSTRUMENTATION_LIST "")
+if(MODB_ENABLE_SANITIZERS)
+    list(APPEND MODB_INSTRUMENTATION_LIST "sanitizers")
+endif()
+if(MODB_ENABLE_COVERAGE)
+    list(APPEND MODB_INSTRUMENTATION_LIST "coverage")
+endif()
+if(MODB_ENABLE_GPROF)
+    list(APPEND MODB_INSTRUMENTATION_LIST "gprof")
+endif()
+if(MODB_INSTRUMENTATION_LIST STREQUAL "")
+    set(MODB_INSTRUMENTATION_NAME "none")
+else()
+    list(JOIN MODB_INSTRUMENTATION_LIST "+" MODB_INSTRUMENTATION_NAME)
+endif()
+target_compile_definitions(modb PUBLIC
+    MODB_BUILD_TYPE_NAME="${CMAKE_BUILD_TYPE}"
+    MODB_INSTRUMENTATION="${MODB_INSTRUMENTATION_NAME}")
 if(WIN32)
     target_link_libraries(modb PUBLIC ws2_32)
 endif()
@@ -258,6 +283,47 @@ if(MODB_ENABLE_COVERAGE)
         message(WARNING
             "moDb: MODB_ENABLE_COVERAGE ignorado — requer GCC ou Clang "
             "(toolchain atual: '${CMAKE_CXX_COMPILER_ID}'). MSVC não suporta --coverage.")
+    endif()
+endif()
+
+if(MODB_ENABLE_PROFILING)
+    # Profiling precisa de duas coisas que RelWithDebInfo não garante: cadeia de
+    # frame pointers (senão o walk de pilha do profiler para no primeiro frame
+    # otimizado) e debug info completa. O nível de otimização NÃO é reduzido --
+    # perfilar -O0 mede o build errado (docs-process/PLANO_PROFILING.md §3, M1).
+    if(MSVC)
+        target_compile_options(modb PUBLIC /Zi /Oy-)
+        target_link_options(modb PUBLIC /DEBUG /PROFILE)
+        message(STATUS "moDb: profiling ativado (MSVC: /Zi /Oy-).")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(modb PUBLIC -g3 -fno-omit-frame-pointer)
+        message(STATUS "moDb: profiling ativado (-g3 -fno-omit-frame-pointer).")
+    else()
+        message(WARNING
+            "moDb: MODB_ENABLE_PROFILING ignorado — toolchain '${CMAKE_CXX_COMPILER_ID}' "
+            "desconhecido para esta opção.")
+    endif()
+endif()
+
+if(MODB_ENABLE_GPROF)
+    # -pg é a única atribuição por função disponível para o binário Windows desta
+    # toolchain: MinGW emite DWARF em PE, e VTune/WPA exigem PDB
+    # (docs-process/PLANO_PROFILING.md §5). Precisa das mesmas flags na compilação
+    # e no link. Serve para ORDENAR hotspots, não para medi-los: com inlining de
+    # -O2 a atribuição de funções pequenas é imprecisa.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        if(MODB_ENABLE_SANITIZERS)
+            message(FATAL_ERROR
+                "moDb: MODB_ENABLE_GPROF e MODB_ENABLE_SANITIZERS não convivem — "
+                "escolha um dos dois presets.")
+        endif()
+        target_compile_options(modb PUBLIC -pg)
+        target_link_options(modb PUBLIC -pg)
+        message(STATUS "moDb: instrumentação gprof ativada (-pg). gmon.out é gravado no cwd do processo.")
+    else()
+        message(WARNING
+            "moDb: MODB_ENABLE_GPROF ignorado — requer GCC ou Clang "
+            "(toolchain atual: '${CMAKE_CXX_COMPILER_ID}').")
     endif()
 endif()
 

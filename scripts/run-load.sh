@@ -190,7 +190,12 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 
 if [[ -z "$BINARY" ]]; then
-    for candidate in "$ROOT/build/debug/modb_load" "$ROOT/build/release/modb_load" "$ROOT/build-linux/modb_load"; do
+    # Ordem deliberada: builds otimizados primeiro. Um número colhido em Debug
+    # (-O0) não descreve o produto e não é comparável com nenhum outro -- era o
+    # defeito M1 de docs-process/PLANO_PROFILING.md §3, e este default era como
+    # ele acontecia na prática.
+    for candidate in "$ROOT/build/relwithdebinfo/modb_load" "$ROOT/build/release/modb_load" \
+                     "$ROOT/build-linux/modb_load" "$ROOT/build/debug/modb_load"; do
         if [[ -x "$candidate" ]]; then
             BINARY="$candidate"
             break
@@ -199,9 +204,13 @@ if [[ -z "$BINARY" ]]; then
 fi
 
 if [[ -z "$BINARY" || ! -x "$BINARY" ]]; then
-    echo "modb_load não encontrado. Ele ainda não está implementado -- ver docs/PLANO_TESTES_DE_CARGA.md, Subfases A/B." >&2
+    echo "modb_load não encontrado. Compile com 'cmake --build --preset relwithdebinfo'." >&2
     echo "Use --dry-run para só ver o comando que seria executado." >&2
     exit 1
+fi
+
+if [[ "$BINARY" == *"/build/debug/"* ]]; then
+    echo "aviso: usando o binário Debug (-O0) -- serve para validar o harness, NÃO para medir desempenho nem alimentar a série histórica." >&2
 fi
 
 "$BINARY" "${ARGS[@]}"
