@@ -854,6 +854,24 @@ imediata. Para deriva, o limiar é acumulado: 15% entre as duas medianas.
 decide com série de menos de 3 pontos: retorna `insufficient_history` e sucesso,
 para não bloquear por falta de dados.
 
+**Implementado na Subfase J.** `modb_load gate --case ID --metric NOME
+[--phase NOME] [--history-file PATH]` reaproveita `compute_trend`
+(Subfase C) sem duplicar a mediana móvel: o gate por execução É o veredito
+do último ponto (`compute_trend` já compara candidato × mediana das até 5
+anteriores da mesma série); `status != "completed"` no último ponto vira
+`fail` direto, nunca uma comparação de limiar (§9: divergência de correção
+é falha imediata). A deriva lenta é um cálculo novo
+(`loadtests/history/gate.cpp`) sobre a mesma janela de valores comparáveis:
+mediana das últimas 5 (incluindo o candidato) × mediana das até 5 que
+terminam 20 execuções atrás, limiar único de 15%, sem tier de alerta.
+Exit code: 0 quando `passed` (inclui `insufficient`/`insufficient` -- não
+bloqueia CI por falta de histórico), 1 quando o gate pontual OU a deriva
+reprovam. Verificado com dados sintéticos: queda pontual de 12%
+(`ops_per_second`, limiar 10%) reprova o gate por execução; 23 execuções
+caindo 1 unidade cada (~20% acumulado) reprovam a deriva mesmo com todo
+gate pontual isolado passando (cada passo fica bem abaixo do limiar de
+alerta de 5%).
+
 ### 13.8 Retenção
 
 Brutos: manter os N últimos por série (padrão 10), todos os marcados como
@@ -863,12 +881,29 @@ bruto removido permanece — com o hash, para que a ausência seja detectável.
 
 Rollups: nunca apagados, nunca reescritos. São a memória do projeto.
 
+**Implementado na Subfase J (parcial).** `modb_load prune [--keep N]
+[--confirm] [--history-file PATH] [--baselines-file PATH] [--raw-dir DIR]`
+agrupa os rollups de `series.jsonl` por `series_key`, mantém os `--keep`
+(padrão 10) mais recentes por `started_at`, e entre os mais antigos só
+remove o `raw_file` (nunca a linha de rollup) de quem não é `status=failed`
+nem tem `run_id` marcado em `baselines.json`. Sem `--confirm`, só lista o
+que seria removido. **Não implementado**: compressão acima de 30 dias, e a
+proteção por `run_note` de interferência -- `run_note` em si nunca foi
+emitido por nenhuma campanha real ainda (nenhuma subfase implementou esse
+record type), então a regra fica sem efeito prático até que exista.
+
 ### 13.9 Baselines marcadas
 
 `load-history/baselines.json` mapeia `series_key` → `run_id` escolhido
 explicitamente, com data e motivo em texto. Uma baseline é uma decisão humana
 registrada, não "a execução mais antiga" nem "a melhor". Imutável: substituir uma
 baseline é acrescentar entrada nova com o motivo da troca.
+
+**Implementado na Subfase J.** `modb_load baseline --case ID --run-id ID
+--reason TEXTO [--history-file PATH] [--baselines-file PATH]` resolve o
+`series_key` procurando o par (`case_id`,`run_id`) em `series.jsonl` e
+acrescenta uma entrada (nunca reescreve as anteriores) em
+`load-history/baselines.json`.
 
 ### 13.10 Anonimização
 

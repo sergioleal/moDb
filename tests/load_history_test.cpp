@@ -1,6 +1,9 @@
 #include "test_support.hpp"
 
+#include "history/baselines.hpp"
+#include "history/gate.hpp"
 #include "history/index.hpp"
+#include "history/retention.hpp"
 #include "history/series_key.hpp"
 #include "history/trend.hpp"
 #include "json_value.hpp"
@@ -348,6 +351,227 @@ void test_rollup_windows_null_when_absent(TestSuite& suite) {
     }
 }
 
+std::string day_stamp(int day) {
+    std::ostringstream oss;
+    oss << "202601" << (day < 10 ? "0" : "") << day << "T000000.000Z";
+    return oss.str();
+}
+
+// Subfase J (§13.7): critério de "pronto" #1 -- regressão sintética de 12%
+// reprovada pelo gate por execução. 5 pontos-base em 100 (mediana=100),
+// candidato em 88 -- queda de 12%, acima do fail_ratio de 10% de
+// `ops_per_second`.
+void test_gate_point_regression_fails(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+    write_file(env_path, fake_environments_json());
+
+    for (int i = 0; i < 5; ++i) {
+        const auto run_id = "run-gate-base-" + std::to_string(i);
+        const auto campaign_path = dir / (run_id + ".jsonl");
+        write_file(campaign_path, fake_campaign_jsonl(run_id, day_stamp(i + 1), 100));
+        auto indexed = index_campaign(campaign_path, history_path, env_path);
+        suite.check(indexed.ok && indexed.appended == 1, "ponto-base deve indexar");
+    }
+    const auto campaign_path = dir / "run-gate-regression.jsonl";
+    write_file(campaign_path, fake_campaign_jsonl("run-gate-regression", day_stamp(6), 88));
+    auto indexed = index_campaign(campaign_path, history_path, env_path);
+    suite.check(indexed.ok && indexed.appended == 1, "candidato deve indexar");
+
+    auto gate = compute_gate(history_path, "load.create_only.embedded.10k", "ops_per_second",
+                             "create");
+    suite.check(gate.ok, "compute_gate não deve falhar: " + gate.error);
+    suite.check(gate.point_verdict == "fail",
+               "queda de 12% (limiar 10% para ops_per_second) deve reprovar o gate pontual");
+    suite.check(!gate.passed, "gate.passed deve ser false quando o gate pontual reprova");
+    suite.check(gate.drift_verdict == "insufficient",
+               "só 6 pontos não é histórico suficiente para deriva (precisa de 20+3)");
+}
+
+// Critério de "pronto" #2: deriva sintética de 15% em ~20 execuções
+// detectada mesmo com todos os gates pontuais passando. 23 pontos caindo 1
+// unidade por execução (100, 99, 98, ..., 78) -- cada passo individual fica
+// bem abaixo do alert_ratio de 5% (mediana móvel de até 5 anteriores), mas a
+// mediana das últimas 5 (78±) contra a mediana de ~20 execuções atrás (99±)
+// já caiu quase 20%, acima do limiar de deriva de 15%.
+void test_gate_drift_detects_slow_degradation(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+    write_file(env_path, fake_environments_json());
+
+    constexpr int kPoints = 23;
+    for (int i = 0; i < kPoints; ++i) {
+        const auto run_id = "run-gate-drift-" + std::to_string(i);
+        const auto campaign_path = dir / (run_id + ".jsonl");
+        const double value = 100.0 - static_cast<double>(i);
+        write_file(campaign_path, fake_campaign_jsonl(run_id, day_stamp(i + 1), value));
+        auto indexed = index_campaign(campaign_path, history_path, env_path);
+        suite.check(indexed.ok && indexed.appended == 1, "ponto de deriva deve indexar");
+    }
+
+    auto trend = compute_trend(history_path, "load.create_only.embedded.10k", "ops_per_second",
+                               "create");
+    suite.check(trend.ok, "compute_trend não deve falhar: " + trend.error);
+    bool any_point_failed_or_alerted = false;
+    for (const auto& p : trend.points) {
+        if (p.verdict == "fail" || p.verdict == "alert") {
+            any_point_failed_or_alerted = true;
+        }
+    }
+    suite.check(!any_point_failed_or_alerted,
+               "nenhum gate pontual isolado deveria acusar nada nesta série (queda suave demais "
+               "por execução)");
+
+    auto gate = compute_gate(history_path, "load.create_only.embedded.10k", "ops_per_second",
+                             "create");
+    suite.check(gate.ok, "compute_gate não deve falhar: " + gate.error);
+    suite.check(gate.point_verdict != "fail",
+               "o último ponto isolado não deveria reprovar (mesma lógica de compute_trend)");
+    suite.check(gate.drift_verdict == "fail",
+               "queda acumulada de ~20% em 20 execuções deve reprovar a deriva (limiar 15%)");
+    suite.check(!gate.passed, "gate.passed deve ser false quando a deriva reprova");
+}
+
+void test_gate_rejects_unknown_metric(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    auto gate = compute_gate(dir / "nao-existe.jsonl", "load.create_only.embedded.10k",
+                             "metrica_fantasma", "create");
+    suite.check(!gate.ok, "métrica desconhecida deve falhar");
+    suite.check(!gate.error.empty(), "erro deve explicar a métrica desconhecida");
+}
+
+void test_gate_insufficient_history_passes(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+    write_file(env_path, fake_environments_json());
+
+    const auto campaign_path = dir / "run-gate-single.jsonl";
+    write_file(campaign_path, fake_campaign_jsonl("run-gate-single", day_stamp(1), 100));
+    auto indexed = index_campaign(campaign_path, history_path, env_path);
+    suite.check(indexed.ok && indexed.appended == 1, "ponto único deve indexar");
+
+    auto gate = compute_gate(history_path, "load.create_only.embedded.10k", "ops_per_second",
+                             "create");
+    suite.check(gate.ok, "compute_gate não deve falhar: " + gate.error);
+    suite.check(gate.passed,
+               "histórico insuficiente nunca deve reprovar (§13.7: não bloquear CI por falta de "
+               "dados)");
+}
+
+std::string fake_rollup_line(const std::string& series_key, const std::string& run_id,
+                             const std::string& status, const std::string& started_at,
+                             const std::string& raw_file) {
+    std::ostringstream oss;
+    oss << R"({"schema":"modb.loadtest.rollup","schema_version":1,"series_key":")" << series_key
+        << R"(","case_id":"load.create_only.embedded.10k","run_id":")" << run_id
+        << R"(","started_at":")" << started_at << R"(","status":")" << status
+        << R"(","raw_file":")" << raw_file << R"("})";
+    return oss.str();
+}
+
+void test_baseline_append_is_additive(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto path = dir / "baselines.json";
+
+    suite.check(!std::filesystem::exists(path), "não deve existir antes da primeira marcação");
+    auto loaded_missing = load_baselines(path);
+    suite.check(loaded_missing.ok && loaded_missing.entries.empty(),
+               "arquivo ausente deve carregar como lista vazia, não erro");
+
+    BaselineEntry first{"seriesA", "run-1", "load.create_only.embedded.10k", "20260101T000000.000Z",
+                        "primeira baseline conhecida"};
+    suite.check(append_baseline(path, first), "primeira marcação deve funcionar");
+
+    BaselineEntry second{"seriesA", "run-2", "load.create_only.embedded.10k", "20260102T000000.000Z",
+                        "trocando a baseline por um run mais recente"};
+    suite.check(append_baseline(path, second), "segunda marcação deve funcionar");
+
+    auto loaded = load_baselines(path);
+    suite.check(loaded.ok, "carregar depois de 2 marcações não deve falhar: " + loaded.error);
+    suite.check(loaded.entries.size() == 2,
+               "a marcação nova deve ACRESCENTAR, nunca substituir a anterior (§13.9)");
+    suite.check(is_baseline_run(loaded.entries, "run-1") && is_baseline_run(loaded.entries, "run-2"),
+               "os dois run_ids marcados devem ser reconhecidos como baseline");
+    suite.check(!is_baseline_run(loaded.entries, "run-3"),
+               "um run_id nunca marcado não deve ser reconhecido como baseline");
+}
+
+// Subfase J (§13.8): mantém os N mais recentes de cada série; mais antigos
+// que isso são candidatos a remoção, EXCETO status=failed ou baseline
+// marcada -- e nunca toca no rollup (`series.jsonl`) em si, só no bruto.
+void test_prune_keeps_recent_failed_and_baseline(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto baselines_path = dir / "baselines.json";
+    const auto raw_dir = dir / "raw";
+    std::filesystem::create_directories(raw_dir);
+
+    // 12 pontos: os 2 mais antigos (run-0/run-1) deveriam ser removíveis;
+    // run-2 é status=failed (nunca remove); run-3 vira baseline (nunca
+    // remove); run-2..run-11 (10 pontos) são a janela dos "10 mais
+    // recentes" e ficam retidos só por estarem nela -- então só
+    // run-0/run-1 sobram como candidatos reais de remoção.
+    std::ostringstream history;
+    for (int i = 0; i < 12; ++i) {
+        const auto run_id = "run-" + std::to_string(i);
+        const auto raw_file = "modb-load-" + run_id + ".jsonl";
+        const auto status = (i == 2) ? "failed" : "completed";
+        history << fake_rollup_line("seriesA", run_id, status, day_stamp(i + 1), raw_file) << '\n';
+        write_file(raw_dir / raw_file, "conteudo bruto de teste\n");
+    }
+    write_file(history_path, history.str());
+    suite.check(append_baseline(baselines_path, BaselineEntry{"seriesA", "run-3",
+                                                             "load.create_only.embedded.10k",
+                                                             "20260101T000000.000Z", "teste"}),
+               "marcar run-3 como baseline não deve falhar");
+
+    PruneOptions options;
+    options.history_path = history_path;
+    options.baselines_path = baselines_path;
+    options.raw_dir = raw_dir;
+    options.keep = 10;
+    options.confirm = false;
+
+    auto dry_run = prune_raw_files(options);
+    suite.check(dry_run.ok, "prune (dry-run) não deve falhar: " + dry_run.error);
+    std::size_t would_remove = 0;
+    for (const auto& c : dry_run.candidates) {
+        if (!c.kept) {
+            ++would_remove;
+        }
+    }
+    suite.check(would_remove == 2,
+               "só run-00/run-01 (fora da janela de 10, não failed, não baseline) deveriam ser "
+               "candidatos -- contou " +
+                   std::to_string(would_remove));
+    suite.check(dry_run.deleted.empty(), "dry-run nunca deve apagar nada de verdade");
+    suite.check(std::filesystem::exists(raw_dir / "modb-load-run-0.jsonl"),
+               "dry-run não deve ter apagado nenhum arquivo");
+
+    options.confirm = true;
+    auto confirmed = prune_raw_files(options);
+    suite.check(confirmed.ok, "prune (confirm) não deve falhar: " + confirmed.error);
+    suite.check(confirmed.deleted.size() == 2, "confirm deve remover exatamente os 2 candidatos");
+    suite.check(!std::filesystem::exists(raw_dir / "modb-load-run-0.jsonl"),
+               "run-0 deveria ter sido removido");
+    suite.check(!std::filesystem::exists(raw_dir / "modb-load-run-1.jsonl"),
+               "run-1 deveria ter sido removido");
+    suite.check(std::filesystem::exists(raw_dir / "modb-load-run-2.jsonl"),
+               "run-2 (failed) nunca deveria ser removido");
+    suite.check(std::filesystem::exists(raw_dir / "modb-load-run-3.jsonl"),
+               "run-3 (baseline) nunca deveria ser removido");
+    suite.check(std::filesystem::exists(raw_dir / "modb-load-run-11.jsonl"),
+               "run-11 (dentro da janela de 10 mais recentes) nunca deveria ser removido");
+
+    // O rollup em si nunca é tocado (§13.8: "Rollups: nunca apagados").
+    suite.check(std::filesystem::exists(history_path) &&
+                   std::filesystem::file_size(history_path) == history.str().size(),
+               "prune nunca deve modificar series.jsonl");
+}
+
 void test_trend_rejects_unknown_metric(TestSuite& suite) {
     suite.check(!find_metric("metrica_fantasma").has_value(),
                "métrica desconhecida deve devolver nullopt");
@@ -367,6 +591,12 @@ int main() {
     test_trend_series_break_resets_window(suite);
     test_rollup_reads_windows_field(suite);
     test_rollup_windows_null_when_absent(suite);
+    test_gate_point_regression_fails(suite);
+    test_gate_drift_detects_slow_degradation(suite);
+    test_gate_rejects_unknown_metric(suite);
+    test_gate_insufficient_history_passes(suite);
+    test_baseline_append_is_additive(suite);
+    test_prune_keeps_recent_failed_and_baseline(suite);
     test_trend_rejects_unknown_metric(suite);
     return suite.finish();
 }

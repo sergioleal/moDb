@@ -1,8 +1,8 @@
-// CLI de testes de carga (docs/PLANO_TESTES_DE_CARGA.md). Subfases A/B/C/F:
-// `run`, `list-cases`, `list-profiles`, `index`, `trend`, `resume` funcionam;
-// `gate`/`compare` ainda não existem (Subfase J) e dizem isso claramente em
-// vez de fingir que fizeram algo. `report` existe em forma mínima (CSV das
-// linhas do rollup).
+// CLI de testes de carga (docs/PLANO_TESTES_DE_CARGA.md). Subfases A/B/C/F/J:
+// `run`, `list-cases`, `list-profiles`, `index`, `trend`, `resume`, `gate`
+// funcionam; `compare` ainda não existe (depende da ponte com `modb_bench
+// compare`, §12) e diz isso claramente em vez de fingir que fez algo.
+// `report` existe em forma mínima (CSV das linhas do rollup).
 //
 // Uso:
 //   modb_load run --profile <nome> [seletores] [orçamento] [--output-dir DIR]
@@ -14,14 +14,23 @@
 //   modb_load trend --case ID --metric NOME [--phase NOME] [--history-file PATH]
 //   modb_load report --case ID [--format csv|json] [--history-file PATH]
 //   modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]
+//   modb_load gate --case ID --metric NOME [--phase NOME] [--history-file PATH]
+//   modb_load baseline --case ID --run-id ID --reason TEXTO [--history-file PATH]
+//                      [--baselines-file PATH]
+//   modb_load prune [--keep N] [--confirm] [--history-file PATH]
+//                   [--baselines-file PATH] [--raw-dir DIR]
 
 #include "calibration.hpp"
 #include "campaign.hpp"
+#include "history/baselines.hpp"
+#include "history/gate.hpp"
 #include "history/index.hpp"
+#include "history/retention.hpp"
 #include "history/trend.hpp"
 #include "json_value.hpp"
 #include "matrix.hpp"
 #include "profiles.hpp"
+#include "runner/environment.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -52,7 +61,12 @@ void print_usage() {
         << "  modb_load index <campanha.jsonl> [--history-file PATH] [--environments-file PATH]\n"
         << "  modb_load trend --case ID --metric NOME [--phase NOME] [--history-file PATH]\n"
         << "  modb_load report --case ID [--format csv|json] [--history-file PATH]\n"
-        << "  modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]\n";
+        << "  modb_load resume <arquivo.partial> [--work-dir DIR] [--seed N]\n"
+        << "  modb_load gate --case ID --metric NOME [--phase NOME] [--history-file PATH]\n"
+        << "  modb_load baseline --case ID --run-id ID --reason TEXTO [--history-file PATH]\n"
+        << "                     [--baselines-file PATH]\n"
+        << "  modb_load prune [--keep N] [--confirm] [--history-file PATH]\n"
+        << "                  [--baselines-file PATH] [--raw-dir DIR]\n";
 }
 
 std::vector<std::string> split_comma(std::string_view value) {
@@ -288,6 +302,48 @@ int command_index(int argc, char** argv) {
     return indexed.rejected > 0 ? 1 : 0;
 }
 
+int command_gate(int argc, char** argv) {
+    std::string case_id, metric_id, phase;
+    std::filesystem::path history_file{"load-history/series.jsonl"};
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg{argv[i]};
+        auto need = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) {
+                std::cerr << "Falta valor para " << name << '\n';
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (arg == "--case") {
+            case_id = need("--case");
+        } else if (arg == "--metric") {
+            metric_id = need("--metric");
+        } else if (arg == "--phase") {
+            phase = need("--phase");
+        } else if (arg == "--history-file") {
+            history_file = need("--history-file");
+        } else {
+            std::cerr << "Argumento desconhecido: " << arg << '\n';
+            return 2;
+        }
+    }
+    if (case_id.empty() || metric_id.empty()) {
+        std::cerr << "Uso: modb_load gate --case ID --metric NOME [--phase NOME] "
+                    "[--history-file PATH]\n";
+        return 2;
+    }
+
+    auto gate = modb::loadtest::compute_gate(history_file, case_id, metric_id, phase);
+    if (!gate.ok) {
+        std::cerr << "Erro: " << gate.error << '\n';
+        return 2;
+    }
+    std::cout << modb::loadtest::render_gate(gate, case_id, metric_id);
+    // §13.7: histórico insuficiente é sucesso (não bloqueia CI por falta de
+    // dados) -- só um veredito "fail" pontual ou de deriva reprova.
+    return gate.passed ? 0 : 1;
+}
+
 int command_trend(int argc, char** argv) {
     std::string case_id, metric_id, phase;
     std::filesystem::path history_file{"load-history/series.jsonl"};
@@ -484,6 +540,137 @@ int command_resume(int argc, char** argv) {
     return result.status == "failed" ? 1 : 0;
 }
 
+int command_baseline(int argc, char** argv) {
+    std::string case_id, run_id, reason;
+    std::filesystem::path history_file{"load-history/series.jsonl"};
+    std::filesystem::path baselines_file{"load-history/baselines.json"};
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg{argv[i]};
+        auto need = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) {
+                std::cerr << "Falta valor para " << name << '\n';
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (arg == "--case") {
+            case_id = need("--case");
+        } else if (arg == "--run-id") {
+            run_id = need("--run-id");
+        } else if (arg == "--reason") {
+            reason = need("--reason");
+        } else if (arg == "--history-file") {
+            history_file = need("--history-file");
+        } else if (arg == "--baselines-file") {
+            baselines_file = need("--baselines-file");
+        } else {
+            std::cerr << "Argumento desconhecido: " << arg << '\n';
+            return 2;
+        }
+    }
+    if (case_id.empty() || run_id.empty() || reason.empty()) {
+        std::cerr << "Uso: modb_load baseline --case ID --run-id ID --reason TEXTO "
+                    "[--history-file PATH] [--baselines-file PATH]\n";
+        return 2;
+    }
+    if (!std::filesystem::exists(history_file)) {
+        std::cerr << "Erro: arquivo histórico não encontrado: " << history_file.string() << '\n';
+        return 1;
+    }
+
+    std::ifstream file(history_file, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    std::istringstream lines(buffer.str());
+    std::string raw_line, series_key;
+    while (std::getline(lines, raw_line)) {
+        if (raw_line.empty()) {
+            continue;
+        }
+        auto parsed = modb::loadtest::parse_json(raw_line);
+        if (parsed.ok && parsed.value.get_string("case_id") == case_id &&
+            parsed.value.get_string("run_id") == run_id) {
+            series_key = parsed.value.get_string("series_key");
+            break;
+        }
+    }
+    if (series_key.empty()) {
+        std::cerr << "Erro: nenhum ponto com case_id='" << case_id << "' e run_id='" << run_id
+                  << "' encontrado em " << history_file.string() << '\n';
+        return 1;
+    }
+
+    modb::loadtest::BaselineEntry entry;
+    entry.series_key = series_key;
+    entry.run_id = run_id;
+    entry.case_id = case_id;
+    entry.marked_at = modb::bench::utc_timestamp_millis();
+    entry.reason = reason;
+    if (!modb::loadtest::append_baseline(baselines_file, entry)) {
+        std::cerr << "Erro: não foi possível gravar em " << baselines_file.string() << '\n';
+        return 1;
+    }
+    std::cout << "Baseline marcada: series_key=" << series_key << "  run_id=" << run_id << '\n';
+    return 0;
+}
+
+int command_prune(int argc, char** argv) {
+    modb::loadtest::PruneOptions options;
+    options.history_path = "load-history/series.jsonl";
+    options.baselines_path = "load-history/baselines.json";
+    options.raw_dir = "load-results";
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg{argv[i]};
+        auto need = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) {
+                std::cerr << "Falta valor para " << name << '\n';
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (arg == "--history-file") {
+            options.history_path = need("--history-file");
+        } else if (arg == "--baselines-file") {
+            options.baselines_path = need("--baselines-file");
+        } else if (arg == "--raw-dir") {
+            options.raw_dir = need("--raw-dir");
+        } else if (arg == "--keep") {
+            options.keep = std::strtoull(need("--keep"), nullptr, 10);
+        } else if (arg == "--confirm") {
+            options.confirm = true;
+        } else {
+            std::cerr << "Argumento desconhecido: " << arg << '\n';
+            return 2;
+        }
+    }
+
+    auto result = modb::loadtest::prune_raw_files(options);
+    if (!result.ok) {
+        std::cerr << "Erro: " << result.error << '\n';
+        return 1;
+    }
+    std::size_t to_remove = 0;
+    for (const auto& candidate : result.candidates) {
+        if (candidate.kept) {
+            continue;
+        }
+        ++to_remove;
+        std::cout << (options.confirm ? "removendo: " : "removeria: ") << candidate.raw_file
+                  << "  (série " << candidate.series_key << ", " << candidate.reason << ")\n";
+    }
+    if (to_remove == 0) {
+        std::cout << "Nada para remover -- todos os brutos estão protegidos (recentes, failed ou "
+                    "baseline).\n";
+    } else if (!options.confirm) {
+        std::cout << to_remove
+                  << " arquivo(s) seriam removidos. Rode de novo com --confirm para remover de "
+                    "verdade.\n";
+    } else {
+        std::cout << result.deleted.size() << "/" << to_remove << " arquivo(s) removidos.\n";
+    }
+    return 0;
+}
+
 int command_not_implemented(std::string_view command, std::string_view subfase) {
     std::cerr << "modb_load " << command << ": ainda não implementado (ver "
              << "docs/PLANO_TESTES_DE_CARGA.md, Subfase " << subfase << ").\n";
@@ -520,7 +707,13 @@ int main(int argc, char** argv) {
         return command_resume(argc, argv);
     }
     if (command == "gate") {
-        return command_not_implemented(command, "J");
+        return command_gate(argc, argv);
+    }
+    if (command == "baseline") {
+        return command_baseline(argc, argv);
+    }
+    if (command == "prune") {
+        return command_prune(argc, argv);
     }
     if (command == "compare") {
         return command_not_implemented("compare", "J");

@@ -451,6 +451,9 @@ add_library(modb_load_core STATIC
     loadtests/history/rollup.cpp
     loadtests/history/index.cpp
     loadtests/history/trend.cpp
+    loadtests/history/gate.cpp
+    loadtests/history/baselines.cpp
+    loadtests/history/retention.cpp
 )
 target_include_directories(modb_load_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/loadtests)
 target_link_libraries(modb_load_core PUBLIC modb_bench_core modb::app_client)
