@@ -55,9 +55,43 @@ std::vector<Case> load_standard_cases() {
 }
 
 std::vector<Case> load_heavy_cases() {
-    // Pairwise nas dimensões secundárias é responsabilidade da Subfase K
-    // (ainda não implementada); por ora o conjunto primário já reflete §6.2.
-    return make_cases(kEscadaBasica, {"embedded", "remote_colocated"}, {"250k", "500k", "1M"});
+    auto cases = make_cases(kEscadaBasica, {"embedded", "remote_colocated"}, {"250k", "500k", "1M"});
+
+    // Pairwise nas dimensões secundárias (Subfase K, §6.2): cada valor não
+    // padrão que TEM dispatch de verdade entra pelo menos uma vez -- não é
+    // produto cartesiano completo. `durability`/`cache`/`primary_storage`/
+    // `readers` não têm dispatch em NENHUM workload ainda (só `payload` e
+    // `concurrency` -- este último só em `mixed_oltp`, Subfase M), então
+    // não entram aqui: prometer um valor que o runtime ignoraria seria
+    // exatamente a dívida D1 que `unimplemented_dimension_reason` existe
+    // para recusar.
+    const auto scale_250k = objects_for_scale("250k");
+    if (scale_250k) {
+        Case fat_create_only;
+        fat_create_only.workload = "create_only";
+        fat_create_only.target = "embedded";
+        fat_create_only.scale = "250k";
+        fat_create_only.objects = *scale_250k;
+        fat_create_only.payload = "fat";
+        cases.push_back(fat_create_only);
+
+        Case fat_crud_full = fat_create_only;
+        fat_crud_full.workload = "crud_full";
+        cases.push_back(fat_crud_full);
+
+        Case mixed_oltp_c4;
+        mixed_oltp_c4.workload = "mixed_oltp";
+        mixed_oltp_c4.target = "embedded";
+        mixed_oltp_c4.scale = "250k";
+        mixed_oltp_c4.objects = *scale_250k;
+        mixed_oltp_c4.concurrency = 4;
+        cases.push_back(mixed_oltp_c4);
+
+        Case mixed_oltp_c16 = mixed_oltp_c4;
+        mixed_oltp_c16.concurrency = 16;
+        cases.push_back(mixed_oltp_c16);
+    }
+    return cases;
 }
 
 std::vector<Case> load_remote_cases() {
@@ -66,6 +100,13 @@ std::vector<Case> load_remote_cases() {
 }
 
 std::vector<Case> load_soak_cases() {
+    // §6.2 descreve "em laço por duração fixa" -- não existe (nesta
+    // subfase) um mecanismo de duração-alvo dentro do próprio `modb_load`
+    // (rodar até N horas terem passado, parando entre repetições). O caso
+    // em si já é real e executável; a repetição prática hoje é
+    // `modb_load run --profile load-soak --repeat N` (Subfase A, já
+    // implementado) -- um número fixo de repetições, não uma duração-alvo.
+    // Ver docs-process/PLANO_IMPLEMENTACAO_CARGA.md, Subfase K.
     return make_cases({"create_delete_interleaved"}, {"embedded"}, {"500k"});
 }
 

@@ -263,6 +263,38 @@ void test_known_catalogs(TestSuite& suite) {
                "sem host remoto disponível para verificar)");
 }
 
+// Subfase K (§6.2 "pairwise nas dimensões secundárias"): load-heavy precisa
+// exercitar ao menos um caso com payload != normal e ao menos um com
+// concurrency != 1 (só mixed_oltp tem dispatch para isso), sem virar
+// produto cartesiano completo nem prometer uma dimensão sem dispatch
+// (durability/cache/primary_storage/readers continuam ausentes).
+void test_load_heavy_pairwise_secondary_dimensions(TestSuite& suite) {
+    auto profile = find_profile("load-heavy");
+    suite.check(profile.has_value(), "load-heavy deve existir");
+    if (!profile) {
+        return;
+    }
+
+    bool has_fat_payload = false;
+    bool has_concurrent_mixed_oltp = false;
+    for (const auto& c : profile->cases) {
+        if (c.payload == "fat") {
+            has_fat_payload = true;
+        }
+        if (c.workload == "mixed_oltp" && c.concurrency > 1) {
+            has_concurrent_mixed_oltp = true;
+        }
+        // Nenhum caso do perfil pode prometer uma dimensão sem dispatch --
+        // se prometesse, expand_matrix (chamado por resolve_cases) teria
+        // que recusar via unimplemented_dimension_reason.
+        suite.check(unimplemented_dimension_reason(c).empty(),
+                   "nenhum caso de load-heavy pode prometer dimensão sem dispatch: " + c.case_id());
+    }
+    suite.check(has_fat_payload, "load-heavy deve ter ao menos 1 caso com payload=fat");
+    suite.check(has_concurrent_mixed_oltp,
+               "load-heavy deve ter ao menos 1 caso mixed_oltp com concurrency > 1");
+}
+
 void test_all_profiles_listable(TestSuite& suite) {
     for (const auto& name : list_profile_names()) {
         auto profile = find_profile(name);
@@ -292,5 +324,6 @@ int main() {
     test_expand_matrix_filter_and_exclude(suite);
     test_known_catalogs(suite);
     test_all_profiles_listable(suite);
+    test_load_heavy_pairwise_secondary_dimensions(suite);
     return suite.finish();
 }

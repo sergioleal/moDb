@@ -459,7 +459,20 @@ Semântica de composição, sem ambiguidade:
 | `load-diagnostic` | vazio; exige seletores explícitos | sem meta |
 
 `load-heavy` é pairwise nas dimensões secundárias, não cartesiano: cada valor
-não padrão aparece ao menos uma vez, sem multiplicar a matriz. "Todos os
+não padrão aparece ao menos uma vez, sem multiplicar a matriz.
+
+**Implementado na Subfase K.** `load_heavy_cases()` acrescenta, além do
+produto primário (ladder × alvo × escala): 2 casos com `payload=fat`
+(`create_only` e `crud_full` em `250k`) e 2 casos `mixed_oltp` com
+`concurrency=4`/`16` (único workload com dispatch real para concorrência,
+Subfase M). **Não** inclui `durability`/`cache`/`primary_storage`/`readers`
+-- nenhum workload tem dispatch para valores não padrão dessas dimensões
+ainda (§4.5), então prometer um valor aí seria a própria dívida D1 que
+`unimplemented_dimension_reason` recusa. `load-soak` continua sendo um
+único caso real (`create_delete_interleaved` em `500k`) -- "laço por
+duração fixa" (rodar até N horas terem passado, não um número fixo de
+repetições) não tem mecanismo dedicado ainda; `modb_load run --profile
+load-soak --repeat N` (Subfase A) é a aproximação disponível hoje. "Todos os
 workloads" em `load-smoke`/`load-local`/`load-standard`/`load-heavy` refere-se
 só à escada básica (§4.2); os workloads de §4.2.1 só entram via
 `load-behavior` ou seleção explícita. `restart_recovery` fica fora de todo
