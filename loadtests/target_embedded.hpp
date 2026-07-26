@@ -78,4 +78,13 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
 [[nodiscard]] CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
                                                         std::filesystem::path& out_db_path);
 
+// cascade_delete (§4.2.1): monta uma árvore N-ária via a codificação
+// "primeiro filho / próximo irmão" (2 campos `OwnedRef` bastam para
+// qualquer largura, não um campo por filho) e remove a raiz numa única
+// chamada -- o motor já cai em cascata por composição (`Database::remove`),
+// não há passeio manual do grafo aqui. Profundidade e largura são
+// derivadas de `params.object_count` (raiz~largura^profundidade nós).
+[[nodiscard]] CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
+                                                        std::filesystem::path& out_db_path);
+
 } // namespace modb::loadtest

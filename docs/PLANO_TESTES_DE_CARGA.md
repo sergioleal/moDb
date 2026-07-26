@@ -190,6 +190,18 @@ que o motor não faz. Verificado ao vivo em `--case
 load.blob_lifecycle.embedded.1k`: `hash_match:true`, `all_deleted:true`,
 `reclaimed=0` (honesto).
 
+**Implementado na Subfase P**: `cascade_delete`. Árvore N-ária codificada
+como "primeiro filho / próximo irmão" -- só 2 campos `OwnedRef` (não um por
+filho), então qualquer largura funciona: remover um nó cai em cascata no
+`first_child`, que cai em cascata no `next_sibling` dele, que cai no dele,
+cobrindo a subárvore inteira e todos os irmãos com uma única chamada
+`database.remove(tx, raiz)` -- o passeio do grafo é do PRÓPRIO motor
+(`Database::remove_cascade`), não código deste workload. Profundidade fixa
+em 4, largura derivada de `object_count` (largura≈object_count^(1/4)).
+Verificado ao vivo em `--case load.cascade_delete.embedded.1k`: árvore de
+1555 nós (largura 6, profundidade 4: 6⁴+6³+6²+6+1), removida em cascata com
+`still_resolving=0`.
+
 Dois workloads adicionais dependem de infraestrutura que o harness genérico
 (`target.hpp`, §14) ainda não cobre; ficam **fora de todos os perfis** até essa
 infraestrutura existir — mesmo tratamento hoje dado a `primary_storage=wal_only`

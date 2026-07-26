@@ -7,6 +7,7 @@
 #include "workloads/create_delete_interleaved.hpp"
 #include "workloads/create_delete_reverse.hpp"
 #include "workloads/blob_lifecycle.hpp"
+#include "workloads/cascade_delete.hpp"
 #include "workloads/create_only.hpp"
 #include "workloads/crud_full.hpp"
 #include "workloads/mixed_oltp.hpp"
@@ -194,6 +195,8 @@ bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, s
         run_result = run_snapshot_hold(c, work_dir, seed, on_progress, db_path);
     } else if (c.workload == "blob_lifecycle") {
         run_result = run_blob_lifecycle(c, work_dir, seed, on_progress, db_path);
+    } else if (c.workload == "cascade_delete") {
+        run_result = run_cascade_delete(c, work_dir, seed, on_progress, db_path);
     } else {
         run_result.status = "unimplemented";
         run_result.error = "dispatch ausente para workload '" + c.workload + "'";

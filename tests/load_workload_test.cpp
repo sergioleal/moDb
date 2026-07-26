@@ -308,6 +308,33 @@ void test_blob_lifecycle(TestSuite& suite) {
     }
 }
 
+// Subfase P (§4.2.1): árvore N-ária via "primeiro filho/próximo irmão",
+// removida em cascata com UMA chamada -- zero refs órfãs ao final.
+void test_cascade_delete(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_cascade_delete_embedded(small_params(work_dir, /*object_count=*/80, /*batch=*/1),
+                                              db_path);
+
+    suite.check(result.ok, "cascade_delete deve completar: " + result.error);
+    suite.check(result.status == "completed", "cascade_delete status deve ser completed");
+    suite.check(result.hash_match, "zero refs órfãs após a remoção em cascata: " + result.error);
+    suite.check(result.all_deleted, "all_deleted deve ser true após a remoção da raiz");
+    suite.check(result.still_resolving == 0, "nenhum nó deve sobrar após a cascata");
+    suite.check(result.phases.size() == 2,
+               "cascade_delete deve produzir 2 fases (create_hierarchy + cascade_delete)");
+    if (result.phases.size() == 2) {
+        suite.check(result.phases[0].phase == "create_hierarchy",
+                   "a 1a fase deve se chamar 'create_hierarchy'");
+        suite.check(result.phases[0].operations > 1,
+                   "a árvore deve ter mais de 1 nó (profundidade x largura reais)");
+        suite.check(result.phases[1].phase == "cascade_delete",
+                   "a 2a fase deve se chamar 'cascade_delete'");
+        suite.check(result.phases[1].operations == result.phases[0].operations,
+                   "cascade_delete deve remover exatamente o total criado");
+    }
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -356,6 +383,7 @@ int main() {
     test_mixed_oltp_single_threaded(suite);
     test_snapshot_hold(suite);
     test_blob_lifecycle(suite);
+    test_cascade_delete(suite);
     test_crud_full(suite);
     return suite.finish();
 }

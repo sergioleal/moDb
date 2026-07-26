@@ -8,6 +8,7 @@
 
 #include "modb/object/blob_store.hpp"
 #include "modb/object/database.hpp"
+#include "modb/object/ref.hpp"
 #include "modb/query/planner.hpp"
 #include "modb/storage/buffer_pool.hpp"
 #include "modb/storage/page.hpp"
@@ -1996,6 +1997,206 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     // não por um único hash de conjunto como create_only/crud_full -- deixar
     // expected_hash/actual_hash vazios é mais honesto que fabricar um par
     // trivialmente igual só para preencher o campo.
+    result.status = "completed";
+    result.ok = true;
+    return result;
+}
+
+namespace {
+
+// Árvore N-ária codificada como "primeiro filho / próximo irmão" (2 campos
+// `OwnedRef` cobrem qualquer largura -- remover um nó em cascata já remove
+// seu `first_child`, que em cascata remove seu próprio `next_sibling`, que
+// remove o dele, e assim por diante: toda a subárvore + todos os irmãos).
+struct HierarchyNode {
+    std::int64_t id{};
+    OwnedRef<HierarchyNode> first_child{};
+    OwnedRef<HierarchyNode> next_sibling{};
+};
+
+BindingBuilder<HierarchyNode> hierarchy_node_binding() {
+    BindingBuilder<HierarchyNode> builder{"HierarchyNode"};
+    builder.field<1>("id", &HierarchyNode::id)
+        .field<2>("first_child", &HierarchyNode::first_child)
+        .field<3>("next_sibling", &HierarchyNode::next_sibling);
+    return builder;
+}
+
+struct BuildResult {
+    ObjectId id;
+    std::uint64_t node_count{};
+};
+
+// Constrói de baixo para cima (filhos antes do pai -- `OwnedRef.target`
+// precisa apontar pra algo que já existe) e de trás pra frente entre irmãos
+// (cada nó recebe o `next_sibling` já pronto, então nenhum precisa de
+// update depois de criado). `next_sibling_id` é o que ESTE nó deve apontar
+// como próximo irmão -- vem do chamador, não é decidido aqui.
+Result<BuildResult> build_hierarchy_subtree(Database& database, Transaction& tx,
+                                            std::uint64_t depth, std::uint64_t width,
+                                            ObjectId next_sibling_id,
+                                            std::uint64_t& next_logical_id) {
+    ObjectId children_head{};
+    std::uint64_t descendants = 0;
+    if (depth > 0) {
+        ObjectId sibling_so_far{};
+        for (std::uint64_t i = 0; i < width; ++i) {
+            auto built =
+                build_hierarchy_subtree(database, tx, depth - 1, width, sibling_so_far, next_logical_id);
+            if (!built) {
+                return std::unexpected(built.error());
+            }
+            sibling_so_far = built->id;
+            descendants += built->node_count;
+        }
+        children_head = sibling_so_far;
+    }
+
+    HierarchyNode node;
+    node.id = static_cast<std::int64_t>(++next_logical_id);
+    node.first_child = OwnedRef<HierarchyNode>{children_head};
+    node.next_sibling = OwnedRef<HierarchyNode>{next_sibling_id};
+    auto created = database.create(tx, node);
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+    return BuildResult{created->id(), descendants + 1};
+}
+
+} // namespace
+
+CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
+                                          std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "cascade_delete");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    AttachedDatabase attached;
+    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+        result.status = "failed";
+        result.error = setup.error;
+        return result;
+    }
+    if (auto bound = attached.database->bind(hierarchy_node_binding()); !bound) {
+        result.status = "failed";
+        result.error = "bind(HierarchyNode): " + bound.error().message;
+        return result;
+    }
+
+    // largura^profundidade ~ object_count -- profundidade fixa em 4 (árvore
+    // rasa e larga o bastante pra exercitar cascata de verdade sem recursão
+    // C++ funda demais), largura derivada do object_count pedido.
+    constexpr std::uint64_t kDepth = 4;
+    const auto width = std::max<std::uint64_t>(
+        2, static_cast<std::uint64_t>(std::llround(
+               std::pow(static_cast<double>(std::max<std::uint64_t>(params.object_count, 16)),
+                       1.0 / static_cast<double>(kDepth)))));
+
+    std::uint64_t next_logical_id = 0;
+    ObjectId root_id;
+    std::uint64_t total_created = 0;
+
+    const auto create_start = std::chrono::steady_clock::now();
+    {
+        auto tx = attached.database->begin();
+        if (!tx) {
+            result.status = "failed";
+            result.error = "begin(create_hierarchy): " + tx.error().message;
+            return result;
+        }
+        auto built =
+            build_hierarchy_subtree(*attached.database, *tx, kDepth, width, ObjectId{}, next_logical_id);
+        if (!built) {
+            result.status = "failed";
+            result.error = "create_hierarchy: " + built.error().message;
+            return result;
+        }
+        if (auto committed = tx->commit(); !committed) {
+            result.status = "failed";
+            result.error = "commit(create_hierarchy): " + committed.error().message;
+            return result;
+        }
+        root_id = built->id;
+        total_created = built->node_count;
+    }
+    const auto create_end = std::chrono::steady_clock::now();
+
+    std::uint64_t live_before_delete = 0;
+    for (auto& row : attached.database->query<HierarchyNode>().stream()) {
+        if (row) {
+            ++live_before_delete;
+        }
+    }
+
+    std::error_code size_error;
+    const auto db_bytes_after_create = std::filesystem::file_size(db_path, size_error);
+    PhaseMetrics create_phase;
+    create_phase.phase = "create_hierarchy";
+    create_phase.operations = total_created;
+    create_phase.duration_ns = ns_between(create_start, create_end);
+    create_phase.db_bytes = size_error ? 0 : db_bytes_after_create;
+    create_phase.peak_rss_bytes = peak_rss_bytes();
+    result.phases.push_back(create_phase);
+
+    if (live_before_delete != total_created) {
+        result.status = "failed";
+        result.error = "cascade_delete: contagem após criação (" + std::to_string(live_before_delete) +
+                       ") != total criado (" + std::to_string(total_created) + ")";
+        return result;
+    }
+
+    // cascade_delete (raiz): uma única chamada -- o motor cai em cascata
+    // por composição, nenhum passeio manual do grafo aqui (§4.2.1).
+    const auto delete_start = std::chrono::steady_clock::now();
+    auto tx = attached.database->begin();
+    if (!tx) {
+        result.status = "failed";
+        result.error = "begin(cascade_delete): " + tx.error().message;
+        return result;
+    }
+    auto removed = attached.database->remove(*tx, root_id);
+    if (!removed) {
+        result.status = "failed";
+        result.error = "cascade_delete(raiz): " + removed.error().message;
+        return result;
+    }
+    if (auto committed = tx->commit(); !committed) {
+        result.status = "failed";
+        result.error = "commit(cascade_delete): " + committed.error().message;
+        return result;
+    }
+    const auto delete_end = std::chrono::steady_clock::now();
+
+    std::uint64_t live_after_delete = 0;
+    for (auto& row : attached.database->query<HierarchyNode>().stream()) {
+        if (row) {
+            ++live_after_delete;
+        }
+    }
+
+    result.all_deleted = live_after_delete == 0;
+    result.still_resolving = live_after_delete;
+    result.hash_match = result.all_deleted;   // "zero refs órfãs" -- não há hash lógico aqui
+
+    if (!result.hash_match) {
+        result.status = "failed";
+        result.error = "cascade_delete: " + std::to_string(live_after_delete) +
+                       " nó(s) órfão(s) sobrando depois da remoção em cascata da raiz (esperado: 0, "
+                       "total criado=" +
+                       std::to_string(total_created) + ")";
+        return result;
+    }
+
+    PhaseMetrics delete_phase;
+    delete_phase.phase = "cascade_delete";
+    delete_phase.operations = total_created;
+    delete_phase.duration_ns = ns_between(delete_start, delete_end);
+    delete_phase.peak_rss_bytes = peak_rss_bytes();
+    result.phases.push_back(delete_phase);
+
+    result.total_duration_ns = create_phase.duration_ns + delete_phase.duration_ns;
+    result.peak_disk_bytes = create_phase.db_bytes;
     result.status = "completed";
     result.ok = true;
     return result;
