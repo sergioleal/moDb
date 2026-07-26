@@ -27,6 +27,7 @@
 #include "modb/storage/page_file.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -128,8 +129,27 @@ std::string exceeds_budget_reason(const BudgetEstimate& estimate, const BudgetLi
 bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, std::uint64_t seed,
                          const std::string& run_id, std::uint64_t& sequence,
                          const std::function<bool(const std::string&)>& write_or_fail,
-                         CaseTally& tally) {
+                         CaseTally& tally, std::size_t case_index, std::size_t case_count,
+                         const CampaignProgressCallback& on_case_progress) {
     const auto case_id = c.case_id();
+    const auto case_start_time = std::chrono::steady_clock::now();
+    if (on_case_progress) {
+        on_case_progress(CampaignProgressEvent{
+            .kind = "case_start", .case_index = case_index, .case_count = case_count,
+            .case_id = case_id});
+    }
+    auto fire_case_end = [&](const std::string& status) {
+        if (!on_case_progress) {
+            return;
+        }
+        const auto elapsed = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - case_start_time)
+                .count());
+        on_case_progress(CampaignProgressEvent{
+            .kind = "case_end", .case_index = case_index, .case_count = case_count,
+            .case_id = case_id, .status = status, .duration_ns = elapsed});
+    };
     {
         std::ostringstream oss;
         oss << "{\"schema\":\"modb.loadtest\",\"schema_version\":1,\"record\":\"case_start\","
@@ -152,6 +172,7 @@ bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, s
                           "' ainda não implementado nesta versão do modb_load (ver "
                           "docs/PLANO_TESTES_DE_CARGA.md §15)")
             << "}";
+        fire_case_end("unimplemented");
         return write_or_fail(oss.str());
     }
 
@@ -164,6 +185,15 @@ bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, s
     // depois, como qualquer outra falha de escrita.
     bool progress_write_failed = false;
     ProgressCallback on_progress = [&](const ProgressWindow& w) {
+        if (on_case_progress) {
+            // Feedback de console, independente do JSONL: uma fase longa
+            // (>10s de padrão) fecha janelas periodicamente mesmo quando o
+            // caso inteiro leva minutos -- sem isto, o terminal fica mudo
+            // do case_start até o case_end de um único caso caro.
+            on_case_progress(CampaignProgressEvent{
+                .kind = "window", .case_index = case_index, .case_count = case_count,
+                .case_id = case_id, .phase = w.phase, .ops_per_second = w.ops_per_second});
+        }
         if (progress_write_failed) {
             return;
         }
@@ -255,6 +285,7 @@ bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, s
             << json_string(run_id) << ",\"sequence\":" << ++sequence
             << ",\"case_id\":" << json_string(case_id)
             << ",\"error\":" << json_string(run_result.error) << "}";
+        fire_case_end(run_result.status);
         return write_or_fail(oss.str());
     }
 
@@ -285,6 +316,7 @@ bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, s
         oss << "null";
     }
     oss << "}";
+    fire_case_end(run_result.status);
     return write_or_fail(oss.str());
 }
 
@@ -575,7 +607,9 @@ CampaignResult run_campaign(const CampaignOptions& options) {
     }
 
     CaseTally tally;
-    for (const auto& c : resolved.cases) {
+    const auto case_count = resolved.cases.size();
+    for (std::size_t case_index = 0; case_index < case_count; ++case_index) {
+        const auto& c = resolved.cases[case_index];
         const auto case_id = c.case_id();
         const auto estimate = estimate_case(c, calibration);
         const auto reason = exceeds_budget_reason(estimate, options.budget);
@@ -589,12 +623,18 @@ CampaignResult run_campaign(const CampaignOptions& options) {
                 << ",\"estimated_disk_bytes\":" << json_uint(estimate.disk_bytes)
                 << ",\"estimated_duration_ns\":" << json_uint(estimate.duration_ns)
                 << ",\"estimated_peak_rss_bytes\":" << json_uint(estimate.peak_rss_bytes) << "}";
+            if (options.on_progress) {
+                options.on_progress(CampaignProgressEvent{
+                    .kind = "skipped", .case_index = case_index, .case_count = case_count,
+                    .case_id = case_id, .status = reason});
+            }
             if (!write_or_fail(oss.str())) {
                 return result;
             }
             continue;
         }
-        if (!run_case_and_record(c, work_dir, options.seed, run_id, sequence, write_or_fail, tally)) {
+        if (!run_case_and_record(c, work_dir, options.seed, run_id, sequence, write_or_fail, tally,
+                                 case_index, case_count, options.on_progress)) {
             return result;
         }
     }
@@ -838,7 +878,9 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
         return true;
     };
 
-    for (const auto& c : pending_cases) {
+    const auto pending_count = pending_cases.size();
+    for (std::size_t pending_index = 0; pending_index < pending_count; ++pending_index) {
+        const auto& c = pending_cases[pending_index];
         const auto case_id = c.case_id();
         const auto estimate = estimate_case(c, calibration);
         const auto reason = exceeds_budget_reason(estimate, options.budget);
@@ -852,13 +894,19 @@ CampaignResult resume_campaign(const ResumeOptions& options) {
                 << ",\"estimated_disk_bytes\":" << json_uint(estimate.disk_bytes)
                 << ",\"estimated_duration_ns\":" << json_uint(estimate.duration_ns)
                 << ",\"estimated_peak_rss_bytes\":" << json_uint(estimate.peak_rss_bytes) << "}";
+            if (options.on_progress) {
+                options.on_progress(CampaignProgressEvent{
+                    .kind = "skipped", .case_index = pending_index, .case_count = pending_count,
+                    .case_id = case_id, .status = reason});
+            }
             if (!write_or_fail(oss.str())) {
                 result.error = write_error;
                 return result;
             }
             continue;
         }
-        if (!run_case_and_record(c, work_dir, seed, run_id, sequence, write_or_fail, tally)) {
+        if (!run_case_and_record(c, work_dir, seed, run_id, sequence, write_or_fail, tally,
+                                 pending_index, pending_count, options.on_progress)) {
             result.error = write_error;
             return result;
         }

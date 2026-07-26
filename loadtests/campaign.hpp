@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -26,6 +27,30 @@ namespace modb::loadtest {
 // revisão pós-implementação).
 [[nodiscard]] bool is_unimplemented_error_text(const std::string& error);
 
+// Feedback ao vivo no console (stderr) durante `run`/`resume`, distinto do
+// `progress_window` gravado no JSONL (esse é por fase, §8; este é por
+// CASO, e nunca é escrito no arquivo -- existe só para quem está olhando o
+// terminal não ficar olhando pra uma tela parada durante uma campanha de
+// vários minutos). `case_index`/`case_count` são 1-based e refletem a
+// posição no PLANO inteiro (não só nos casos que de fato rodam -- casos
+// pulados por orçamento também contam uma posição).
+struct CampaignProgressEvent {
+    // "case_start" | "case_end" | "skipped" | "window"
+    std::string kind;
+    std::size_t case_index{};
+    std::size_t case_count{};
+    std::string case_id;
+    // "case_end": status final (completed/failed/unimplemented). "skipped":
+    // o motivo do skip.
+    std::string status;
+    // "case_end": duração total do caso.
+    std::uint64_t duration_ns{};
+    // "window": nome da fase corrente e taxa observada até agora.
+    std::string phase;
+    double ops_per_second{};
+};
+using CampaignProgressCallback = std::function<void(const CampaignProgressEvent&)>;
+
 struct CampaignOptions {
     std::optional<std::string> profile;
     MatrixSelectors selectors;
@@ -37,6 +62,7 @@ struct CampaignOptions {
     bool dry_run{false};
     BudgetLimits budget;
     std::string argv_joined;
+    CampaignProgressCallback on_progress;   // opcional; nunca persistido no JSONL
 };
 
 struct CampaignResult {
@@ -80,6 +106,7 @@ struct ResumeOptions {
     // perderia o orçamento no meio do caminho, cada vez que fosse retomada.
     std::filesystem::path calibration_file;   // vazio = usa default_calibration_path()
     BudgetLimits budget;
+    CampaignProgressCallback on_progress;   // opcional; nunca persistido no JSONL
 };
 
 [[nodiscard]] CampaignResult resume_campaign(const ResumeOptions& options);

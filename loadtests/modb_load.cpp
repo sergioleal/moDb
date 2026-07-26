@@ -100,6 +100,28 @@ std::string join_argv(int argc, char** argv) {
     return out;
 }
 
+// Feedback ao vivo em stderr durante `run`/`resume` (nunca gravado no
+// JSONL, ver campaign.hpp) -- sem isto, uma campanha de vários casos/vários
+// minutos deixa o terminal parado do começo ao fim, indistinguível de
+// travado. Uma linha por evento; sem controle de cursor (\r) porque isso
+// não é confiável quando a saída é redirecionada/capturada (ex.:
+// scripts/run-load.ps1 encaminhando pra um arquivo de log).
+void print_campaign_progress(const modb::loadtest::CampaignProgressEvent& e) {
+    const auto seconds = static_cast<double>(e.duration_ns) / 1'000'000'000.0;
+    if (e.kind == "case_start") {
+        std::cerr << "[" << (e.case_index + 1) << "/" << e.case_count << "] " << e.case_id
+                  << "...\n";
+    } else if (e.kind == "window") {
+        std::cerr << "  ops/s=" << static_cast<std::uint64_t>(e.ops_per_second) << " (" << e.phase
+                  << ")\n";
+    } else if (e.kind == "case_end") {
+        std::cerr << "  -> " << e.status << " em " << seconds << "s\n";
+    } else if (e.kind == "skipped") {
+        std::cerr << "[" << (e.case_index + 1) << "/" << e.case_count << "] " << e.case_id
+                  << " ... pulado (orçamento): " << e.status << "\n";
+    }
+}
+
 // Preenche seletores comuns a `run` e `list-cases`. `history_file`/`no_index`
 // só importam para `run` (indexação automática, §13.5) mas são aceitos aqui
 // também para `list-cases` sem efeito, para manter um único parser.
@@ -184,6 +206,9 @@ int command_run(int argc, char** argv) {
         return 2;
     }
 
+    if (!options.dry_run) {
+        options.on_progress = print_campaign_progress;
+    }
     auto result = modb::loadtest::run_campaign(options);
     if (options.dry_run) {
         if (!result.ok) {
@@ -540,6 +565,7 @@ int command_resume(int argc, char** argv) {
         }
     }
 
+    options.on_progress = print_campaign_progress;
     auto result = modb::loadtest::resume_campaign(options);
     if (!result.ok && result.result_path.empty()) {
         std::cerr << "Erro: " << result.error << '\n';
