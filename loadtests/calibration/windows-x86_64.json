@@ -3,20 +3,24 @@
   "schema_version": 1,
   "platform": "windows",
   "arch": "x86_64",
-  "measured_at": "2026-07-25",
-  "notes": "Calibração reduzida (Subfase H): medição real só em 10k/100k. 250k/500k/1M são extrapolação linear a partir de 100k, documentada como tal em cada entrada -- não uma medição real dessas escalas. Ver docs/PLANO_TESTES_DE_CARGA.md §10 e docs-process/PLANO_IMPLEMENTACAO_CARGA.md (Subfase H).",
+  "measured_at": "2026-07-26",
+  "notes": "Calibração (Subfase H, ampliada em 2026-07-26): medição real em 10k/100k/250k para os 5 workloads da escada básica. 500k/1M seguem extrapolação linear a partir de 100k, documentada como tal em cada entrada -- não uma medição real dessas escalas (não executadas nesta rodada por tempo: crud_full sozinho levou ~44min em 250k). A medição real de 250k confirma que a extrapolação linear a partir de 100k SUBESTIMA a duração real em todas as 5 entradas (ver 'underestimate_ratio_250k_vs_extrapolated' e 'degradation_100k_to_250k_ratio' em cada entrada) -- a degradação não-linear já observada de 10k->100k continua além de 100k, então os valores extrapolados de 500k/1M abaixo permanecem otimistas, provavelmente mais ainda do que o aviso original indicava. Ver docs/PLANO_TESTES_DE_CARGA.md §10 e docs-process/PLANO_IMPLEMENTACAO_CARGA.md (Subfase H).",
   "entries": [
     {
       "workload": "create_only",
       "payload": "normal",
       "measured_scales": [
         "10k",
-        "100k"
+        "100k",
+        "250k"
       ],
       "objects_per_second_at_100k": 6287.9,
+      "objects_per_second_at_250k": 2565.39,
       "bytes_per_object_at_100k": 458,
       "degradation_10k_to_100k_ratio": 2.45,
-      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 2.45x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "degradation_100k_to_250k_ratio": 2.45,
+      "underestimate_ratio_250k_vs_extrapolated": 2.45,
+      "extrapolation_caveat": "Medido de verdade até 250k (2026-07-26). A vazão caiu 2.45x de 10k para 100k e mais 2.45x de 100k para 250k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- a extrapolação linear anterior a partir de 100k subestimou a duração real em 250k por 2.45x. As entradas 500k/1M abaixo continuam sendo extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem ainda mais a duração real nessas escalas. Substituir por medição real é o trabalho pendente restante da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
       "scales": {
         "1k": {
           "source": "extrapolated_linear_from_100k",
@@ -37,10 +41,10 @@
           "peak_rss_bytes": 160276480
         },
         "250k": {
-          "source": "extrapolated_linear_from_100k",
-          "duration_ns": 39758897500,
-          "disk_peak_bytes": 114500000,
-          "peak_rss_bytes": 400691200
+          "source": "measured",
+          "duration_ns": 97451127500,
+          "disk_peak_bytes": 114495488,
+          "peak_rss_bytes": 297238528
         },
         "500k": {
           "source": "extrapolated_linear_from_100k",
@@ -61,12 +65,16 @@
       "payload": "normal",
       "measured_scales": [
         "10k",
-        "100k"
+        "100k",
+        "250k"
       ],
       "objects_per_second_at_100k": 5555.16,
+      "objects_per_second_at_250k": 1703.13,
       "bytes_per_object_at_100k": 458,
       "degradation_10k_to_100k_ratio": 2.32,
-      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 2.32x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "degradation_100k_to_250k_ratio": 3.26,
+      "underestimate_ratio_250k_vs_extrapolated": 3.26,
+      "extrapolation_caveat": "Medido de verdade até 250k (2026-07-26). A vazão caiu 2.32x de 10k para 100k e mais 3.26x de 100k para 250k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- a extrapolação linear anterior a partir de 100k subestimou a duração real em 250k por 3.26x, a maior discrepância entre as 5 entradas desta subfase. As entradas 500k/1M abaixo continuam sendo extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem ainda mais a duração real nessas escalas. Substituir por medição real é o trabalho pendente restante da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
       "scales": {
         "1k": {
           "source": "extrapolated_linear_from_100k",
@@ -87,10 +95,10 @@
           "peak_rss_bytes": 222134272
         },
         "250k": {
-          "source": "extrapolated_linear_from_100k",
-          "duration_ns": 45003238000,
-          "disk_peak_bytes": 114500000,
-          "peak_rss_bytes": 555335680
+          "source": "measured",
+          "duration_ns": 146800305400,
+          "disk_peak_bytes": 114495488,
+          "peak_rss_bytes": 520818688
         },
         "500k": {
           "source": "extrapolated_linear_from_100k",
@@ -111,12 +119,16 @@
       "payload": "normal",
       "measured_scales": [
         "10k",
-        "100k"
+        "100k",
+        "250k"
       ],
       "objects_per_second_at_100k": 5583.51,
+      "objects_per_second_at_250k": 2676.13,
       "bytes_per_object_at_100k": 458,
       "degradation_10k_to_100k_ratio": 2.44,
-      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 2.44x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "degradation_100k_to_250k_ratio": 2.09,
+      "underestimate_ratio_250k_vs_extrapolated": 2.09,
+      "extrapolation_caveat": "Medido de verdade até 250k (2026-07-26). A vazão caiu 2.44x de 10k para 100k e mais 2.09x de 100k para 250k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- a extrapolação linear anterior a partir de 100k subestimou a duração real em 250k por 2.09x. As entradas 500k/1M abaixo continuam sendo extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem ainda mais a duração real nessas escalas. Substituir por medição real é o trabalho pendente restante da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
       "scales": {
         "1k": {
           "source": "extrapolated_linear_from_100k",
@@ -137,10 +149,10 @@
           "peak_rss_bytes": 222154752
         },
         "250k": {
-          "source": "extrapolated_linear_from_100k",
-          "duration_ns": 44774678500,
-          "disk_peak_bytes": 114500000,
-          "peak_rss_bytes": 555386880
+          "source": "measured",
+          "duration_ns": 93414759300,
+          "disk_peak_bytes": 114495488,
+          "peak_rss_bytes": 521076736
         },
         "500k": {
           "source": "extrapolated_linear_from_100k",
@@ -161,12 +173,16 @@
       "payload": "normal",
       "measured_scales": [
         "10k",
-        "100k"
+        "100k",
+        "250k"
       ],
       "objects_per_second_at_100k": 5323.11,
+      "objects_per_second_at_250k": 2609.16,
       "bytes_per_object_at_100k": 458,
       "degradation_10k_to_100k_ratio": 2.41,
-      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 2.41x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "degradation_100k_to_250k_ratio": 2.04,
+      "underestimate_ratio_250k_vs_extrapolated": 2.04,
+      "extrapolation_caveat": "Medido de verdade até 250k (2026-07-26). A vazão caiu 2.41x de 10k para 100k e mais 2.04x de 100k para 250k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- a extrapolação linear anterior a partir de 100k subestimou a duração real em 250k por 2.04x, a menor discrepância entre as 5 entradas desta subfase (mesmo assim, subestimou). As entradas 500k/1M abaixo continuam sendo extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem ainda mais a duração real nessas escalas. Substituir por medição real é o trabalho pendente restante da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
       "scales": {
         "1k": {
           "source": "extrapolated_linear_from_100k",
@@ -187,10 +203,10 @@
           "peak_rss_bytes": 222220288
         },
         "250k": {
-          "source": "extrapolated_linear_from_100k",
-          "duration_ns": 46965019500,
-          "disk_peak_bytes": 114500000,
-          "peak_rss_bytes": 555550720
+          "source": "measured",
+          "duration_ns": 95815937300,
+          "disk_peak_bytes": 114495488,
+          "peak_rss_bytes": 521105408
         },
         "500k": {
           "source": "extrapolated_linear_from_100k",
@@ -211,12 +227,16 @@
       "payload": "normal",
       "measured_scales": [
         "10k",
-        "100k"
+        "100k",
+        "250k"
       ],
       "objects_per_second_at_100k": 413.21,
+      "objects_per_second_at_250k": 94.4,
       "bytes_per_object_at_100k": 1674,
       "degradation_10k_to_100k_ratio": 5.07,
-      "extrapolation_caveat": "Medido de verdade só até 100k. A vazão caiu 5.07x de 10k para 100k (comportamento não-linear do motor em escala crescente, não um artefato de medição) -- as entradas 250k/500k/1M abaixo são extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem a duração real nessas escalas. Substituir por medição real é o trabalho pendente da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).",
+      "degradation_100k_to_250k_ratio": 4.38,
+      "underestimate_ratio_250k_vs_extrapolated": 4.38,
+      "extrapolation_caveat": "Medido de verdade até 250k (2026-07-26): 2648.5s (~44.1min), contra a extrapolação linear anterior de 605s (~10.1min) -- subestimava por 4.38x, o maior desvio entre as 5 entradas desta subfase e o workload mais caro da escada (6 fases, reescrita completa do registro). A vazão caiu 5.07x de 10k para 100k e mais 4.38x de 100k para 250k (comportamento não-linear do motor em escala crescente, não um artefato de medição). As entradas 500k/1M abaixo continuam sendo extrapolação linear simples a partir do ponto de 100k e é ESPERADO que subestimem MUITO a duração real nessas escalas -- a 1M, a projeção ingênua de 2420s (~40min) quase certamente será uma fração pequena do tempo real, a julgar pela progressão 5.07x/4.38x observada. Substituir por medição real é o trabalho pendente restante da Subfase H (docs-process/PLANO_IMPLEMENTACAO_CARGA.md); vale reservar várias horas dedicadas para o 1M de crud_full especificamente.",
       "scales": {
         "1k": {
           "source": "extrapolated_linear_from_100k",
@@ -237,10 +257,10 @@
           "peak_rss_bytes": 222310400
         },
         "250k": {
-          "source": "extrapolated_linear_from_100k",
-          "duration_ns": 605014476750,
-          "disk_peak_bytes": 418500000,
-          "peak_rss_bytes": 555776000
+          "source": "measured",
+          "duration_ns": 2648512650700,
+          "disk_peak_bytes": 418918400,
+          "peak_rss_bytes": 522821632
         },
         "500k": {
           "source": "extrapolated_linear_from_100k",
