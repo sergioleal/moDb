@@ -26,6 +26,7 @@ constexpr std::size_t k_small_socket_buffer = 4 * 1024;
 
 struct SessionState {
     NativeSocket* peer{nullptr};
+    Compression selected_codec{Compression::none};
     std::mutex write_mu;
     std::mutex inbox_mu;
     std::condition_variable inbox_cv;
@@ -140,12 +141,17 @@ Server::Server(Server&& other) noexcept
       listener_{std::move(other.listener_)}, port_{other.port_},
       database_name_{std::move(other.database_name_)}, baseline_{other.baseline_},
       fail_after_{other.fail_after_}, small_buffers_{other.small_buffers_},
-      last_stats_{other.last_stats_},
-      stop_requested_{other.stop_requested_.load()} {
+      selected_codec_{other.selected_codec_.load(std::memory_order_relaxed)},
+      last_stats_{other.last_stream_stats()},
+      stop_requested_{other.stop_requested_.load(std::memory_order_relaxed)} {
     other.database_id_ = object::DatabaseId{};
     other.fail_after_.reset();
     other.small_buffers_ = false;
-    other.last_stats_ = {};
+    {
+        const std::scoped_lock lock{*other.stats_mutex_};
+        other.last_stats_ = {};
+    }
+    other.selected_codec_.store(Compression::none, std::memory_order_relaxed);
     other.stop_requested_.store(false);
 }
 
@@ -195,6 +201,11 @@ Result<Server> Server::listen(const std::filesystem::path& path, std::string_vie
 
     return Server{std::move(database), *database_id, std::move(*listener), *bound_port,
                   path.filename().string(), baseline};
+}
+
+StreamStats Server::last_stream_stats() const noexcept {
+    const std::scoped_lock lock{*stats_mutex_};
+    return last_stats_;
 }
 
 namespace {
@@ -403,13 +414,13 @@ Result<void> Server::handle_connection(NativeSocket peer) {
 
     SessionState session;
     session.peer = &peer;
+    session.selected_codec = selected;
     std::thread reader{[&session] { reader_loop(session); }};
 
     // Workers ativos para multiplexação (query_id → thread).
     std::mutex workers_mu;
     std::vector<std::thread> workers;
     std::atomic<int> live_workers{0};
-    std::mutex stats_mu;
 
     Result<void> session_status{};
     while (!session.stop.load(std::memory_order_relaxed)) {
@@ -439,12 +450,12 @@ Result<void> Server::handle_connection(NativeSocket peer) {
             }
 
             live_workers.fetch_add(1, std::memory_order_relaxed);
-            const Compression codec = selected_codec_;
+            const Compression codec = session.selected_codec;
             std::thread worker([&, query_copy, codec]() mutable {
                 auto stats =
                     run_query(session, database_, query_copy, fail_after_, codec, *engine_mutex_);
                 if (stats) {
-                    const std::scoped_lock lock{stats_mu};
+                    const std::scoped_lock lock{*stats_mutex_};
                     last_stats_ = *stats;
                 }
                 live_workers.fetch_sub(1, std::memory_order_relaxed);
@@ -570,24 +581,48 @@ void Server::request_stop() noexcept {
 }
 
 Result<void> Server::serve_forever() {
+    std::mutex sessions_mu;
+    std::vector<std::thread> sessions;
+    Result<void> loop_status{};
+
+    const auto join_sessions = [&] {
+        const std::scoped_lock lock{sessions_mu};
+        for (auto& session : sessions) {
+            if (session.joinable()) {
+                session.join();
+            }
+        }
+        sessions.clear();
+    };
+
     while (!stop_requested_.load()) {
-        auto status = serve_one();
-        if (!status) {
+        auto peer = listener_.accept();
+        if (!peer) {
             if (stop_requested_.load()) {
-                return {};
+                break;
             }
             // Listener fechado externamente conta como parada limpa.
-            if (status.error().code == ErrorCode::connection_closed ||
-                status.error().code == ErrorCode::io_error) {
+            if (peer.error().code == ErrorCode::connection_closed ||
+                peer.error().code == ErrorCode::io_error) {
                 if (!listener_.is_open()) {
                     stop_requested_.store(true);
-                    return {};
+                    break;
                 }
             }
-            return status;
+            loop_status = std::unexpected(peer.error());
+            break;
+        }
+
+        std::thread session_thread([this, peer = std::move(*peer)]() mutable {
+            (void)handle_connection(std::move(peer));
+        });
+        {
+            const std::scoped_lock lock{sessions_mu};
+            sessions.push_back(std::move(session_thread));
         }
     }
-    return {};
+    join_sessions();
+    return loop_status;
 }
 
 } // namespace modb::net

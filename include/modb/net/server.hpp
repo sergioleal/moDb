@@ -52,13 +52,15 @@ public:
     [[nodiscard]] std::uint16_t port() const noexcept { return port_; }
     [[nodiscard]] std::string_view database_name() const noexcept { return database_name_; }
     [[nodiscard]] object::BaselineId baseline() const noexcept { return baseline_; }
-    [[nodiscard]] const StreamStats& last_stream_stats() const noexcept { return last_stats_; }
+    [[nodiscard]] StreamStats last_stream_stats() const noexcept;
     [[nodiscard]] object::Database& database() noexcept { return *database_; }
     [[nodiscard]] const object::Database& database() const noexcept { return *database_; }
     [[nodiscard]] std::size_t open_snapshot_count() const noexcept {
         return database_ ? database_->open_snapshot_count() : 0;
     }
-    [[nodiscard]] Compression selected_codec() const noexcept { return selected_codec_; }
+    [[nodiscard]] Compression selected_codec() const noexcept {
+        return selected_codec_.load(std::memory_order_relaxed);
+    }
 
     void fail_stream_after(std::size_t objects) noexcept { fail_after_ = objects; }
     void use_small_socket_buffers(bool enabled) noexcept { small_buffers_ = enabled; }
@@ -104,8 +106,9 @@ private:
     std::uint16_t max_concurrent_streams_{default_max_concurrent_streams};
     std::uint32_t idle_timeout_ms_{default_idle_timeout_ms};
     Compression preferred_codec_{Compression::rle};
-    Compression selected_codec_{Compression::none};
+    std::atomic<Compression> selected_codec_{Compression::none};
     StreamStats last_stats_{};
+    mutable std::unique_ptr<std::mutex> stats_mutex_{std::make_unique<std::mutex>()};
     std::shared_ptr<ops::OperationRegistry> operations_{};
     std::shared_ptr<ops::FacadeCatalog> facades_{};
     std::atomic<bool> stop_requested_{false};

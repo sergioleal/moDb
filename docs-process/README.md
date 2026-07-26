@@ -49,6 +49,16 @@ decisões arquiteturais que os dois pressupõem estão em
 [`docs/decisions/`](../docs/README.md) (ADRs) — essas ficaram em `docs/` por
 serem atemporais, não histórico puro.
 
+- **[PLANO_SERVIDOR_ASSINCRONO.md](PLANO_SERVIDOR_ASSINCRONO.md)** -- plano de
+  arquitetura para evoluir o servidor para multiplas conexoes, leitores
+  paralelos fisicamente seguros, fila de escrita dedicada e, depois de medicao,
+  coroutines/I/O assincrono quando fizer sentido.
+- **[PLANO_REPLICA_LEITURA_COLUNAR.md](PLANO_REPLICA_LEITURA_COLUNAR.md)** --
+  plano para permitir replicas de leitura em modo row-store ou colunar,
+  selecionadas no follower; com o WAL fisico atual, o MVP colunar assume row
+  sombra + projecao colunar ate haver WAL logico ou spike que elimine esse
+  custo.
+
 ## 2. Relatórios de fechamento e medição
 
 - **[FECHAMENTO_10F.md](FECHAMENTO_10F.md)** — matriz final da Fase 10 (tag

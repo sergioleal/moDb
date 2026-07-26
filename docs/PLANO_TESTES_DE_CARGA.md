@@ -298,18 +298,27 @@ reais) fica para uma iteração futura desta subfase.
 **Revisão pós-implementação.** `target_client.cpp` ganhou uma rede de
 segurança (RAII) para o join da thread aceitadora -- uma exceção escapando
 do bloco cliente/servidor não deixa mais a thread joinable para
-`~std::thread` chamar `std::terminate()`. **Pendência conhecida, não
-corrigida nesta revisão**: `Server::request_stop()` fecha o listener via
-`close(fd)` contra uma thread bloqueada em `accept()` -- destrava de verdade
-no Windows, mas é comportamento não especificado em POSIX (no Linux,
-`accept()` tende a continuar bloqueado, travando `acceptor.join()` no
-caminho de falha de `connect()`). Isso só importa quando o alvo `loopback`/
-`remote_colocated` de fato rodar em Linux -- ainda não aconteceu nesta
-sessão (SSH para `linux-remoto` nunca testado, §6.4/scripts/run-remote-
-load.ps1). Não corrigido aqui porque a correção vive em `src/net/server.cpp`/
-`include/modb/net/server.hpp`, arquivos sob edição concorrente de outro
-processo (plano de servidor assíncrono) nesta mesma árvore de trabalho --
-tocar neles arriscaria colidir com esse trabalho em andamento.
+`~std::thread` chamar `std::terminate()`.
+
+`Server::request_stop()` fechava o listener via `close(fd)` contra uma
+thread bloqueada em `accept()` -- destravava de verdade no Windows, mas era
+comportamento não especificado em POSIX (no Linux, `accept()` tende a
+continuar bloqueado, travando `acceptor.join()` no caminho de falha de
+`connect()`). Corrigido em `src/net/native_socket.cpp`/`native_socket.hpp`
+(não em `server.cpp`/`server.hpp`, que estavam sob edição concorrente de
+outro processo nesta mesma árvore -- o truque do "self-pipe" ficou contido
+inteiramente no socket nativo): o socket de escuta ganha um pipe próprio
+criado em `listen()`; `accept()` primeiro espera em `poll()` pelo socket OU
+pelo pipe, nunca bloqueia dentro do `::accept()` de verdade sem saber que há
+conexão pronta; `close()` escreve no pipe para acordar quem estiver
+esperando, em vez de depender do fechamento do próprio fd de escuta (que é
+o comportamento não especificado). **Ainda não verificado em Linux de
+verdade** -- o ambiente de desenvolvimento desta sessão é Windows (onde o
+caminho POSIX do arquivo nem compila), e o acesso SSH a `linux-remoto` nunca
+foi testado (§6.4/scripts/run-remote-load.ps1). A suíte completa (incluindo
+`modb.native_socket`/`modb.operation_server`/`modb.app_server_connection`)
+passa no Windows sem regressão, mas isso só exercita o ramo `#ifdef _WIN32`,
+que não foi alterado.
 
 ### 4.4 D4 — Ambiente registrado
 

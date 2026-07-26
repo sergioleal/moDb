@@ -7,8 +7,10 @@
 
 #include "test_support.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -51,6 +53,115 @@ int main() {
     using modb::ops::OperationRegistry;
 
     const auto path = temp_db_path("net");
+    {
+        const auto concurrent_path = temp_db_path("concurrent-writes");
+        cleanup(concurrent_path);
+
+        modb::object::ObjectId source{};
+        modb::object::ObjectId destination{};
+        {
+            auto created = Database::create(concurrent_path);
+            suite.check(created.has_value(), "concurrent writes: create database");
+            if (created) {
+                auto database = std::make_shared<Database>(std::move(*created));
+                auto attached = DatabaseRegistry::instance().attach(database);
+                suite.check(attached.has_value(), "concurrent writes: attach");
+                suite.check(bind_accounts(*database).has_value(), "concurrent writes: bind");
+                auto tx = database->begin();
+                auto a = database->create(*tx, Account{"Source", 100});
+                auto b = database->create(*tx, Account{"Destination", 10});
+                suite.check(a.has_value() && b.has_value(), "concurrent writes: seed");
+                if (a && b) {
+                    source = a->id();
+                    destination = b->id();
+                }
+                suite.check(tx->commit().has_value(), "concurrent writes: commit seed");
+                if (attached) {
+                    DatabaseRegistry::instance().detach(*attached);
+                }
+            }
+        }
+
+        {
+            auto server = Server::listen(concurrent_path, "127.0.0.1", 0);
+            suite.check(server.has_value(), "concurrent writes: server listens");
+            if (server) {
+                suite.check(bind_accounts(server->database()).has_value(),
+                            "concurrent writes: bind server");
+
+                auto registry = std::make_shared<OperationRegistry>();
+                const auto baseline = server->database().current_baseline()->id();
+                auto manifest = transfer_funds_manifest(baseline);
+                ModuleLoader loader;
+                loader.admit_hash(manifest.hash);
+                suite.check(loader
+                                .load(manifest, baseline, *registry,
+                                      [](OperationRegistry& reg) {
+                                          return register_transfer_funds_module(reg);
+                                      })
+                                .has_value(),
+                            "concurrent writes: load module");
+                server->set_operation_registry(registry);
+
+                const auto port = server->port();
+                const auto db_name = std::string{server->database_name()};
+                modb::Result<void> forever_result{};
+                std::thread runner([&server, &forever_result] {
+                    forever_result = server->serve_forever();
+                });
+                std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+                std::atomic<bool> first_ok{false};
+                std::atomic<bool> second_ok{false};
+                const auto call_transfer = [&](std::atomic<bool>& flag) {
+                    auto client = Client::connect("127.0.0.1", port, db_name);
+                    if (!client) {
+                        return;
+                    }
+                    auto args = TransferFunds::encode_args(source, destination, 10);
+                    if (!args) {
+                        return;
+                    }
+                    auto payload = client->call(TransferFunds::k_id, *args);
+                    flag.store(payload.has_value(), std::memory_order_relaxed);
+                };
+
+                std::thread first{call_transfer, std::ref(first_ok)};
+                std::thread second{call_transfer, std::ref(second_ok)};
+                first.join();
+                second.join();
+
+                server->request_stop();
+                runner.join();
+                suite.check(forever_result.has_value(), "concurrent writes: serve_forever stops");
+                suite.check(first_ok.load(std::memory_order_relaxed) &&
+                                second_ok.load(std::memory_order_relaxed),
+                            "concurrent writes: both remote writes commit");
+            }
+        }
+
+        {
+            auto opened = Database::open(concurrent_path);
+            suite.check(opened.has_value(), "concurrent writes: reopen");
+            if (opened) {
+                auto database = std::make_shared<Database>(std::move(*opened));
+                auto attached = DatabaseRegistry::instance().attach(database);
+                suite.check(attached.has_value(), "concurrent writes: reattach");
+                suite.check(bind_accounts(*database).has_value(), "concurrent writes: rebind");
+                auto source_v = database->materialize(*database->get<Account>(source));
+                auto destination_v = database->materialize(*database->get<Account>(destination));
+                suite.check(source_v && source_v->balance == 80,
+                            "concurrent writes: source balance after two commits");
+                suite.check(destination_v && destination_v->balance == 30,
+                            "concurrent writes: destination balance after two commits");
+                if (attached) {
+                    DatabaseRegistry::instance().detach(*attached);
+                }
+            }
+        }
+        cleanup(concurrent_path);
+    }
+
     cleanup(path);
 
     modb::object::ObjectId alice{};

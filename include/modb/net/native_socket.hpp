@@ -46,6 +46,18 @@ private:
 #else
     explicit NativeSocket(int fd) noexcept : fd_{fd} {}
     int fd_ = -1;
+    // Só preenchido para o socket de ESCUTA (por `listen()`): truque do
+    // "self-pipe" para `accept()` acordar de forma bem definida quando
+    // `close()` é chamado de outra thread. Fechar o fd de escuta enquanto
+    // uma thread está bloqueada dentro do `::accept()` propriamente dito é
+    // comportamento não especificado em POSIX (o fd pode até ser reaproveitado
+    // por um `open()`/`socket()` concorrente antes da thread acordar) --
+    // `accept()` primeiro espera em `poll()` por este pipe OU pelo socket,
+    // nunca bloqueia dentro do `::accept()` de verdade sem antes saber que
+    // há uma conexão pronta.
+    int stop_pipe_read_ = -1;
+    int stop_pipe_write_ = -1;
+    void close_stop_pipe() noexcept;
 #endif
 };
 

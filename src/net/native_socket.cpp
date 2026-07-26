@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -323,25 +324,54 @@ Result<void> NativeSocket::set_recv_timeout_ms(std::uint32_t milliseconds) {
 
 #else
 
-NativeSocket::NativeSocket(NativeSocket&& other) noexcept : fd_{std::exchange(other.fd_, -1)} {}
+NativeSocket::NativeSocket(NativeSocket&& other) noexcept
+    : fd_{std::exchange(other.fd_, -1)},
+      stop_pipe_read_{std::exchange(other.stop_pipe_read_, -1)},
+      stop_pipe_write_{std::exchange(other.stop_pipe_write_, -1)} {}
 
 NativeSocket& NativeSocket::operator=(NativeSocket&& other) noexcept {
     if (this != &other) {
         static_cast<void>(close());
+        close_stop_pipe();
         fd_ = std::exchange(other.fd_, -1);
+        stop_pipe_read_ = std::exchange(other.stop_pipe_read_, -1);
+        stop_pipe_write_ = std::exchange(other.stop_pipe_write_, -1);
     }
     return *this;
 }
 
 NativeSocket::~NativeSocket() {
     static_cast<void>(close());
+    close_stop_pipe();
 }
 
 bool NativeSocket::is_open() const noexcept {
     return fd_ != -1;
 }
 
+void NativeSocket::close_stop_pipe() noexcept {
+    if (stop_pipe_read_ != -1) {
+        ::close(stop_pipe_read_);
+        stop_pipe_read_ = -1;
+    }
+    if (stop_pipe_write_ != -1) {
+        ::close(stop_pipe_write_);
+        stop_pipe_write_ = -1;
+    }
+}
+
 Result<void> NativeSocket::close() {
+    if (stop_pipe_write_ != -1) {
+        // Acorda uma `accept()` bloqueada em `poll()` (thread diferente) --
+        // escrever num pipe de outra thread é bem definido em POSIX. Os fds
+        // do pipe em si só são fechados na destruição (`close_stop_pipe()`),
+        // não aqui -- por essa altura o chamador já deveria ter dado join()
+        // na thread que estava bloqueada (mesmo padrão de
+        // `target_client.cpp`/`serve_forever()`), então não há leitor
+        // concorrente para arriscar um close() no meio do `poll()`.
+        const char byte = 1;
+        (void)::write(stop_pipe_write_, &byte, 1);
+    }
     if (!is_open()) {
         return {};
     }
@@ -374,7 +404,16 @@ Result<NativeSocket> NativeSocket::listen(std::string_view host, std::uint16_t p
         close_handle(handle);
         return std::unexpected(make_io("listen failed", code));
     }
-    return NativeSocket{handle};
+    int pipe_fds[2] = {-1, -1};
+    if (::pipe(pipe_fds) != 0) {
+        const int code = last_error();
+        close_handle(handle);
+        return std::unexpected(make_io("pipe() failed", code));
+    }
+    NativeSocket socket{handle};
+    socket.stop_pipe_read_ = pipe_fds[0];
+    socket.stop_pipe_write_ = pipe_fds[1];
+    return socket;
 }
 
 Result<NativeSocket> NativeSocket::connect(std::string_view host, std::uint16_t port) {
@@ -399,6 +438,19 @@ Result<NativeSocket> NativeSocket::connect(std::string_view host, std::uint16_t 
 Result<NativeSocket> NativeSocket::accept() {
     if (!is_open()) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "accept on closed socket"});
+    }
+    if (stop_pipe_read_ != -1) {
+        pollfd fds[2]{};
+        fds[0].fd = fd_;
+        fds[0].events = POLLIN;
+        fds[1].fd = stop_pipe_read_;
+        fds[1].events = POLLIN;
+        if (::poll(fds, 2, -1) < 0) {
+            return std::unexpected(make_io("poll before accept failed", last_error()));
+        }
+        if (fds[1].revents & POLLIN) {
+            return std::unexpected(make_closed("accept interrompido por request_stop()"));
+        }
     }
     const SocketHandle client = ::accept(fd_, nullptr, nullptr);
     if (client == kInvalid) {
