@@ -124,6 +124,7 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
     bool ok = false;
     std::string error_message;
     std::vector<double> batch_latencies_ns;
+    RssTracker rss;
     std::uint64_t total_create_ns = 0;
     std::string expected_hash, actual_hash;
     bool hash_match = false;
@@ -155,6 +156,7 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
                                                                params.payload);
                     const auto op_end = std::chrono::steady_clock::now();
                     batch_latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
+                    rss.sample();
                     if (!invoked) {
                         error_message = "CreateBatch(start=" + std::to_string(start + 1) +
                                        "): " + invoked.error().message;
@@ -268,7 +270,9 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
         phase.latency_ns.p99 = percentile_sorted(batch_latencies_ns, 0.99);
         phase.latency_ns.p999 = percentile_sorted(batch_latencies_ns, 0.999);
     }
-    phase.peak_rss_bytes = peak_rss_bytes();   // processo combinado cliente+servidor (mesmo processo)
+    // Pico da FASE (amostrado), não da vida do processo. Continua sendo o
+    // processo combinado cliente+servidor: os dois rodam no mesmo processo.
+    phase.peak_rss_bytes = rss.peak();
     phase.db_bytes = db_bytes_after;
     phase.wal_bytes = wal_ec ? 0 : wal_bytes;
     phase.pages_read = pages_read_after - pages_read_before;
