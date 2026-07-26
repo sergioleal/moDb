@@ -58,6 +58,7 @@ LESSONS = [
     ("18-protocol-and-compatibility/18-protocol-and-compatibility.md", "Lesson 18"),
     ("19-replication-catchup-walonly/19-replication-catchup-walonly.md", "Lesson 19"),
     ("20-performance-and-hardening/20-performance-and-hardening.md", "Lesson 20"),
+    ("21-load-testing-dashboard/21-load-testing-dashboard.md", "Lesson 21"),
 ]
 
 # Basenames of markdown files that are part of THIS rendered set -- used to
@@ -77,7 +78,8 @@ LESSON_NOTES = {
         "goal": (
             "Set expectations for the whole arc -- binding, persistence, transactions, schema "
             "evolution, relationships, snapshots, queries, networking, remote operations, "
-            "facades, graphs, async I/O, and replication -- and explain how the 13 lessons "
+            "facades, graphs, async I/O, replication, hardening, and load-test evidence -- "
+            "and explain how the 21 lessons "
             "chain together."
         ),
         "outcomes": [
@@ -89,11 +91,37 @@ LESSON_NOTES = {
 
 Every lesson lives in its own folder: the lesson document, one self-contained C++ source file, and a short README explaining exactly how to build and run it. "Self-contained" is a specific claim here -- each source file contains only that lesson's own new code, nothing copy-pasted forward from earlier lessons.
 
-What makes the lessons a course rather than thirteen unrelated examples is a single, real, persistent database file. Lesson 1 creates it. Every lesson after that is a separate program run that opens the very same file and continues exactly where the previous run left off. Ana, Bruno, and Carla, once created in Lesson 2, are still there in Lesson 13.
+What makes the lessons a course rather than unrelated examples is a single, real, persistent database file. Lesson 1 creates it. Every lesson after that is a separate program run that opens the very same file and continues exactly where the previous run left off. Ana, Bruno, and Carla, once created in Lesson 2, are still there when later operational lessons inspect, replicate, test, and harden the system.
 
 Because each lesson is a genuinely separate process with no shared memory, you will also see a recurring pattern: instead of remembering an employee's numeric id across runs, later lessons look employees up by name through an index. That is not a toy simplification -- it is closer to how a real client actually finds a record after restarting.
 
 Run the lessons in order, once each, starting from Lesson 1. If you want to start over, just re-run Lesson 1 -- it deletes any old copy of the file and creates it fresh.""",
+    },
+    "21-load-testing-dashboard.md": {
+        "context": (
+            "Lesson 20 connected performance work to benchmarks, load tests, fuzzing, and "
+            "operational evidence. This lesson turns that map into a concrete `modb_load` "
+            "workflow."
+        ),
+        "goal": (
+            "Show how to inspect available load-test cases, run a small campaign, preserve "
+            "the raw JSONL result, index it into history, and open the dashboard view that "
+            "operators use to compare runs."
+        ),
+        "outcomes": [
+            "Know the difference between raw run files in `load-results/` and indexed trend history in `load-history/series.jsonl`.",
+            "Use `list-profiles`, `list-cases`, `run`, and `index` as the normal load-test loop.",
+            "Open the dashboard and load the history file instead of expecting the dashboard to run tests directly.",
+        ],
+        "narration": """Lesson 21 is the operator-facing close of the training track.
+
+The important tool here is `modb_load`. Start by asking it what it knows: `list-profiles` shows the configured profiles, and `list-cases` resolves a profile, workload, target, and scale before anything expensive runs. That dry inspection step matters because it catches missing dispatch, wrong scales, and budget surprises early.
+
+When you run a campaign, `modb_load` writes raw JSONL into `load-results/`. Treat that file as the audit trail for the run. It is the detailed record you can keep, copy from another machine, or index later.
+
+The dashboard does not execute tests. It reads indexed history. That history normally lives in `load-history/series.jsonl`, and you create or update it with `modb_load index` when a raw result file needs to be folded into the trend line.
+
+So the loop is simple: inspect the case, run the campaign, keep the raw JSONL, index it into `series.jsonl`, then open `loadtests/dashboard/index.html` and load that history file with the dashboard's file picker. From that point forward, new performance work has something concrete to compare against.""",
     },
     "01-binding-your-first-type.md": {
         "context": (
@@ -769,7 +797,7 @@ def lesson_sidebar(current_relpath: str) -> str:
 
 def hero_intro(title: str) -> str:
     if title == "Building an Employee Directory with Ring0":
-        return "A project-based C++ course: one real application, twenty chained lessons, one persistent file."
+        return "A project-based C++ course: one real application, twenty-one chained lessons, one persistent file."
     return "Learn one capability, run the lesson's own binary, then carry the idea into the next lesson."
 
 

@@ -12,7 +12,7 @@ lambdas, RAII, smart pointers, `std::filesystem`) and have already skimmed
 [docs/DEVELOPER_GUIDE.md](../../DEVELOPER_GUIDE.md) or at least Chapter 0-1
 of it (what Ring0 is, how to build it).
 
-> **Status:** complete -- all 20 lessons have real, compiling code, one
+> **Status:** complete -- all 21 lessons have real, compiling code, one
 > self-contained folder per lesson, verified against an actual build and
 > run. Each lesson names its target reference doc(s) in `docs/reference/`
 > or the operational docs when that is the better source.
@@ -62,14 +62,16 @@ and a `README.md` with the exact build/run commands.
     map the operational commands after the initial replica bootstrap.
 20. [Performance and Hardening](20-performance-and-hardening/20-performance-and-hardening.md) --
     connect the tutorial to benchmark, load-test, and fuzzing evidence.
+21. [Load Testing and Dashboard](21-load-testing-dashboard/21-load-testing-dashboard.md) --
+    run `modb_load`, index results, and inspect the history dashboard.
 
 ## How the Code Is Organized
 
 Each lesson is a folder -- `01-binding-your-first-type/`,
-`02-persist-and-reopen/`, ... `20-performance-and-hardening/` -- holding three
+`02-persist-and-reopen/`, ... `21-load-testing-dashboard/` -- holding three
 things: the lesson doc (`<slug>.md`), one self-contained source file
 (`lesson_01_binding.cpp`, `lesson_02_persist_reopen.cpp`, ...
-`lesson_20_performance_hardening.cpp`), and a `README.md` with that lesson's
+`lesson_21_load_testing_dashboard.cpp`), and a `README.md` with that lesson's
 build command.
 
 The lessons chain to each other through one real, persistent database
@@ -110,7 +112,7 @@ cmake --build --preset debug --target employee_directory_lesson_01
 .\build\debug\employee_directory_lesson_01.exe
 ```
 
-Swap `01` for any lesson number 01-20. Building a later lesson's target does
+Swap `01` for any lesson number 01-21. Building a later lesson's target does
 not require building earlier ones first. Running them, though, is in order:
 Lesson `NN` expects Lessons 1 through `NN-1` to have already run against the
 same persistent file, except for explicitly self-contained lab work. To go
@@ -119,7 +121,7 @@ through the whole course from scratch:
 ```powershell
 cmake --preset debug
 cmake --build --preset debug
-foreach ($n in 1..20) {
+foreach ($n in 1..21) {
     & ".\build\debug\employee_directory_lesson_$('{0:D2}' -f $n).exe"
 }
 ```

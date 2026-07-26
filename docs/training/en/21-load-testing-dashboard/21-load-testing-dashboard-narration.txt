@@ -1,0 +1,17 @@
+Lesson 21 is the operator-facing close of the training track.
+
+The important tool here is `modb_load`. Start by asking it what it knows: `list-profiles` shows the configured profiles, and `list-cases` resolves a profile, workload, target, and scale before anything expensive runs. That dry inspection step matters because it catches missing dispatch, wrong scales, and budget surprises early.
+
+When you run a campaign, `modb_load` writes raw JSONL into `load-results/`. Treat that file as the audit trail for the run. It is the detailed record you can keep, copy from another machine, or index later.
+
+The dashboard does not execute tests. It reads indexed history. That history normally lives in `load-history/series.jsonl`, and you create or update it with `modb_load index` when a raw result file needs to be folded into the trend line.
+
+So the loop is simple: inspect the case, run the campaign, keep the raw JSONL, index it into `series.jsonl`, then open `loadtests/dashboard/index.html` and load that history file with the dashboard's file picker. From that point forward, new performance work has something concrete to compare against.
+
+Lesson 21 -- Load Testing and Dashboard is part of the bridge from tutorial code to operational use. The lesson keeps the example concrete, but the deeper habit is to connect every feature to the artifact that proves it: a page inventory, a baseline id, a version negotiation, a replication command, or a repeatable test result.
+
+The context for this lesson is that Lesson 20 connected performance work to benchmarks, load tests, fuzzing, and operational evidence. This lesson turns that map into a concrete `modb_load` workflow.
+
+What we are trying to achieve is this: Show how to inspect available load-test cases, run a small campaign, preserve the raw JSONL result, index it into history, and open the dashboard view that operators use to compare runs.
+
+By the end of this lesson, the learner should be able to know the difference between raw run files in `load-results/` and indexed trend history in `load-history/series.jsonl`. Use `list-profiles`, `list-cases`, `run`, and `index` as the normal load-test loop. Open the dashboard and load the history file instead of expecting the dashboard to run tests directly.

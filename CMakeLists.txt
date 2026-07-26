@@ -362,6 +362,8 @@ if(MODB_BUILD_EXAMPLES)
         docs/training/en/19-replication-catchup-walonly/lesson_19_replication_catchup_walonly.cpp)
     modb_add_training_lesson(employee_directory_lesson_20
         docs/training/en/20-performance-and-hardening/lesson_20_performance_hardening.cpp)
+    modb_add_training_lesson(employee_directory_lesson_21
+        docs/training/en/21-load-testing-dashboard/lesson_21_load_testing_dashboard.cpp)
 endif()
 
 if(MODB_BUILD_TRAINING)

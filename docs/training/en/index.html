@@ -43,13 +43,14 @@
 <li><a href="18-protocol-and-compatibility/18-protocol-and-compatibility.html">Lesson 18</a></li>
 <li><a href="19-replication-catchup-walonly/19-replication-catchup-walonly.html">Lesson 19</a></li>
 <li><a href="20-performance-and-hardening/20-performance-and-hardening.html">Lesson 20</a></li>
+<li><a href="21-load-testing-dashboard/21-load-testing-dashboard.html">Lesson 21</a></li>
         </ol>
       </aside>
       <article class="content">
         <section class="hero">
           <p class="eyebrow">Ring0 Developer Course</p>
           <h1>Building an Employee Directory with Ring0</h1>
-          <p>A project-based C++ course: one real application, twenty chained lessons, one persistent file.</p>
+          <p>A project-based C++ course: one real application, twenty-one chained lessons, one persistent file.</p>
         </section>
         
         <section class="audio-panel">
@@ -67,7 +68,7 @@
           <h2>Before You Run the Lesson</h2>
           <p>This course is the project-based companion to docs/DEVELOPER_GUIDE.md. Instead of a fast narrative tour, you build one real application -- an employee directory -- one capability at a time, and every lesson&#x27;s code is real, compiling code, not pseudocode.</p>
           <h3>What We Are Trying To Achieve</h3>
-          <p>Set expectations for the whole arc -- binding, persistence, transactions, schema evolution, relationships, snapshots, queries, networking, remote operations, facades, graphs, async I/O, and replication -- and explain how the 13 lessons chain together.</p>
+          <p>Set expectations for the whole arc -- binding, persistence, transactions, schema evolution, relationships, snapshots, queries, networking, remote operations, facades, graphs, async I/O, replication, hardening, and load-test evidence -- and explain how the 21 lessons chain together.</p>
           <h3>Learning Outcomes</h3>
           <p>Understand why each lesson is a separate, self-contained program that opens the same persistent file the previous lesson left behind. See how object identity is recovered across separate runs through name-based lookups instead of shared in-process state. Know where each lesson&#x27;s source and build instructions live.</p>
           <h3>Conceptual Layer</h3>
@@ -80,14 +81,14 @@
           <h2>What This Lesson Means</h2>
           <p>Think of this course as watching one small, real application grow, one commit-sized capability at a time, instead of reading thirteen disconnected demos.</p>
 <p>Every lesson lives in its own folder: the lesson document, one self-contained C++ source file, and a short README explaining exactly how to build and run it. &quot;Self-contained&quot; is a specific claim here -- each source file contains only that lesson&#x27;s own new code, nothing copy-pasted forward from earlier lessons.</p>
-<p>What makes the lessons a course rather than thirteen unrelated examples is a single, real, persistent database file. Lesson 1 creates it. Every lesson after that is a separate program run that opens the very same file and continues exactly where the previous run left off. Ana, Bruno, and Carla, once created in Lesson 2, are still there in Lesson 13.</p>
+<p>What makes the lessons a course rather than unrelated examples is a single, real, persistent database file. Lesson 1 creates it. Every lesson after that is a separate program run that opens the very same file and continues exactly where the previous run left off. Ana, Bruno, and Carla, once created in Lesson 2, are still there when later operational lessons inspect, replicate, test, and harden the system.</p>
 <p>Because each lesson is a genuinely separate process with no shared memory, you will also see a recurring pattern: instead of remembering an employee&#x27;s numeric id across runs, later lessons look employees up by name through an index. That is not a toy simplification -- it is closer to how a real client actually finds a record after restarting.</p>
 <p>Run the lessons in order, once each, starting from Lesson 1. If you want to start over, just re-run Lesson 1 -- it deletes any old copy of the file and creates it fresh.</p>
         </section>
 
         <p>A project-based course: you build one application, an employee directory, from an empty file to a networked, multi-client system with remote operations, versioned facades, an org-chart graph, operational diagnostics, replication workflows, and hardening evidence -- one capability at a time. Each lesson assumes you completed the previous one and starts from that lesson&#x27;s ending code.</p>
 <p>This assumes you&#x27;re comfortable with modern C++ (structs, templates, lambdas, RAII, smart pointers, <code>std::filesystem</code>) and have already skimmed <a href="../../DEVELOPER_GUIDE.md" target="_blank" rel="noopener noreferrer">docs/DEVELOPER_GUIDE.md</a> or at least Chapter 0-1 of it (what Ring0 is, how to build it).</p>
-<blockquote><p><strong>Status:</strong> complete -- all 20 lessons have real, compiling code, one self-contained folder per lesson, verified against an actual build and run. Each lesson names its target reference doc(s) in <code>docs/reference/</code> or the operational docs when that is the better source.</p></blockquote>
+<blockquote><p><strong>Status:</strong> complete -- all 21 lessons have real, compiling code, one self-contained folder per lesson, verified against an actual build and run. Each lesson names its target reference doc(s) in <code>docs/reference/</code> or the operational docs when that is the better source.</p></blockquote>
 <h2>Lessons</h2>
 <p>Each lesson lives in its own folder: the lesson doc, its <code>.cpp</code> source, and a <code>README.md</code> with the exact build/run commands.</p>
 <ol>
@@ -111,9 +112,10 @@
 <li><a href="18-protocol-and-compatibility/18-protocol-and-compatibility.html" target="_blank" rel="noopener noreferrer">Protocol and Compatibility</a> -- practice version checks before a client trusts bytes or a peer.</li>
 <li><a href="19-replication-catchup-walonly/19-replication-catchup-walonly.html" target="_blank" rel="noopener noreferrer">Replication Catch-up and wal_only</a> -- map the operational commands after the initial replica bootstrap.</li>
 <li><a href="20-performance-and-hardening/20-performance-and-hardening.html" target="_blank" rel="noopener noreferrer">Performance and Hardening</a> -- connect the tutorial to benchmark, load-test, and fuzzing evidence.</li>
+<li><a href="21-load-testing-dashboard/21-load-testing-dashboard.html" target="_blank" rel="noopener noreferrer">Load Testing and Dashboard</a> -- run <code>modb_load</code>, index results, and inspect the history dashboard.</li>
 </ol>
 <h2>How the Code Is Organized</h2>
-<p>Each lesson is a folder -- <code>01-binding-your-first-type/</code>, <code>02-persist-and-reopen/</code>, ... <code>20-performance-and-hardening/</code> -- holding three things: the lesson doc (<code>&lt;slug&gt;.md</code>), one self-contained source file (<code>lesson_01_binding.cpp</code>, <code>lesson_02_persist_reopen.cpp</code>, ... <code>lesson_20_performance_hardening.cpp</code>), and a <code>README.md</code> with that lesson&#x27;s build command.</p>
+<p>Each lesson is a folder -- <code>01-binding-your-first-type/</code>, <code>02-persist-and-reopen/</code>, ... <code>21-load-testing-dashboard/</code> -- holding three things: the lesson doc (<code>&lt;slug&gt;.md</code>), one self-contained source file (<code>lesson_01_binding.cpp</code>, <code>lesson_02_persist_reopen.cpp</code>, ... <code>lesson_21_load_testing_dashboard.cpp</code>), and a <code>README.md</code> with that lesson&#x27;s build command.</p>
 <p>The lessons chain to each other through one real, persistent database file -- <code>docs/training/en/employee-directory.modb</code> (git-ignored, like every other <code>*.modb</code> in this repo) -- instead of through shared in-process state:</p>
 <ul>
 <li><strong>Lesson 1</strong> deletes any old copy and creates this file fresh. Every other lesson only ever opens it, except Lesson 15&#x27;s separate physical-storage lab.</li>
@@ -129,10 +131,10 @@
 <pre><code class="language-powershell">cmake --preset debug
 cmake --build --preset debug --target employee_directory_lesson_01
 .\build\debug\employee_directory_lesson_01.exe</code></pre>
-<p>Swap <code>01</code> for any lesson number 01-20. Building a later lesson&#x27;s target does not require building earlier ones first. Running them, though, is in order: Lesson <code>NN</code> expects Lessons 1 through <code>NN-1</code> to have already run against the same persistent file, except for explicitly self-contained lab work. To go through the whole course from scratch:</p>
+<p>Swap <code>01</code> for any lesson number 01-21. Building a later lesson&#x27;s target does not require building earlier ones first. Running them, though, is in order: Lesson <code>NN</code> expects Lessons 1 through <code>NN-1</code> to have already run against the same persistent file, except for explicitly self-contained lab work. To go through the whole course from scratch:</p>
 <pre><code class="language-powershell">cmake --preset debug
 cmake --build --preset debug
-foreach ($n in 1..20) {
+foreach ($n in 1..21) {
     &amp; &quot;.\build\debug\employee_directory_lesson_$(&#x27;{0:D2}&#x27; -f $n).exe&quot;
 }</code></pre>
 <h2>Conventions Used in Every Lesson</h2>

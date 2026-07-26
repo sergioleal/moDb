@@ -60,6 +60,10 @@ Next commands:
 - Any parser that accepts bytes from disk or the network belongs in the fuzzing
   story.
 
+## Next
+
+Continue with [Lesson 21 -- Load Testing and Dashboard](../21-load-testing-dashboard/21-load-testing-dashboard.md).
+
 ## Related Reference
 
 - [PLANO_BENCHMARKS.md](../../../PLANO_BENCHMARKS.md)
