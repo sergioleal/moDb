@@ -239,10 +239,10 @@ data, conforme [RASTREADOR.md](RASTREADOR.md).
 | O | `dataset_user_blob`, `blob_lifecycle` | 7 | ✅ | `47f0c41` · 2026-07-25 (blob_lifecycle real; sem dataset_user_blob formal, gerador ad hoc; tamanhos reduzidos; sem free list no motor -- ver §4.2.1) |
 | P | `cascade_delete` | 7 | ✅ | `18fa1ea` · 2026-07-25 |
 | Q | `oversubscribed_churn`, perfil `load-behavior` | 7 | ✅ | `0c595a2` · 2026-07-25 |
-| R | Harness kill/restart, `restart_recovery` | 7 | ⬜ | ver §17 risco 13 |
+| R | Harness kill/restart, `restart_recovery` | 7 | ✅ | `aa3985a` · 2026-07-25 (simulado via failpoint em processo + reabertura real; sem kill de processo de verdade -- ver §17 risco 13 e docs/PLANO_TESTES_DE_CARGA.md §4.2.1) |
 | K | Pairwise secundárias, `load-heavy`, `load-soak` | 7 | ⬜ | depende de M, N, O, P, Q |
 
-Progresso: **18/20**.
+Progresso: **19/20**.
 
 ## 6. O que não está neste plano, de propósito
 
