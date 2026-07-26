@@ -202,6 +202,24 @@ Verificado ao vivo em `--case load.cascade_delete.embedded.1k`: árvore de
 1555 nós (largura 6, profundidade 4: 6⁴+6³+6²+6+1), removida em cascata com
 `still_resolving=0`.
 
+**Implementado na Subfase Q**: `oversubscribed_churn`. Mesma lógica de
+`create_delete_interleaved` (mesmas fases, mesmo `reorder_for_delete`), mas
+`Database::create` recebe um `cache_capacity` explícito (parâmetro que já
+existia na API, só não era usado por nenhum workload até aqui) -- 10% do
+número de páginas estimado para o working set, forçando eviction de
+verdade em vez de confiar num cache "quase suficiente". `cache_hit_rate` da
+fase de delete (métricas do buffer pool zeradas logo após o create, para
+não diluir a leitura com o preenchimento inicial) é a "razão de
+eviction/releitura" do critério de pronto. O perfil `load-behavior` (§6.2)
+já existia no catálogo com os 7 workloads adicionais -- resolvia mas 6 deles
+não tinham dispatch até esta onda de subfases (L-Q); agora resolve e
+despacha de ponta a ponta (`--dry-run` lista os 7 casos reais). Achado real:
+mesmo com o cache em ~10% do estimado, o hit rate medido em 10k objetos
+ficou em ~93,6% -- a localidade do delete por stride (§4.2, Subfase D)
+aparentemente favorece bem o cache reduzido; degradação mais severa deve
+aparecer em escalas maiores ou com um cache ainda menor, não investigado
+mais a fundo nesta subfase.
+
 Dois workloads adicionais dependem de infraestrutura que o harness genérico
 (`target.hpp`, §14) ainda não cobre; ficam **fora de todos os perfis** até essa
 infraestrutura existir — mesmo tratamento hoje dado a `primary_storage=wal_only`

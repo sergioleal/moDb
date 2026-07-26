@@ -219,9 +219,10 @@ struct SetupResult {
 
 // Cria o arquivo, registra e faz bind de `User` -- comum a todo workload
 // embedded desta subfase.
-SetupResult setup_database(AttachedDatabase& attached, const std::filesystem::path& db_path) {
+SetupResult setup_database(AttachedDatabase& attached, const std::filesystem::path& db_path,
+                           std::size_t cache_capacity_pages = modb::storage::page_cache_capacity) {
     SetupResult result;
-    auto created = Database::create(db_path);
+    auto created = Database::create(db_path, cache_capacity_pages);
     if (!created) {
         result.error = "Database::create: " + created.error().message;
         return result;
@@ -2197,6 +2198,92 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
 
     result.total_duration_ns = create_phase.duration_ns + delete_phase.duration_ns;
     result.peak_disk_bytes = create_phase.db_bytes;
+    result.status = "completed";
+    result.ok = true;
+    return result;
+}
+
+CaseRunResult run_oversubscribed_churn_embedded(const WorkloadParams& params,
+                                                std::filesystem::path& out_db_path) {
+    CaseRunResult result;
+    const auto db_path = make_db_path(params, "oversubscribed_churn");
+    out_db_path = db_path;
+    const std::filesystem::path wal_path{db_path.string() + ".wal"};
+
+    // Cache deliberadamente pequeno: uma fração do working set estimado
+    // (bytes/objeto ~458, medido nas outras subfases de create_delete) --
+    // 10% do necessário força eviction de verdade, não um cache "quase
+    // suficiente" que mascararia a diferença entre gracioso e catastrófico.
+    const auto estimated_pages = std::max<std::uint64_t>(
+        16, (params.object_count * 458) / modb::storage::page_size);
+    const auto cache_capacity_pages =
+        static_cast<std::size_t>(std::max<std::uint64_t>(8, estimated_pages / 10));
+
+    AttachedDatabase attached;
+    if (auto setup = setup_database(attached, db_path, cache_capacity_pages); !setup.ok) {
+        result.status = "failed";
+        result.error = setup.error;
+        return result;
+    }
+
+    auto create_outcome = perform_create_phase(attached, params, db_path, wal_path, result.windows);
+    if (!create_outcome.ok) {
+        result.status = "failed";
+        result.error = create_outcome.error;
+        return result;
+    }
+    result.phases.push_back(create_outcome.phase);
+
+    // Reseta as métricas do buffer pool DEPOIS do create -- o que importa
+    // aqui é a razão de eviction/releitura durante o DELETE intercalado, não
+    // diluída pelo preenchimento inicial do cache.
+    auto& buffer_pool = attached.database->page_file().buffer_pool();
+    buffer_pool.reset_metrics();
+
+    const auto delete_ids = reorder_for_delete(create_outcome.ids, DeleteOrder::Interleaved);
+    auto delete_outcome = perform_delete_phase(attached, delete_ids, params.batch, db_path, wal_path,
+                                              params.on_progress, params.window_interval,
+                                              result.windows);
+
+    const auto metrics = buffer_pool.metrics();
+    const auto total_accesses = metrics.hits + metrics.misses;
+    delete_outcome.phase.cache_hit_rate =
+        total_accesses > 0 ? static_cast<double>(metrics.hits) / static_cast<double>(total_accesses)
+                          : -1.0;
+    result.phases.push_back(delete_outcome.phase);
+    if (!delete_outcome.ok) {
+        result.status = "failed";
+        result.error = delete_outcome.error;
+        return result;
+    }
+    result.reclaimed_bytes = delete_outcome.reclaimed_bytes;
+
+    auto verification = verify_all_deleted(attached, create_outcome.ids);
+    result.all_deleted = verification.all_deleted;
+    result.still_resolving = verification.still_resolving;
+    if (!verification.all_deleted) {
+        result.status = "failed";
+        result.error = std::to_string(verification.still_resolving) +
+                       " objeto(s) ainda resolvem depois do delete (esperado: 0)";
+        return result;
+    }
+
+    const auto total_bytes_written =
+        (create_outcome.phase.db_bytes > create_outcome.db_bytes_before
+            ? create_outcome.phase.db_bytes - create_outcome.db_bytes_before
+            : 0) +
+        (delete_outcome.phase.db_bytes > create_outcome.phase.db_bytes
+            ? delete_outcome.phase.db_bytes - create_outcome.phase.db_bytes
+            : 0);
+
+    result.peak_disk_bytes = delete_outcome.phase.db_bytes;
+    result.total_duration_ns = create_outcome.phase.duration_ns + delete_outcome.phase.duration_ns;
+    result.write_amplification = create_outcome.logical_bytes > 0
+                                    ? static_cast<double>(total_bytes_written) /
+                                          static_cast<double>(create_outcome.logical_bytes)
+                                    : 0.0;
+    result.space_amplification = 0.0;   // tudo deletado -- mesma convenção de create_delete_embedded
+    result.hash_match = true;   // invariantes já conferidas acima (all_deleted); sem hash de conjunto
     result.status = "completed";
     result.ok = true;
     return result;

@@ -87,4 +87,13 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
 [[nodiscard]] CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
                                                         std::filesystem::path& out_db_path);
 
+// oversubscribed_churn (§4.2.1): mesmo create → delete intercalado de
+// `create_delete_interleaved`, mas com o buffer pool explicitamente menor
+// que o working set (`Database::create(path, cache_capacity)`) -- versão em
+// volume real de `storage.buffer_pool.oversubscribed` (Fase 10). Mesmas
+// invariantes de `create_delete_interleaved` + `cache_hit_rate` da fase de
+// delete (razão de eviction/releitura sob pressão real de cache).
+[[nodiscard]] CaseRunResult run_oversubscribed_churn_embedded(const WorkloadParams& params,
+                                                              std::filesystem::path& out_db_path);
+
 } // namespace modb::loadtest

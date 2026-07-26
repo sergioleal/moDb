@@ -335,6 +335,28 @@ void test_cascade_delete(TestSuite& suite) {
     }
 }
 
+// Subfase Q (§4.2.1): mesmas invariantes de create_delete_interleaved, com
+// o buffer pool deliberadamente menor que o working set -- e uma taxa de
+// acerto medida de verdade (não inventada) sob essa pressão.
+void test_oversubscribed_churn(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    std::filesystem::path db_path;
+    auto result = run_oversubscribed_churn_embedded(
+        small_params(work_dir, /*object_count=*/500, /*batch=*/37), db_path);
+
+    suite.check(result.ok, "oversubscribed_churn deve completar: " + result.error);
+    suite.check(result.status == "completed", "oversubscribed_churn status deve ser completed");
+    suite.check(result.all_deleted, "todos os objetos devem estar removidos ao final");
+    suite.check(result.still_resolving == 0, "nenhum id removido deve continuar resolvendo");
+    suite.check(result.phases.size() == 2,
+               "oversubscribed_churn deve produzir 2 fases (create + delete)");
+    if (result.phases.size() == 2) {
+        suite.check(result.phases[1].phase == "delete", "a 2a fase deve se chamar 'delete'");
+        suite.check(result.phases[1].cache_hit_rate >= 0.0 && result.phases[1].cache_hit_rate <= 1.0,
+                   "cache_hit_rate da fase de delete deve ser uma fração válida");
+    }
+}
+
 void test_crud_full(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -384,6 +406,7 @@ int main() {
     test_snapshot_hold(suite);
     test_blob_lifecycle(suite);
     test_cascade_delete(suite);
+    test_oversubscribed_churn(suite);
     test_crud_full(suite);
     return suite.finish();
 }

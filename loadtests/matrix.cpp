@@ -22,6 +22,7 @@ const std::vector<std::string> kImplementedWorkloads = {
     "snapshot_hold",
     "blob_lifecycle",
     "cascade_delete",
+    "oversubscribed_churn",
 };
 
 bool contains(const std::vector<std::string>& values, std::string_view target) {
