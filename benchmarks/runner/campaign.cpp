@@ -240,9 +240,14 @@ CampaignResult run_campaign(const CampaignOptions& options) {
             << json_string(env.compiler_id) << ",\"version\":" << json_string(env.compiler_version)
             << "},\"cxx_standard\":" << json_string(env.cxx_standard)
             << ",\"build_type\":" << json_string(env.build_type)
+            << ",\"instrumentation\":" << json_string(env.instrumentation)
             << ",\"os\":{\"name\":" << json_string(env.os_name)
             << ",\"version\":" << json_string(env.os_version) << "},\"arch\":"
-            << json_string(env.arch) << ",\"hostname_token\":" << json_string(env.hostname_token)
+            << json_string(env.arch) << ",\"cpu\":{\"model\":" << json_string(env.cpu_model)
+            << ",\"cores_physical\":" << json_uint(env.cores_physical)
+            << ",\"cores_logical\":" << json_uint(env.cores_logical) << "}"
+            << ",\"ram_bytes\":" << json_uint(env.ram_bytes)
+            << ",\"hostname_token\":" << json_string(env.hostname_token)
             << ",\"page_size\":" << env.page_size
             << ",\"project_version\":" << json_string(env.project_version)
             << ",\"argv\":" << json_string(env.argv_joined) << "}";
