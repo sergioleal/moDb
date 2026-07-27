@@ -147,6 +147,11 @@ private:
     [[nodiscard]] Result<SlottedPage> load_trusted(PageId id);
     // Persiste os ponteiros e contadores da raiz dedicada.
     [[nodiscard]] Result<void> persist_root();
+    // Escreve uma página de DADOS. Existe como ponto único para a sonda de
+    // atribuição de tempo (docs-process/PLANO_PROFILING.md, Etapa 1); a escrita
+    // da raiz não passa por aqui, para os dois estágios não se contarem duas
+    // vezes.
+    [[nodiscard]] Result<void> write_page(PageId id, const Page& page);
 
     // Aponta para o arquivo cuja vida é controlada pelo chamador.
     PageFile* file_;

@@ -2,6 +2,10 @@
 #include "modb/storage/table_heap.hpp"
 #include "modb/storage/binary.hpp"
 
+// Sondas de atribuição de tempo; sem custo quando MODB_ENABLE_STAGE_PROFILING
+// está desligado (docs-process/PLANO_PROFILING.md, Etapa 1).
+#include "modb/diag/stage_profile.hpp"
+
 // Disponibiliza algoritmos e blocos fixos usados pela assinatura.
 #include <algorithm>
 #include <array>
@@ -237,8 +241,17 @@ Result<TableHeap> TableHeap::open(PageFile& file, PageId root,
 
 // Grava os metadados espelhados em memória na raiz dedicada.
 Result<void> TableHeap::persist_root() {
+    diag::ScopedStage stage{diag::Stage::persist_root};
+    // Direto no arquivo, NÃO por write_page: a raiz tem estágio próprio, e
+    // passar por lá contaria o mesmo tempo duas vezes.
     return file_->write(root_, encode_root(RootMetadata{
                                    first_, last_, page_count_, record_count_}));
+}
+
+Result<void> TableHeap::write_page(PageId id, const Page& page) {
+    diag::ScopedStage stage{diag::Stage::heap_page_write};
+    stage.add_units(page_size);
+    return file_->write(id, page);
 }
 
 // Lê uma página física e valida seu layout de registros.
@@ -302,7 +315,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
         if (!generation) {
             return std::unexpected(generation.error());
         }
-        if (auto written = file_->write(*page_id, page.page()); !written) {
+        if (auto written = write_page(*page_id, page.page()); !written) {
             return std::unexpected(written.error());
         }
         first_ = *page_id;
@@ -335,7 +348,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
         if (!generation) {
             return std::unexpected(generation.error());
         }
-        if (auto written = file_->write(page_id, page->page()); !written) {
+        if (auto written = write_page(page_id, page->page()); !written) {
             return std::unexpected(written.error());
         }
         insertion_capacity_by_page_[page_id.value] = page->insertion_capacity();
@@ -349,14 +362,25 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
     // Coleta as candidatas antes de inserir para não mutar o mapa durante a
     // iteração; a ordem de std::map por PageId prioriza as páginas mais antigas
     // de forma determinística entre execuções e plataformas.
+    // Sonda: este laço percorre TODAS as páginas a cada inserção e filtra por
+    // dentro. `units` conta as iterações -- é o número que decide se o termo
+    // proporcional à contagem de páginas (H1) mora aqui ou em outro lugar, e se
+    // as candidatas produzidas justificam a varredura.
     std::vector<std::uint64_t> candidates;
-    for (const auto& [page_value, insertion_capacity] : insertion_capacity_by_page_) {
-        if ((last_ && page_value == last_->value) || insertion_capacity < record.size()) {
-            continue;
+    {
+        diag::ScopedStage stage{diag::Stage::heap_candidate_scan};
+        std::uint64_t iterations = 0;
+        for (const auto& [page_value, insertion_capacity] : insertion_capacity_by_page_) {
+            ++iterations;
+            if ((last_ && page_value == last_->value) || insertion_capacity < record.size()) {
+                continue;
+            }
+            candidates.push_back(page_value);
         }
-        candidates.push_back(page_value);
+        stage.add_units(iterations);
     }
     for (const auto page_value : candidates) {
+        diag::ScopedStage stage{diag::Stage::heap_candidate_try};
         auto inserted = try_insert(PageId{page_value});
         if (!inserted) {
             return std::unexpected(inserted.error());
@@ -364,6 +388,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
         if (*inserted) {
             return **inserted;
         }
+        stage.add_units(1);   // candidata que a varredura ofereceu e estava cheia
     }
     // A última página é a candidata normal quando não há buracos reaproveitáveis.
     if (last_) {
@@ -408,13 +433,13 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
     if (!generation) {
         return std::unexpected(generation.error());
     }
-    if (auto written = file_->write(*new_page_id, new_page.page()); !written) {
+    if (auto written = write_page(*new_page_id, new_page.page()); !written) {
         return std::unexpected(written.error());
     }
     if (auto linked = previous->set_next_page(*new_page_id); !linked) {
         return std::unexpected(linked.error());
     }
-    if (auto written = file_->write(previous_id, previous->page()); !written) {
+    if (auto written = write_page(previous_id, previous->page()); !written) {
         return std::unexpected(written.error());
     }
     insertion_capacity_by_page_[previous_id.value] = previous->insertion_capacity();
@@ -652,7 +677,7 @@ Result<RecordId> TableHeap::update(RecordId id, std::span<const std::byte> recor
     // Tenta preservar página, slot e geração.
     auto updated = page->update(id.slot, record);
     if (updated) {
-        if (auto written = file_->write(id.page, page->page()); !written) {
+        if (auto written = write_page(id.page, page->page()); !written) {
             return std::unexpected(written.error());
         }
         insertion_capacity_by_page_[id.page.value] = page->insertion_capacity();
@@ -707,7 +732,7 @@ Result<void> TableHeap::erase(RecordId id) {
 
     // Páginas ainda ocupadas continuam na cadeia.
     if (current->record_count() != 0) {
-        if (auto written = file_->write(id.page, current->page()); !written) {
+        if (auto written = write_page(id.page, current->page()); !written) {
             return std::unexpected(written.error());
         }
         --record_count_;
@@ -743,7 +768,7 @@ Result<void> TableHeap::erase(RecordId id) {
         if (auto linked = previous->set_next_page(next_id); !linked) {
             return std::unexpected(linked.error());
         }
-        if (auto written = file_->write(*previous_id, previous->page()); !written) {
+        if (auto written = write_page(*previous_id, previous->page()); !written) {
             return std::unexpected(written.error());
         }
     }
@@ -761,7 +786,7 @@ Result<void> TableHeap::erase(RecordId id) {
         if (auto linked = next->set_previous_page(previous_id); !linked) {
             return std::unexpected(linked.error());
         }
-        if (auto written = file_->write(*next_id, next->page()); !written) {
+        if (auto written = write_page(*next_id, next->page()); !written) {
             return std::unexpected(written.error());
         }
     }

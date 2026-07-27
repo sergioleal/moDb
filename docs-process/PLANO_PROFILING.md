@@ -305,15 +305,22 @@ Legenda: ⬜ não começado · 🔄 em andamento · ✅ concluído · ⛔ bloque
 | 0.3 `page_size` numérico + `series_key_version`=2 (M3) | ✅ | guarda de regressão em `tests/load_history_test.cpp` |
 | 0.4 Coleta CPU/cores/RAM/OS/fs/instrumentação (M4) | ✅ | `device_class` segue não coletado (ver abaixo) |
 | 0.5 Baseline RelWithDebInfo, 3 repetições | ✅ | 30 pontos, CV 0,3–6%; válido entre repetições, não entre casos (M5) |
-| **Etapa 1** — `stage_profile` | ⬜ | é o que separa o termo por página do termo por tamanho de página (§9.1) |
-| **Etapa 2** — atribuição por função | ⬜ | trilha B (WSL/`perf`) pendente de decisão |
+| **Etapa 1** — `stage_profile` | 🔄 | preset `stage-profile` + 6 estágios entregues; cobertura fecha em update (93%), não em create (59%) nem delete (16%) |
+| **Etapa 2** — atribuição por função | ⬜ | **provavelmente desnecessária agora** — ver abaixo |
 | **Etapa 3** — varreduras | 🔄 | page size ✅ (§9.1); faltam batch, durability, cache, payload, scale até 250k |
 | **Etapa 4** — relatório e gates | ⬜ | |
 
-Próximo passo recomendado: **Etapa 1**. A varredura de page size levou H1 até
-onde uma varredura consegue ir — o que falta (separar o custo por página do custo
-por tamanho de página, e atribuí-los a `heap_candidate_scan`, `persist_root` e
-`wal_append`) exige os timers por estágio, não mais uma varredura.
+Resultados medidos: [RESULTADOS_PROFILING.md §4.1](RESULTADOS_PROFILING.md).
+
+**Reordenação depois da Etapa 1.** O gargalo está localizado numa linha
+([table_heap.cpp:353](../src/storage/table_heap.cpp)) com 80–88% das fases de
+update. A Etapa 2 (gprof/`perf`) existia para achar hotspots por função — e o
+hotspot já está achado, com um contador provando que o laço não produz nada. Ela
+passa a ser opcional: vale se, depois de corrigir a varredura, o resíduo não
+atribuído de `create` (39%) continuar sem explicação pelos estágios que faltam.
+
+Próximo passo recomendado: **corrigir a varredura de candidatas** (ação A2), com
+o antes/depois registrado pelo harness que agora existe.
 
 ### O que ficou fora, deliberadamente
 

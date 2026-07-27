@@ -102,7 +102,12 @@ public:
     WindowTracker(std::string phase, ProgressCallback callback, std::chrono::nanoseconds interval,
                  std::function<std::uint64_t()> db_bytes_getter)
         : phase_(std::move(phase)), callback_(std::move(callback)), interval_(interval),
-          db_bytes_getter_(std::move(db_bytes_getter)) {}
+          db_bytes_getter_(std::move(db_bytes_getter)) {
+        // O tracker tem exatamente o tempo de vida da fase, então é aqui que os
+        // contadores de estágio zeram. As fases são sequenciais: nenhuma outra
+        // corre enquanto esta acumula.
+        diag::stage_reset();
+    }
 
     void record_operation(double latency_ns) {
         const auto now = std::chrono::steady_clock::now();
@@ -120,6 +125,10 @@ public:
     // Pico de RSS da fase, amostrado ao longo dela -- não o pico monotônico do
     // processo (docs-process/PLANO_PROFILING.md §3, M2).
     [[nodiscard]] std::uint64_t rss_peak_bytes() { return rss_.peak(); }
+
+    // Tempo por estágio acumulado desde o início da fase. Tudo zero num build
+    // sem MODB_ENABLE_STAGE_PROFILING.
+    [[nodiscard]] diag::StageSnapshot stages() const { return diag::stage_snapshot(); }
 
     // Fecha a última janela parcial, se sobrou alguma operação não emitida --
     // mas só quando pelo menos uma janela completa já fechou antes (§8: fase
@@ -362,6 +371,7 @@ CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const Worklo
     outcome.phase.errors = errors;
     outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
     outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
+    outcome.phase.stages = window_tracker.stages();
     outcome.phase.db_bytes = db_bytes_after;
     outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     outcome.phase.pages_read = pages_read_after - pages_read_before;
@@ -474,6 +484,7 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
     outcome.phase.errors = errors;
     outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
     outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
+    outcome.phase.stages = window_tracker.stages();
     outcome.phase.db_bytes = db_bytes_after;
     outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     // O motor não expõe uma razão de fragmentação na API pública hoje (§4.2
@@ -615,6 +626,7 @@ ReadPhaseOutcome perform_read_phase(AttachedDatabase& attached, const std::vecto
     outcome.phase.errors = errors;
     outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
     outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
+    outcome.phase.stages = window_tracker.stages();
     outcome.phase.db_bytes = db_bytes;
     outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     outcome.phase.pages_read = pages_read_after - pages_read_before;
@@ -733,6 +745,7 @@ UpdatePhaseOutcome perform_update_phase(
     outcome.phase.errors = errors;
     outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
     outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
+    outcome.phase.stages = window_tracker.stages();
     outcome.phase.db_bytes = db_bytes;
     outcome.phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
     outcome.phase.pages_read = pages_read_after - pages_read_before;

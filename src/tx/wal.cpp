@@ -7,6 +7,8 @@
 #include "modb/storage/native_file.hpp"
 // Importa AsyncFile, base do sink assíncrono (Fase 13).
 #include "modb/storage/async_file.hpp"
+// Sondas de atribuição de tempo; sem custo quando desligadas.
+#include "modb/diag/stage_profile.hpp"
 
 // Disponibiliza std::copy/std::equal.
 #include <algorithm>
@@ -298,7 +300,13 @@ Result<Wal> Wal::open_durable(const std::filesystem::path& path, std::uint64_t s
 
 Result<void> Wal::append(WalRecordType type, std::uint64_t tx_id, std::uint64_t page_id,
                          std::span<const std::byte> payload) {
+    // Sonda no ponto único por onde passa todo record de WAL. `units` conta os
+    // bytes efetivamente gravados -- é o número que quantifica a amplificação de
+    // escrita das imagens de página inteiras (H1/H3, docs-process/
+    // PLANO_PROFILING.md).
+    diag::ScopedStage stage{diag::Stage::wal_append};
     std::vector<std::byte> record(record_fixed_size + payload.size() + record_crc_size);
+    stage.add_units(record.size());
     const std::span<std::byte> view{record};
     store_le(view.subspan(0, 8), next_lsn_);
     store_le(view.subspan(8, 8), tx_id);
@@ -336,7 +344,12 @@ Result<void> Wal::append_commit(std::uint64_t tx_id) {
     return append(WalRecordType::commit, tx_id, 0, commit_lsn_bytes);
 }
 
-Result<void> Wal::sync() { return sink_->sync(); }
+Result<void> Wal::sync() {
+    // O `fsync` de verdade: nenhum profiler amostral de CPU mostra este tempo,
+    // que é exatamente por que a Etapa 1 existe.
+    diag::ScopedStage stage{diag::Stage::wal_sync};
+    return sink_->sync();
+}
 
 Result<std::vector<WalRecord>> Wal::read_all(const std::filesystem::path& path) {
     return read_wal_records(path, 0, ReadMode::soft_eof);

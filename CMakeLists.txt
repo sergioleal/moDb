@@ -15,6 +15,7 @@ option(MODB_ENABLE_COVERAGE "Instrument modb with --coverage for gcov/gcovr repo
 option(MODB_ENABLE_LIBFUZZER "Build fuzz targets with Clang libFuzzer (requires Clang)" OFF)
 option(MODB_ENABLE_PROFILING "Keep frame pointers and full debug info so profilers can walk stacks" OFF)
 option(MODB_ENABLE_GPROF "Instrument with -pg for gprof (GCC/Clang; mutually exclusive with sanitizers)" OFF)
+option(MODB_ENABLE_STAGE_PROFILING "Time named stages of the hot path and emit them in the load report" OFF)
 option(MODB_ALLOW_CXX23_FALLBACK "Allow a local C++23 build when C++26 is unavailable" ON)
 # Link estático do runtime MinGW gera binários portáteis (sem DLLs), mas a
 # toolchain do CLion migrou de GCC 13 para GCC 15.2, cujo libwinpthread.a
@@ -91,6 +92,7 @@ add_library(modb
     src/ops/facade_catalog.cpp
     examples/transfer_funds/transfer_funds.cpp
     examples/accounts_facade/accounts_facade.cpp
+    src/diag/stage_profile.cpp
     src/graph/graph_view.cpp
     src/repl/bootstrap.cpp
     src/repl/wal_manifest.cpp
@@ -168,7 +170,15 @@ target_compile_definitions(modb PUBLIC MODB_PAGE_SIZE=${MODB_PAGE_SIZE})
 # e a instrumentação ativa. Ambos entram na series_key, para uma corrida com -pg
 # (2-3x mais lenta) nunca cair na mesma série de uma corrida limpa
 # (docs-process/PLANO_PROFILING.md §3, M4).
+if(MODB_ENABLE_STAGE_PROFILING)
+    target_compile_definitions(modb PUBLIC MODB_ENABLE_STAGE_PROFILING)
+    message(STATUS "moDb: timers por estágio ativados -- build de diagnóstico, não comparável com um build limpo.")
+endif()
+
 set(MODB_INSTRUMENTATION_LIST "")
+if(MODB_ENABLE_STAGE_PROFILING)
+    list(APPEND MODB_INSTRUMENTATION_LIST "stage_profile")
+endif()
 if(MODB_ENABLE_SANITIZERS)
     list(APPEND MODB_INSTRUMENTATION_LIST "sanitizers")
 endif()

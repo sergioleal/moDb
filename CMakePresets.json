@@ -53,6 +53,14 @@
       }
     },
     {
+      "name": "stage-profile",
+      "displayName": "RelWithDebInfo + per-stage timers on the hot path",
+      "inherits": "relwithdebinfo",
+      "cacheVariables": {
+        "MODB_ENABLE_STAGE_PROFILING": "ON"
+      }
+    },
+    {
       "name": "profile-8k",
       "displayName": "RelWithDebInfo with 8 KiB pages",
       "inherits": "relwithdebinfo",
@@ -121,6 +129,10 @@
       "configurePreset": "gprof"
     },
     {
+      "name": "stage-profile",
+      "configurePreset": "stage-profile"
+    },
+    {
       "name": "profile-8k",
       "configurePreset": "profile-8k"
     },
@@ -156,6 +168,13 @@
     {
       "name": "relwithdebinfo",
       "configurePreset": "relwithdebinfo",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "stage-profile",
+      "configurePreset": "stage-profile",
       "output": {
         "outputOnFailure": true
       }

@@ -97,6 +97,51 @@ std::string phase_json(const PhaseMetrics& p) {
     return oss.str();
 }
 
+// Registro `stage_profile` (Etapa 1 do plano de profiling): tempo atribuído a
+// estágios nomeados do caminho quente, um registro por fase instrumentada.
+//
+// Só é emitido quando há dados. A ausência do registro significa "esta fase não
+// foi instrumentada, ou o build não tem os timers" -- e é deliberadamente
+// distinta de uma linha cheia de zeros, que se leria como "medi e não achei
+// nada". `unattributed_ns` fica explícito no registro: o resíduo é resultado,
+// não uma sobra para varrer para debaixo do tapete.
+std::string stage_profile_json(const PhaseMetrics& p) {
+    const auto attributed = attributed_ns(p.stages);
+    std::ostringstream oss;
+    oss << "\"phase\":" << json_string(p.phase) << ",\"duration_ns\":" << json_uint(p.duration_ns)
+        << ",\"attributed_ns\":" << json_uint(attributed) << ",\"unattributed_ns\":"
+        << json_uint(p.duration_ns > attributed ? p.duration_ns - attributed : 0)
+        << ",\"attributed_fraction\":"
+        << (p.duration_ns > 0 ? static_cast<double>(attributed) / static_cast<double>(p.duration_ns)
+                              : 0.0)
+        << ",\"stages\":{";
+    bool first = true;
+    for (std::size_t i = 0; i < diag::stage_count; ++i) {
+        const auto& s = p.stages[i];
+        if (s.calls == 0) {
+            continue;
+        }
+        if (!first) {
+            oss << ',';
+        }
+        first = false;
+        oss << json_string(diag::stage_name(static_cast<diag::Stage>(i))) << ":{\"elapsed_ns\":"
+            << json_uint(s.elapsed_ns) << ",\"calls\":" << json_uint(s.calls)
+            << ",\"units\":" << json_uint(s.units);
+        if (p.operations > 0) {
+            oss << ",\"calls_per_operation\":"
+                << static_cast<double>(s.calls) / static_cast<double>(p.operations)
+                << ",\"units_per_operation\":"
+                << static_cast<double>(s.units) / static_cast<double>(p.operations)
+                << ",\"ns_per_operation\":"
+                << static_cast<double>(s.elapsed_ns) / static_cast<double>(p.operations);
+        }
+        oss << '}';
+    }
+    oss << "}";
+    return oss.str();
+}
+
 struct CaseTally {
     std::uint64_t completed{};
     std::uint64_t failed{};
@@ -286,6 +331,17 @@ bool run_case_and_record(const Case& c, const std::filesystem::path& work_dir, s
                 << ",\"case_id\":" << json_string(case_id) << "," << phase_json(phase) << "}";
         if (!write_or_fail(summary.str())) {
             return false;
+        }
+        if (has_stage_data(phase.stages)) {
+            std::ostringstream stages;
+            stages << "{\"schema\":\"modb.loadtest\",\"schema_version\":1,\"record\":"
+                      "\"stage_profile\",\"run_id\":"
+                   << json_string(run_id) << ",\"sequence\":" << ++sequence
+                   << ",\"case_id\":" << json_string(case_id) << "," << stage_profile_json(phase)
+                   << "}";
+            if (!write_or_fail(stages.str())) {
+                return false;
+            }
         }
     }
 
