@@ -30,6 +30,9 @@ public:
     // Acrescenta uma sequência de bytes sem modificá-la.
     void write_bytes(std::span<const std::byte> bytes);
 
+    // Pré-aloca espaço no vetor interno para evitar realocações dinâmicas.
+    void reserve(std::size_t capacity) { bytes_.reserve(capacity); }
+
     // Retorna uma visão somente leitura do conteúdo atual.
     [[nodiscard]] std::span<const std::byte> bytes() const noexcept { return bytes_; }
     // Transfere o vetor completo para o chamador.

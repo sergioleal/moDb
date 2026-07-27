@@ -13,6 +13,16 @@
 
 namespace modb::repl {
 
+// Define a variante de armazenamento do follower (ADR-021, Fase B).
+enum class ReplicaStorageKind : std::uint8_t {
+    row = 0,
+    columnar = 1,
+};
+
+[[nodiscard]] constexpr std::string_view to_string(ReplicaStorageKind kind) noexcept {
+    return kind == ReplicaStorageKind::columnar ? "columnar" : "row";
+}
+
 // Copia o arquivo de dados do primary sob barreira do escritor e devolve o
 // manifesto (cut_lsn = checkpoint atual).
 struct BootstrapSnapshot {
