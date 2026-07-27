@@ -20,6 +20,10 @@
 #include <span>
 // Disponibiliza o mapa ordenado por PageId do índice de capacidade.
 #include <map>
+// Disponibiliza o índice ordenado por (capacidade, PageId).
+#include <set>
+// Disponibiliza std::pair, a chave composta do índice de capacidade.
+#include <utility>
 // Disponibiliza os vetores retornados por leitura, scan e layout.
 #include <unordered_set>
 #include <vector>
@@ -153,6 +157,30 @@ private:
     // vezes.
     [[nodiscard]] Result<void> write_page(PageId id, const Page& page);
 
+    // Ponto único de escrita em insertion_capacity_by_page_ que mantém
+    // capacity_index_ sincronizado (ação A2, docs-process/PLANO_PROFILING.md
+    // §RESULTADOS -- o laço de candidatas media 80-88% do tempo das fases de
+    // update, varrendo o mapa inteiro e devolvendo ZERO candidatas na maioria
+    // das vezes).
+    //
+    // Uma primeira tentativa desta correção indexava só "capacidade > 0", e foi
+    // uma REGRESSÃO medida (~11x mais lento em update_inplace a 100k, não uma
+    // melhora): páginas reais quase sempre sobram alguns bytes de folga mesmo
+    // efetivamente cheias para o tamanho de registro em uso, então quase
+    // TODAS as páginas continuavam "capacidade > 0" -- o filtro não podava
+    // quase nada, e o custo extra de manter um índice paralelo (sem reduzir o
+    // conjunto varrido) somou log(n) sobre o O(n) que já existia. Corrigido
+    // ordenando de verdade por capacidade (ver capacity_index_) para que
+    // `lower_bound(tamanho do registro)` pule direto as páginas insuficientes
+    // em O(log n), não importa quantas existam abaixo do limiar.
+    void set_insertion_capacity(std::uint64_t page_value, std::size_t capacity);
+    // Remove uma página que saiu do heap (erase de página vazia) dos dois
+    // índices.
+    void forget_page_capacity(std::uint64_t page_value);
+    // Reconstrói capacity_index_ a partir de insertion_capacity_by_page_ --
+    // usado só onde o mapa inteiro é substituído de uma vez (layout()/open()).
+    void rebuild_capacity_index();
+
     // Aponta para o arquivo cuja vida é controlada pelo chamador.
     PageFile* file_;
     // Guarda a identidade estável da raiz dedicada.
@@ -173,6 +201,17 @@ private:
     // std::map mantém a ordem por PageId (idade de alocação), tornando a escolha
     // de página determinística entre execuções e plataformas.
     std::map<std::uint64_t, std::size_t> insertion_capacity_by_page_;
+    // Espelha insertion_capacity_by_page_ ordenado por (capacidade, PageId) --
+    // o PageId desempata porque muitas páginas preenchidas sequencialmente
+    // terminam com a MESMA capacidade residual exata, e um std::set precisa de
+    // uma chave única por entrada. `lower_bound({tamanho, 0})` encontra a
+    // primeira página com capacidade suficiente em O(log n), pulando direto
+    // todas as insuficientes sem visitá-las (ação A2, docs-process/
+    // PLANO_PROFILING.md). A ordem de iteração vira ascendente por capacidade
+    // (menor capacidade suficiente primeiro), não mais por idade da página --
+    // mudança deliberada; nenhum teste depende de qual página específica
+    // absorve um registro quando várias servem, só da contagem/hash agregados.
+    std::set<std::pair<std::size_t, std::uint64_t>> capacity_index_;
 };
 
 } // namespace modb::storage

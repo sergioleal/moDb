@@ -1,6 +1,7 @@
 # Plano de profiling de desempenho — onde estão os gargalhos
 
-- Estado: **Etapa 0 concluída; H1 confirmada** (ver §8, Andamento)
+- Estado: **Etapa 0 concluída; H1 confirmada; ação A2 implementada e medida**
+  (ver §8, Andamento)
 - Resultados medidos e ações sugeridas: [RESULTADOS_PROFILING.md](RESULTADOS_PROFILING.md)
 - Versão: 1
 - Data de abertura: 2026-07-26
@@ -312,6 +313,17 @@ Legenda: ⬜ não começado · 🔄 em andamento · ✅ concluído · ⛔ bloque
 
 Resultados medidos: [RESULTADOS_PROFILING.md §4.1](RESULTADOS_PROFILING.md).
 
+**Ação A2 implementada e medida** ([RESULTADOS_PROFILING.md §4.2](RESULTADOS_PROFILING.md)):
+o laço de candidatas virou um índice ordenado por capacidade
+(`std::set<std::pair<capacidade, PageId>>`, `lower_bound` em O(log n), para na
+primeira candidata). `crud_full.embedded.100k`: 105,6 s → ~30 s (3,5×). Dois
+falsos começos medidos e descartados no caminho (uma poda por "capacidade > 0"
+que não podava quase nada e regrediu 11×; um índice ordenado correto mas que
+coletava candidatas demais e regredia `update_shrink`). Contrapartida aceita:
+`delete` ~22% mais lento (custo de manter o índice). `hash_match=True` em
+todas as verificações; 138/138 testes em `relwithdebinfo`, `stage-profile` e
+`sanitizers`.
+
 **Reordenação depois da Etapa 1.** O gargalo está localizado numa linha
 ([table_heap.cpp:353](../src/storage/table_heap.cpp)) com 80–88% das fases de
 update. A Etapa 2 (gprof/`perf`) existia para achar hotspots por função — e o
@@ -319,8 +331,11 @@ hotspot já está achado, com um contador provando que o laço não produz nada.
 passa a ser opcional: vale se, depois de corrigir a varredura, o resíduo não
 atribuído de `create` (39%) continuar sem explicação pelos estágios que faltam.
 
-Próximo passo recomendado: **corrigir a varredura de candidatas** (ação A2), com
-o antes/depois registrado pelo harness que agora existe.
+Próximo passo recomendado: revisitar H5 (retenção MVCC do `snapshot_hold`) ou
+H6 (dívidas de CPU do Binding, só visíveis em Release) -- ou seguir para a
+Etapa 3 (varreduras de `--batch`/`durability`/`payload`), agora que o gargalo
+dominante de update/create está corrigido e essas varreduras vão medir efeitos
+reais, não o ruído do laço de candidatas.
 
 ### O que ficou fora, deliberadamente
 
