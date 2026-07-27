@@ -254,6 +254,36 @@ Result<void> TableHeap::write_page(PageId id, const Page& page) {
     return file_->write(id, page);
 }
 
+void TableHeap::set_insertion_capacity(std::uint64_t page_value, std::size_t capacity) {
+    // Remove a entrada antiga do índice ordenado ANTES de sobrescrever o mapa --
+    // precisa da capacidade anterior para achar a chave composta exata (O(log n)
+    // via find, não um equal_range por capacidade que poderia ter milhares de
+    // páginas empatadas).
+    if (auto it = insertion_capacity_by_page_.find(page_value);
+        it != insertion_capacity_by_page_.end()) {
+        capacity_index_.erase({it->second, page_value});
+        it->second = capacity;
+    } else {
+        insertion_capacity_by_page_.emplace(page_value, capacity);
+    }
+    capacity_index_.insert({capacity, page_value});
+}
+
+void TableHeap::forget_page_capacity(std::uint64_t page_value) {
+    if (auto it = insertion_capacity_by_page_.find(page_value);
+        it != insertion_capacity_by_page_.end()) {
+        capacity_index_.erase({it->second, page_value});
+        insertion_capacity_by_page_.erase(it);
+    }
+}
+
+void TableHeap::rebuild_capacity_index() {
+    capacity_index_.clear();
+    for (const auto& [page_value, capacity] : insertion_capacity_by_page_) {
+        capacity_index_.insert({capacity, page_value});
+    }
+}
+
 // Lê uma página física e valida seu layout de registros.
 Result<SlottedPage> TableHeap::load(PageId id) {
     // Empresta uma área previamente alocada e lê diretamente sobre ela.
@@ -323,7 +353,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
         page_count_ = 1;
         record_count_ = 1;
         page_ids_.insert(page_id->value);
-        insertion_capacity_by_page_[page_id->value] = page.insertion_capacity();
+        set_insertion_capacity(page_id->value, page.insertion_capacity());
         if (auto persisted = persist_root(); !persisted) {
             return std::unexpected(persisted.error());
         }
@@ -339,7 +369,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
         auto slot = page->insert(record);
         if (!slot) {
             if (slot.error().code == ErrorCode::page_full) {
-                insertion_capacity_by_page_[page_id.value] = page->insertion_capacity();
+                set_insertion_capacity(page_id.value, page->insertion_capacity());
                 return std::nullopt;
             }
             return std::unexpected(slot.error());
@@ -351,7 +381,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
         if (auto written = write_page(page_id, page->page()); !written) {
             return std::unexpected(written.error());
         }
-        insertion_capacity_by_page_[page_id.value] = page->insertion_capacity();
+        set_insertion_capacity(page_id.value, page->insertion_capacity());
         ++record_count_;
         if (auto persisted = persist_root(); !persisted) {
             return std::unexpected(persisted.error());
@@ -359,23 +389,48 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
         return std::optional<RecordId>{RecordId{page_id, *slot, *generation}};
     };
 
-    // Coleta as candidatas antes de inserir para não mutar o mapa durante a
-    // iteração; a ordem de std::map por PageId prioriza as páginas mais antigas
-    // de forma determinística entre execuções e plataformas.
-    // Sonda: este laço percorre TODAS as páginas a cada inserção e filtra por
-    // dentro. `units` conta as iterações -- é o número que decide se o termo
-    // proporcional à contagem de páginas (H1) mora aqui ou em outro lugar, e se
-    // as candidatas produzidas justificam a varredura.
+    // Coleta as candidatas antes de inserir para não mutar o índice durante a
+    // iteração (try_insert reescreve capacity_index_ a cada tentativa).
+    //
+    // Ação A2 (docs-process/PLANO_PROFILING.md): a medição mostrou este laço
+    // varrendo TODAS as páginas do heap a cada inserção e devolvendo ZERO
+    // candidatas em create/update_inplace/update_grow -- 80 a 88% do tempo das
+    // fases de update. capacity_index_ ordena por capacidade de verdade, então
+    // `lower_bound` pula direto para a primeira página com espaço suficiente em
+    // O(log n) -- não importa quantas páginas insuficientes existam abaixo do
+    // limiar, elas nunca são visitadas. (Uma primeira versão desta correção
+    // filtrava só "capacidade > 0", que quase não poda nada -- páginas cheias
+    // sempre sobram alguns bytes de folga -- e foi medida ~11x MAIS LENTA, não
+    // mais rápida; corrigida para o índice ordenado abaixo.)
+    //
+    // A ordem de iteração passa a ser ascendente por capacidade (menor
+    // suficiente primeiro), não mais por idade da página -- mudança
+    // deliberada, sem teste que dependa de qual página específica absorve um
+    // registro quando várias servem.
+    //
+    // Para no PRIMEIRO candidato válido, não continua até capacity_index_.end().
+    // Uma versão anterior desta correção coletava TODAS as páginas com
+    // capacidade suficiente antes de tentar qualquer uma -- inofensivo quando
+    // poucas páginas qualificam, mas em `update_shrink` (que libera espaço em
+    // muitas páginas ao longo da fase) isso chegou a coletar milhares de
+    // candidatas genuínas por operação quando a primeira já bastava. O cache de
+    // capacidade é corrigido a cada escrita (set_insertion_capacity), então em
+    // uso single-thread a primeira candidata praticamente sempre têm sucesso; se
+    // não tiver (cache desatualizado, teoricamente possível), cai no fallback de
+    // `last_`/página nova abaixo em vez de tentar mais candidatas -- troca
+    // aceitável: no pior caso aloca uma página a mais, nunca perde dado.
     std::vector<std::uint64_t> candidates;
     {
         diag::ScopedStage stage{diag::Stage::heap_candidate_scan};
         std::uint64_t iterations = 0;
-        for (const auto& [page_value, insertion_capacity] : insertion_capacity_by_page_) {
+        for (auto it = capacity_index_.lower_bound({record.size(), 0});
+             it != capacity_index_.end(); ++it) {
             ++iterations;
-            if ((last_ && page_value == last_->value) || insertion_capacity < record.size()) {
+            if (last_ && it->second == last_->value) {
                 continue;
             }
-            candidates.push_back(page_value);
+            candidates.push_back(it->second);
+            break;
         }
         stage.add_units(iterations);
     }
@@ -442,8 +497,8 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
     if (auto written = write_page(previous_id, previous->page()); !written) {
         return std::unexpected(written.error());
     }
-    insertion_capacity_by_page_[previous_id.value] = previous->insertion_capacity();
-    insertion_capacity_by_page_[new_page_id->value] = new_page.insertion_capacity();
+    set_insertion_capacity(previous_id.value, previous->insertion_capacity());
+    set_insertion_capacity(new_page_id->value, new_page.insertion_capacity());
     page_ids_.insert(new_page_id->value);
     last_ = *new_page_id;
     ++page_count_;
@@ -595,6 +650,7 @@ Result<std::vector<TableHeapPageInfo>> TableHeap::layout() {
         }
         page_ids_.clear();
         insertion_capacity_by_page_.clear();
+        capacity_index_.clear();
         return pages;
     }
     // Começa na primeira página de dados persistida na raiz.
@@ -644,6 +700,7 @@ Result<std::vector<TableHeapPageInfo>> TableHeap::layout() {
             }
             page_ids_ = std::move(page_ids);
             insertion_capacity_by_page_ = std::move(insertion_capacity_by_page);
+            rebuild_capacity_index();
             return pages;
         }
         // Avança para a página ligada.
@@ -680,7 +737,7 @@ Result<RecordId> TableHeap::update(RecordId id, std::span<const std::byte> recor
         if (auto written = write_page(id.page, page->page()); !written) {
             return std::unexpected(written.error());
         }
-        insertion_capacity_by_page_[id.page.value] = page->insertion_capacity();
+        set_insertion_capacity(id.page.value, page->insertion_capacity());
         return id;
     }
     // Erros diferentes de falta de espaço não permitem realocação.
@@ -736,7 +793,7 @@ Result<void> TableHeap::erase(RecordId id) {
             return std::unexpected(written.error());
         }
         --record_count_;
-        insertion_capacity_by_page_[id.page.value] = current->insertion_capacity();
+        set_insertion_capacity(id.page.value, current->insertion_capacity());
         if (auto persisted = persist_root(); !persisted) {
             return std::unexpected(persisted.error());
         }
@@ -800,7 +857,7 @@ Result<void> TableHeap::erase(RecordId id) {
     --page_count_;
     --record_count_;
     page_ids_.erase(id.page.value);
-    insertion_capacity_by_page_.erase(id.page.value);
+    forget_page_capacity(id.page.value);
     if (page_count_ == 0) {
         first_.reset();
         last_.reset();

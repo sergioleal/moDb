@@ -16,18 +16,24 @@ feita nesta rodada.
 
 ## 1. Resumo em cinco linhas
 
-1. **Um único laço responde por 80–88% das fases de update e ~50% da ingestão**:
-   a varredura de candidatas de [`TableHeap::insert`](../src/storage/table_heap.cpp),
-   que percorre de 5.000 a 37.622 entradas de um `std::map` por operação e
-   devolve **zero candidatas** em três das quatro fases medidas.
-2. Como as fases de update são 90% de um caso `crud_full`, esse laço é o gargalo
-   do produto, não um detalhe do caminho de ingestão.
-3. O gargalo é de **escrita e mutação**: leitura e varredura não degradam com o
-   volume; ingestão degrada 3,3× e update até 6,5× de 10k para 100k.
-4. Escrita de página (0,2–0,5%), `persist_root` (0,5–1,8%) e `fsync`
-   (0,8–2,5%) **não** são o problema com `batch=1000`.
-5. Cinco defeitos de medição foram encontrados e corrigidos. Antes deles, nenhum
-   número da série histórica descrevia o produto.
+1. **Corrigido**: o laço de candidatas de
+   [`TableHeap::insert`](../src/storage/table_heap.cpp) respondia por 80–88%
+   das fases de update e ~50% da ingestão, varrendo de 5.000 a 37.622 entradas
+   por operação e devolvendo **zero candidatas** na maioria das vezes. Trocado
+   por um índice ordenado por capacidade (`lower_bound` em O(log n)) — dois
+   falsos começos medidos e descartados antes da versão final (§4.2).
+2. Resultado medido, isolado, antes/depois: `crud_full.embedded.100k` de
+   **105,6 s para ~30 s (3,5×)**, com `create` 3,2×, `update_inplace` 6,7×,
+   `update_grow` 11,1× e `update_shrink` 7,2× mais rápidos. `hash_match=True`
+   em todas as verificações; 138/138 testes em três presets.
+3. Contrapartida real e aceita: `delete` ficou ~22% mais lento (custo de manter
+   o índice ordenado). `read` não regrediu — a comparação inicial vinha de uma
+   campanha contaminada por M5, não de uma medição isolada limpa (§4.2).
+4. O gargalo era de **escrita e mutação**, não de leitura: leitura e varredura
+   nunca degradaram com o volume.
+5. Cinco defeitos de medição foram encontrados e corrigidos antes de qualquer
+   conclusão. Antes deles, nenhum número da série histórica descrevia o
+   produto.
 
 ## 2. Confiabilidade da medição (o que mudou)
 
@@ -179,6 +185,83 @@ página está medida e é desprezível): sobra o codec do objeto, o Binding, o
 `IdentityMap`, o B-tree e o caminho de `erase`. Instrumentar esses é o que falta
 da Etapa 1.
 
+## 4.2 A2 — a varredura corrigida, com dois falsos começos honestos
+
+Ação A2 (corrigir o laço de candidatas de `TableHeap::insert`) foi implementada.
+O caminho até a versão final teve dois erros medidos e corrigidos, registrados
+aqui porque descrevem por que a solução final é do jeito que é.
+
+**Tentativa 1 — "capacidade > 0" como poda.** Manter um subconjunto de páginas
+"reutilizáveis" (capacidade > 0) parecia bastar. Não bastou: páginas reais quase
+sempre sobram alguns bytes de folga mesmo efetivamente cheias para o tamanho de
+registro em uso, então quase TODAS as páginas continuavam qualificando — o
+filtro não podava quase nada, e o custo extra de manter um índice paralelo (sem
+reduzir o conjunto varrido) somou um `.find()` a mais por página ao trabalho que
+já existia. Medido, não hipotético: `update_inplace` a 100k caiu de 5.885 para
+**528 ops/s** — **11× mais lento**, com degradação progressiva dentro da própria
+fase (a matemática bate: log₂(15.000) ≈ 13,9, muito próximo do fator observado).
+`crud_full.embedded.100k` não terminava em 3 minutos (antes levava 105,6 s).
+
+**Tentativa 2 — índice ordenado por capacidade, coletando todas as candidatas.**
+Corrigido para um `std::set<std::pair<capacidade, PageId>>` de verdade, com
+`lower_bound` pulando direto para a primeira página suficiente em O(log n). As
+três fases-alvo melhoraram (create 2,4×, update_inplace 4,6×, update_grow 7,3×),
+mas `update_shrink` ficou **pior** que o baseline (1.913 vs 2.206 ops/s) com um
+padrão de ACELERAÇÃO dentro da fase (334 → 26.685 ops/s). Causa: o laço
+continuava depois do `lower_bound` até `capacity_index_.end()`, coletando TODAS
+as páginas com capacidade suficiente antes de tentar qualquer uma — inofensivo
+quando poucas qualificam, mas em `update_shrink` (que libera espaço em muitas
+páginas ao longo da fase) isso chegou a coletar milhares de candidatas genuínas
+por operação quando a primeira já bastava.
+
+**Versão final — para na primeira candidata.** `heap_candidate_scan` só coleta
+a primeira página não-`last_` encontrada pelo `lower_bound`; se ela falhar
+(cache desatualizado — não deveria acontecer em uso single-thread, já que o
+cache é corrigido a cada escrita), cai no fallback de `last_`/página nova em vez
+de tentar mais candidatas. Confirmado pelos timers: `heap_candidate_scan` caiu
+de 48,9–87,7% para **0,4–0,5%** em create/update_inplace/update_grow, e de
+87,7% para 75,7% em update_shrink (ainda o estágio dominante ali, mas com 6.723
+iterações/op contra 37.622 antes — 5,6× menos).
+
+### Resultado final, medido isolado (mesma metodologia dos dois lados)
+
+`crud_full.embedded.100k`, um processo por medição, código antes/depois do
+commit desta ação, 3 repetições onde o tempo permitiu:
+
+| fase | antes (isolado) | depois (3 rep, CV) | fator |
+|---|---|---|---|
+| `create` | 10.438 | 33.233 (4,2%) | **3,18×** |
+| `read` | 37.206 | 37.332 (2,6%) | 1,00× |
+| `update_inplace` | 4.023 | 26.966 (1,5%) | **6,70×** |
+| `update_grow` | 2.046 | 22.691 (2,2%) | **11,09×** |
+| `update_shrink` | 1.484 | 10.742 (1,0%) | **7,24×** |
+| `delete` | 59.022 | 45.924 (1,3%) | 0,78× |
+
+`hash_match=True` em todas as execuções (create_only e crud_full, 10k e 100k, 3
+repetições cada) — nenhuma regressão de corretude. Suíte completa (138 testes,
+incluindo os 5 testes de invariante do `TableHeap`) passa nos presets
+`relwithdebinfo`, `stage-profile` e `sanitizers` (MinGW não tem ASan/UBSan
+reais; a rede de segurança é `_GLIBCXX_ASSERTIONS` + `-fstack-protector-strong`,
+que também não acusou nada).
+
+**`delete` fica ~22% mais lento — real, não ruído, e aceito.** Cada mudança de
+capacidade agora paga duas operações de árvore num `std::set<pair>` (remove a
+entrada antiga, insere a nova) em vez de uma única atribuição de mapa —
+alocação/liberação de nó a cada toque, mais cara que sobrescrever um valor no
+lugar. `delete` é a fase que mais toca capacidade (cada erase atualiza ou remove
+uma entrada), então é onde esse custo aparece mais. **`read` não regrediu** —
+a comparação inicial contra 53.070 ops/s vinha de uma campanha de 30 casos no
+mesmo processo (sujeita a M5, §5), não de uma medição isolada; refeita com a
+mesma metodologia dos dois lados, `read` fica praticamente idêntico (37.206 →
+37.332).
+
+**Não investigado mais a fundo, por escolha:** eliminar o custo de
+alocação/liberação de nó do `std::set<pair>` (um índice intrusivo ou por bucket
+seria mais amigável ao allocator) devolveria parte do `delete`, mas é engenharia
+adicional para um ganho pequeno frente ao que já foi conquistado. O saldo total
+do caso (create-to-delete) já é **3,5× mais rápido** (105,6 s → ~30 s), e a
+perda em `delete` (≈0,5 s em 100k operações) é uma fração disso.
+
 ## 5. M5 — a vazão depende do que rodou antes
 
 Descoberto ao perseguir uma anomalia do baseline: a mesma fase `create`, no mesmo
@@ -216,21 +299,16 @@ ligado. Resultados em §4.1.
 instrumentar codec do objeto, Binding, `IdentityMap`, B-tree e o caminho de
 `erase`. **Esforço:** ~meio dia.
 
-### A2 — `TableHeap::insert`: laço de candidatas *(agora a prioridade isolada)*
+### A2 — `TableHeap::insert`: laço de candidatas ✅ *implementada e medida*
 
-Não é mais uma hipótese. Medido: **80–88% das fases de update e ~50% da
-ingestão**, com 5.000 a 37.622 iterações de `std::map` por operação e **zero
-candidatas produzidas** em três das quatro fases (§4.1).
+Entregue: `capacity_index_`, um `std::set<std::pair<capacidade, PageId>>`
+mantido em todo ponto que escreve `insertion_capacity_by_page_`; `insert()`
+usa `lower_bound(tamanho do registro)` e para na primeira candidata. Detalhes,
+os dois falsos começos e a análise da contrapartida em `delete`: §4.2.
 
-- **Direção sugerida:** manter apenas páginas com espaço reutilizável numa
-  estrutura indexada por capacidade, em vez de varrer o mapa inteiro. No caminho
-  de ingestão sequencial a resposta certa é a última página, que é O(1).
-- **Teto:** `crud_full` a 100k de 105,6 s para ~22 s (≈4,8×), extrapolando a
-  fração medida por fase. Ordem de grandeza para priorizar, não promessa.
-- **Pré-requisito:** nenhum. A evidência está completa.
-- **Esforço:** médio. **Risco:** caminho quente com invariantes de reuso de
-  espaço — exige `table_heap_space_reuse`, `table_heap_churn` e
-  `table_heap_reverse_churn` verdes, além do antes/depois registrado.
+Resultado: `crud_full.embedded.100k` de 105,6 s para ~30 s (3,5×), com ganhos
+de 3,2× a 11,1× nas fases de create/update. `delete` ~22% mais lento (aceito).
+138/138 testes em `relwithdebinfo`, `stage-profile` e `sanitizers`.
 
 ### A3 — Caminho de update ✅ *respondido por A1*
 
