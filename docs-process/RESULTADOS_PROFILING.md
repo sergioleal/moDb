@@ -6,8 +6,8 @@
   `060b517` chegou depois, em paralelo, e só alterou a tabela de calibração
   (nenhum caminho de código medido aqui) — ver o conflito registrado em A7.
 - Plano e andamento: [PLANO_PROFILING.md](PLANO_PROFILING.md)
-- Escopo desta rodada: Etapa 0 (medição confiável) + varredura de page size da
-  Etapa 3. Etapas 1, 2 e 4 não começaram.
+- Escopo desta rodada: Etapa 0 (medição confiável), varredura de page size da
+  Etapa 3 e Etapa 1 (timers por estágio, parcial). Etapas 2 e 4 não começaram.
 
 Este documento registra **o que foi medido** e **o que sugerimos fazer**. Nada
 aqui é uma otimização aplicada: a regra do repositório é que otimização entra
@@ -16,16 +16,16 @@ feita nesta rodada.
 
 ## 1. Resumo em cinco linhas
 
-1. O gargalo está na **escrita e na mutação**. Leitura e varredura não degradam
-   com o volume; ingestão degrada 3,3× e update degrada até 6,5× de 10k para 100k.
-2. **77% do custo de inserção a 100k é um termo proporcional à contagem de
-   páginas do heap** — confirmado por predição registrada antes da medição e
-   acertada em 10%.
-3. Existe um **segundo termo, proporcional ao tamanho da página**, que cancela o
-   ganho de páginas maiores. Suspeito principal: o WAL grava imagens de página
-   inteiras.
-4. **90% do tempo de um caso `crud_full` a 100k está nas três fases de update** —
-   e o caminho de update ainda não foi investigado.
+1. **Um único laço responde por 80–88% das fases de update e ~50% da ingestão**:
+   a varredura de candidatas de [`TableHeap::insert`](../src/storage/table_heap.cpp),
+   que percorre de 5.000 a 37.622 entradas de um `std::map` por operação e
+   devolve **zero candidatas** em três das quatro fases medidas.
+2. Como as fases de update são 90% de um caso `crud_full`, esse laço é o gargalo
+   do produto, não um detalhe do caminho de ingestão.
+3. O gargalo é de **escrita e mutação**: leitura e varredura não degradam com o
+   volume; ingestão degrada 3,3× e update até 6,5× de 10k para 100k.
+4. Escrita de página (0,2–0,5%), `persist_root` (0,5–1,8%) e `fsync`
+   (0,8–2,5%) **não** são o problema com `batch=1000`.
 5. Cinco defeitos de medição foram encontrados e corrigidos. Antes deles, nenhum
    número da série histórica descrevia o produto.
 
@@ -126,6 +126,59 @@ de página inteiras**, então dobrar a página dobra os bytes de WAL por página
 erra os de 10k (prevê 32,2 µs para 16 KiB/10k, mediu 22,35). Os termos não são
 separáveis por varredura — é para isso que existe a Etapa 1.
 
+## 4.1 Etapa 1: a varredura de candidatas domina TUDO, não só a ingestão
+
+Timers por estágio (preset `stage-profile`), `create_only` e `crud_full` a 100k,
+um processo por caso. Sobrecarga da instrumentação: dentro do ruído entre
+execuções (6,9 s e 5,95 s instrumentado contra 6,62 s limpo na mesma fase).
+
+| fase | duração | `heap_candidate_scan` | ns/op | iterações/op | candidatas produzidas |
+|---|---|---|---|---|---|
+| `create` | 6,0–6,9 s | **48,9–51,2%** | 30–34 µs | 5.000 | **zero** |
+| `update_inplace` | 14,9 s | **80,2%** | 119,5 µs | 15.000 | **zero** |
+| `update_grow` | 33,4 s | **85,2%** | 284,4 µs | 28.334 | **zero** |
+| `update_shrink` | 45,2 s | **87,7%** | 396,3 µs | 37.622 | 0,367/op |
+| `delete` | 1,2 s | — (não insere) | — | — | — |
+
+**O laço de [table_heap.cpp:353](../src/storage/table_heap.cpp) é 80–88% das
+fases de update**, que por sua vez são 90% do caso. H1 mirava a ingestão; o dano
+real está no update. Um update que não cabe no lugar precisa inserir a nova
+versão em outro ponto (o MVCC retém a `previous`), então **todo update chama
+`insert` e paga a varredura completa** — e o número de iterações cresce ao longo
+das fases (15.000 → 28.334 → 37.622) porque o heap cresce com as versões retidas.
+
+**A varredura não produz nada.** O estágio `heap_candidate_try` conta as
+candidatas que o laço ofereceu: **zero** em `create`, `update_inplace` e
+`update_grow`. Ou seja, em três das quatro fases o laço percorre de 5.000 a
+28.000 entradas de um `std::map` por operação e devolve lista vazia — em ingestão
+sequencial todas as páginas menos a última estão cheias, e o filtro por
+capacidade descarta todas, uma a uma. Só `update_shrink` produz candidatas
+(0,367/op), porque encolher registros libera espaço.
+
+**A escrita de página não é o gargalo:** `heap_page_write` fica em 0,2–0,5% em
+todas as fases. `persist_root` (H2) é real — 1 chamada por operação, confirmada —
+mas custa 0,5–1,8%. `wal_sync` fica em 0,8–2,5% com `batch=1000`.
+
+Teto estimado se a varredura virasse O(1)/O(log n): `crud_full` a 100k cairia de
+**105,6 s para ~22 s**, cerca de **4,8×**. É extrapolação a partir da fração
+medida por fase, não uma medição — vale como ordem de grandeza para priorizar,
+não como promessa.
+
+**Cobertura da atribuição** (critério de aceite da Etapa 1 é ≥ 90%):
+
+| fase | atribuído |
+|---|---|
+| `update_shrink` | 93,3% ✅ |
+| `update_grow` | 89,7% |
+| `update_inplace` | 84,8% |
+| `create` | 58,6–60,6% ❌ |
+| `delete` | 15,7% ❌ |
+
+`create` e `delete` ainda não fecham. O resíduo **não** é I/O (a escrita de
+página está medida e é desprezível): sobra o codec do objeto, o Binding, o
+`IdentityMap`, o B-tree e o caminho de `erase`. Instrumentar esses é o que falta
+da Etapa 1.
+
 ## 5. M5 — a vazão depende do que rodou antes
 
 Descoberto ao perseguir uma anomalia do baseline: a mesma fase `create`, no mesmo
@@ -151,46 +204,40 @@ de verdade num servidor.
 
 Ordenadas por valor sobre custo. Nenhuma foi executada.
 
-### A1 — Etapa 1: timers por estágio *(habilitador; recomendado primeiro)*
+### A1 — Etapa 1: timers por estágio ✅ *parcialmente entregue*
 
-Sem isto, tudo abaixo continua sendo inferência de curva. Instrumentar
-`encode`, `heap_candidate_scan`, `heap_page_write`, `persist_root`, `wal_append`,
-`wal_sync`, `buffer_pool_*`, `index_update`, com contadores de iterações do laço
-de candidatas, escritas de página por operação, bytes de WAL por operação e
-tempo de `fsync`.
+Entregue: preset `stage-profile`, seis estágios instrumentados
+(`heap_candidate_scan`, `heap_candidate_try`, `heap_page_write`, `persist_root`,
+`wal_append`, `wal_sync`), registro `stage_profile` por fase no JSONL com
+`unattributed_ns` explícito. Custo zero quando desligado; dentro do ruído quando
+ligado. Resultados em §4.1.
 
-- **Responde:** separa `b` (por página) de `c` (por tamanho de página); aponta a
-  linha exata em vez de um termo de regressão.
-- **Critério de aceite:** soma dos estágios ≥ 90% da duração da fase, resíduo
-  registrado explicitamente.
-- **Esforço:** ~1 dia. **Risco:** baixo (aditivo ao schema JSONL).
+**Falta** fechar a cobertura em `create` (58,6%) e `delete` (15,7%):
+instrumentar codec do objeto, Binding, `IdentityMap`, B-tree e o caminho de
+`erase`. **Esforço:** ~meio dia.
 
-### A2 — `TableHeap::insert`: laço de candidatas *(maior ganho isolado)*
+### A2 — `TableHeap::insert`: laço de candidatas *(agora a prioridade isolada)*
 
-O laço em [table_heap.cpp:353](../src/storage/table_heap.cpp) percorre todas as
-páginas e filtra dentro. Em ingestão sequencial todas as páginas menos a última
-estão cheias, então ele itera ~11.200 entradas e produz **zero** candidatas —
-custo puro, sem trabalho útil. *(A alegação "zero candidatas" é dedução do código,
-ainda não medida: é o primeiro contador que A1 deve registrar.)*
+Não é mais uma hipótese. Medido: **80–88% das fases de update e ~50% da
+ingestão**, com 5.000 a 37.622 iterações de `std::map` por operação e **zero
+candidatas produzidas** em três das quatro fases (§4.1).
 
 - **Direção sugerida:** manter apenas páginas com espaço reutilizável numa
-  estrutura própria indexada por capacidade, em vez de varrer o mapa inteiro.
-- **Teto:** o modelo sugere até ~4× de ingestão a 100k se `b` for a zero. A
-  evidência **medida** direta é mais modesta e mais confiável: **+46% ao dobrar o
-  page size**, que corta o termo pela metade.
-- **Pré-requisito:** A1, para confirmar que o custo está neste laço e não no
-  buffer pool ou no mapa de espaço livre.
-- **Esforço:** médio. **Risco:** mexe em caminho quente com invariantes de
-  reuso de espaço — exige `table_heap_space_reuse` e `churn` verdes.
+  estrutura indexada por capacidade, em vez de varrer o mapa inteiro. No caminho
+  de ingestão sequencial a resposta certa é a última página, que é O(1).
+- **Teto:** `crud_full` a 100k de 105,6 s para ~22 s (≈4,8×), extrapolando a
+  fração medida por fase. Ordem de grandeza para priorizar, não promessa.
+- **Pré-requisito:** nenhum. A evidência está completa.
+- **Esforço:** médio. **Risco:** caminho quente com invariantes de reuso de
+  espaço — exige `table_heap_space_reuse`, `table_heap_churn` e
+  `table_heap_reverse_churn` verdes, além do antes/depois registrado.
 
-### A3 — Caminho de update *(maior bloco de tempo absoluto, não investigado)*
+### A3 — Caminho de update ✅ *respondido por A1*
 
-90% do `crud_full` a 100k, e degradação de 6,5× — pior que a ingestão. Nenhuma
-hipótese foi testada ainda.
-
-- **Sugestão:** incluir as fases `update_*` no escopo de A1 desde o início, e
-  medir bytes movidos e escritas de página por operação.
-- **Esforço:** vem quase de graça junto com A1.
+Era o maior bloco de tempo absoluto e não tinha hipótese. Agora tem: 80–88% dele
+é a varredura de candidatas de A2, porque todo update que não cabe no lugar
+insere a nova versão e paga a varredura inteira. **Não precisa de investigação
+própria — é a mesma correção.**
 
 ### A4 — WAL: imagens de página inteiras *(implicado por dois caminhos)*
 
@@ -258,10 +305,14 @@ patamar após o primeiro caso grande aponta cache do SO.
 
 ## 7. O que este documento não afirma
 
-- Não afirma **qual linha** consome o termo por página. H1 identifica o *termo*;
-  atribuí-lo a `heap_candidate_scan` em vez do buffer pool ou do mapa de espaço
-  livre é trabalho de A1.
-- Não afirma nada sobre o caminho de update além de quanto ele custa.
 - Não afirma que 8 KiB é melhor: mediu ingestão, e ingestão é 7% do `crud_full`.
+  Com a varredura corrigida (A2), o ganho do page size provavelmente encolhe —
+  boa parte dele era só reduzir a contagem de iterações do laço.
 - Não afirma que M5 é artefato de medição — só que impede comparação entre casos.
-- H2, H4, H5 e H6 continuam **não testadas**.
+- Não explica 39% de `create` nem 84% de `delete`: a atribuição não fecha nessas
+  duas fases, e o que falta está nomeado em A1, não adivinhado.
+- O teto de ~4,8× para A2 é **extrapolação** da fração medida por fase, não uma
+  medição de antes/depois.
+- H5 (retenção MVCC) e H6 (dívidas de CPU do Binding) continuam **não testadas**.
+  H2 foi confirmada mas é pequena (0,5–1,8%). H3 e H4 foram absorvidas: com
+  `batch=1000` o WAL não domina, e o custo do update é a varredura de A2.

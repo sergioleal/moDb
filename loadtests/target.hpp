@@ -4,6 +4,8 @@
 // §4.3/§14). Nesta subfase só existe `target_embedded`; `target_client.hpp`
 // (loopback/remoto) chega na Subfase G reaproveitando os mesmos estes tipos.
 
+#include "modb/diag/stage_profile.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -69,7 +71,33 @@ struct PhaseMetrics {
     // reter (`database.data_record_count() - vivos_atuais`). 0 quando não
     // medido (nenhuma snapshot aberta nesta fase).
     std::uint64_t retained_versions{0};
+
+    // Etapa 1 do plano de profiling: tempo atribuído a estágios nomeados do
+    // caminho quente. Todos os totais ficam em zero num build sem
+    // MODB_ENABLE_STAGE_PROFILING -- e é assim que o emissor sabe que não deve
+    // gravar o registro `stage_profile`, em vez de gravar uma linha de zeros
+    // que se pareceria com "medi e não achei nada".
+    diag::StageSnapshot stages{};
 };
+
+// Soma dos tempos atribuídos, para conferir a cobertura contra a duração da
+// fase (critério de aceite da Etapa 1: >= 90%).
+[[nodiscard]] inline std::uint64_t attributed_ns(const diag::StageSnapshot& stages) noexcept {
+    std::uint64_t total = 0;
+    for (const auto& s : stages) {
+        total += s.elapsed_ns;
+    }
+    return total;
+}
+
+[[nodiscard]] inline bool has_stage_data(const diag::StageSnapshot& stages) noexcept {
+    for (const auto& s : stages) {
+        if (s.calls != 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // Parâmetros efetivos que um workload recebe do caso já resolvido pela
 // matriz -- não sabe se está embedded ou em rede (§14: "Workload e matriz não
