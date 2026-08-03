@@ -94,6 +94,25 @@ std::string phase_json(const PhaseMetrics& p) {
         << ",\"pages_written_estimated\":" << json_uint(p.pages_written_estimated)
         << ",\"cache_hit_rate\":" << p.cache_hit_rate
         << ",\"retained_versions\":" << json_uint(p.retained_versions);
+    // Quanto de `duration_ns` é trabalho do HARNESS e não do motor: validação,
+    // formatação canônica, contabilidade. `ops_per_second` sempre incluiu isso e
+    // os percentis nunca -- os dois descreviam coisas diferentes sem dizer.
+    // Agora a diferença é um número, e `engine_ops_per_second` é a vazão contra
+    // o tempo que o motor de fato consumiu. Omitido (não zerado) numa fase que
+    // não mede por operação.
+    if (p.operation_ns_total > 0) {
+        const auto overhead =
+            p.duration_ns > p.operation_ns_total ? p.duration_ns - p.operation_ns_total : 0;
+        oss << ",\"operation_ns_total\":" << json_uint(p.operation_ns_total)
+            << ",\"harness_overhead_ns\":" << json_uint(overhead)
+            << ",\"harness_overhead_fraction\":"
+            << (p.duration_ns > 0
+                    ? static_cast<double>(overhead) / static_cast<double>(p.duration_ns)
+                    : 0.0)
+            << ",\"engine_ops_per_second\":"
+            << (static_cast<double>(p.operations) * 1'000'000'000.0) /
+                   static_cast<double>(p.operation_ns_total);
+    }
     // Mix ALCANÇADO (PLANO_PROFILER.md §4.4). Fica aqui, no phase_summary, e não
     // no registro `stage_profile`: são contadores comuns do harness, não
     // instrumentação do motor, então precisam existir em qualquer build --

@@ -98,6 +98,20 @@ struct PhaseMetrics {
     // Subfase D2 (docs-process/PLANO_IMPLEMENTACAO_CARGA.md): campos que o
     // dashboard já pressupunha e o coletor não produzia.
     LatencyPercentilesNs latency_ns;
+
+    // Soma do tempo medido POR OPERAÇÃO -- exatamente o mesmo intervalo que
+    // alimenta `latency_ns`, que em toda fase envolve só a chamada ao motor.
+    //
+    // Existe porque `ops_per_second` vem de `duration_ns` (tempo de parede do
+    // laço, incluindo validação, formatação e contabilidade do harness) enquanto
+    // os percentis vêm do intervalo por operação (que exclui tudo isso). Os dois
+    // números descreviam coisas diferentes sem dizer. A diferença
+    // `duration_ns - operation_ns_total` é o overhead do harness, e na fase
+    // `read` ela é ~72% (docs-process/PLANO_PROFILER.md §9.3) -- não é detalhe.
+    //
+    // 0 = fase que não mede por operação; o emissor omite os derivados nesse
+    // caso em vez de gravar zeros que se leriam como "sem overhead".
+    std::uint64_t operation_ns_total{0};
     std::uint64_t peak_rss_bytes{};
     std::uint64_t db_bytes{};
     std::uint64_t wal_bytes{};

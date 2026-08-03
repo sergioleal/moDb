@@ -93,6 +93,18 @@ LatencyPercentilesNs percentiles_of(std::vector<double> latencies_ns) {
     return latency;
 }
 
+// Preenche `latency_ns` E `operation_ns_total` a partir da mesma amostra, num
+// único ponto: separados, era questão de tempo até uma fase nova preencher um e
+// esquecer o outro, e aí o overhead do harness apareceria como zero.
+void set_operation_latencies(PhaseMetrics& phase, std::vector<double> latencies_ns) {
+    double total = 0.0;
+    for (const auto ns : latencies_ns) {
+        total += ns;
+    }
+    phase.operation_ns_total = static_cast<std::uint64_t>(total);
+    phase.latency_ns = percentiles_of(std::move(latencies_ns));
+}
+
 // Fecha uma ProgressWindow a cada `interval` de tempo decorrido (§12) e
 // repassa para `callback` (nulo = não emite nada -- comportamento anterior
 // a esta subfase, sem custo além de checar um ponteiro de função a cada
@@ -369,7 +381,7 @@ CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const Worklo
     outcome.phase.bytes_per_object =
         params.object_count > 0 ? db_bytes_after / params.object_count : 0;
     outcome.phase.errors = errors;
-    outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
+    set_operation_latencies(outcome.phase, std::move(latencies_ns));
     outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
     outcome.phase.stages = window_tracker.stages();
     outcome.phase.db_bytes = db_bytes_after;
@@ -482,7 +494,7 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
                      : 0.0;
     outcome.phase.bytes_per_object = 0;   // delete não escreve conteúdo lógico por objeto
     outcome.phase.errors = errors;
-    outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
+    set_operation_latencies(outcome.phase, std::move(latencies_ns));
     outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
     outcome.phase.stages = window_tracker.stages();
     outcome.phase.db_bytes = db_bytes_after;
@@ -624,7 +636,7 @@ ReadPhaseOutcome perform_read_phase(AttachedDatabase& attached, const std::vecto
                    : 0.0;
     outcome.phase.bytes_per_object = object_count > 0 ? db_bytes / object_count : 0;
     outcome.phase.errors = errors;
-    outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
+    set_operation_latencies(outcome.phase, std::move(latencies_ns));
     outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
     outcome.phase.stages = window_tracker.stages();
     outcome.phase.db_bytes = db_bytes;
@@ -743,7 +755,7 @@ UpdatePhaseOutcome perform_update_phase(
                      : 0.0;
     outcome.phase.bytes_per_object = ids.size() > 0 ? db_bytes / ids.size() : 0;
     outcome.phase.errors = errors;
-    outcome.phase.latency_ns = percentiles_of(std::move(latencies_ns));
+    set_operation_latencies(outcome.phase, std::move(latencies_ns));
     outcome.phase.peak_rss_bytes = window_tracker.rss_peak_bytes();
     outcome.phase.stages = window_tracker.stages();
     outcome.phase.db_bytes = db_bytes;
@@ -1168,7 +1180,7 @@ CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
                                             static_cast<double>(read_ns)
                                        : 0.0;
     phase.errors = errors;
-    phase.latency_ns = percentiles_of(std::move(latencies_ns));
+    set_operation_latencies(phase, std::move(latencies_ns));
     phase.peak_rss_bytes = rss.peak();
     phase.db_bytes = size_error ? 0 : db_bytes;
     phase.wal_bytes = wal_size_error ? 0 : wal_bytes;
@@ -1593,7 +1605,7 @@ CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
                                             static_cast<double>(mixed_ns)
                                        : 0.0;
     phase.errors = state.errors;
-    phase.latency_ns = percentiles_of(std::move(state.latencies_ns));
+    set_operation_latencies(phase, std::move(state.latencies_ns));
     phase.peak_rss_bytes = rss.peak();
     phase.stages = mixed_stages;
     // Mix alcançado e estágios por classe (§3.2/§4.4). Este é o único workload

@@ -626,8 +626,47 @@ record`) e passa com ela.
 `read`, os estágios do motor somam ~2,9 µs dos 10,3 µs/op da fase; os 7,4 µs
 restantes estão **fora do motor**, no laço do próprio harness. Ou seja, uma
 parte relevante do que a série histórica chama de "vazão de leitura" é custo do
-medidor, não do medido. É um achado sobre o harness, não sobre o motor, e não
-foi perseguido nesta execução.
+medidor, não do medido.
+
+### 9.3.1 Ação: o overhead do harness virou um número
+
+`ops_per_second` sempre veio de `duration_ns` (tempo de parede do laço, com
+validação, formatação canônica e contabilidade dentro) enquanto os percentis
+sempre vieram do intervalo medido por operação, que exclui tudo isso. **Os dois
+números descreviam coisas diferentes e nada dizia qual.**
+
+`PhaseMetrics` passou a somar o tempo por operação (`operation_ns_total`, a
+mesma amostra que alimenta `latency_ns`), e o `phase_summary` emite
+`harness_overhead_ns`, `harness_overhead_fraction` e `engine_ops_per_second`.
+Nenhum campo existente mudou de significado.
+
+`crud_full.embedded.10k`, RelWithDebInfo:
+
+| fase | `ops_per_second` | `engine_ops_per_second` | overhead |
+|---|---|---|---|
+| `read` | 113.510 | 437.185 | **74,0%** |
+| `create` | 56.673 | 150.663 | **62,4%** |
+| `update_shrink` | 52.048 | 108.293 | 51,9% |
+| `update_grow` | 56.644 | 99.526 | 43,1% |
+| `update_inplace` | 68.659 | 114.175 | 39,9% |
+| `delete` | 160.034 | 254.617 | 37,1% |
+
+De 37% a 74% de cada número de fase é o medidor. Três consequências:
+
+1. Os 74% de `read` confirmam a estimativa de 72% acima, e os 62,4% de `create`
+   explicam por que a cobertura de estágios dele trava em ~48% — o resíduo não
+   estava num estágio que faltava, estava fora do motor.
+2. **A fração varia por fase (37%–74%), então comparar fases entre si na série
+   histórica nunca foi válido** — pela mesma razão que M5 invalidou comparar
+   casos entre si, e por um motivo independente dele.
+3. Explica por que um ganho de ~2× no motor (§9.2.4) apareceu como 1,14× na
+   fase.
+
+O que **não** foi feito, deliberadamente: reduzir o overhead. Tirar a validação
+de dentro do laço muda o que o load test mede, e as duas escolhas são legítimas
+— medir o motor, ou medir a experiência ponta a ponta de um cliente. Agora que os
+dois números existem lado a lado, a escolha pode ser feita com evidência em vez
+de por omissão.
 
 Achado colateral do mesmo bloco: `identity_lookup` e `heap_record_read` têm
 `calls_per_operation = 2,00` na fase `read` — o caminho de leitura **resolve o
