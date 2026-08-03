@@ -1705,10 +1705,44 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
     std::uint64_t churn_errors = 0;
 
     RssTracker rss;
+    // H5 (retenção MVCC) era a hipótese mais antiga em aberto do plano de
+    // profiling e a fase `hold` não tinha instrumentação NENHUMA: sem reset de
+    // estágios, sem snapshot, sem tempo por operação. Como ela é ~98% da duração
+    // do caso, a hipótese era simplesmente inmensurável.
+    std::vector<double> hold_latencies_ns;
+    hold_latencies_ns.reserve(n);
+    OperationClassBreakdown hold_classes{};
+
+    // RAII porque o laço do churn sai por `continue` em vários caminhos de erro:
+    // contabilizar no fim do corpo perderia exatamente as iterações que falharam.
+    struct HoldOpAccounting {
+        std::vector<double>& latencies;
+        OperationClassBreakdown& classes;
+        OperationClass op_class;
+        std::chrono::steady_clock::time_point start{std::chrono::steady_clock::now()};
+        diag::StageSnapshot before{diag::stage_snapshot()};
+
+        ~HoldOpAccounting() {
+            latencies.push_back(
+                static_cast<double>(ns_between(start, std::chrono::steady_clock::now())));
+            auto& bucket = classes[static_cast<std::size_t>(op_class)];
+            ++bucket.operations;
+            diag::stage_accumulate_delta(bucket.stages, before, diag::stage_snapshot());
+        }
+    };
+
+    diag::stage_reset();
     const auto hold_start = std::chrono::steady_clock::now();
     for (std::size_t i = 0; i < n; ++i) {
         rss.sample();   // retenção MVCC é justamente onde o RSS por fase importa
         const auto logical_id = i + 1;
+        // A classe vem do ramo do churn, e o terço final NÃO toca o banco -- só
+        // preenche `final_expected`. Sem contar isso como `noop`, a vazão da fase
+        // divide o tempo por um terço de operações que não existiram.
+        HoldOpAccounting accounting{hold_latencies_ns, hold_classes,
+                                    i < update_end   ? OperationClass::update
+                                    : i < delete_end ? OperationClass::remove
+                                                     : OperationClass::noop};
         if (i < update_end) {
             const auto new_value = generate_user_ex(params.seed, logical_id, filler_bytes,
                                                      static_cast<std::int32_t>((logical_id + 1) % 3));
@@ -1784,6 +1818,8 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
 
     held.reset();   // fecha a snapshot -- libera a época para o GC.
     const auto hold_end = std::chrono::steady_clock::now();
+    // Antes do collect_garbage(), que roda fora da fase e sujaria os contadores.
+    const auto hold_stages = diag::stage_snapshot();
 
     auto gc = attached.database->collect_garbage();
     if (!gc) {
@@ -1860,10 +1896,20 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
     phase.phase = "hold";
     phase.operations = n;
     phase.duration_ns = ns_between(hold_start, hold_end);
+    phase.ops_per_second =
+        phase.duration_ns > 0 ? (static_cast<double>(n) * 1'000'000'000.0) /
+                                    static_cast<double>(phase.duration_ns)
+                             : 0.0;
     phase.peak_rss_bytes = rss.peak();
     phase.db_bytes = size_error ? 0 : db_bytes;
     phase.retained_versions = retained_while_open;
     phase.errors = churn_errors;
+    // H5 finalmente mensurável: estágios da fase, latências por operação e a
+    // composição real do churn (incluindo o terço que não toca o banco).
+    phase.stages = hold_stages;
+    set_operation_latencies(phase, std::move(hold_latencies_ns));
+    phase.has_operation_classes = true;
+    phase.operation_classes = hold_classes;
     result.phases.push_back(phase);
 
     result.total_duration_ns = create_outcome.phase.duration_ns + phase.duration_ns;

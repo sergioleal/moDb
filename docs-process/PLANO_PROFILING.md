@@ -392,7 +392,7 @@ registrada para não ser reinvestigada.
 | — | H2 | pendente | — |
 | — | H3 | reforçada indiretamente por §9.1 | — |
 | — | H4 | pendente | — |
-| — | H5 | pendente | — |
+| 2026-08-03 | **H5 (retenção MVCC no `snapshot_hold`)** | **refutada** | a fase `hold` era 98% durabilidade de commit, não retenção — §9.3 |
 | — | H6 (leitura) | pendente | estágio `materialize` existe desde 2026-08-02; falta medir em Release |
 | 2026-08-02 | H6 (escrita, `to_field_values`) | **refutada** | o estágio `object_bind` move 0,3 p.p. de `create` — a conversão do Binding é barata ([PLANO_PROFILER.md §9.2](PLANO_PROFILER.md)) |
 | 2026-08-02 | **H7 (nova): commit reabre o WAL e faz fsync de dados 3–4× por transação** | **confirmada por instrumentação** | [PLANO_PROFILER.md §9.2](PLANO_PROFILER.md) |
@@ -453,6 +453,40 @@ matriz (update/delete/read) em 8 KiB antes de mexer no default.
 >
 > Um achado de perfil vale contra o código em que foi medido. Este ficou 5 dias
 > obsoleto.
+
+### 9.3 H5 — refutada; a fase `hold` era `fsync`, não retenção
+
+H5 era a hipótese mais antiga em aberto, e a razão de nunca ter sido medida
+apareceu ao tentar: **a fase `hold` não tinha instrumentação nenhuma** — sem
+reset de estágios, sem snapshot, sem tempo por operação. Como ela é ~98% da
+duração do caso, a hipótese era literalmente inmensurável, não apenas não
+medida.
+
+Instrumentada (`snapshot_hold.embedded.10k`, cobertura 93,5%):
+
+| | ns/op | fração da fase |
+|---|---|---|
+| `tx_commit` (envelope) | 1.371.850 | ~98% |
+| ↳ `page_file_sync` | 591.888 | |
+| ↳ `wal_sync` | 562.881 | |
+| ↳ `wal_append` | 124.096 | |
+| ↳ `buffer_pool_writeback` | 65.647 | |
+| `identity_lookup` + `heap_record_read` + `object_decode` | ~10.668 | **0,8%** |
+
+Os 6.666 registros retidos a 10k existem — a retenção é real. Ela só **não custa
+tempo**: o trabalho de resolver identidade, ler e decodificar sob retenção é 0,8%
+da fase. O que consome os 13,8 s são os ~6.666 commits do churn, a ~1,37 ms cada,
+e 98% disso é durabilidade (`fsync` de WAL e de dados).
+
+Consequência: `snapshot_hold` não é um caso de teste de MVCC do ponto de vista de
+desempenho — é mais um caso de custo de commit, como `mixed_oltp`. Para medir o
+custo *da retenção* seria preciso um workload que lê muito sob uma snapshot
+aberta em vez de commitar muito.
+
+Achado colateral: **um terço das "operações" da fase não toca o banco** (o ramo
+final do churn só preenche `final_expected`), então a vazão reportada estava
+~50% inflada. Agora contadas como `noop`, com os mesmos contadores por classe da
+§4.4 do plano do profiler.
 
 ### 9.2 Nota de procedência da série histórica
 

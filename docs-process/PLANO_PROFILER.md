@@ -303,6 +303,29 @@ certo.
 Ou seja: **entregar a razão configurável sem P1 e P4 torna o profiler menos
 útil do que ele é hoje.** A ordem da §6 não é preferência de estilo.
 
+## 4.7 Resultado das predições pré-registradas (medido em 2026-08-03)
+
+`mixed_oltp.embedded.10k`, RelWithDebInfo, 5 repetições, um processo por caso,
+work dir limpo por repetição:
+
+| `reads_per_write` | alcançado | vazão |
+|---|---|---|
+| 4 (comportamento antigo) | 3,99 | 2.544 ops/s (CV 3,2%) |
+| **10 (novo padrão)** | 10,26 | **5.747 ops/s** (CV 1,0%) |
+
+**Pred. 1 confirmada: 2,26× medido contra ~2,1× previsto**, escrito antes de
+rodar, com limite de refutação em 1,3×. O efeito do mix é dominado pelo commit.
+
+A premissa da Pred. 2 também se sustenta, e a atribuição por classe (§3.2) é o
+que permite ver isso: o custo **por escrita** praticamente não muda com a razão —
+`tx_commit` por create foi 1.882 µs a 4:1 e 1.841 µs a 10:1 (−2,2%, dentro dos
+~2% previstos), e leituras nunca commitam. Ou seja, não existe interação
+escondida; muda só a *frequência* de escrita. A aritmética fecha:
+
+- 4:1 → 10.014 escritas em 50.000 ops = 20,0%
+- 10:1 → 4.442 em 50.000 = 8,88%
+- razão das frações de escrita = **2,25×**, contra **2,26×** de vazão medida
+
 ## 5. Predições pré-registradas
 
 Escritas antes de rodar, como manda a §4 do plano de profiling. Uma predição
