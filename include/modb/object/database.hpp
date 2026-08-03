@@ -1056,7 +1056,15 @@ private:
     }
 
     [[nodiscard]] bool commit_is_durable() const noexcept { return commit_durable_; }
-    void require_recovery() noexcept { recovery_required_ = true; }
+    void require_recovery() noexcept {
+        recovery_required_ = true;
+        // A recuperação relê e reescreve o WAL por caminho; um handle nosso
+        // apontando para o estado anterior não pode sobreviver a isso.
+        open_wal_.reset();
+    }
+
+    // Devolve o WAL durável aberto, reabrindo se necessário. Ver `open_wal_`.
+    [[nodiscard]] Result<tx::Wal*> durable_wal();
 
     // Grava o buffer da transação no WAL, aplica-o e (em full) remove o WAL.
     [[nodiscard]] Result<void> commit_transaction(CommitPhase phase);
@@ -1478,6 +1486,16 @@ private:
     // Fábrica do arquivo do WAL; produção usa NativeFile, testes injetam falhas.
     tx::WalFileFactory wal_factory_{tx::open_native_wal_sink};
     bool custom_wal_factory_{false};
+    // Handle do WAL mantido aberto entre commits. Antes, `commit_transaction`
+    // chamava `Wal::open_durable` a cada transação -- dois `stat` e um
+    // CreateFile/close por commit, medidos em 1,83 ms por escrita
+    // (docs-process/PLANO_PROFILER.md §9.2), 42% do custo do commit.
+    //
+    // Invalidado explicitamente em `rollback_transaction` (que APAGA o arquivo,
+    // e o sink nativo abre sem FILE_SHARE_DELETE, então o remove falharia com o
+    // handle vivo) e em `require_recovery`. Fora disso, `durable_wal()` confere
+    // a invariante de LSN e reabre sozinho se ela quebrar -- ver lá.
+    std::optional<tx::Wal> open_wal_;
     // Follower read-only (Fase 14D): begin/escrita retornam replica_read_only.
     bool read_only_replica_{false};
     // Ativado após o sync do registro commit no WAL. A partir daí rollback não

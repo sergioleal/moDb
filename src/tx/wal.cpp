@@ -100,7 +100,11 @@ Result<std::vector<WalRecord>> read_wal_records(const std::filesystem::path& pat
         return std::unexpected(Error{ErrorCode::corrupt_file, "WAL is smaller than its header"});
     }
 
-    auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::open_existing);
+    // Somente leitura: este é o caminho de read_all/read_from/
+    // read_for_replication, e o escritor mantém o WAL aberto entre commits
+    // (Database::open_wal_) -- pedir GENERIC_WRITE aqui daria violação de
+    // compartilhamento.
+    auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::open_read_only);
     if (!file) {
         return std::unexpected(file.error());
     }

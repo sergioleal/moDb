@@ -29,6 +29,17 @@ public:
         create_new,
         // Abre um arquivo existente para leitura e escrita.
         open_existing,
+        // Abre um arquivo existente APENAS para leitura, e permite que outro
+        // processo/handle o mantenha aberto para escrita enquanto isso.
+        //
+        // Existe porque `open_existing` pede GENERIC_WRITE e concede só
+        // FILE_SHARE_READ: dois leitores coexistem, mas um leitor não coexiste
+        // com um escritor. Enquanto o WAL era reaberto a cada commit isso não
+        // aparecia -- havia uma janela sem handle de escrita. Com o handle
+        // mantido aberto (Database::open_wal_), qualquer leitura por caminho
+        // (recuperação, replicação, manifesto) colidiria. Pedir escrita para
+        // ler era, de todo modo, permissão a mais.
+        open_read_only,
     };
 
     // Um objeto recém-construído não possui descritor aberto.

@@ -43,7 +43,9 @@ Result<std::vector<std::byte>> read_all_bytes(const std::filesystem::path& path)
     if (ec) {
         return std::unexpected(Error{ErrorCode::io_error, "could not stat file: " + ec.message()});
     }
-    auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::open_existing);
+    // Leitura pura (hash do manifesto): não pede escrita, e assim coexiste com o
+    // WAL mantido aberto pelo escritor (Database::open_wal_).
+    auto file = storage::NativeFile::open(path, storage::NativeFile::Mode::open_read_only);
     if (!file) {
         return std::unexpected(file.error());
     }

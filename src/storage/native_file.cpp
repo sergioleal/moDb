@@ -63,9 +63,13 @@ bool NativeFile::is_open() const noexcept {
 Result<NativeFile> NativeFile::open(const std::filesystem::path& path, Mode mode) {
     // Cria falha se já existir; do contrário exige um arquivo existente.
     const DWORD disposition = (mode == Mode::create_new) ? CREATE_NEW : OPEN_EXISTING;
-    // Abre com leitura e escrita, permitindo apenas leitura concorrente.
-    const HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                                        FILE_SHARE_READ, nullptr, disposition,
+    const bool read_only = mode == Mode::open_read_only;
+    // Leitura pura não pede GENERIC_WRITE e compartilha amplamente, para
+    // coexistir com um escritor que mantenha o arquivo aberto.
+    const DWORD access = read_only ? GENERIC_READ : (GENERIC_READ | GENERIC_WRITE);
+    const DWORD share =
+        read_only ? (FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE) : FILE_SHARE_READ;
+    const HANDLE handle = ::CreateFileW(path.c_str(), access, share, nullptr, disposition,
                                         FILE_ATTRIBUTE_NORMAL, nullptr);
     // INVALID_HANDLE_VALUE indica falha; o motivo vem de GetLastError.
     if (handle == INVALID_HANDLE_VALUE) {
@@ -173,8 +177,10 @@ bool NativeFile::is_open() const noexcept {
 }
 
 Result<NativeFile> NativeFile::open(const std::filesystem::path& path, Mode mode) {
-    // Leitura e escrita; criação exclusiva quando o modo é create_new.
-    int flags = O_RDWR;
+    // Leitura e escrita; criação exclusiva quando o modo é create_new. POSIX não
+    // tem bloqueio obrigatório por padrão, então open_read_only aqui só deixa de
+    // pedir escrita -- não há colisão a evitar como no Windows.
+    int flags = mode == Mode::open_read_only ? O_RDONLY : O_RDWR;
     if (mode == Mode::create_new) {
         flags |= O_CREAT | O_EXCL;
     }

@@ -375,6 +375,30 @@ Result<Transaction> Database::begin() {
     return Transaction{database_id_};
 }
 
+Result<tx::Wal*> Database::durable_wal() {
+    const auto expected_lsn = store_.next_lsn();
+    // Cache auto-corretivo. A alternativa seria provar, por inspeção de todos os
+    // caminhos, que o LSN do handle nunca divergisse do persistido no DBRT --
+    // frágil, porque rollback, recovery e os failpoints de CommitPhase
+    // reconstroem `store_` por baixo. Conferir a invariante custa uma comparação
+    // por commit e faz o caminho cacheado se comportar exatamente como a
+    // reabertura por commit sempre que ela quebrar.
+    if (open_wal_ && open_wal_->next_lsn() != expected_lsn) {
+        open_wal_.reset();
+    }
+    if (!open_wal_) {
+        auto opened =
+            wal_io_ == WalIoMode::async
+                ? tx::Wal::open_durable(wal_path_, expected_lsn, tx::open_async_wal_sink)
+                : tx::Wal::open_durable(wal_path_, expected_lsn);
+        if (!opened) {
+            return std::unexpected(opened.error());
+        }
+        open_wal_ = std::move(*opened);
+    }
+    return &*open_wal_;
+}
+
 Result<void> Database::commit_transaction(CommitPhase phase) {
     if (!file_->in_transaction()) {
         return std::unexpected(
@@ -390,18 +414,26 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
         // WAL v2 durável: append no arquivo existente com LSN global do DBRT.
         // Failpoints ainda usam a fábrica injetável; se a fábrica for a nativa
         // efêmera (create), open_durable não é usado — detectamos pela factory.
-        Result<tx::Wal> wal = [&]() -> Result<tx::Wal> {
-            if (custom_wal_factory_) {
-                // Failpoint: recria por commit (comportamento efêmero dos testes).
-                return tx::Wal::create(wal_path_, wal_factory_);
+        //
+        // O caminho normal REUSA um handle aberto (`durable_wal`), em vez de
+        // reabrir o arquivo por commit. O failpoint continua recriando por
+        // commit, porque é justamente o comportamento efêmero que os testes de
+        // falha esperam -- e por isso ele nunca é cacheado.
+        std::optional<tx::Wal> ephemeral_wal;
+        tx::Wal* wal = nullptr;
+        if (custom_wal_factory_) {
+            auto created = tx::Wal::create(wal_path_, wal_factory_);
+            if (!created) {
+                return std::unexpected(created.error());
             }
-            if (wal_io_ == WalIoMode::async) {
-                return tx::Wal::open_durable(wal_path_, store_.next_lsn(), tx::open_async_wal_sink);
+            ephemeral_wal = std::move(*created);
+            wal = &*ephemeral_wal;
+        } else {
+            auto reused = durable_wal();
+            if (!reused) {
+                return std::unexpected(reused.error());
             }
-            return tx::Wal::open_durable(wal_path_, store_.next_lsn());
-        }();
-        if (!wal) {
-            return std::unexpected(wal.error());
+            wal = *reused;
         }
         if (auto appended = wal->append_begin(current_tx_id_); !appended) {
             return std::unexpected(appended.error());
@@ -479,6 +511,11 @@ Result<void> Database::rollback_transaction() {
     // que nunca durável) nunca deve ser reatribuído a outro objeto (ADR-001).
     const auto watermark_before_rollback = store_.next_object_id_watermark();
     file_->discard_transaction();
+    // Fecha o handle ANTES do remove: o sink nativo abre sem FILE_SHARE_DELETE,
+    // então apagar o arquivo com ele vivo falharia -- e `remove_error` é
+    // ignorado logo abaixo, o que tornaria a falha invisível e deixaria um WAL
+    // residual que a próxima abertura leria como estado válido.
+    open_wal_.reset();
     std::error_code remove_error;
     std::filesystem::remove(wal_path_, remove_error);
     // O buffer de páginas do PageFile já foi descartado (o arquivo voltou ao

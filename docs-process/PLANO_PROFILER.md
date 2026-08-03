@@ -441,6 +441,41 @@ candidatos com teto grande e correção barata, e nenhum dos dois aparecia em H1
 `create`: a conversão do Binding é barata. Predição implícita de H6 para o
 caminho de escrita, refutada.
 
+### 9.2.1 Ação: WAL mantido aberto entre commits — medida
+
+`Wal::open_durable` deixou de ser chamado por commit; `Database` guarda o handle
+em `open_wal_`, com invariante de LSN conferida a cada uso (se o LSN do handle
+divergir do persistido no DBRT, o handle é descartado e reaberto — o caminho
+cacheado passa a se comportar como a reabertura por commit exatamente nos casos
+em que ela era necessária).
+
+`mixed_oltp.embedded.1k`, RelWithDebInfo, um processo por caso, 3 repetições:
+
+| | antes | depois | |
+|---|---|---|---|
+| `mixed_oltp` | 3.056 ops/s | **6.150 ops/s** | **2,01×** |
+| `create` | 45.432 ops/s | 47.569 ops/s | +4,7%, dentro do CV (7–11%) |
+
+`tx_commit` caiu de 348.142 para 144.429 ns/op (2,4×) e `wal_open` saiu do
+ranking. O ganho superou o teto estimado de ~1,7× porque o custo era o par
+open+close, não só o open. `create` quase não muda, como previsto: com
+`batch=1000` a reabertura era amortizada por mil operações.
+
+Duas correções foram necessárias para isso funcionar, e valem por si:
+`NativeFile` ganhou `Mode::open_read_only` (antes, *ler* um arquivo pedia
+`GENERIC_WRITE` e concedia só `FILE_SHARE_READ`, então nenhum leitor coexistia
+com um escritor), e os leitores puros do WAL passaram a usá-lo — o de
+`read_all`/`read_from`/`read_for_replication` e o do hash do manifesto de
+replicação. Sem isso, 9 testes falhavam por violação de compartilhamento.
+
+O rollback apaga o arquivo do WAL e o sink nativo não concede
+`FILE_SHARE_DELETE`, então `rollback_transaction` fecha o handle antes do
+`remove` — sem isso o `remove` falharia em silêncio (o `error_code` é ignorado)
+e deixaria um WAL residual que a próxima abertura leria como estado válido.
+
+**Novo #1 do commit:** `page_file_sync`, 77.884 ns/op, 54% do que restou de
+`tx_commit`.
+
 ### 9.3 Onde a cobertura ainda não fecha, e por quê
 
 `crud_full` a 10k, depois da correção de aninhamento:
