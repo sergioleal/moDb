@@ -5,6 +5,10 @@
 // Política major/minor do superbloco (Fase 10E).
 #include "modb/compatibility.hpp"
 
+// Sondas de atribuição de tempo; sem custo quando MODB_ENABLE_STAGE_PROFILING
+// está desligado (docs-process/PLANO_PROFILING.md, Etapa 1).
+#include "modb/diag/stage_profile.hpp"
+
 // Disponibiliza algoritmos como copy e equal.
 #include <algorithm>
 // Disponibiliza blocos de tamanho fixo.
@@ -310,9 +314,12 @@ Result<void> PageFile::read(PageId id, Page& destination) {
     }
 
     // Read-your-writes: durante uma transação, uma página já modificada é
-    // servida do buffer, não do disco (que ainda tem a versão anterior).
+    // servida do buffer, não do disco (que ainda tem a versão anterior). Conta
+    // como buffer_pool_hit: vem de memória, sem syscall.
     if (in_transaction_) {
         if (const auto found = tx_pages_.find(id.value); found != tx_pages_.end()) {
+            diag::ScopedStage stage{diag::Stage::buffer_pool_hit};
+            stage.add_units(page_size);
             std::copy(found->second.bytes().begin(), found->second.bytes().end(),
                       destination.bytes().begin());
             return {};
@@ -321,6 +328,8 @@ Result<void> PageFile::read(PageId id, Page& destination) {
 
     // Acerto de cache: copia a página já residente e evita a syscall.
     if (const Page* cached = cache_->get(id.value)) {
+        diag::ScopedStage stage{diag::Stage::buffer_pool_hit};
+        stage.add_units(page_size);
         std::copy(cached->bytes().begin(), cached->bytes().end(), destination.bytes().begin());
         return {};
     }
@@ -328,6 +337,7 @@ Result<void> PageFile::read(PageId id, Page& destination) {
     // Erro de cache: traz a página pedida e as seguintes numa única leitura
     // maior (read-ahead), limitada ao fim lógico do arquivo. Favorece varreduras
     // sequenciais e o acesso repetido à mesma página (ex.: IDMP compartilhada).
+    diag::ScopedStage stage{diag::Stage::buffer_pool_miss};
     const std::uint64_t first = id.value;
     const std::uint64_t available = page_count_ - first;
     const std::size_t count =
@@ -335,6 +345,9 @@ Result<void> PageFile::read(PageId id, Page& destination) {
     // Buffer contíguo para a leitura única; só a parte preenchida é usada.
     std::array<std::byte, page_readahead * page_size> buffer;
     const std::span<std::byte> block{buffer.data(), count * page_size};
+    // Bytes que saem do disco de verdade -- incluindo o read-ahead, que é o
+    // custo real da syscall mesmo quando o chamador pediu uma página só.
+    stage.add_units(block.size());
     if (auto read = file_.read_at(page_offset(id), block); !read) {
         return std::unexpected(read.error());
     }
@@ -389,6 +402,7 @@ void PageFile::discard_transaction() noexcept {
 }
 
 Result<void> PageFile::apply_transaction() {
+    diag::ScopedStage stage{diag::Stage::buffer_pool_writeback};
     // Aplica cada página suja ao disco somente depois que o chamador tornou o
     // WAL durável — write-back ordenado WAL → páginas.
     std::size_t applied = 0;
@@ -405,6 +419,7 @@ Result<void> PageFile::apply_transaction() {
         }
         ++applied;
     }
+    stage.add_units(applied * page_size);
     cache_->record_dirty_flushes(applied);
     // write_at já fez put limpo; remove qualquer residual dirty do pool.
     cache_->discard_dirty();
@@ -432,6 +447,7 @@ Result<void> PageFile::write_recovered_page(PageId id, const Page& page) {
 
 // Persiste no dispositivo todas as escritas já aceitas (durabilidade real).
 Result<void> PageFile::flush() {
+    diag::ScopedStage stage{diag::Stage::page_file_sync};
     // Delega ao descritor nativo, que chama FlushFileBuffers/fsync.
     return file_.sync();
 }

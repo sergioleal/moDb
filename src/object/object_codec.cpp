@@ -8,6 +8,10 @@
 // Importa o helper de visitação exaustiva de variant.
 #include "modb/detail/overloaded.hpp"
 
+// Sondas de atribuição de tempo; sem custo quando MODB_ENABLE_STAGE_PROFILING
+// está desligado (docs-process/PLANO_PROFILING.md, Etapa 1).
+#include "modb/diag/stage_profile.hpp"
+
 // Disponibiliza std::min ao limitar a reserva de campos.
 #include <algorithm>
 // Disponibiliza std::bit_cast para int64/float64 <-> u64 sem UB.
@@ -247,6 +251,7 @@ Result<FieldValues> decode_object_payload(std::span<const std::byte> payload) {
 
 Result<std::vector<std::byte>> encode_object(ObjectId id, TypeDefinitionId type,
                                              const FieldValues& fields) {
+    diag::ScopedStage stage{diag::Stage::object_encode};
     auto payload = encode_object_payload(fields);
     if (!payload) {
         return std::unexpected(payload.error());
@@ -255,10 +260,13 @@ Result<std::vector<std::byte>> encode_object(ObjectId id, TypeDefinitionId type,
     writer.write_u64(id.value);
     writer.write_u64(type.value);
     writer.write_bytes(*payload);
+    stage.add_units(payload->size());
     return std::move(writer).take();
 }
 
 Result<DecodedObject> decode_object(std::span<const std::byte> record) {
+    diag::ScopedStage stage{diag::Stage::object_decode};
+    stage.add_units(record.size());
     storage::BinaryReader reader{record};
 
     auto id = reader.read_u64();

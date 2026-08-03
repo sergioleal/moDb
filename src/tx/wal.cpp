@@ -260,6 +260,7 @@ Result<Wal> Wal::open_durable(const std::filesystem::path& path, std::uint64_t s
 
 Result<Wal> Wal::open_durable(const std::filesystem::path& path, std::uint64_t starting_lsn,
                               const WalFileFactory& append_factory) {
+    diag::ScopedStage stage{diag::Stage::wal_open};
     if (starting_lsn == 0) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "starting_lsn must be >= 1"});
     }

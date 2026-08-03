@@ -52,7 +52,8 @@ enum class DeleteOrder { Forward, Reverse, Interleaved };
                                                           std::filesystem::path& out_db_path);
 
 // mixed_oltp (§4.2.1): cria um working set inicial, depois `params.concurrency`
-// threads emitindo create/read/update/delete (proporção fixa 5/80/10/5) contra
+// threads emitindo create/read/update/delete na razão `params.reads_per_write`
+// (padrão 10 leituras por escrita; escritas repartidas 25/50/25) contra
 // o MESMO banco, serializadas por um mutex (o motor é single-thread, ADR-011)
 // -- contenção real na fila de entrada, não paralelismo real dentro do motor.
 // Fecha a dívida D1 para `--concurrency` (docs-process/PLANO_IMPLEMENTACAO_CARGA.md).

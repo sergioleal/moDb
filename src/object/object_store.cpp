@@ -5,6 +5,10 @@
 #include "modb/index/btree.hpp"
 #include "modb/index/key_codec.hpp"
 
+// Sondas de atribuição de tempo; sem custo quando MODB_ENABLE_STAGE_PROFILING
+// está desligado (docs-process/PLANO_PROFILING.md, Etapa 1).
+#include "modb/diag/stage_profile.hpp"
+
 // Disponibiliza std::min no comparador de bytes.
 #include <algorithm>
 // Disponibiliza o limite do espaço de ObjectIds.
@@ -488,8 +492,12 @@ bool bytes_less(std::span<const std::byte> a, std::span<const std::byte> b) {
 Result<void> ObjectStore::index_maintain(const std::string& type_name, ObjectId id,
                                          const FieldValues& fields, bool insert) {
     if (!indexes_) {
+        // Sem índices declarados não há estágio: um registro de zeros se leria
+        // como "medi a manutenção de índice e ela não custou nada", quando o que
+        // houve foi não existir índice nenhum para manter.
         return {};
     }
+    diag::ScopedStage stage{diag::Stage::index_update};
     for (std::size_t slot = 0; slot < indexes_->indexes().size(); ++slot) {
         const auto& info = indexes_->indexes()[slot];
         if (info.type_name != type_name) {
@@ -499,6 +507,7 @@ Result<void> ObjectStore::index_maintain(const std::string& type_name, ObjectId 
         if (value == nullptr || value->is_null()) {
             continue;  // nulos não entram no índice
         }
+        stage.add_units(1);   // chave de índice efetivamente tocada
         auto key = index::encode_key(*value);
         if (!key) {
             return std::unexpected(key.error());

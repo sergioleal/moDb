@@ -294,6 +294,108 @@ void test_mixed_oltp_single_threaded(TestSuite& suite) {
     suite.check(result.hash_match, "reconciliação deve conferir com uma única sessão: " + result.error);
 }
 
+// PLANO_PROFILER.md §4.4: o mix ALCANÇADO tem que ser observável. Antes desta
+// mudança o worker degradava em silêncio -- com o conjunto vivo vazio,
+// read/update/delete não faziam nada e ainda contavam como operação executada,
+// então não havia como saber se a corrida rodou a razão pedida.
+void test_mixed_oltp_achieved_mix_matches_configured(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    auto params = small_params(work_dir, /*object_count=*/300, /*batch=*/50);
+    params.reads_per_write = 10;
+    std::filesystem::path db_path;
+    auto result = run_mixed_oltp_embedded(params, db_path);
+
+    suite.check(result.ok, "mixed_oltp 10:1 deve completar: " + result.error);
+    if (result.phases.size() != 2) {
+        return;
+    }
+    const auto& phase = result.phases[1];
+    suite.check(phase.has_operation_classes,
+               "a fase de mix deve preencher o bloco de classes de operação");
+    suite.check(phase.reads_per_write_configured == 10,
+               "a razão configurada deve ser registrada junto do resultado");
+
+    std::uint64_t total = 0;
+    for (const auto& c : phase.operation_classes) {
+        total += c.operations;
+    }
+    suite.check(total == phase.operations,
+               "as contagens por classe devem somar exatamente as operações da fase");
+
+    // Com um conjunto vivo saudável não deve haver degradação silenciosa; se
+    // houvesse, seria justamente isto que o contador `noop` tornaria visível.
+    suite.check(phase.operation_classes[static_cast<std::size_t>(OperationClass::noop)].operations ==
+                   0,
+               "com conjunto vivo não vazio nenhuma operação deve degradar para noop");
+
+    const auto achieved = achieved_reads_per_write(phase.operation_classes);
+    suite.check(achieved > 8.0 && achieved < 12.5,
+               "a razão alcançada deve ficar perto da configurada (10), medido: " +
+                   std::to_string(achieved));
+}
+
+// reads_per_write=0 significa "só escrita" -- um valor legítimo, e o caso em
+// que um limiar em ponto flutuante teria errado.
+void test_mixed_oltp_write_only_ratio(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    auto params = small_params(work_dir, /*object_count=*/200, /*batch=*/37);
+    params.reads_per_write = 0;
+    std::filesystem::path db_path;
+    auto result = run_mixed_oltp_embedded(params, db_path);
+
+    suite.check(result.ok, "mixed_oltp com reads_per_write=0 deve completar: " + result.error);
+    if (result.phases.size() != 2) {
+        return;
+    }
+    const auto& classes = result.phases[1].operation_classes;
+    suite.check(classes[static_cast<std::size_t>(OperationClass::read)].operations == 0,
+               "reads_per_write=0 não pode produzir nenhuma leitura");
+    suite.check(classes[static_cast<std::size_t>(OperationClass::create)].operations > 0 &&
+                   classes[static_cast<std::size_t>(OperationClass::update)].operations > 0,
+               "reads_per_write=0 deve continuar emitindo as três classes de escrita");
+}
+
+// Risco 2 de PLANO_PROFILER.md §7: um estágio novo aninhado dentro de outro
+// quebraria `attributed_ns` sem aviso -- a cobertura passaria de 100% e o
+// resíduo viraria lixo em vez de resultado. Este teste é a rede: se alguém
+// instrumentar um estágio dentro de outro sem marcá-lo como envelope, a
+// fração passa de 1,0 e isto falha.
+//
+// Num build sem MODB_ENABLE_STAGE_PROFILING os contadores ficam zerados e a
+// checagem é vacuamente verdadeira -- por isso ela é acompanhada da checagem
+// de que o build instrumentado de fato produziu dados.
+void test_attributed_fraction_never_exceeds_one(TestSuite& suite) {
+    auto work_dir = make_temp_work_dir();
+    auto params = small_params(work_dir, /*object_count=*/300, /*batch=*/50);
+    std::filesystem::path db_path;
+    auto result = run_mixed_oltp_embedded(params, db_path);
+    suite.check(result.ok, "mixed_oltp deve completar para a checagem de cobertura: " + result.error);
+
+    for (const auto& phase : result.phases) {
+        const auto attributed = attributed_ns(phase.stages);
+        suite.check(attributed <= phase.duration_ns,
+                   "tempo atribuído não pode exceder a duração da fase '" + phase.phase +
+                       "' (estágio aninhado sem marcação de envelope?): " +
+                       std::to_string(attributed) + " > " + std::to_string(phase.duration_ns));
+
+        // A mesma invariante vale por classe de operação: os baldes vêm de
+        // diferenças de snapshot, e um envelope contado como folha estouraria
+        // aqui primeiro.
+        if (!phase.has_operation_classes) {
+            continue;
+        }
+        for (std::size_t c = 0; c < operation_class_count; ++c) {
+            suite.check(attributed_ns(phase.operation_classes[c].stages) <= phase.duration_ns,
+                       "tempo atribuído a uma classe não pode exceder a duração da fase");
+        }
+    }
+
+    if (modb::diag::stage_profiling_enabled) {
+        suite.check(has_stage_data(result.phases.back().stages),
+                   "num build com MODB_ENABLE_STAGE_PROFILING a fase de mix deve produzir estágios");
+    }
+}
+
 // Subfase N (§4.2.1): a leitura pela snapshot aberta não pode mudar durante
 // o churn, e o estado pós-fechamento (sem snapshot) precisa refletir o
 // churn de verdade.
@@ -508,6 +610,9 @@ int main() {
     test_range_scan_sweep(suite);
     test_mixed_oltp_concurrent(suite);
     test_mixed_oltp_single_threaded(suite);
+    test_mixed_oltp_achieved_mix_matches_configured(suite);
+    test_mixed_oltp_write_only_ratio(suite);
+    test_attributed_fraction_never_exceeds_one(suite);
     test_snapshot_hold(suite);
     test_snapshot_hold_retained_versions_excludes_extra_objects(suite);
     test_blob_lifecycle(suite);

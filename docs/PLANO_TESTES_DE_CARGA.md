@@ -164,7 +164,7 @@ ladder — these require explicit selection via `--workload` or the
 |---|---|---|---|
 | `read_hotspot` | create → read (Zipf over a fixed working set) | buffer pool/page cache pressure under skewed reads | read values == expected; cache hit rate recorded |
 | `range_scan_sweep` | create → scan (selectivity 0.01%–100%) | index vs. full-scan cost as selectivity and volume vary | returned count == expected per selectivity; plan (index/scan) recorded |
-| `mixed_oltp` | single phase, concurrent sessions emitting create/read/update/delete at a configured ratio (default 5/80/10/5) | real contention and tail latency under a mix — not under one isolated, repeated operation | final count reconciles (created − removed); deterministic sample checksum matches |
+| `mixed_oltp` | single phase, concurrent sessions emitting create/read/update/delete at a configured ratio (`--reads-per-write`, default 10 reads per write; writes split 25/50/25) | real contention and tail latency under a mix — not under one isolated, repeated operation | final count reconciles (created − removed); deterministic sample checksum matches; achieved mix recorded per class and compared to the configured ratio |
 | `snapshot_hold` | create → open snapshot(s) → churn (create/update/delete) → close snapshot(s) | MVCC version retention under real volume and duration, GC on close | reading through the open snapshot stays identical to the state at open throughout the churn; retained versions and bytes recorded |
 | `blob_lifecycle` | create (with blob) → read/stream → grow → shrink → delete | `BlobStore` under varying volume and sizes (1, 16, 256 MiB) | byte-for-byte hash of the read blob == written; space reclaimed after delete |
 | `cascade_delete` | create_hierarchy (depth × width) → cascade_delete (root) | referential integrity and cascade-removal cost scaling with descendant count | zero orphan refs; total removed == total created |
@@ -191,7 +191,8 @@ criterion becomes part of the phase name itself, not a new schema field.
 reads `c.concurrency` — this closes debt D1 for that dimension
 (`unimplemented_dimension_reason` now only rejects concurrency≠1 for other
 workloads). `params.concurrency` sessions (real `std::thread`s) emit
-create/read/update/delete (5/80/10/5) against the SAME `Database`, each
+create/read/update/delete at `reads_per_write` (default 10:1, writes split
+25/50/25) against the SAME `Database`, each
 whole operation (begin+engine+commit+bookkeeping) under a single
 `std::mutex` — the engine is single-threaded (ADR-011), so this is real
 contention on the entry queue, not real parallelism inside the engine (the
@@ -456,6 +457,7 @@ Fixed at a default value; varied only for cases targeting a specific risk.
 | user payload | `slim` (~64 B), `normal` (~256 B), `fat` (~4 KiB) | `normal` |
 | objects per commit | 1, 100, 1,000, 10,000 | 1,000 |
 | concurrent sessions | 1, 4, 16 | 1 |
+| reads per write (`mixed_oltp` only) | 0 (write-only), 4, 10, 20 | 10 |
 | concurrent readers during write | 0, 2, 8 | 0 |
 | durability | `sync_real`, `disabled_diagnostic` | `sync_real` |
 | cache | `warm`, `database_reopen`, `oversubscribed` | `warm` |

@@ -59,6 +59,10 @@ struct Case {
     std::string durability{"sync_real"};
     std::string cache{"warm"};
     std::string primary_storage{"full"};
+    // PLANO_PROFILER.md §4.2: leituras por escrita no mix do `mixed_oltp`.
+    // Padrão 10 -- antes a razão era literal no código (4:1) e a documentação
+    // já prometia "a configured ratio" que não existia.
+    std::uint64_t reads_per_write{10};
     std::uint64_t repeat_index{0};
 
     // Sufixo explícito, só usado quando o caso veio de `--case` com uma
@@ -87,6 +91,7 @@ struct MatrixSelectors {
     std::vector<std::string> environment;   // cross-product quando > 1 valor
     std::vector<std::string> concurrency;   // idem
     std::vector<std::string> payload;       // idem
+    std::vector<std::string> reads_per_write;   // idem (PLANO_PROFILER.md §4.2)
     std::vector<std::string> case_ids;      // --case; substitui perfil e demais seletores de D1-D3
     std::vector<std::string> exclude;       // substring, subtrai por último
     std::string filter;                     // substring no case_id

@@ -176,6 +176,9 @@ std::string Case::case_id() const {
         if (primary_storage != "full") {
             parts.push_back("walonly");
         }
+        if (reads_per_write != 10) {
+            parts.push_back("rw" + std::to_string(reads_per_write));
+        }
         for (const auto& p : parts) {
             if (!suffix.empty()) {
                 suffix += "_";
@@ -209,6 +212,14 @@ std::string unimplemented_dimension_reason(const Case& c) {
         return "concurrency=" + std::to_string(c.concurrency) +
                " ainda não tem dispatch implementado para o workload '" + c.workload +
                "' (só 'mixed_oltp' desde a Subfase M) -- " + c.case_id();
+    }
+    // Mesma disciplina de `concurrency` acima (dívida D1): só `mixed_oltp` lê
+    // `reads_per_write`. Prometer um `case_id` com `.rw20` que o runtime ignora
+    // é exatamente o que esta checagem existe para evitar.
+    if (c.reads_per_write != 10 && c.workload != "mixed_oltp") {
+        return "reads_per_write=" + std::to_string(c.reads_per_write) +
+               " ainda não tem dispatch implementado para o workload '" + c.workload +
+               "' (só 'mixed_oltp') -- " + c.case_id();
     }
     if (c.readers != 0) {
         return "readers=" + std::to_string(c.readers) +
@@ -326,6 +337,12 @@ ExpandResult expand_matrix(const std::vector<Case>& profile_cases,
                            });
     working = cross_expand(std::move(working), selectors.payload,
                            [](Case& c, const std::string& v) { c.payload = v; });
+    working = cross_expand(std::move(working), selectors.reads_per_write,
+                           [](Case& c, const std::string& v) {
+                               if (auto n = parse_u64(v)) {
+                                   c.reads_per_write = *n;
+                               }
+                           });
 
     if (selectors.repeat > 1) {
         std::vector<Case> repeated;

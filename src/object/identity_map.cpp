@@ -4,6 +4,10 @@
 // Importa store_le/load_le para os campos das páginas.
 #include "modb/storage/endian.hpp"
 
+// Sondas de atribuição de tempo; sem custo quando MODB_ENABLE_STAGE_PROFILING
+// está desligado (docs-process/PLANO_PROFILING.md, Etapa 1).
+#include "modb/diag/stage_profile.hpp"
+
 // Disponibiliza std::equal ao validar o magic.
 #include <algorithm>
 // Disponibiliza o bloco fixo das assinaturas.
@@ -408,6 +412,9 @@ Result<void> IdentityMap::bind(ObjectId id, storage::RecordId record, std::uint6
 }
 
 Result<storage::RecordId> IdentityMap::find(ObjectId id) const {
+    diag::ScopedStage stage{diag::Stage::identity_lookup};
+    // Uma página de diretório (IDMP) por resolução -- a que contém a entrada.
+    stage.add_units(1);
     const auto entry_page = id.value / entries_per_idmp;
     const auto entry_index = id.value % entries_per_idmp;
 
@@ -435,6 +442,8 @@ Result<storage::RecordId> IdentityMap::find(ObjectId id) const {
 }
 
 Result<storage::RecordId> IdentityMap::find_at(ObjectId id, std::uint64_t snapshot_epoch) const {
+    diag::ScopedStage stage{diag::Stage::identity_lookup};
+    stage.add_units(1);
     const auto entry_page = id.value / entries_per_idmp;
     const auto entry_index = id.value % entries_per_idmp;
 

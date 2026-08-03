@@ -1319,21 +1319,38 @@ struct MixedOltpSharedState {
     std::uint64_t deleted{0};
     std::uint64_t errors{0};
     std::vector<double> latencies_ns;
+    // Mix alcançado + estágios atribuídos por classe (PLANO_PROFILER.md
+    // §3.2/§4.4). Protegido pelo mesmo `mutex`, como todo o resto.
+    OperationClassBreakdown by_class{};
 };
 
-// Uma sessão do mixed_oltp: `ops` operações na proporção fixa 5/80/10/5
-// (create/read/update/delete, §4.2.1). Cada operação inteira -- begin,
-// engine, commit, contabilidade -- roda sob `state.mutex`: contenção real na
-// fila de entrada do motor single-thread, não paralelismo real dentro dele.
+// Uma sessão do mixed_oltp: `ops` operações na razão `reads_per_write`
+// (PLANO_PROFILER.md §4.2). Cada operação inteira -- begin, engine, commit,
+// contabilidade -- roda sob `state.mutex`: contenção real na fila de entrada do
+// motor single-thread, não paralelismo real dentro dele.
 void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, std::uint64_t ops,
-                       std::uint64_t base_seed, std::uint64_t rng_seed, std::string payload) {
+                       std::uint64_t base_seed, std::uint64_t rng_seed, std::string payload,
+                       std::uint64_t reads_per_write) {
     std::mt19937_64 rng(rng_seed);
-    std::uniform_real_distribution<double> action(0.0, 1.0);
     std::uniform_int_distribution<int> status_dist(0, 2);
     const auto filler_bytes = filler_bytes_for_payload(payload);
 
     for (std::uint64_t i = 0; i < ops; ++i) {
-        const double r = action(rng);
+        // Seleção por inteiro, não por limiar em ponto flutuante (§4.2): assim
+        // as frações são racionais exatas, e reads_per_write=0 significa "só
+        // escrita" -- um valor legítimo, não um caso degenerado.
+        OperationClass intended;
+        if (rng() % (reads_per_write + 1) != 0) {
+            intended = OperationClass::read;
+        } else {
+            // Composição interna das escritas preservada: os antigos 5/10/5 são
+            // 25%/50%/25% das escritas. Mantida como estava para que mudar a
+            // razão mude UMA variável.
+            const auto pick = rng() % 4;
+            intended = pick == 0   ? OperationClass::create
+                       : pick == 3 ? OperationClass::remove
+                                   : OperationClass::update;
+        }
         const auto op_start = std::chrono::steady_clock::now();
         // A operação inteira roda dentro de try/catch: qualquer exceção
         // (ex.: um `.at()` sem chave por um bug de invariante) escapando de
@@ -1344,8 +1361,19 @@ void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, 
         try {
         std::lock_guard<std::mutex> lock(state.mutex);
 
-        if (r < 0.05) {
-            // create (5%)
+        // Uma classe pretendida que não pode ser executada vira `noop` e é
+        // contada como tal (§4.4): antes, read/update/delete com o conjunto vivo
+        // vazio não faziam nada e ainda contavam como operação executada, o que
+        // tornava a razão alcançada invisível.
+        const auto actual = (intended != OperationClass::create && state.live_ids.empty())
+                                ? OperationClass::noop
+                                : intended;
+        // Atribuição por classe pela diferença de dois snapshots (§3.2): custo
+        // zero dentro do motor, e correto sem sincronização nova porque a
+        // operação inteira roda sob este lock.
+        const auto stages_before = diag::stage_snapshot();
+
+        if (actual == OperationClass::create) {
             const auto logical_id = ++state.next_logical_id;
             const auto generated = generate_user(base_seed, logical_id, payload);
             auto tx = attached.database->begin();
@@ -1364,8 +1392,7 @@ void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, 
                     ++state.created;
                 }
             }
-        } else if (r < 0.85 && !state.live_ids.empty()) {
-            // read (80%)
+        } else if (actual == OperationClass::read) {
             const auto idx = rng() % state.live_ids.size();
             auto handle = attached.database->get<User>(state.live_ids[idx]);
             if (!handle) {
@@ -1373,8 +1400,7 @@ void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, 
             } else if (auto value = attached.database->materialize(*handle); !value) {
                 ++state.errors;
             }
-        } else if (r < 0.95 && !state.live_ids.empty()) {
-            // update (10%)
+        } else if (actual == OperationClass::update) {
             const auto idx = rng() % state.live_ids.size();
             const auto object_id = state.live_ids[idx];
             const auto logical_id = state.logical_id_of.at(object_id.value);
@@ -1397,8 +1423,7 @@ void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, 
                     state.expected[logical_id] = new_value;
                 }
             }
-        } else if (!state.live_ids.empty()) {
-            // delete (5%, ou sobra de read/update quando live_ids esvaziou)
+        } else if (actual == OperationClass::remove) {
             const auto idx = rng() % state.live_ids.size();
             const auto object_id = state.live_ids[idx];
             auto tx = attached.database->begin();
@@ -1417,6 +1442,10 @@ void mixed_oltp_worker(AttachedDatabase& attached, MixedOltpSharedState& state, 
                 ++state.deleted;
             }
         }
+
+        auto& bucket = state.by_class[static_cast<std::size_t>(actual)];
+        ++bucket.operations;
+        diag::stage_accumulate_delta(bucket.stages, stages_before, diag::stage_snapshot());
 
         const auto op_end = std::chrono::steady_clock::now();
         state.latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
@@ -1472,6 +1501,10 @@ CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
     // contabilidade em memória só acumula), então limitar por início/fim
     // captura o pico sem sincronização.
     RssTracker rss;
+    // A fase de create já terminou (o WindowTracker dela foi destruído), então
+    // os contadores de estágio zeram aqui para medir só a fase de mix. Esta fase
+    // não usa WindowTracker -- é multithread -- então o reset é explícito.
+    diag::stage_reset();
     const auto mixed_start = std::chrono::steady_clock::now();
     {
         std::vector<std::thread> threads;
@@ -1479,13 +1512,15 @@ CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
         for (std::uint64_t t = 0; t < concurrency; ++t) {
             const auto rng_seed = params.seed ^ (0x9E37'79B9'7F4A'7C15ULL * (t + 1));
             threads.emplace_back(mixed_oltp_worker, std::ref(attached), std::ref(state),
-                                 ops_per_thread, params.seed, rng_seed, params.payload);
+                                 ops_per_thread, params.seed, rng_seed, params.payload,
+                                 params.reads_per_write);
         }
         for (auto& th : threads) {
             th.join();
         }
     }
     const auto mixed_end = std::chrono::steady_clock::now();
+    const auto mixed_stages = diag::stage_snapshot();
 
     // Reconciliação independente (§4.2.1 "contagem final reconcilia"): conta
     // de verdade quantos `User` existem no banco -- não só confia na
@@ -1560,6 +1595,12 @@ CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
     phase.errors = state.errors;
     phase.latency_ns = percentiles_of(std::move(state.latencies_ns));
     phase.peak_rss_bytes = rss.peak();
+    phase.stages = mixed_stages;
+    // Mix alcançado e estágios por classe (§3.2/§4.4). Este é o único workload
+    // de fase única com mix, e portanto o único que preenche o bloco.
+    phase.has_operation_classes = true;
+    phase.operation_classes = state.by_class;
+    phase.reads_per_write_configured = params.reads_per_write;
     std::error_code size_error;
     const auto db_bytes = std::filesystem::file_size(db_path, size_error);
     phase.db_bytes = size_error ? 0 : db_bytes;

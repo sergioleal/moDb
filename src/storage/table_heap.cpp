@@ -511,6 +511,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
 
 // Lê um RecordId usando o índice de páginas validado ao abrir o heap.
 Result<std::vector<std::byte>> TableHeap::read(RecordId id) {
+    diag::ScopedStage stage{diag::Stage::heap_record_read};
     if (!page_ids_.contains(id.page.value)) {
         return std::unexpected(Error{
             ErrorCode::record_not_found,
@@ -529,7 +530,11 @@ Result<std::vector<std::byte>> TableHeap::read(RecordId id) {
             "record generation does not match the occupied slot",
         });
     }
-    return current->read(id.slot);
+    auto record = current->read(id.slot);
+    if (record) {
+        stage.add_units(record->size());
+    }
+    return record;
 }
 
 // Produz todos os endereços na ordem lógica da cadeia em uma única passada.

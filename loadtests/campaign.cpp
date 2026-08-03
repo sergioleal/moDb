@@ -94,6 +94,24 @@ std::string phase_json(const PhaseMetrics& p) {
         << ",\"pages_written_estimated\":" << json_uint(p.pages_written_estimated)
         << ",\"cache_hit_rate\":" << p.cache_hit_rate
         << ",\"retained_versions\":" << json_uint(p.retained_versions);
+    // Mix ALCANÇADO (PLANO_PROFILER.md §4.4). Fica aqui, no phase_summary, e não
+    // no registro `stage_profile`: são contadores comuns do harness, não
+    // instrumentação do motor, então precisam existir em qualquer build --
+    // inclusive num sem MODB_ENABLE_STAGE_PROFILING, onde `stage_profile` não é
+    // emitido. Sem eles não há como saber se a corrida rodou a razão pedida, já
+    // que o worker degrada em silêncio quando o conjunto vivo esvazia.
+    if (p.has_operation_classes) {
+        for (std::size_t c = 0; c < operation_class_count; ++c) {
+            oss << ",\"operations_"
+                << operation_class_name(static_cast<OperationClass>(c)) << "\":"
+                << json_uint(p.operation_classes[c].operations);
+        }
+        oss << ",\"reads_per_write_configured\":" << json_uint(p.reads_per_write_configured);
+        const auto achieved = achieved_reads_per_write(p.operation_classes);
+        if (achieved >= 0.0) {
+            oss << ",\"reads_per_write_achieved\":" << achieved;
+        }
+    }
     return oss.str();
 }
 
@@ -105,6 +123,48 @@ std::string phase_json(const PhaseMetrics& p) {
 // distinta de uma linha cheia de zeros, que se leria como "medi e não achei
 // nada". `unattributed_ns` fica explícito no registro: o resíduo é resultado,
 // não uma sobra para varrer para debaixo do tapete.
+// Um estágio como objeto JSON. `operations` = 0 omite as taxas por operação em
+// vez de emitir divisões por zero.
+void write_stage_json(std::ostringstream& oss, diag::Stage stage, const diag::StageTotals& s,
+                      std::uint64_t operations) {
+    oss << json_string(diag::stage_name(stage)) << ":{\"elapsed_ns\":" << json_uint(s.elapsed_ns)
+        << ",\"calls\":" << json_uint(s.calls) << ",\"units\":" << json_uint(s.units)
+        << ",\"max_ns\":" << json_uint(s.max_ns);
+    if (operations > 0) {
+        oss << ",\"calls_per_operation\":"
+            << static_cast<double>(s.calls) / static_cast<double>(operations)
+            << ",\"units_per_operation\":"
+            << static_cast<double>(s.units) / static_cast<double>(operations)
+            << ",\"ns_per_operation\":"
+            << static_cast<double>(s.elapsed_ns) / static_cast<double>(operations);
+    }
+    oss << '}';
+}
+
+// Emite os estágios de `snapshot` num objeto, filtrando por envelope/folha.
+// Estágio sem chamada nenhuma é omitido, não zerado.
+void write_stage_map_json(std::ostringstream& oss, const diag::StageSnapshot& snapshot,
+                          std::uint64_t operations, bool envelopes) {
+    oss << '{';
+    bool first = true;
+    for (std::size_t i = 0; i < diag::stage_count; ++i) {
+        const auto stage = static_cast<diag::Stage>(i);
+        if (diag::stage_is_envelope(stage) != envelopes) {
+            continue;
+        }
+        const auto& s = snapshot[i];
+        if (s.calls == 0) {
+            continue;
+        }
+        if (!first) {
+            oss << ',';
+        }
+        first = false;
+        write_stage_json(oss, stage, s, operations);
+    }
+    oss << '}';
+}
+
 std::string stage_profile_json(const PhaseMetrics& p) {
     const auto attributed = attributed_ns(p.stages);
     std::ostringstream oss;
@@ -114,31 +174,40 @@ std::string stage_profile_json(const PhaseMetrics& p) {
         << ",\"attributed_fraction\":"
         << (p.duration_ns > 0 ? static_cast<double>(attributed) / static_cast<double>(p.duration_ns)
                               : 0.0)
-        << ",\"stages\":{";
-    bool first = true;
-    for (std::size_t i = 0; i < diag::stage_count; ++i) {
-        const auto& s = p.stages[i];
-        if (s.calls == 0) {
-            continue;
+        << ",\"stages\":";
+    write_stage_map_json(oss, p.stages, p.operations, /*envelopes=*/false);
+    // Envelopes num bloco separado: contêm folhas, então não entram em
+    // `attributed_ns` (PLANO_PROFILER.md §3.1). Somá-los à cobertura contaria o
+    // mesmo tempo duas vezes.
+    oss << ",\"envelopes\":";
+    write_stage_map_json(oss, p.stages, p.operations, /*envelopes=*/true);
+
+    // §3.2/§4.4: com a razão leitura/escrita configurável, o total por fase não
+    // basta -- a maioria absoluta das operações passa a ser leitura, e sem este
+    // bloco os estágios de escrita apareceriam diluídos por 11 operações.
+    if (p.has_operation_classes) {
+        oss << ",\"reads_per_write_configured\":" << json_uint(p.reads_per_write_configured);
+        const auto achieved = achieved_reads_per_write(p.operation_classes);
+        if (achieved >= 0.0) {
+            oss << ",\"reads_per_write_achieved\":" << achieved;
         }
-        if (!first) {
-            oss << ',';
-        }
-        first = false;
-        oss << json_string(diag::stage_name(static_cast<diag::Stage>(i))) << ":{\"elapsed_ns\":"
-            << json_uint(s.elapsed_ns) << ",\"calls\":" << json_uint(s.calls)
-            << ",\"units\":" << json_uint(s.units);
-        if (p.operations > 0) {
-            oss << ",\"calls_per_operation\":"
-                << static_cast<double>(s.calls) / static_cast<double>(p.operations)
-                << ",\"units_per_operation\":"
-                << static_cast<double>(s.units) / static_cast<double>(p.operations)
-                << ",\"ns_per_operation\":"
-                << static_cast<double>(s.elapsed_ns) / static_cast<double>(p.operations);
+        oss << ",\"by_operation_class\":{";
+        bool first_class = true;
+        for (std::size_t c = 0; c < operation_class_count; ++c) {
+            const auto& profile = p.operation_classes[c];
+            if (!first_class) {
+                oss << ',';
+            }
+            first_class = false;
+            oss << json_string(operation_class_name(static_cast<OperationClass>(c)))
+                << ":{\"operations\":" << json_uint(profile.operations) << ",\"stages\":";
+            write_stage_map_json(oss, profile.stages, profile.operations, /*envelopes=*/false);
+            oss << ",\"envelopes\":";
+            write_stage_map_json(oss, profile.stages, profile.operations, /*envelopes=*/true);
+            oss << '}';
         }
         oss << '}';
     }
-    oss << "}";
     return oss.str();
 }
 
