@@ -153,8 +153,16 @@ Result<std::uint64_t> validate_superblock(const Page& superblock, std::uintmax_t
     const auto stored_page_size = decode_u32(superblock.bytes(), page_size_offset);
     // O tamanho armazenado precisa ser igual ao tamanho usado pelo código.
     if (stored_page_size != page_size) {
-        return std::unexpected(
-            Error{ErrorCode::corrupt_file, "stored page size does not match the moDb page size"});
+        // O arquivo não está corrompido: foi criado por um build com outro
+        // MODB_PAGE_SIZE. A mensagem diz os dois tamanhos e o que fazer, porque
+        // o padrão mudou de 4096 para 8192 e "corrupt_file" sozinho manda o
+        // leitor investigar a coisa errada.
+        return std::unexpected(Error{
+            ErrorCode::corrupt_file,
+            "page size mismatch: the file was created with " + std::to_string(stored_page_size) +
+                "-byte pages, this build uses " + std::to_string(page_size) +
+                " (MODB_PAGE_SIZE). The file is not corrupt; rebuild with -DMODB_PAGE_SIZE=" +
+                std::to_string(stored_page_size) + " to open it."});
     }
 
     // Reconstrói a quantidade de páginas declarada pelo superbloco.
@@ -240,8 +248,16 @@ Result<PageFile> PageFile::open(const std::filesystem::path& path,
     }
     // Um arquivo válido possui pelo menos uma página e não possui página parcial.
     if (size < page_size || size % page_size != 0) {
-        return std::unexpected(
-            Error{ErrorCode::corrupt_file, "database file is truncated or misaligned"});
+        // Esta checagem roda ANTES de ler o page size do superbloco, então ela é
+        // quem responde primeiro quando o arquivo foi criado por um build com
+        // outro MODB_PAGE_SIZE -- e "truncated or misaligned" sozinho manda
+        // procurar corrupção onde só há incompatibilidade de configuração.
+        return std::unexpected(Error{
+            ErrorCode::corrupt_file,
+            "database file is truncated or misaligned: " + std::to_string(size) +
+                " bytes is not a multiple of this build's " + std::to_string(page_size) +
+                "-byte page size (MODB_PAGE_SIZE). A file created by a build with a different "
+                "page size looks exactly like this."});
     }
 
     // Abre o arquivo existente para leitura e escrita.

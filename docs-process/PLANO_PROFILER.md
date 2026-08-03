@@ -476,6 +476,68 @@ e deixaria um WAL residual que a próxima abertura leria como estado válido.
 **Novo #1 do commit:** `page_file_sync`, 77.884 ns/op, 54% do que restou de
 `tx_commit`.
 
+### 9.2.2 Ação: page size padrão 8 KiB — e o "+46%" que não existia mais
+
+O achado de [PLANO_PROFILING.md §9.1](PLANO_PROFILING.md) prometia **+46% de
+ingestão a 100k** trocando 4 KiB por 8 KiB, "sem uma linha de código". Ao medir
+para decidir, o ganho havia desaparecido:
+
+| `create_only.embedded.100k` | 4 KiB | 8 KiB |
+|---|---|---|
+| §9.1 (antes da ação A2) | 15.471 ops/s | 22.652 ops/s (+46%) |
+| agora (depois de A2) | 55.724 ops/s | 55.011 ops/s (−1,3%, dentro do CV) |
+
+**A2 absorveu o ganho.** As duas mudanças atacavam o mesmo termo — o custo
+proporcional à contagem de páginas que H1 identificou. Dobrar a página cortava
+esse termo pela metade; o índice ordenado por capacidade o eliminou na fonte, e
+o 4 KiB passou de 15.471 para 55.724 ops/s (3,6×). Lição registrada: **um
+achado de perfil tem data de validade** — vale contra o código em que foi
+medido, e a ação que o realiza precisa ser remedida antes de entrar.
+
+Também **encontrei um defeito no meu próprio harness de medição** no caminho:
+sem limpar o work dir entre repetições, cada uma rodava sobre ~94 MB deixados
+pelas anteriores. As médias pareciam precisas (CV 1,8–4,7%) e estavam erradas em
+até 2× — o candidato 3 de M5 (§3.1 do plano de profiling), agora reproduzido de
+propósito. Todos os números abaixo usam work dir limpo por repetição.
+
+O que sobrou justifica a troca, por outra razão que não a ingestão.
+`crud_full.embedded.100k`, RelWithDebInfo, 5 repetições, um processo por caso:
+
+| fase | 4 KiB | 8 KiB | razão |
+|---|---|---|---|
+| `update_shrink` | 13.002 (CV 4,2%) | **25.222** (CV 1,6%) | **1,94×** |
+| `delete` | 61.551 (CV 4,1%) | **77.734** (CV 7,7%) | **1,26×** |
+| `create` | 61.657 | 61.200 | 0,99× |
+| `update_grow` | 27.889 | 28.054 | 1,01× |
+| `update_inplace` | 33.408 | 33.357 | 1,00× |
+| `read_hotspot` (100k) | 39.633 (CV 4,6%) | 35.848 (CV 16,2%) | ver abaixo |
+
+`update_shrink` era a fase mais lenta de todas em termos absolutos; dobrá-la é
+o ganho real. Nenhuma fase piora: a leitura parecia 10% pior, mas a série de
+8 KiB tem um outlier (25.629 contra 39.098/36.453/38.920/39.139) e sem ele a
+média fica 3% abaixo — dentro do ruído. **O contra-termo previsto na §9.1 (custo
+que cresce com o tamanho da página) não se manifesta em nenhuma fase a 8 KiB.**
+
+Padrão trocado para 8192. Consequências declaradas:
+
+- **Formato.** O superbloco grava o page size e a abertura rejeita divergência.
+  Um banco de 4 KiB não abre num build de 8 KiB, e não há migração automática.
+  As duas mensagens de erro do caminho passaram a dizer os dois tamanhos e o que
+  fazer — antes, a checagem de alinhamento (que roda *antes* de ler o page size
+  do superbloco) respondia "database file is truncated or misaligned", mandando
+  procurar corrupção onde só havia configuração diferente.
+- **Preset `profile-4k`** criado, para o tamanho anterior continuar mensurável.
+- **Dois testes tinham constantes de 4 KiB** e passaram a afirmar o oposto do que
+  verificavam: `slotted_page` (dois registros de 2000 B enchiam uma página de
+  4 KiB, mas não uma de 8 KiB, então a compactação deixava de ser exercitada) e
+  `index_catalog` (80 entradas transbordavam para uma segunda página só a 4 KiB).
+  Ambos passaram a derivar os tamanhos de `page_size`. Isso também revela que os
+  presets `profile-8k`/`profile-16k` existiam com testes **nunca executados** --
+  só o build era feito.
+- **`modb.cli.blob_put`** reaproveitava um `.modb` entre execuções (é o único
+  teste da CLI sem `--force`); o nome do arquivo passou a carregar o page size,
+  senão trocar `MODB_PAGE_SIZE` quebra os testes de qualquer build dir antigo.
+
 ### 9.3 Onde a cobertura ainda não fecha, e por quê
 
 `crud_full` a 10k, depois da correção de aninhamento:

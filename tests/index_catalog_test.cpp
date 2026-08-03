@@ -56,7 +56,12 @@ int main() {
     const PageId directory = catalog->directory();
 
     // Nomes longos forçam várias páginas IXDR (cada entrada ~2+nome+2+8 bytes).
-    constexpr int total = 80;
+    // O total é derivado do page size, não fixo em 80: com 80 entradas o
+    // diretório transbordava numa página de 4 KiB e NÃO transbordava numa de
+    // 8 KiB, então o teste passava a afirmar o contrário do que queria verificar
+    // quando o padrão mudou. ~72 bytes por entrada; o dobro do que cabe numa
+    // página garante a continuação em qualquer tamanho.
+    const int total = static_cast<int>(2 * modb::storage::page_size / 72);
     const std::string prefix(60, 'T');
     bool added = true;
     for (int i = 0; i < total; ++i) {

@@ -61,8 +61,16 @@
       }
     },
     {
+      "name": "profile-4k",
+      "displayName": "RelWithDebInfo with 4 KiB pages (the previous default)",
+      "inherits": "relwithdebinfo",
+      "cacheVariables": {
+        "MODB_PAGE_SIZE": "4096"
+      }
+    },
+    {
       "name": "profile-8k",
-      "displayName": "RelWithDebInfo with 8 KiB pages",
+      "displayName": "RelWithDebInfo with 8 KiB pages (same as the default now)",
       "inherits": "relwithdebinfo",
       "cacheVariables": {
         "MODB_PAGE_SIZE": "8192"
@@ -133,6 +141,10 @@
       "configurePreset": "stage-profile"
     },
     {
+      "name": "profile-4k",
+      "configurePreset": "profile-4k"
+    },
+    {
       "name": "profile-8k",
       "configurePreset": "profile-8k"
     },
@@ -175,6 +187,13 @@
     {
       "name": "stage-profile",
       "configurePreset": "stage-profile",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "profile-4k",
+      "configurePreset": "profile-4k",
       "output": {
         "outputOnFailure": true
       }

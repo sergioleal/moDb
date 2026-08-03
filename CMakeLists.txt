@@ -27,7 +27,16 @@ option(MODB_ALLOW_CXX23_FALLBACK "Allow a local C++23 build when C++26 is unavai
 option(MODB_STATIC_MINGW_RUNTIME "Link the MinGW runtime statically into executables" OFF)
 option(MODB_BUILD_TRAINING "Build the Ring0 Markdown training as static HTML" ON)
 set(MODB_PYTHON_EXECUTABLE "" CACHE FILEPATH "Python interpreter used to render training HTML")
-set(MODB_PAGE_SIZE 4096 CACHE STRING "Database page size in bytes")
+# 8 KiB, não 4 KiB. Medido em crud_full.embedded.100k, RelWithDebInfo, um
+# processo por caso, work dir limpo por repetição, 5 repetições
+# (docs-process/PLANO_PROFILER.md §9.2.2): update_shrink 1,94x, delete 1,26x,
+# e create/update_grow/update_inplace/read dentro do CV. Nenhuma fase piora.
+#
+# CONSEQUÊNCIA DE FORMATO: o superbloco grava o tamanho de página e a abertura
+# rejeita divergência, então um banco criado com 4 KiB não abre num build de
+# 8 KiB. Não há migração automática. Para ler bases antigas, reconfigure com
+# -DMODB_PAGE_SIZE=4096 (ou use o preset `profile-4k`).
+set(MODB_PAGE_SIZE 8192 CACHE STRING "Database page size in bytes")
 set(MODB_CHURN_RECORD_TOTAL 10000 CACHE STRING "Record count used by churn tests")
 
 # Opções de link do runtime MinGW, vazias quando o link estático está desligado.
@@ -1044,8 +1053,14 @@ if(BUILD_TESTING)
     set_tests_properties(modb.cli.query_explain PROPERTIES DEPENDS modb.cli.query_indexed)
     add_test(NAME modb.cli.blob_help COMMAND modb_cli blob --help)
     add_test(NAME modb.cli.graph_help COMMAND modb_cli graph --help)
+    # O nome carrega o page size: este teste é o único da CLI que reaproveita o
+    # mesmo arquivo entre execuções (não tem --force), então um .modb deixado por
+    # um build de 4 KiB fazia o build de 8 KiB falhar na abertura. Sem isto,
+    # trocar MODB_PAGE_SIZE quebra os testes de qualquer diretório de build
+    # preexistente.
     add_test(NAME modb.cli.blob_put
-        COMMAND modb_cli blob put ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-blob.modb hello)
+        COMMAND modb_cli blob put
+                ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-blob-${MODB_PAGE_SIZE}.modb hello)
     add_test(NAME modb.cli.graph_demo
         COMMAND modb_cli demo graph
                 ${CMAKE_CURRENT_BINARY_DIR}/modb-cli-phase4-graph.modb --force)

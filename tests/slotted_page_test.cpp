@@ -267,24 +267,33 @@ int main() {
     // contíguo, mas caberia recuperando buracos, dispara a compactação e sucede.
     {
         SlottedPage fragmented = SlottedPage::create();
-        const std::vector<std::byte> big_a(2000, std::byte{0x51U});
-        const std::vector<std::byte> big_b(2000, std::byte{0x52U});
+        // Dimensionado a partir da capacidade real da página, não em constantes
+        // de 4 KiB: com dois registros fixos de 2000 bytes, uma página de 8 KiB
+        // ficava com espaço contíguo sobrando e o teste deixava de exercitar a
+        // compactação -- passava a afirmar o oposto do que queria verificar.
+        // 45% cada enche a página nas duas configurações; 30% não cabe no
+        // contíguo restante (~10%) e cabe depois de recuperar o buraco.
+        const auto capacity = fragmented.free_space();
+        const std::size_t big_size = capacity * 45 / 100;
+        const std::size_t mid_size = capacity * 30 / 100;
+        const std::vector<std::byte> big_a(big_size, std::byte{0x51U});
+        const std::vector<std::byte> big_b(big_size, std::byte{0x52U});
         suite.check(fragmented.insert(big_a) == Result<SlotId>{SlotId{0}}, "big A occupies slot 0");
         suite.check(fragmented.insert(big_b) == Result<SlotId>{SlotId{1}}, "big B occupies slot 1");
         const auto tight_free = fragmented.free_space();
-        // Remove A: abre um buraco de 2000 bytes que não é recuperado na hora.
+        // Remove A: abre um buraco que não é recuperado na hora.
         suite.check(fragmented.erase(SlotId{0}).has_value(), "big A is erased, leaving a hole");
         suite.check(fragmented.free_space() == tight_free,
                     "the contiguous free space stays tight after the lazy erase");
-        // Um registro de 1500 não cabe nos ~poucos bytes contíguos, mas cabe
-        // depois de recuperar o buraco de 2000: a inserção compacta e sucede.
-        const std::vector<std::byte> mid(1500, std::byte{0x53U});
+        // Não cabe nos poucos bytes contíguos, mas cabe depois de recuperar o
+        // buraco de A: a inserção compacta e sucede.
+        const std::vector<std::byte> mid(mid_size, std::byte{0x53U});
         suite.check(fragmented.free_space() < mid.size(),
                     "the record does not fit the contiguous free space");
         suite.check(fragmented.insert(mid) == Result<SlotId>{SlotId{0}},
                     "on-demand compaction reclaims the hole and reuses slot 0");
         auto read_back = fragmented.read(SlotId{0});
-        suite.check(read_back.has_value() && read_back->size() == 1500,
+        suite.check(read_back.has_value() && read_back->size() == mid_size,
                     "the compacted record reads back at its full size");
         suite.check(SlottedPage::from_page(fragmented.page()).has_value(),
                     "the page validates after on-demand compaction");

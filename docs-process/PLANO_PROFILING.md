@@ -442,6 +442,18 @@ ligeiramente **menor** (43,7 → 41,9 MB). 16 KiB não acrescenta nada (+3%) e p
 escalas pequenas. Isto não entra como decisão ainda: falta rodar o resto da
 matriz (update/delete/read) em 8 KiB antes de mexer no default.
 
+> **Revisão de 2026-08-02 — este +46% não existe mais.** A matriz foi rodada, e
+> na mesma medição a ingestão a 100k ficou **igual** entre 4 KiB e 8 KiB (55.724
+> vs 55.011 ops/s, dentro do CV). A ação A2 absorveu o ganho: as duas mudanças
+> atacavam o mesmo termo proporcional à contagem de páginas, e A2 o eliminou na
+> fonte (o próprio 4 KiB subiu de 15.471 para 55.724 ops/s, 3,6×). O padrão foi
+> mesmo trocado para 8 KiB, mas por outro motivo: `update_shrink` 1,94× e
+> `delete` 1,26×, com todas as outras fases planas. Detalhe e consequências de
+> formato em [PLANO_PROFILER.md §9.2.2](PLANO_PROFILER.md).
+>
+> Um achado de perfil vale contra o código em que foi medido. Este ficou 5 dias
+> obsoleto.
+
 ### 9.2 Nota de procedência da série histórica
 
 As execuções de diagnóstico desta sessão foram indexadas por engano na série
