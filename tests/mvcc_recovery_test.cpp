@@ -386,5 +386,66 @@ int main() {
                     "D: the database is structurally sound after recovering a removal");
     }
 
+    // === E. Read-your-writes não pode ser servido por cache dentro da tx ===
+    // `ObjectStore::peeked_` guarda o registro lido por `peek_type` para que o
+    // `get` seguinte não releia o mesmo objeto. A época só avança no COMMIT,
+    // então dentro de uma transação a época sozinha não distingue o antes do
+    // depois de um update -- é a guarda de `in_transaction` que impede servir o
+    // registro velho. Este teste falha se ela for removida.
+    {
+        TemporaryDatabase temp{"peek-cache"};
+        auto created = Database::create(temp.path());
+        auto database = share(created);
+        suite.check(database != nullptr, "E: database is created");
+        if (!database) {
+            return suite.finish();
+        }
+        auto database_id = attach(database);
+        suite.check(database->bind(doc_builder()).has_value(), "E: Doc is bound");
+
+        auto id = create_committed(*database, Doc{"first", 1});
+        suite.check(id.has_value(), "E: the seed document is committed");
+        if (!id) {
+            detach(database_id);
+            return suite.finish();
+        }
+
+        // Popula o cache: `get` chama `peek_type`, que lê e guarda o registro.
+        auto warm = database->get<Doc>(*id);
+        suite.check(warm.has_value(), "E: the committed document is readable");
+        if (warm) {
+            auto value = database->materialize(*warm);
+            suite.check(value.has_value() && value->rev == 1,
+                        "E: the first read sees the committed revision");
+        }
+
+        // Atualiza e materializa o handle JÁ OBTIDO, sem um `get` novo no meio.
+        // Este detalhe é o que torna o teste capaz de falhar: `get<T>()` chama
+        // `peek_type`, que reescreve o cache, então reler por `get` esconderia o
+        // problema. Reusar o handle vai direto a `store_.get()`, e é aí que um
+        // registro cacheado antes do update seria servido -- a época não avançou
+        // porque o commit ainda não aconteceu.
+        auto tx = database->begin();
+        suite.check(tx.has_value(), "E: the update transaction begins");
+        if (tx && warm) {
+            suite.check(database->update(*tx, *warm, Doc{"second", 2}).has_value(),
+                        "E: the update is staged");
+            auto value = database->materialize(*warm);
+            suite.check(value.has_value() && value->rev == 2 && value->title == "second",
+                        "E: read-your-writes sees the staged update, not the cached record");
+            suite.check(tx->commit().has_value(), "E: the update commits");
+        }
+
+        // E depois do commit, com a época já avançada, o valor novo persiste.
+        auto after = database->get<Doc>(*id);
+        suite.check(after.has_value(), "E: the document is readable after the commit");
+        if (after) {
+            auto value = database->materialize(*after);
+            suite.check(value.has_value() && value->rev == 2,
+                        "E: the committed update is what a fresh read returns");
+        }
+        detach(database_id);
+    }
+
     return suite.finish();
 }

@@ -572,6 +572,43 @@ risco sério do caminho. Com isso, é reparável por construção.
 cada N commits, não a cada um) — mudança de desenho de recuperação, não de
 higiene de `fsync`, e fora do escopo desta ação.
 
+### 9.2.4 Ação: uma leitura por leitura, não duas — medida
+
+O profiler mostrou `identity_lookup` e `heap_record_read` com
+`calls_per_operation = 2,00` na fase `read`: o par natural
+`Database::get<T>()` + `materialize()` lia o mesmo objeto **duas vezes**.
+`get` chama `peek_type` (resolve o id, lê o registro, decodifica só o cabeçalho
+para validar o tipo) e `materialize` chama `store_.get` (resolve, lê,
+decodifica tudo). A Fase 10C já havia eliminado o decode duplicado; a leitura
+duplicada passou batida.
+
+`ObjectStore` passou a guardar o registro que `peek_type` acabou de ler
+(`peeked_`, uma entrada só) para o `get` do mesmo id reaproveitá-lo.
+
+`crud_full.embedded.100k`, RelWithDebInfo, 5 repetições, medições lado a lado:
+
+| fase | antes | depois | |
+|---|---|---|---|
+| `read` | 97.245 (CV 1,1%) | **111.019** (CV 2,8%) | **1,14×** |
+| todas as outras | — | — | planas dentro do CV |
+
+`identity_lookup` e `heap_record_read` caíram para 1,00 chamada por operação, e
+`buffer_pool_hit` de 5,97 para 3,00. O ganho de fase (+14%) é menor que o ganho
+do motor (~2×) por um motivo já registrado na §9.3: 72% da fase `read` do
+harness não é motor. Num cliente real a fração é outra.
+
+**A guarda que torna o cache correto, e como sei que ela funciona.** A época só
+avança no commit, então dentro de uma transação ela não distingue o antes do
+depois de um update — daí a condição extra de `!in_transaction()`.
+
+O primeiro teste que escrevi para isso **passava mesmo com a guarda removida**, e
+portanto não valia nada: `get<T>()` chama `peek_type`, que reescreve o cache, de
+modo que reler por `get` refresca a entrada e esconde o problema. O teste que
+vale materializa o handle **já obtido**, sem `get` no meio — aí a chamada vai
+direto a `store_.get()`. Verificado nas duas direções: falha com a guarda
+removida (`FAIL: E: read-your-writes sees the staged update, not the cached
+record`) e passa com ela.
+
 ### 9.3 Onde a cobertura ainda não fecha, e por quê
 
 `crud_full` a 10k, depois da correção de aninhamento:

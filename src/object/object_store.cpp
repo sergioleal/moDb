@@ -314,6 +314,20 @@ Result<ObjectId> ObjectStore::create_object(const TypeDefinition& type, FieldVal
 }
 
 Result<DecodedObject> ObjectStore::get(ObjectId id) {
+    // Reaproveita o registro que `peek_type` acabou de ler para este mesmo id na
+    // mesma época -- ver `peeked_`. Poupa uma resolução de identidade e uma
+    // leitura de heap no par get<T>()+materialize().
+    //
+    // A guarda de `in_transaction` não é redundante com a de época: a época só
+    // avança no commit, então DENTRO de uma transação um update seguido de get
+    // seria servido com o registro anterior. Fora de transação nenhuma mutação
+    // pode estar em voo (mutar exige transação), e o commit que a publicaria
+    // avança a época. Leituras dentro de transação perdem a economia e
+    // continuam corretas -- a troca certa.
+    if (peeked_ && peeked_->id == id && peeked_->epoch == root_.epoch() &&
+        !file_->in_transaction()) {
+        return decode_object(peeked_->record);
+    }
     auto location = identity_.find(id);
     if (!location) {
         return std::unexpected(location.error());
@@ -338,6 +352,9 @@ Result<TypeDefinitionId> ObjectStore::peek_type(ObjectId id) {
     if (!header) {
         return std::unexpected(header.error());
     }
+    // Só depois de o registro se provar íntegro: um registro que não decodifica
+    // não vai para o cache.
+    peeked_ = PeekedRecord{root_.epoch(), id, std::move(*record)};
     return header->type;
 }
 

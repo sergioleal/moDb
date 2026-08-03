@@ -252,6 +252,29 @@ private:
     std::optional<Baseline> current_baseline_;
     // Diretório de índices (Fase 7B); nullopt até o primeiro índice ser criado.
     std::optional<IndexCatalog> indexes_;
+
+    // Último registro lido por `peek_type`, para `get` do MESMO id não repetir a
+    // resolução de identidade e a leitura do heap.
+    //
+    // Existe porque o par natural `Database::get<T>()` + `materialize()` fazia
+    // duas leituras completas do mesmo objeto: `get` chama `peek_type` (resolve
+    // o id, lê o registro, decodifica só o cabeçalho para validar o tipo) e
+    // `materialize` chama `get` (resolve o id, lê o registro, decodifica tudo).
+    // O profiler mostrou `identity_lookup` e `heap_record_read` com
+    // `calls_per_operation = 2,00` na fase de leitura
+    // (docs-process/PLANO_PROFILER.md §9.2.4). A Fase 10C já havia eliminado o
+    // decode duplicado; a leitura duplicada ficou.
+    //
+    // Uma entrada só, e o `epoch` é o que a torna correta em vez de perigosa:
+    // qualquer commit avança a época (`advance_epoch`), então um registro
+    // cacheado por uma época anterior nunca é servido. Leituras por snapshot
+    // (`get_at`/`find_at`) não passam por aqui.
+    struct PeekedRecord {
+        std::uint64_t epoch{0};
+        ObjectId id{0};
+        std::vector<std::byte> record;
+    };
+    std::optional<PeekedRecord> peeked_;
 };
 
 } // namespace modb::object
