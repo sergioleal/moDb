@@ -6,6 +6,10 @@
 #include "modb/tx/recovery.hpp"
 #include "modb/tx/wal.hpp"
 
+// Sondas de atribuição de tempo; sem custo quando MODB_ENABLE_STAGE_PROFILING
+// está desligado (docs-process/PLANO_PROFILING.md, Etapa 1).
+#include "modb/diag/stage_profile.hpp"
+
 #include <chrono>
 #include <thread>
 #include <system_error>
@@ -573,6 +577,11 @@ Snapshot::~Snapshot() {
 Result<void> Transaction::commit() { return commit(CommitPhase::full); }
 
 Result<void> Transaction::commit(CommitPhase phase) {
+    // ENVELOPE: contém wal_append, wal_sync e buffer_pool_writeback. Fica fora
+    // de attributed_ns -- ver stage_envelope_mask. Só a sobrecarga com
+    // CommitPhase é instrumentada; commit() delega para cá, então medir as duas
+    // contaria o mesmo commit duas vezes.
+    diag::ScopedStage stage{diag::Stage::tx_commit};
     if (!active_) {
         return std::unexpected(Error{committed_ ? ErrorCode::transaction_committed
                                                  : ErrorCode::transaction_required,

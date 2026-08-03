@@ -15,6 +15,10 @@
 #include "modb/object/projection_plan.hpp"
 // Importa o encoding ordenável usado no fallback Scan+Predicate (Fase 7E).
 #include "modb/index/key_codec.hpp"
+
+// Sondas de atribuição de tempo; sem custo quando MODB_ENABLE_STAGE_PROFILING
+// está desligado (docs-process/PLANO_PROFILING.md, Etapa 1).
+#include "modb/diag/stage_profile.hpp"
 // Importa o gerador e os operadores de streaming (Fase 7A).
 #include "modb/query/generator.hpp"
 #include "modb/query/operators.hpp"
@@ -443,7 +447,14 @@ public:
         if (!type) {
             return std::unexpected(type.error());
         }
-        auto fields = bound->binding.to_field_values(&value);
+        // Instrumentado aqui, e não dentro de Binding::to_field_values, pela
+        // mesma razão que `materialize`: um binder de campo embutido chama
+        // to_field_values recursivamente, e o estágio se aninharia em si mesmo.
+        auto fields = [&] {
+            diag::ScopedStage stage{diag::Stage::object_bind};
+            stage.add_units(bound->binding.fields().size());
+            return bound->binding.to_field_values(&value);
+        }();
         if (!fields) {
             return std::unexpected(fields.error());
         }
@@ -606,7 +617,11 @@ public:
             return std::unexpected(
                 Error{ErrorCode::type_mismatch, "object belongs to a different bound type"});
         }
-        auto fields = bound->binding.to_field_values(&value);
+        auto fields = [&] {
+            diag::ScopedStage stage{diag::Stage::object_bind};
+            stage.add_units(bound->binding.fields().size());
+            return bound->binding.to_field_values(&value);
+        }();
         if (!fields) {
             return std::unexpected(fields.error());
         }
@@ -1080,6 +1095,14 @@ private:
     template <typename T>
     [[nodiscard]] Result<T> materialize_decoded(const BoundType& bound,
                                                 const DecodedObject& object) {
+        // Único sítio do estágio `materialize`, e não os dois `::materialize`
+        // que ele chama: um binder de objeto embutido invoca
+        // Binding::materialize de DENTRO de ProjectionPlan::materialize
+        // (binding.hpp, FieldBinder::store de campo embedded), então
+        // instrumentar lá aninharia o estágio dentro de si mesmo. Aqui não
+        // aninha -- materialize_decoded nunca chama outro materialize_decoded.
+        diag::ScopedStage stage{diag::Stage::materialize};
+        stage.add_units(object.fields.size());
         T result{};
         const Migration* migration = migration_for(bound.binding.type_name(), object.type);
         if (migration != nullptr) {

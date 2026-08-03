@@ -51,6 +51,7 @@ void print_usage() {
         << "  modb_load run --profile <nome> [--scale a,b] [--workload a,b] [--target a,b]\n"
         << "                [--environment a,b] [--case id,id] [--filter SUBSTR]\n"
         << "                [--exclude SUBSTR] [--concurrency a,b] [--payload a,b]\n"
+        << "                [--reads-per-write a,b]  (só mixed_oltp; padrão 10, 0 = só escrita)\n"
         << "                [--repeat N] [--seed N] [--output-dir DIR] [--work-dir DIR]\n"
         << "                [--environments-file PATH] [--calibration-file PATH] [--max-duration N]\n"
         << "                [--max-disk-gb N]\n"
@@ -156,6 +157,8 @@ bool parse_common_selectors(int argc, char** argv, int start, CampaignOptions& o
             extend(options.selectors.concurrency, need("--concurrency"));
         } else if (arg == "--payload") {
             extend(options.selectors.payload, need("--payload"));
+        } else if (arg == "--reads-per-write") {
+            extend(options.selectors.reads_per_write, need("--reads-per-write"));
         } else if (arg == "--repeat") {
             options.selectors.repeat = std::strtoull(need("--repeat"), nullptr, 10);
         } else if (arg == "--seed") {

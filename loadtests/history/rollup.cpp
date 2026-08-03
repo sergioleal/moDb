@@ -11,6 +11,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <string_view>
 
 namespace modb::loadtest {
 namespace {
@@ -37,6 +38,26 @@ std::string ram_gb_or_null(std::uint64_t ram_bytes) {
     }
     constexpr std::uint64_t gib = 1024ULL * 1024 * 1024;
     return json_uint((ram_bytes + gib / 2) / gib);
+}
+
+// Versão SEMÂNTICA do workload -- incrementada quando o que o workload mede
+// muda de significado, mesmo com o mesmo `case_id` (PLANO_PROFILER.md §4.5).
+// Entra no `series_key`, então um ponto medido sob a semântica antiga nunca é
+// comparado com um da nova.
+//
+// `mixed_oltp` = 2: o mix padrão passou de 4 leituras por escrita (5/80/10/5,
+// literal no código) para 10:1 configurável. Os 2 únicos pontos históricos de
+// `mixed_oltp` estão na versão 1 do `series_key` e já eram incomparáveis por
+// outra razão -- mas o mecanismo entra agora porque a próxima mudança de
+// semântica não vai ter essa sorte.
+//
+// Preferido a incrementar `series_key_version`, que separaria TODOS os pontos
+// (64 na versão 2) por causa de uma mudança que afeta um workload só.
+std::uint32_t workload_version_of(std::string_view workload) {
+    if (workload == "mixed_oltp") {
+        return 2;
+    }
+    return 1;
 }
 
 // Estado acumulado de um `case_id` enquanto a campanha é varrida linha a
@@ -296,7 +317,7 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
 
         SeriesKeyInput key_input;
         key_input.case_id = case_id;
-        key_input.workload_version = 1;   // sem versionamento de workload ainda
+        key_input.workload_version = workload_version_of(acc.workload);
         key_input.dataset_id = "user_v1"; // único dataset existente (Subfase B)
         key_input.dataset_version = 1;
         key_input.scale = acc.scale;

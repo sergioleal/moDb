@@ -32,6 +32,34 @@ void test_case_id_with_variant(TestSuite& suite) {
     c2.payload = "fat";
     suite.check(c2.case_id() == "load.create_only.embedded.100k.payload_fat",
                "payload != normal deve produzir sufixo .payload_fat");
+
+    // PLANO_PROFILER.md §4.2/§4.5: a razão leitura/escrita entra no case_id
+    // como variante -- é o que separa os casos fora do padrão na série
+    // histórica sem precisar mexer no series_key.
+    Case c3;
+    c3.workload = "mixed_oltp";
+    c3.target = "embedded";
+    c3.scale = "100k";
+    c3.reads_per_write = 20;
+    suite.check(c3.case_id() == "load.mixed_oltp.embedded.100k.rw20",
+               "reads_per_write != 10 deve produzir sufixo .rw20");
+
+    Case c4;
+    c4.workload = "mixed_oltp";
+    c4.target = "embedded";
+    c4.scale = "100k";
+    suite.check(c4.case_id() == "load.mixed_oltp.embedded.100k",
+               "reads_per_write no padrão (10) não deve produzir sufixo nenhum");
+
+    // 0 = só escrita, um valor legítimo -- e precisa de sufixo próprio, não ser
+    // confundido com o padrão por ser "falsy".
+    Case c5;
+    c5.workload = "mixed_oltp";
+    c5.target = "embedded";
+    c5.scale = "100k";
+    c5.reads_per_write = 0;
+    suite.check(c5.case_id() == "load.mixed_oltp.embedded.100k.rw0",
+               "reads_per_write=0 (só escrita) deve produzir sufixo .rw0");
 }
 
 void test_parse_case_id_roundtrip(TestSuite& suite) {
@@ -150,6 +178,43 @@ void test_expand_matrix_rejects_unimplemented_concurrency(TestSuite& suite) {
     suite.check(expanded.error.find("Subfase M") != std::string::npos,
                "a mensagem de erro deve citar a subfase que implementará concorrência");
     suite.check(expanded.cases.empty(), "nenhum caso deve sobreviver quando a dimensão é rejeitada");
+}
+
+// Mesma disciplina D1 para a dimensão nova: só `mixed_oltp` lê
+// `reads_per_write`, então pedi-la em outro workload tem que falhar em vez de
+// produzir um `.rw20` que o runtime ignora (PLANO_PROFILER.md §4.3).
+void test_expand_matrix_rejects_reads_per_write_outside_mixed_oltp(TestSuite& suite) {
+    std::vector<Case> cases(1);
+    cases[0].workload = "create_only";
+    cases[0].target = "embedded";
+    cases[0].scale = "10k";
+    cases[0].objects = 10'000;
+
+    MatrixSelectors selectors;
+    selectors.reads_per_write = {"20"};
+    auto expanded = expand_matrix(cases, selectors);
+    suite.check(!expanded.error.empty(),
+               "--reads-per-write 20 em create_only deve falhar, não gerar um .rw20 inerte");
+    suite.check(expanded.error.find("reads_per_write") != std::string::npos,
+               "a mensagem deve nomear a dimensão recusada");
+    suite.check(expanded.cases.empty(), "nenhum caso deve sobreviver quando a dimensão é rejeitada");
+}
+
+void test_expand_matrix_accepts_reads_per_write_on_mixed_oltp(TestSuite& suite) {
+    std::vector<Case> cases(1);
+    cases[0].workload = "mixed_oltp";
+    cases[0].target = "embedded";
+    cases[0].scale = "10k";
+    cases[0].objects = 10'000;
+
+    MatrixSelectors selectors;
+    selectors.reads_per_write = {"4", "20"};
+    auto expanded = expand_matrix(cases, selectors);
+    suite.check(expanded.error.empty(),
+               "--reads-per-write em mixed_oltp deve ser aceito (dimensão com dispatch)");
+    suite.check(expanded.cases.size() == 2, "dois valores devem produzir produto cartesiano de 2");
+    suite.check(expanded.cases[0].reads_per_write == 4 && expanded.cases[1].reads_per_write == 20,
+               "cada caso deve carregar a razão pedida");
 }
 
 void test_expand_matrix_accepts_implemented_payload(TestSuite& suite) {
@@ -318,6 +383,8 @@ int main() {
     test_expand_matrix_case_overrides_profile(suite);
     test_expand_matrix_environment_cross_product(suite);
     test_expand_matrix_rejects_unimplemented_concurrency(suite);
+    test_expand_matrix_rejects_reads_per_write_outside_mixed_oltp(suite);
+    test_expand_matrix_accepts_reads_per_write_on_mixed_oltp(suite);
     test_expand_matrix_accepts_implemented_payload(suite);
     test_unimplemented_dimension_reason_direct(suite);
     test_expand_matrix_repeat(suite);

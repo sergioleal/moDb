@@ -3,6 +3,9 @@
 - Estado: **Etapa 0 concluída; H1 confirmada; ação A2 implementada e medida**
   (ver §8, Andamento)
 - Resultados medidos e ações sugeridas: [RESULTADOS_PROFILING.md](RESULTADOS_PROFILING.md)
+- Desenho da ferramenta (lacunas de cobertura da Etapa 1, caminho de leitura,
+  atribuição por classe de operação, dimensão leitura/escrita):
+  [PLANO_PROFILER.md](PLANO_PROFILER.md)
 - Versão: 1
 - Data de abertura: 2026-07-26
 - Branch: `subphase/H-calibration-250k`
@@ -306,7 +309,7 @@ Legenda: ⬜ não começado · 🔄 em andamento · ✅ concluído · ⛔ bloque
 | 0.3 `page_size` numérico + `series_key_version`=2 (M3) | ✅ | guarda de regressão em `tests/load_history_test.cpp` |
 | 0.4 Coleta CPU/cores/RAM/OS/fs/instrumentação (M4) | ✅ | `device_class` segue não coletado (ver abaixo) |
 | 0.5 Baseline RelWithDebInfo, 3 repetições | ✅ | 30 pontos, CV 0,3–6%; válido entre repetições, não entre casos (M5) |
-| **Etapa 1** — `stage_profile` | 🔄 | preset `stage-profile` + 6 estágios entregues; cobertura fecha em update (93%), não em create (59%) nem delete (16%) |
+| **Etapa 1** — `stage_profile` | ✅ | 18 estágios (13 folhas + 5 envelopes), caminho de leitura e escrita; `mixed_oltp` fecha em 94,8%. `create` (48%) e `read` (17%) não fecham, e a instrumentação mostra que o resíduo está no harness, não no motor ([PLANO_PROFILER.md §9.3](PLANO_PROFILER.md)) |
 | **Etapa 2** — atribuição por função | ⬜ | **provavelmente desnecessária agora** — ver abaixo |
 | **Etapa 3** — varreduras | 🔄 | page size ✅ (§9.1); faltam batch, durability, cache, payload, scale até 250k |
 | **Etapa 4** — relatório e gates | ⬜ | |
@@ -323,6 +326,21 @@ coletava candidatas demais e regredia `update_shrink`). Contrapartida aceita:
 `delete` ~22% mais lento (custo de manter o índice). `hash_match=True` em
 todas as verificações; 138/138 testes em `relwithdebinfo`, `stage-profile` e
 `sanitizers`.
+
+**Correção retroativa dos números de cobertura (2026-08-02).** Ao executar
+[PLANO_PROFILER.md](PLANO_PROFILER.md) descobriu-se que `heap_candidate_try`
+continha `heap_page_write` e `persist_root` (o lambda `try_insert` faz as três
+coisas), então **os percentuais de cobertura citados acima e nos resultados
+anteriores contavam tempo duas vezes**. Os 93% de update eram, de verdade,
+66–86%. A taxonomia agora separa folhas de envelopes e `attributed_ns` só soma
+folhas; um teste falha se a fração passar de 1,0. Nenhum número de *vazão* muda
+— só a atribuição.
+
+**Hipótese nova, vinda da Etapa 1 e não prevista em H1–H6.** O commit reabre o
+WAL a cada transação (`Wal::open_durable`, 148 µs/op em `mixed_oltp`) e chama
+`fsync` do arquivo de dados 3–4 vezes por commit (`page_file_sync`, 87 µs/op).
+Juntos são ~68% do custo de `tx_commit`, que por sua vez é 97% da fase. Ver
+[PLANO_PROFILER.md §9.2](PLANO_PROFILER.md).
 
 **Reordenação depois da Etapa 1.** O gargalo está localizado numa linha
 ([table_heap.cpp:353](../src/storage/table_heap.cpp)) com 80–88% das fases de
@@ -375,7 +393,9 @@ registrada para não ser reinvestigada.
 | — | H3 | reforçada indiretamente por §9.1 | — |
 | — | H4 | pendente | — |
 | — | H5 | pendente | — |
-| — | H6 | pendente | — |
+| — | H6 (leitura) | pendente | estágio `materialize` existe desde 2026-08-02; falta medir em Release |
+| 2026-08-02 | H6 (escrita, `to_field_values`) | **refutada** | o estágio `object_bind` move 0,3 p.p. de `create` — a conversão do Binding é barata ([PLANO_PROFILER.md §9.2](PLANO_PROFILER.md)) |
+| 2026-08-02 | **H7 (nova): commit reabre o WAL e faz fsync de dados 3–4× por transação** | **confirmada por instrumentação** | [PLANO_PROFILER.md §9.2](PLANO_PROFILER.md) |
 
 ### 9.1 H1 — confirmado; e a varredura revelou um segundo termo
 

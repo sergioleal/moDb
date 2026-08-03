@@ -22,6 +22,7 @@ CaseRunResult run_mixed_oltp(const Case& c, const std::filesystem::path& work_di
     params.batch = c.batch;
     params.payload = c.payload;
     params.concurrency = c.concurrency;
+    params.reads_per_write = c.reads_per_write;
     params.on_progress = on_progress;
 
     return run_mixed_oltp_embedded(params, out_db_path);
