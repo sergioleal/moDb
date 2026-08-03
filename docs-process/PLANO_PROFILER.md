@@ -538,6 +538,40 @@ Padrão trocado para 8192. Consequências declaradas:
   teste da CLI sem `--force`); o nome do arquivo passou a carregar o page size,
   senão trocar `MODB_PAGE_SIZE` quebra os testes de qualquer build dir antigo.
 
+### 9.2.3 Ação: um `fsync` do arquivo de dados a menos por commit — medida
+
+`commit_transaction` fazia **três** `file_->flush()` por commit. `flush()` é
+`FlushFileBuffers` no arquivo inteiro, então um flush posterior já torna durável
+tudo escrito antes dele — três só se justificariam se houvesse requisito de
+ordem entre eles.
+
+Há um, e só um: **as páginas de dados precisam estar duráveis antes de o
+checkpoint LSN ficar durável.** Um checkpoint que afirma "tudo até o LSN N está
+no arquivo" sem que as páginas estejam faz a recuperação *pular* o replay, e a
+perda é silenciosa. Esse flush ficou, e agora está comentado como barreira.
+
+O flush do meio ficava entre `set_next_lsn` e `set_checkpoint_lsn` — duas
+escritas na **mesma página DBRT**, sem ordem exigida entre si. Removido.
+
+O argumento que fecha a questão não é o raciocínio acima e sim uma rede que já
+existia: `Database::open` varre o WAL inteiro por `max_lsn` e corrige
+`next_lsn` para `max_lsn+1` quando o DBRT está atrás, nos dois modos de
+armazenamento ([database.cpp:247](../src/object/database.cpp)). Sem isso, um
+`next_lsn` defasado poderia reusar LSNs e embaralhar a ordem do WAL — o único
+risco sério do caminho. Com isso, é reparável por construção.
+
+`mixed_oltp.embedded.10k`, RelWithDebInfo, 5 repetições, work dir limpo:
+
+| | antes | depois | |
+|---|---|---|---|
+| `mixed_oltp` | 5.510 ops/s (CV 2,3%) | **6.549 ops/s** (CV 3,5%) | **1,19×** |
+| `create` | 57.317 ops/s | 56.743 ops/s | plano |
+
+`page_file_sync` caiu de ~3 para 2 chamadas por commit (`calls_per_operation`
+0,25 → 0,18). Reduzir para 1 exigiria tornar o checkpoint preguiçoso (avançar a
+cada N commits, não a cada um) — mudança de desenho de recuperação, não de
+higiene de `fsync`, e fora do escopo desta ação.
+
 ### 9.3 Onde a cobertura ainda não fecha, e por quê
 
 `crud_full` a 10k, depois da correção de aninhamento:

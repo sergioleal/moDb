@@ -465,16 +465,37 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
         if (auto applied = file_->apply_transaction(); !applied) {
             return std::unexpected(applied.error());
         }
+        // BARREIRA, não conveniência: as páginas de dados precisam estar
+        // duráveis ANTES de o checkpoint LSN ficar durável (lá embaixo). Um
+        // checkpoint que afirma "tudo até o LSN N está no arquivo de dados" sem
+        // que as páginas estejam faz a recuperação PULAR o replay -- e aí a
+        // perda é silenciosa. Este flush é o que impede isso.
         if (auto flushed = file_->flush(); !flushed) {
             return std::unexpected(flushed.error());
         }
         // Persiste o próximo LSN global antes do checkpoint (ainda na mesma
         // janela; DBRT já foi escrito via apply das páginas da tx).
+        //
+        // Sem flush aqui, deliberadamente. `flush()` é FlushFileBuffers no
+        // arquivo inteiro, então o flush do checkpoint (abaixo) já torna durável
+        // tudo escrito antes dele -- inclusive este `set_next_lsn`, que grava na
+        // MESMA página DBRT que o checkpoint. Não há requisito de ordem entre os
+        // dois: uma queda entre eles deixa next_lsn defasado, e a recuperação
+        // replica a partir do checkpoint (que também não avançou) -- redo
+        // idempotente, sem perda.
+        //
+        // O que descarta o único risco sério (REUSO de LSN, que embaralharia a
+        // ordem do WAL) não é o raciocínio acima, é uma rede que já existe: a
+        // abertura varre o WAL inteiro por max_lsn e corrige next_lsn para
+        // max_lsn+1 quando o DBRT está atrás -- nos dois modos de armazenamento
+        // (`Database::open`, e o caminho wal_only logo acima dele). Um next_lsn
+        // defasado no disco é, por construção, reparável.
+        //
+        // Eram 3 fsync do arquivo de dados por commit e o do meio não separava
+        // nada: 77.884 ns/op em `page_file_sync`, o maior custo do commit depois
+        // que a reabertura do WAL saiu (docs-process/PLANO_PROFILER.md §9.2.3).
         if (auto set_lsn = store_.set_next_lsn(wal->next_lsn()); !set_lsn) {
             return std::unexpected(set_lsn.error());
-        }
-        if (auto flushed = file_->flush(); !flushed) {
-            return std::unexpected(flushed.error());
         }
         if (phase == CommitPhase::stop_before_wal_cleanup) {
             return {};
@@ -492,6 +513,8 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
             if (auto acked = await_commit_ack(commit_lsn); !acked) {
                 return std::unexpected(acked.error());
             }
+            // Torna durável o checkpoint E o `set_next_lsn` acima, que grava na
+            // mesma página DBRT -- ver o comentário lá.
         } else if (auto flushed = file_->flush(); !flushed) {
             return std::unexpected(flushed.error());
         }
