@@ -479,8 +479,10 @@ database and the option would not reach it. Example:
 `payload=fat` does not work with `crud_full`: `update_grow` makes the ~4 KiB
 record exceed what fits in one 8 KiB page (`record exceeds the maximum
 TableHeap page payload`; there are no overflow records), so
-`load.crud_full.*.payload_fat` — including the one in `load-heavy` — always
-fails. `create_only` with `fat` works.
+`load.crud_full.*.payload_fat` always fails. It was removed from `load-heavy`
+in 2026-09 (T27); `create_only` with `fat` works and stays. Records larger than
+one page are refused by design (`record_too_large`) until there are overflow
+records.
 
 `primary_storage=wal_only`
 ([ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md))
@@ -570,8 +572,9 @@ Composition semantics, unambiguous:
 non-default value appears at least once, without multiplying the matrix.
 
 **Implemented in Subphase K.** `load_heavy_cases()` adds, on top of the
-primary product (ladder × target × scale): 2 cases with `payload=fat`
-(`create_only` and `crud_full` at `250k`) and 2 `mixed_oltp` cases with
+primary product (ladder × target × scale): 1 case with `payload=fat`
+(`create_only` at `250k`; the `crud_full` one was dropped in 2026-09 because it
+always fails, T27) and 2 `mixed_oltp` cases with
 `concurrency=4`/`16` (the only workload with real concurrency dispatch,
 Subphase M). It does **not** include `durability`/`cache`/
 `primary_storage`/`readers` — no workload has dispatch for non-default
@@ -802,6 +805,13 @@ Subphase H.
 and is skipped (the campaign ends `partial`); before starting, `run` sums
 the peak disk of every case with a known estimate and aborts with a clear
 message if free space in `--work-dir` is insufficient.
+
+
+**Calibration per build type (2026-09, T22).** The default file is
+`loadtests/calibration/<platform>-<CMAKE_BUILD_TYPE>.json` when it exists, and
+`<platform>.json` otherwise — that one is the legacy table measured in Debug,
+which overestimates an optimized binary by ~2.5×. Regenerate a table with
+`scripts/calibrate_load.py` (every scale measured, none extrapolated).
 
 ## 11. Remote execution
 

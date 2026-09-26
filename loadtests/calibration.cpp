@@ -1,5 +1,7 @@
 #include "calibration.hpp"
 
+#include <string>
+
 #include "json_value.hpp"
 
 #include <fstream>
@@ -24,12 +26,27 @@ const CalibrationPoint* CalibrationTable::find(const std::string& workload, cons
 
 std::filesystem::path default_calibration_path() {
 #if defined(_WIN32)
-    return "loadtests/calibration/windows-x86_64.json";
+    const std::string platform = "windows-x86_64";
 #elif defined(__linux__)
-    return "loadtests/calibration/linux-x86_64.json";
+    const std::string platform = "linux-x86_64";
 #else
-    return "loadtests/calibration/unknown.json";
+    const std::string platform = "unknown";
 #endif
+    const std::filesystem::path dir{"loadtests/calibration"};
+    // Um arquivo por tipo de build (T22): a calibração em Debug superestimava a
+    // duração de um binário otimizado em ~2,5x e fazia `--max-duration` pular
+    // casos que caberiam. O arquivo sem sufixo é o legado, medido em Debug.
+#if defined(MODB_BUILD_TYPE_NAME)
+    const std::string build{MODB_BUILD_TYPE_NAME};
+    if (!build.empty()) {
+        const auto specific = dir / (platform + "-" + build + ".json");
+        std::error_code error;
+        if (std::filesystem::exists(specific, error)) {
+            return specific;
+        }
+    }
+#endif
+    return dir / (platform + ".json");
 }
 
 CalibrationLoadResult load_calibration(const std::filesystem::path& path) {

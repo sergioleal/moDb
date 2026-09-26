@@ -47,6 +47,8 @@ struct CalibrationLoadResult {
 // resolvido em tempo de compilação pela plataforma do binário -- é o binário
 // rodando, não o SO do host, que determina qual arquivo é relevante (ex.:
 // rodar sob WSL usa o binário Linux, então o arquivo Linux).
+// Prefere `<plataforma>-<CMAKE_BUILD_TYPE>.json` quando existe (T22); senão o
+// arquivo sem sufixo, que é o legado medido em Debug.
 [[nodiscard]] std::filesystem::path default_calibration_path();
 
 // Ausência do arquivo em `path` devolve `ok=true` com tabela vazia -- ainda

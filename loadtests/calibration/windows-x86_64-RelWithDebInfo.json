@@ -1,0 +1,261 @@
+{
+  "schema": "modb.loadtest.calibration",
+  "schema_version": 1,
+  "platform": "windows",
+  "arch": "x86_64",
+  "build_type": "RelWithDebInfo",
+  "measured_at": "2026-09-26",
+  "notes": "Gerado por scripts/calibrate_load.py: cada escala medida de verdade, uma execução por ponto, processo e work dir próprios, com opt-out de power throttling (T11). Nenhum ponto extrapolado. Ver docs-process/PROFILING_2026-09.md, T22.",
+  "entries": [
+    {
+      "workload": "create_only",
+      "payload": "normal",
+      "measured_scales": [
+        "1k",
+        "10k",
+        "100k",
+        "250k",
+        "500k",
+        "1M"
+      ],
+      "scales": {
+        "1k": {
+          "source": "measured",
+          "duration_ns": 16832900,
+          "disk_peak_bytes": 491520,
+          "peak_rss_bytes": 20590592
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 166977400,
+          "disk_peak_bytes": 4440064,
+          "peak_rss_bytes": 34066432
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 1539058500,
+          "disk_peak_bytes": 43884544,
+          "peak_rss_bytes": 128819200
+        },
+        "250k": {
+          "source": "measured",
+          "duration_ns": 4045573300,
+          "disk_peak_bytes": 109633536,
+          "peak_rss_bytes": 280956928
+        },
+        "500k": {
+          "source": "measured",
+          "duration_ns": 7643227600,
+          "disk_peak_bytes": 219217920,
+          "peak_rss_bytes": 531800064
+        },
+        "1M": {
+          "source": "measured",
+          "duration_ns": 15910756500,
+          "disk_peak_bytes": 438386688,
+          "peak_rss_bytes": 1036038144
+        }
+      }
+    },
+    {
+      "workload": "create_delete_forward",
+      "payload": "normal",
+      "measured_scales": [
+        "1k",
+        "10k",
+        "100k",
+        "250k",
+        "500k",
+        "1M"
+      ],
+      "scales": {
+        "1k": {
+          "source": "measured",
+          "duration_ns": 18625800,
+          "disk_peak_bytes": 491520,
+          "peak_rss_bytes": 20602880
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 171537700,
+          "disk_peak_bytes": 4440064,
+          "peak_rss_bytes": 34131968
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 1781947200,
+          "disk_peak_bytes": 43884544,
+          "peak_rss_bytes": 128724992
+        },
+        "250k": {
+          "source": "measured",
+          "duration_ns": 4614722900,
+          "disk_peak_bytes": 109633536,
+          "peak_rss_bytes": 281968640
+        },
+        "500k": {
+          "source": "measured",
+          "duration_ns": 9083960300,
+          "disk_peak_bytes": 219217920,
+          "peak_rss_bytes": 533618688
+        },
+        "1M": {
+          "source": "measured",
+          "duration_ns": 18681061800,
+          "disk_peak_bytes": 438386688,
+          "peak_rss_bytes": 1040355328
+        }
+      }
+    },
+    {
+      "workload": "create_delete_reverse",
+      "payload": "normal",
+      "measured_scales": [
+        "1k",
+        "10k",
+        "100k",
+        "250k",
+        "500k",
+        "1M"
+      ],
+      "scales": {
+        "1k": {
+          "source": "measured",
+          "duration_ns": 16927800,
+          "disk_peak_bytes": 491520,
+          "peak_rss_bytes": 20606976
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 174945000,
+          "disk_peak_bytes": 4440064,
+          "peak_rss_bytes": 34140160
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 1760851800,
+          "disk_peak_bytes": 43884544,
+          "peak_rss_bytes": 128737280
+        },
+        "250k": {
+          "source": "measured",
+          "duration_ns": 4202874100,
+          "disk_peak_bytes": 109633536,
+          "peak_rss_bytes": 279986176
+        },
+        "500k": {
+          "source": "measured",
+          "duration_ns": 8711256400,
+          "disk_peak_bytes": 219217920,
+          "peak_rss_bytes": 532967424
+        },
+        "1M": {
+          "source": "measured",
+          "duration_ns": 18186559800,
+          "disk_peak_bytes": 438386688,
+          "peak_rss_bytes": 1036226560
+        }
+      }
+    },
+    {
+      "workload": "create_delete_interleaved",
+      "payload": "normal",
+      "measured_scales": [
+        "1k",
+        "10k",
+        "100k",
+        "250k",
+        "500k",
+        "1M"
+      ],
+      "scales": {
+        "1k": {
+          "source": "measured",
+          "duration_ns": 17992000,
+          "disk_peak_bytes": 491520,
+          "peak_rss_bytes": 20729856
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 166610900,
+          "disk_peak_bytes": 4440064,
+          "peak_rss_bytes": 34164736
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 2003978400,
+          "disk_peak_bytes": 43884544,
+          "peak_rss_bytes": 128929792
+        },
+        "250k": {
+          "source": "measured",
+          "duration_ns": 4761396600,
+          "disk_peak_bytes": 109633536,
+          "peak_rss_bytes": 280158208
+        },
+        "500k": {
+          "source": "measured",
+          "duration_ns": 10253646100,
+          "disk_peak_bytes": 219217920,
+          "peak_rss_bytes": 532062208
+        },
+        "1M": {
+          "source": "measured",
+          "duration_ns": 20707949800,
+          "disk_peak_bytes": 438386688,
+          "peak_rss_bytes": 1040920576
+        }
+      }
+    },
+    {
+      "workload": "crud_full",
+      "payload": "normal",
+      "measured_scales": [
+        "1k",
+        "10k",
+        "100k",
+        "250k",
+        "500k",
+        "1M"
+      ],
+      "scales": {
+        "1k": {
+          "source": "measured",
+          "duration_ns": 59091400,
+          "disk_peak_bytes": 1712128,
+          "peak_rss_bytes": 21991424
+        },
+        "10k": {
+          "source": "measured",
+          "duration_ns": 553472700,
+          "disk_peak_bytes": 16744448,
+          "peak_rss_bytes": 34369536
+        },
+        "100k": {
+          "source": "measured",
+          "duration_ns": 5582331800,
+          "disk_peak_bytes": 167403520,
+          "peak_rss_bytes": 129019904
+        },
+        "250k": {
+          "source": "measured",
+          "duration_ns": 14568536800,
+          "disk_peak_bytes": 418455552,
+          "peak_rss_bytes": 280375296
+        },
+        "500k": {
+          "source": "measured",
+          "duration_ns": 28882647800,
+          "disk_peak_bytes": 836878336,
+          "peak_rss_bytes": 532410368
+        },
+        "1M": {
+          "source": "measured",
+          "duration_ns": 59286541600,
+          "disk_peak_bytes": 1673723904,
+          "peak_rss_bytes": 1036414976
+        }
+      }
+    }
+  ]
+}

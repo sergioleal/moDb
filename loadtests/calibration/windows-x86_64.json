@@ -3,8 +3,9 @@
   "schema_version": 1,
   "platform": "windows",
   "arch": "x86_64",
+  "build_type": "Debug",
   "measured_at": "2026-07-26",
-  "notes": "Calibração (Subfase H, ampliada em 2026-07-26): medição real em 10k/100k/250k para os 5 workloads da escada básica. 500k/1M seguem extrapolação linear a partir de 100k, documentada como tal em cada entrada -- não uma medição real dessas escalas (não executadas nesta rodada por tempo: crud_full sozinho levou ~44min em 250k). A medição real de 250k confirma que a extrapolação linear a partir de 100k SUBESTIMA a duração real em todas as 5 entradas (ver 'underestimate_ratio_250k_vs_extrapolated' e 'degradation_100k_to_250k_ratio' em cada entrada) -- a degradação não-linear já observada de 10k->100k continua além de 100k, então os valores extrapolados de 500k/1M abaixo permanecem otimistas, provavelmente mais ainda do que o aviso original indicava. Ver docs/PLANO_TESTES_DE_CARGA.md §10 e docs-process/PLANO_IMPLEMENTACAO_CARGA.md (Subfase H).",
+  "notes": "LEGADO, medido em Debug (-O0): superestima um binário otimizado em ~2,5x. Desde 2026-09 (T22) o modb_load prefere windows-x86_64-<CMAKE_BUILD_TYPE>.json quando existe; este arquivo é o fallback. Nota original: Calibração (Subfase H, ampliada em 2026-07-26): medição real em 10k/100k/250k para os 5 workloads da escada básica. 500k/1M seguem extrapolação linear a partir de 100k, documentada como tal em cada entrada -- não uma medição real dessas escalas (não executadas nesta rodada por tempo: crud_full sozinho levou ~44min em 250k). A medição real de 250k confirma que a extrapolação linear a partir de 100k SUBESTIMA a duração real em todas as 5 entradas (ver 'underestimate_ratio_250k_vs_extrapolated' e 'degradation_100k_to_250k_ratio' em cada entrada) -- a degradação não-linear já observada de 10k->100k continua além de 100k, então os valores extrapolados de 500k/1M abaixo permanecem otimistas, provavelmente mais ainda do que o aviso original indicava. Ver docs/PLANO_TESTES_DE_CARGA.md §10 e docs-process/PLANO_IMPLEMENTACAO_CARGA.md (Subfase H).",
   "entries": [
     {
       "workload": "create_only",
