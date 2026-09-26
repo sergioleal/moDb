@@ -1,0 +1,814 @@
+{
+ "meta": {
+  "label": "P1 revisado (sem power throttling)",
+  "binary": "C:\\tmp\\apps\\cpp\\moDb2\\build\\relwithdebinfo\\modb_load.exe",
+  "repeat": 5,
+  "seed": 1,
+  "extra_args": [],
+  "raw_files": {
+   "@C:/Users/SERGIO~1.FON/AppData/Local/Temp/claude/C--tmp-apps-cpp-moDb2/461740ed-dd74-4d2f-bb07-a0b6eb13fca1/scratchpad/wt-pre/build/modb_load.exe load.mixed_oltp.embedded.10k": [
+    "modb-load-20260926T143728.364Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144025.998Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144035.562Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144311.872Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144320.485Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@build/relwithdebinfo/modb_load.exe load.mixed_oltp.embedded.10k --checkpoint-interval 1": [
+    "modb-load-20260926T143737.631Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144017.363Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144044.063Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144303.678Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144328.657Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@build/relwithdebinfo/modb_load.exe load.mixed_oltp.embedded.10k": [
+    "modb-load-20260926T143744.970Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144013.759Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144051.107Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144256.166Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144336.885Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@C:/Users/SERGIO~1.FON/AppData/Local/Temp/claude/C--tmp-apps-cpp-moDb2/461740ed-dd74-4d2f-bb07-a0b6eb13fca1/scratchpad/wt-pre/build/modb_load.exe load.snapshot_hold.embedded.10k": [
+    "modb-load-20260926T143749.631Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T143959.836Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144055.564Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144235.799Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144341.150Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@build/relwithdebinfo/modb_load.exe load.snapshot_hold.embedded.10k --checkpoint-interval 1": [
+    "modb-load-20260926T143804.829Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T143920.615Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144108.132Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144221.732Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144356.293Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@build/relwithdebinfo/modb_load.exe load.snapshot_hold.embedded.10k": [
+    "modb-load-20260926T143814.295Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T143915.485Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144118.177Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144216.656Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144407.558Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@C:/Users/SERGIO~1.FON/AppData/Local/Temp/claude/C--tmp-apps-cpp-moDb2/461740ed-dd74-4d2f-bb07-a0b6eb13fca1/scratchpad/wt-pre/build/modb_load.exe load.crud_full.embedded.100k": [
+    "modb-load-20260926T143820.135Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T143905.545Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144123.591Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144207.406Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144413.072Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@build/relwithdebinfo/modb_load.exe load.crud_full.embedded.100k --checkpoint-interval 1": [
+    "modb-load-20260926T143829.953Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T143855.619Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144132.414Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144158.197Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144423.009Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@build/relwithdebinfo/modb_load.exe load.crud_full.embedded.100k": [
+    "modb-load-20260926T143838.863Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T143847.110Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144141.532Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144150.119Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T144431.670Z-34c3b792b770-eac301be.jsonl"
+   ]
+  }
+ },
+ "cases": {
+  "@C:/Users/SERGIO~1.FON/AppData/Local/Temp/claude/C--tmp-apps-cpp-moDb2/461740ed-dd74-4d2f-bb07-a0b6eb13fca1/scratchpad/wt-pre/build/modb_load.exe load.mixed_oltp.embedded.10k": {
+   "create": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     58227.44,
+     0.09643341889849126
+    ],
+    "engine_ops_per_second": [
+     157050.2,
+     0.12227336036216116
+    ],
+    "duration_s": [
+     0.17305652,
+     0.09874892143701716
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.6282548,
+     0.016562676041350026
+    ]
+   },
+   "mixed_oltp": {
+    "repetitions": 5,
+    "operations": 50000,
+    "ops_per_second": [
+     6635.63,
+     0.06009111720414602
+    ],
+    "engine_ops_per_second": [
+     6641.195999999999,
+     0.060025782544577265
+    ],
+    "duration_s": [
+     7.557259419999999,
+     0.061112317333177436
+    ],
+    "wal_bytes_per_op": [
+     2686.95408,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0008414892,
+     0.08101228355916651
+    ]
+   }
+  },
+  "@build/relwithdebinfo/modb_load.exe load.mixed_oltp.embedded.10k --checkpoint-interval 1": {
+   "create": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     51153.340000000004,
+     0.28531682842388656
+    ],
+    "engine_ops_per_second": [
+     86769.92,
+     0.30199557754865136
+    ],
+    "duration_s": [
+     0.21362494,
+     0.38024291613983663
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4075702,
+     0.03575359299872867
+    ]
+   },
+   "mixed_oltp": {
+    "repetitions": 5,
+    "operations": 50000,
+    "ops_per_second": [
+     7705.652,
+     0.06691450954880997
+    ],
+    "engine_ops_per_second": [
+     7714.5740000000005,
+     0.06693662672762869
+    ],
+    "duration_s": [
+     6.5129511,
+     0.06955446014181123
+    ],
+    "wal_bytes_per_op": [
+     2686.95408,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.00115525,
+     0.07192286105815811
+    ]
+   }
+  },
+  "@build/relwithdebinfo/modb_load.exe load.mixed_oltp.embedded.10k": {
+   "create": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     59367.86,
+     0.2935170503783322
+    ],
+    "engine_ops_per_second": [
+     107284.22,
+     0.310014182314028
+    ],
+    "duration_s": [
+     0.18911574,
+     0.4686623463906646
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4433548,
+     0.038300932556631764
+    ]
+   },
+   "mixed_oltp": {
+    "repetitions": 5,
+    "operations": 50000,
+    "ops_per_second": [
+     16204.969999999998,
+     0.2763733781192845
+    ],
+    "engine_ops_per_second": [
+     16241.466,
+     0.27649131151444556
+    ],
+    "duration_s": [
+     3.413811,
+     0.43568016947901284
+    ],
+    "wal_bytes_per_op": [
+     2686.95408,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.002202302,
+     0.11309238141126983
+    ]
+   }
+  },
+  "@C:/Users/SERGIO~1.FON/AppData/Local/Temp/claude/C--tmp-apps-cpp-moDb2/461740ed-dd74-4d2f-bb07-a0b6eb13fca1/scratchpad/wt-pre/build/modb_load.exe load.snapshot_hold.embedded.10k": {
+   "create": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     45081.36,
+     0.24299327965144243
+    ],
+    "engine_ops_per_second": [
+     112177.86000000002,
+     0.2898548649720562
+    ],
+    "duration_s": [
+     0.23693692,
+     0.33249533203230336
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.5922452,
+     0.04341609932222413
+    ]
+   },
+   "hold": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     734.711,
+     0.16455021095597874
+    ],
+    "engine_ops_per_second": [
+     851.106,
+     0.16566943069201476
+    ],
+    "duration_s": [
+     13.9368388,
+     0.17991541122999852
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.1366326,
+     0.0420165498853343
+    ]
+   }
+  },
+  "@build/relwithdebinfo/modb_load.exe load.snapshot_hold.embedded.10k --checkpoint-interval 1": {
+   "create": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     61271.86,
+     0.1381144540124825
+    ],
+    "engine_ops_per_second": [
+     105404.72,
+     0.1946626122927403
+    ],
+    "duration_s": [
+     0.16586658,
+     0.14514872345748223
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.41255040000000004,
+     0.10531318426072016
+    ]
+   },
+   "hold": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     902.0409999999999,
+     0.41054113298201067
+    ],
+    "engine_ops_per_second": [
+     1083.7854,
+     0.40531574973031714
+    ],
+    "duration_s": [
+     15.035025580000001,
+     0.8200129882232513
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.1669594,
+     0.22393371347243396
+    ]
+   }
+  },
+  "@build/relwithdebinfo/modb_load.exe load.snapshot_hold.embedded.10k": {
+   "create": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     68916.94,
+     0.10190005176062635
+    ],
+    "engine_ops_per_second": [
+     127213.4,
+     0.1255684037721519
+    ],
+    "duration_s": [
+     0.14639252,
+     0.10847084083126195
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4569146,
+     0.030481854594223746
+    ]
+   },
+   "hold": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     2572.04,
+     0.04543997240339404
+    ],
+    "engine_ops_per_second": [
+     3051.904,
+     0.03860784293848248
+    ],
+    "duration_s": [
+     3.89410784,
+     0.04341034955575442
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.1573716,
+     0.06059009978786764
+    ]
+   }
+  },
+  "@C:/Users/SERGIO~1.FON/AppData/Local/Temp/claude/C--tmp-apps-cpp-moDb2/461740ed-dd74-4d2f-bb07-a0b6eb13fca1/scratchpad/wt-pre/build/modb_load.exe load.crud_full.embedded.100k": {
+   "create": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     60719.0,
+     0.041436673600216155
+    ],
+    "engine_ops_per_second": [
+     166146.8,
+     0.055880980819100666
+    ],
+    "duration_s": [
+     1.6492266999999998,
+     0.041983777922080454
+    ],
+    "wal_bytes_per_op": [
+     481.40206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.6342866,
+     0.010672072806903599
+    ]
+   },
+   "read": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     107158.38,
+     0.19543666619205388
+    ],
+    "engine_ops_per_second": [
+     408099.8,
+     0.15362751308772427
+    ],
+    "duration_s": [
+     0.96610174,
+     0.21874470704475524
+    ],
+    "wal_bytes_per_op": [
+     481.40206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.7354478,
+     0.060785599109330124
+    ]
+   },
+   "update_inplace": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     78012.9,
+     0.053352065104137494
+    ],
+    "engine_ops_per_second": [
+     123667.2,
+     0.049540346600997355
+    ],
+    "duration_s": [
+     1.2847617599999999,
+     0.05331089663897836
+    ],
+    "wal_bytes_per_op": [
+     954.41356,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.3692182,
+     0.02405564708131548
+    ]
+   },
+   "update_grow": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     63089.219999999994,
+     0.06496301444511876
+    ],
+    "engine_ops_per_second": [
+     107249.6,
+     0.06082399097925382
+    ],
+    "duration_s": [
+     1.59032514,
+     0.06379716176331506
+    ],
+    "wal_bytes_per_op": [
+     1721.22206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.41183139999999996,
+     0.017505026890336235
+    ]
+   },
+   "update_shrink": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     50378.86,
+     0.0858965662972555
+    ],
+    "engine_ops_per_second": [
+     96652.42,
+     0.07629953509244541
+    ],
+    "duration_s": [
+     1.99656858,
+     0.08482957108092942
+    ],
+    "wal_bytes_per_op": [
+     2655.57381,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4789894,
+     0.019483540900058577
+    ]
+   },
+   "delete": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     156905.0,
+     0.1213908249369551
+    ],
+    "engine_ops_per_second": [
+     232200.0,
+     0.10920471263707068
+    ],
+    "duration_s": [
+     0.6449829599999999,
+     0.12263484584332507
+    ],
+    "wal_bytes_per_op": [
+     2720.46081,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.32500239999999997,
+     0.0282604435778422
+    ]
+   }
+  },
+  "@build/relwithdebinfo/modb_load.exe load.crud_full.embedded.100k --checkpoint-interval 1": {
+   "create": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     65486.86,
+     0.0847777162521976
+    ],
+    "engine_ops_per_second": [
+     112663.12,
+     0.11098755237701781
+    ],
+    "duration_s": [
+     1.53621602,
+     0.08852692445205151
+    ],
+    "wal_bytes_per_op": [
+     481.40206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4173172,
+     0.03867232303689676
+    ]
+   },
+   "read": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     116065.8,
+     0.04703630710753073
+    ],
+    "engine_ops_per_second": [
+     410223.2,
+     0.07228123076583942
+    ],
+    "duration_s": [
+     0.86315232,
+     0.04840618598909336
+    ],
+    "wal_bytes_per_op": [
+     481.40206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.7166238,
+     0.011324424904152513
+    ]
+   },
+   "update_inplace": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     78069.81999999999,
+     0.05119397852448308
+    ],
+    "engine_ops_per_second": [
+     84039.34,
+     0.05328183723831926
+    ],
+    "duration_s": [
+     1.28353488,
+     0.0500517952330968
+    ],
+    "wal_bytes_per_op": [
+     954.41356,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0709514,
+     0.027173379604864597
+    ]
+   },
+   "update_grow": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     69319.42,
+     0.07742315394760868
+    ],
+    "engine_ops_per_second": [
+     74992.9,
+     0.07963581393569537
+    ],
+    "duration_s": [
+     1.45023666,
+     0.08510375000236041
+    ],
+    "wal_bytes_per_op": [
+     1721.22206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0755114,
+     0.03088956588599122
+    ]
+   },
+   "update_shrink": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     58371.219999999994,
+     0.05649562308560827
+    ],
+    "engine_ops_per_second": [
+     61163.780000000006,
+     0.05776408333016081
+    ],
+    "duration_s": [
+     1.7172947,
+     0.053129266168434046
+    ],
+    "wal_bytes_per_op": [
+     2655.57381,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.04560324,
+     0.03003720108352396
+    ]
+   },
+   "delete": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     169116.8,
+     0.04583602537267125
+    ],
+    "engine_ops_per_second": [
+     172076.6,
+     0.04608858573375568
+    ],
+    "duration_s": [
+     0.5923192399999999,
+     0.04661746295537995
+    ],
+    "wal_bytes_per_op": [
+     2720.46081,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.01718972,
+     0.06351491741960438
+    ]
+   }
+  },
+  "@build/relwithdebinfo/modb_load.exe load.crud_full.embedded.100k": {
+   "create": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     70524.08,
+     0.02353182866673997
+    ],
+    "engine_ops_per_second": [
+     127361.0,
+     0.034415430180925514
+    ],
+    "duration_s": [
+     1.41858852,
+     0.023720895697709573
+    ],
+    "wal_bytes_per_op": [
+     481.40206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4460904,
+     0.015636564803434623
+    ]
+   },
+   "read": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     119071.6,
+     0.023262408501006478
+    ],
+    "engine_ops_per_second": [
+     424473.4,
+     0.04437145174130431
+    ],
+    "duration_s": [
+     0.84019196,
+     0.023154406356997382
+    ],
+    "wal_bytes_per_op": [
+     481.40206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.719267,
+     0.008676283379373111
+    ]
+   },
+   "update_inplace": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     83039.45999999999,
+     0.056059843800978386
+    ],
+    "engine_ops_per_second": [
+     89755.38,
+     0.058278690720460345
+    ],
+    "duration_s": [
+     1.20730354,
+     0.056480463093771714
+    ],
+    "wal_bytes_per_op": [
+     954.41356,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0747282,
+     0.02801893123621875
+    ]
+   },
+   "update_grow": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     69627.42000000001,
+     0.08852376586786477
+    ],
+    "engine_ops_per_second": [
+     75554.38,
+     0.09231338626399091
+    ],
+    "duration_s": [
+     1.44478194,
+     0.08394153621354492
+    ],
+    "wal_bytes_per_op": [
+     1721.22206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.07820614000000001,
+     0.04279815841273071
+    ]
+   },
+   "update_shrink": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     67393.28,
+     0.05203960851441042
+    ],
+    "engine_ops_per_second": [
+     71166.94,
+     0.0533792039198496
+    ],
+    "duration_s": [
+     1.4871335399999999,
+     0.05340921698951785
+    ],
+    "wal_bytes_per_op": [
+     2655.57381,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.05297028,
+     0.026986439448392567
+    ]
+   },
+   "delete": {
+    "repetitions": 5,
+    "operations": 100000,
+    "ops_per_second": [
+     196399.2,
+     0.060463118981848626
+    ],
+    "engine_ops_per_second": [
+     200364.0,
+     0.060682769049629326
+    ],
+    "duration_s": [
+     0.51060474,
+     0.05822939712073785
+    ],
+    "wal_bytes_per_op": [
+     2720.46081,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.019779659999999998,
+     0.03268947621150125
+    ]
+   }
+  }
+ }
+}

@@ -246,14 +246,16 @@ Fecha o ciclo P1; repetir ao fim de cada ciclo seguinte.
 
 Numeradas depois de T25 para não renumerar o plano; a prioridade vai ao lado.
 
-#### T26 — Truncar/segmentar o WAL *(P2, médio)*
+#### T26 — Truncar/segmentar o WAL *(P2, médio)* ✅
+
+> Feito pela variante do offset do checkpoint (DBRT `checkpoint_wal_offset`): reinício 7× a 10k, 18,8× a 100k. Achado e corrigido no caminho: commits depois de um rabo rasgado do WAL se perdiam na queda seguinte.
 
 A abertura lê o WAL inteiro (`Wal::read_all`) e ele nunca é truncado: 134 ms a
 10k objetos, crescendo com a idade do banco (T9.4).
 
-- [ ] 26.1 Desenho: truncar até o menor LSN ainda necessário (checkpoint e réplicas, `oldest_available_lsn`)
-- [ ] 26.2 Ou recuperação que leia só a partir do checkpoint
-- [ ] 26.3 Antes/depois em `restart_recovery`
+- [x] 26.1 *(escolhida a variante 26.2, que não mexe na retenção de réplicas)* Desenho: truncar até o menor LSN ainda necessário (checkpoint e réplicas, `oldest_available_lsn`)
+- [x] 26.2 Ou recuperação que leia só a partir do checkpoint
+- [x] 26.3 Antes/depois em `restart_recovery`
 
 #### T27 — Registros maiores que uma página *(P3, grande)*
 
@@ -270,47 +272,83 @@ Com `--case`, a campanha não atribui ambiente e o rollup rejeita o ponto
 
 - [ ] 28.1 Atribuir o ambiente padrão também com `--case`, ou falhar cedo
 
+#### T29 — `update_shrink`: candidatas lidas do disco *(P2, médio)*
+
+T14: quando o registro encolhido muda de página, `heap_candidate_try` custa
+~13,5 µs por chamada (16% da fase) e `buffer_pool_miss` 15%.
+
+- [ ] 29.1 Entender por que a candidata raramente está no cache
+- [ ] 29.2 Predição e antes/depois
+
+#### T30 — Uma cópia de página por leitura ainda sobra *(P3, pequeno)*
+
+T15.5: 8.192 B copiados por leitura (eram 24.466); provável resolução do
+diretório do `IdentityMap`.
+
+- [ ] 30.1 Localizar e trocar por `PageFile::view`
+
+#### T31 — `wal_bytes` ausente em `cascade_delete`/`blob_lifecycle` *(P3, pequeno)*
+
+- [ ] 31.1 Preencher `wal_bytes` nessas fases (T12)
+
+#### T32 — Outliers intermitentes do ambiente *(P3, pequeno)*
+
+Repetições isoladas 2–4× mais lentas em qualquer binário, que somem ao repetir
+(P1 revisado, T26).
+
+- [ ] 32.1 Correlacionar com Defender/indexação/estado do disco
+
 ### P2
 
-#### T11 — Isolar a causa de M5 *(pequeno + máquina)*
+#### T11 — Isolar a causa de M5 *(pequeno + máquina)* ✅
 
-- [ ] 11.1 Rodar o mesmo caso N vezes num único processo e plotar a série
-- [ ] 11.2 Variar: caso de 100k antes ou não; work dir limpo ou acumulado;
+> Causa: **power throttling do Windows (EcoQoS)**, não allocator. `modb_load` faz opt-out; 16–17 casos lentos → 0. Os ganhos do P1 foram remedidos sem throttling (seção 'P1 revisado').
+
+- [x] 11.1 Rodar o mesmo caso N vezes num único processo e plotar a série
+- [x] 11.2 Variar: caso de 100k antes ou não; work dir limpo ou acumulado;
   mesmo processo ou processo novo
-- [ ] 11.3 Classificar: estado de processo (heap/allocator), cache do SO ou metadados NTFS
-- [ ] 11.4 Se for estado de processo: abrir hipótese de produto (servidor de
+- [x] 11.3 Classificar: estado de processo (heap/allocator), cache do SO ou metadados NTFS
+- [x] 11.4 Se for estado de processo: abrir hipótese de produto (servidor de
   vida longa) e testar um allocator alternativo
 
-#### T12 — Perfilar os workloads ainda não medidos depois das otimizações *(máquina, muitos casos)*
+#### T12 — Perfilar os workloads ainda não medidos depois das otimizações *(máquina, muitos casos)* ✅
+
+> Achados: `cascade_delete`/`blob_lifecycle` nunca tinham `ops_per_second` (corrigido); `loopback` usa `CreateBatch` e não se compara com o embedded; `remote_colocated` precisa de servidor remoto e não foi medido.
 
 Para cada um: cobertura de estágios, top-3 estágios, hipótese se houver anomalia.
 
-- [ ] 12.1 `range_scan_sweep` (último número é de Debug)
-- [ ] 12.2 `cascade_delete`
-- [ ] 12.3 `blob_lifecycle`
-- [ ] 12.4 `oversubscribed_churn`
-- [ ] 12.5 `restart_recovery` (replay do WAL; afetado por T9)
-- [ ] 12.6 `loopback` / `remote_colocated` (caminho de rede)
+- [x] 12.1 `range_scan_sweep` (último número é de Debug)
+- [x] 12.2 `cascade_delete`
+- [x] 12.3 `blob_lifecycle`
+- [x] 12.4 `oversubscribed_churn`
+- [x] 12.5 `restart_recovery` (replay do WAL; afetado por T9)
+- [x] 12.6 `loopback` / `remote_colocated` (caminho de rede)
 
-#### T13 — Decidir o que o load test mede *(pequeno a médio)*
+#### T13 — Decidir o que o load test mede *(pequeno a médio)* ✅
+
+> Decisão: os dois números, explicitamente (`PLANO_TESTES_DE_CARGA.md` §13.3.1). Rollup e dashboard levam `engine_ops_per_second`.
 
 De 37% a 74% de cada número de fase é o medidor.
 
-- [ ] 13.1 Decidir: motor, ponta a ponta, ou os dois explicitamente
+- [x] 13.1 Decidir: motor, ponta a ponta, ou os dois explicitamente
   (registrar em PLANO_TESTES_DE_CARGA)
-- [ ] 13.2 Se "motor": tirar validação e formatação do laço cronometrado
-- [ ] 13.3 Dashboard mostra `engine_ops_per_second` ao lado de `ops_per_second`
-- [ ] 13.4 Aviso na série histórica: comparar fases entre si nunca foi válido
+- [x] 13.2 *(não se aplica: a decisão foi manter os dois)* Se "motor": tirar validação e formatação do laço cronometrado
+- [x] 13.3 Dashboard mostra `engine_ops_per_second` ao lado de `ops_per_second`
+- [x] 13.4 Aviso na série histórica: comparar fases entre si nunca foi válido
 
-#### T14 — Resto do caminho de update (H4) *(médio; depende de T3.2)*
+#### T14 — Resto do caminho de update (H4) *(médio; depende de T3.2)* ✅
+
+> Nenhum estágio domina; commit 24–32%. Alvo novo: `update_shrink` (`heap_candidate_try` 16%, `buffer_pool_miss` 15%) → T29.
 
 - [x] 14.1 *(sem objeto: T3.2 mediu `heap_candidate_scan` em 0,7% de `update_shrink`
   a 8 KiB; a fase agora é 77% commit)* Se `heap_candidate_scan` ainda dominar `update_shrink`: explicar por
   que `lower_bound` + "para na primeira" ainda itera milhares de vezes
-- [ ] 14.2 Bytes movidos e escritas de página por update vs tamanho do registro
-- [ ] 14.3 Cobertura de `update_inplace`/`update_grow` (66–67%): o que falta atribuir
+- [x] 14.2 Bytes movidos e escritas de página por update vs tamanho do registro
+- [x] 14.3 Cobertura de `update_inplace`/`update_grow` (66–67%): o que falta atribuir
 
-#### T15 — Dívidas de CPU no caminho de leitura (H6 / Fase 10C) *(médio; depende de T3.3)*
+#### T15 — Dívidas de CPU no caminho de leitura (H6 / Fase 10C) *(médio; depende de T3.3)* ✅
+
+> 15.5 (leitura sem cópia de página: `read` 1,51× no motor, updates +13–25%) e 15.4 (`push_back` incremental: 12–15× a 20k) feitos; 15.1–15.3 decididos pelo teto (≤2%, ≤6%, sem workload).
 
 > T3.3: `materialize` é 11% do tempo de motor da leitura (teto baixo para 15.1–15.3). O teto
 > maior está nas **três cópias de página de 8 KiB por leitura** e na navegação de
@@ -319,19 +357,21 @@ De 37% a 74% de cada número de fase é o medidor.
 Medir com `modb_bench object_store.read_hotpath` e o estágio `materialize`.
 Cada item: predição, antes/depois, e decisão mesmo que seja "não vale".
 
-- [ ] 15.1 `std::function` por campo no Binding → NTTP / ponteiro cru
-- [ ] 15.2 Zero-copy em `to_field_values` / strings (na leitura; a escrita foi refutada)
-- [ ] 15.3 `Handle::get<Member>()` materializa o objeto inteiro → projeção de um campo
-- [ ] 15.4 Append incremental de coleções (hoje O(n))
-- [ ] 15.5 *(novo, achado da T3)* Leitura sem copiar a página inteira: `buffer_pool_hit`
+- [x] 15.1 `std::function` por campo no Binding → NTTP / ponteiro cru
+- [x] 15.2 Zero-copy em `to_field_values` / strings (na leitura; a escrita foi refutada)
+- [x] 15.3 `Handle::get<Member>()` materializa o objeto inteiro → projeção de um campo
+- [x] 15.4 Append incremental de coleções (hoje O(n))
+- [x] 15.5 *(novo, achado da T3)* Leitura sem copiar a página inteira: `buffer_pool_hit`
   copia 24.466 B por leitura de um registro de 375 B
 
-#### T16 — WAL grava imagens de página inteiras (A4 / H3) *(grande; depende de T3.4 e T5)*
+#### T16 — WAL grava imagens de página inteiras (A4 / H3) *(grande; depende de T3.4 e T5)* ✅
 
-- [ ] 16.1 Separar custo por byte (append + sync) do custo por commit, com T5.2/T5.3
-- [ ] 16.2 Se o teto justificar: ADR de registro lógico/delta (muda o formato
+> `fsync` tem piso de ~320 µs; 29 KB acrescentam ~80 µs. Teto de um WAL lógico ~1,3–1,4×; custo grande (formato, recuperação, réplicas). Não agora.
+
+- [x] 16.1 Separar custo por byte (append + sync) do custo por commit, com T5.2/T5.3
+- [x] 16.2 Se o teto justificar: ADR de registro lógico/delta (muda o formato
   do WAL, a recuperação e a réplica — ADR-016/020)
-- [ ] 16.3 Registrar a decisão (fazer / não fazer) com o teto estimado
+- [x] 16.3 Registrar a decisão (fazer / não fazer) com o teto estimado
 
 ### P3
 
@@ -395,3 +435,4 @@ Só se, depois de T6 e T13, sobrar resíduo de motor sem explicação.
 | 2026-09-26 | T1 | — (não commitado) | RESULTADOS_PROFILING, PLANO_PROFILING e PLANO_PROFILER atualizados e linkados a este plano |
 | 2026-09-26 | T2 | — (não commitado) | `scripts/build_docs_site.py` (+ `build-docs.ps1`/`.sh`, `docs_site_assets/`): 148 documentos, 8 seções, 115 páginas de código com âncora de linha, busca local; build em ~3 s; 91 links quebrados corrigidos nos `.md` (90 apontavam para arquivos movidos para `docs/`, 1 para arquivo removido). 2.7 (publicar) não feito — opcional |
 | 2026-09-26 | T3–T10 (P1) | (este commit) | Relatório: [PROFILING_2026-09.md](PROFILING_2026-09.md). ADR-022 (1 `fsync` por commit) + CRC slicing-by-8: `mixed_oltp` ~2,97×, `hold` ~2,8–3,0×. Defeitos corrigidos: commit fora do tempo de motor no harness; `set_wal_file_factory` com WAL aberto (testes de failpoint passavam pelo motivo errado). 10.4 pendente |
+| 2026-09-26 | T11–T16, T26 (P2) | `6d70a5e` `d8750ac` `eed7f93` + seguintes | M5 = power throttling do Windows (opt-out no `modb_load`); P1 remedido: `mixed_oltp` 2,65×, `hold` 3,51×. Leitura sem cópia de página (1,51× no motor); `push_back` incremental (12–15×); abertura lendo do checkpoint (7–19×); corrigido: commits após rabo rasgado do WAL se perdiam. Novas: T29–T32 |

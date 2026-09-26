@@ -503,9 +503,10 @@ teto está na cópia de página (T15.5), não no Binding (T15.1–15.3).
 | group commit | T8 | — | até 1/c do `fsync` com c escritores | grande (modelo de concorrência) | **adiado** |
 
 **Total do ciclo** (base = motor da abertura do ciclo, `fsync` ×4; final =
-T7.3 + T9 + T7.1; produto dos A/B): `mixed_oltp.10k` **~2,97×** (7.024 →
-~20.900 ops/s), `snapshot_hold` (`hold`) **~2,8–3,0×**, `crud_full.100k` +10 a
-+30% por fase de escrita, `read` igual. Fora do motor: a série histórica
+T7.3 + T9 + T7.1): `mixed_oltp.10k` **~2,65×**, `snapshot_hold` (`hold`)
+**~3,5×**, `crud_full.100k` +6 a +34% por fase. *(Corrigido depois da T11:
+a primeira versão dizia ~2,97× e ~2,8–3,0×, medidos sob power throttling — ver
+"P1 revisado".)* Fora do motor: a série histórica
 reinicia neste ponto (novas baselines), o harness mede o commit onde ele
 acontece, e `--batch`/`--durability`/`--checkpoint-interval` passaram a ter
 seletor.
@@ -544,3 +545,375 @@ modb_load gate --case load.create_only.embedded.100k  --metric ops_per_second --
 Todos passam agora. **Não são gate de CI:** `desktop-windows` está marcado como
 ruidoso em `environments.json`, e este ciclo mediu deriva de ~7% entre sessões
 na própria máquina. Viram gate de verdade num ambiente calibrado.
+
+---
+
+# Ciclo P2
+
+## T11 — Causa de M5 (contaminação por ordem)
+
+M5 foi medido em julho, antes da A2 e do ADR-022: dentro de um mesmo
+processo, um caso de 100k antes cortava pela metade a vazão do caso de 10k
+seguinte, de forma estável. Três candidatos: estado do processo
+(heap/allocator), cache de escrita do SO, metadados NTFS do work dir.
+
+Experimentos (`create_only`, `relwithdebinfo`, 3 repetições de cada):
+
+| exp. | processos | sequência | isola |
+|---|---|---|---|
+| E1 | 1 | 10k ×6 | controle |
+| E2 | 1 | 100k, depois 10k ×5 | M5 original |
+| E3a | 2 | processo A: 100k; processo B: 10k no **mesmo** work dir | SO e NTFS, sem estado de processo |
+| E3b | 2 | processo A: 100k; processo B: 10k em work dir **novo** | só cache do SO |
+
+### Predição (escrita antes de rodar)
+
+M5 continua existindo dentro do processo: em **E2 os casos de 10k ficam ≥30%
+abaixo de E1**. Entre processos ele some: **E3a e E3b ficam dentro de ±10% de
+E1**. Isso aponta estado de processo (allocator), a hipótese mais antiga.
+*Refutação:* se E3a ou E3b ficarem lentos, é SO/NTFS; se E2 não ficar lento,
+M5 deixou de existir com as otimizações.
+
+### Resultado — a predição acertou o "onde" e errou o "porquê"
+
+**11.1/11.2 — o efeito existe e é de processo.** Três repetições de cada
+experimento (vazão de `create` dos casos de 10k, em k ops/s):
+
+| exp. | resultado |
+|---|---|
+| E1 (10k ×6, um processo) | ~73k, estável |
+| E2 (100k, depois 10k ×5, um processo) | **26k–54k** (média ~38k, **−48%**), sem recuperar |
+| E3a (100k e 10k em processos separados, mesmo work dir) | 65k–73k |
+| E3b (idem, work dir novo) | 65k–75k |
+
+Como previsto, M5 existe dentro do processo e some entre processos. Mas a
+causa não é o allocator:
+
+- o RSS volta a 33 MB depois do caso de 100k (igual a E1) — não há memória
+  retida;
+- com `stage-profile`, a queda é **uniforme**: todo estágio fica 2,2–2,6× mais
+  lento, inclusive CPU pura (`object_encode` 916 → 2.380 ns/op) e o próprio
+  laço do harness (2,4×). Fragmentação ou um contêiner inchado deixariam
+  alguns estágios mais lentos, não todos;
+- o efeito é intermitente: uma sequência de 3 rodadas de "100k + 10k ×3" não
+  o mostrou, e rodadas seguidas da mesma sequência mostraram;
+- **um processo que roda só casos de 10k também cai**: `10k ×25` despencou de
+  ~78k para ~30k a partir do 10º caso — ~1,3 s de vida do processo, nenhum
+  caso de 100k. O caso de 100k só fazia o processo durar o bastante.
+
+**11.3 — causa: power throttling do Windows (EcoQoS).** O Windows rebaixa
+threads de processos de console em segundo plano, e o processo inteiro passa
+a rodar mais devagar. Teste direto: o `modb_load` passou a pedir para não ser
+rebaixado (`SetProcessInformation(ProcessPowerThrottling)`, com
+`EXECUTION_SPEED` controlado e desligado). `10k ×25`, 4 execuções de cada,
+alternadas:
+
+| modo | casos abaixo de 50k (de 25) | menor vazão |
+|---|---|---|
+| throttling permitido (`MODB_LOAD_ALLOW_POWER_THROTTLING=1`) | **16, 16, 17, 17** | 24k–28k |
+| opt-out (novo padrão) | **0, 0, 0, 0** | 57k–63k |
+
+**11.4 — não é hipótese de produto do motor**, e sim do ambiente de medição;
+mas vale para qualquer serviço Windows de longa vida que rode como processo
+de console em segundo plano: ele deve fazer o mesmo opt-out.
+
+**Consequência para o ciclo P1.** Toda medição com processo de mais de ~1,3 s
+pode ter rodado em parte rebaixada. Os A/B do P1 alternaram as variantes, mas a
+variante mais lenta vive mais e passa mais tempo rebaixada, o que **tende a
+inflar os ganhos**. Os números de T7.3/T9/T7.1 foram refeitos com o opt-out
+nos dois lados — ver "P1 revisado" abaixo.
+
+## T15.5 — Leitura sem copiar a página inteira
+
+T3.3 mostrou `buffer_pool_hit` copiando 24.466 B por leitura de um registro de
+375 B: `IdentityMap::find` lia a página IDMP por valor (1 cópia) e
+`TableHeap::read` copiava a página para um buffer de rascunho e de novo para um
+`SlottedPage` (2 cópias). Mudança: `PageFile::view(PageId)` devolve um
+`const Page*` para a página no buffer da transação ou no cache, válido até a
+próxima chamada ao `PageFile`; `SlottedPage::read_in`/`generation_in` leem o
+registro direto de uma página que não possuem; `find`, `find_at` e
+`TableHeap::read` passam a usar a visão. Os caminhos que escrevem a página
+continuam copiando.
+
+### Predição (escrita antes de rodar)
+
+`buffer_pool_hit` na fase `read` cai de ~24.500 para ~0 bytes copiados por
+operação. Tempo de motor da leitura **20–30% menor** (as cópias eram ~27% dele);
+vazão de parede de `read` +6–10% (o harness é ~70% da fase). Nas outras fases
+e em `mixed_oltp`, dentro de ±5%. *Refutação:* motor de `read` melhorando menos
+de 10% — o custo estaria no acesso ao cache, não na cópia.
+
+## P1 revisado — os ganhos sem power throttling
+
+Mesmo desenho do A/B da T9, agora com o opt-out de throttling nas três
+variantes e o binário de **antes do ciclo** (`8aee7f1`, worktree separado, só
+com o opt-out aplicado) como base. 5 repetições alternadas
+([dados](profiling/2026-09/p1-rev-summary.md)). Houve dois outliers isolados
+(uma repetição da variante final de `mixed_oltp` a 8.235 contra ~18k nas
+outras; uma de `hold` com intervalo 1 a 270), então a tabela usa **medianas**:
+
+| caso · fase | antes do ciclo | T7.3+T7.1 (intervalo 1) | final (T7.3+T7.1+T9) | total | só T9 |
+|---|---|---|---|---|---|
+| `mixed_oltp.10k` · `mixed_oltp` | 6.755 | 7.812 | 17.935 | **2,65×** | 2,30× |
+| `snapshot_hold.10k` · `hold` | 722 | 1.010 | 2.532 | **3,51×** | 2,51× |
+
+Em `crud_full.100k` (médias, CV ≤ 9% na variante final): `create` 1,16×,
+`read` 1,11×, `update_inplace` 1,06×, `update_grow` 1,10×, `update_shrink`
+1,34×, `delete` 1,25×.
+
+**Correção:** o "~2,97×" em `mixed_oltp` publicado no resumo da T10 (produto
+dos A/B feitos sob throttling) estava **inflado em ~12%**; o número é
+**~2,65×**. O de `snapshot_hold` ficou maior (3,5× contra ~2,8–3,0×). A
+direção e a ordem de grandeza de todas as conclusões se mantêm; os números da
+T10 e do ADR-022 foram atualizados.
+
+### Resultado da T15.5
+
+A/B alternado, 5 repetições, com opt-out de throttling nas duas variantes
+([dados](profiling/2026-09/t15-5-summary.md); estágios em
+[t15-5-sp](profiling/2026-09/t15-5-sp-summary.md)):
+
+| caso · fase | parede antes → depois | motor antes → depois |
+|---|---|---|
+| `crud_full.100k` · `read` | 112.824 → 125.620 (**1,11×**) | 390.746 → 590.104 (**1,51×**) |
+| `crud_full.100k` · `update_inplace` | 75.491 → 93.162 (1,23×) | 1,25× |
+| `crud_full.100k` · `update_grow` | 68.614 → 79.808 (1,16×) | 1,18× |
+| `crud_full.100k` · `update_shrink` | 62.372 → 70.668 (1,13×) | 1,14× |
+| `crud_full.100k` · `delete` | 177.479 → 209.394 (1,18×) | 1,18× |
+| `crud_full.100k` · `create` | 59.658 → 65.804 (1,10×) | 1,15× |
+| `read_hotspot.100k` | 42.214 → 43.770 (1,04×, CV 11%) | 1,15× |
+| `mixed_oltp.10k` | 17.074 → 18.498 (1,08×) | 1,08× |
+
+**Confirmada, e maior que o previsto.** O motor de `read` ficou 51% mais rápido
+(previsto 20–30%); a parede, +11% (previsto 6–10%). `buffer_pool_hit` caiu de
+24.466 para **8.192 bytes copiados por leitura** — sobra uma cópia, a de uma
+página que o caminho de leitura ainda lê por valor (candidata: a resolução do
+diretório do `IdentityMap`). **Errado na direção boa:** a predição dizia que as
+outras fases ficariam dentro de ±5%, e elas ganharam 10–25% — update e delete
+também leem o objeto (e o `IdentityMap`) antes de mudá-lo.
+
+## T26 — Abrir o banco sem ler o WAL inteiro, e um defeito de integridade
+
+### O defeito encontrado ao desenhar a T26 (anterior a este ciclo, agravado pela T9)
+
+`Wal::open_durable` anexa no **fim do arquivo**. Se a última queda deixou no
+fim do WAL um registro rasgado ou as imagens de um commit interrompido, os
+commits da sessão seguinte ficavam **atrás** desse lixo — e a recuperação para
+no primeiro registro inválido. Antes da T9 isso ficava escondido, porque todo
+commit também era checkpointado no arquivo de dados; com o checkpoint
+preguiçoso, **uma segunda queda perderia até 63 commits confirmados**.
+
+Vizinho: o `tx_id` recomeça em 1 a cada sessão, e a recuperação decide
+"commitado" por `tx_id` no WAL inteiro — uma transação morta que sobrasse no
+log poderia ser tomada por commitada se a sessão nova reutilizasse o id.
+
+**Correção:** na abertura, depois da recuperação, o WAL é **cortado no fim do
+último registro de commit**, com sync (tudo depois dele é de transação morta);
+e `next_tx_id` começa acima do maior `tx_id` visto. Testes em `recovery_test`:
+
+- **W1** (queda com rabo rasgado → reabre → commit B → segunda queda): B
+  sobrevive. **Falha sem o corte** (verificado por mutação).
+- **W2** (transação morta no fim → reabre → 4 commits → segunda queda): passa,
+  mas **passa também sem as duas proteções** — neste arranjo a sessão nova
+  regrava as mesmas páginas que a morta tocou e as imagens posteriores
+  sobrescrevem as dela. Fica como teste de regressão do cenário, não como
+  prova da proteção de `tx_id`.
+
+### A T26 propriamente
+
+A abertura lia o WAL inteiro para a memória, **duas vezes** (em `tx::recover`
+e de novo em `Database::open`, para achar o maior LSN) — 134 ms a 10k objetos
+(T9.4), crescendo com a idade do banco, porque o WAL nunca é truncado.
+Mudança, sem mudar a versão do formato:
+
+- a DBRT ganha `checkpoint_wal_offset` (campo novo no fim; zero em arquivos
+  antigos = "desconhecido"), gravado em todo checkpoint com o offset do WAL
+  logo depois do último commit coberto, e zerado quando o rollback apaga o WAL;
+- `tx::recover` lê só a partir desse offset quando ele é confiável (dentro do
+  arquivo, com o primeiro registro ali legível e de LSN posterior ao
+  checkpoint); senão, lê tudo, como antes;
+- `Database::open` usa o maior LSN que `recover` já calculou, em vez de reler.
+
+### Predição (escrita antes de rodar)
+
+A fase `restart_recovery` de `restart_recovery.10k` cai **pelo menos à
+metade** (141 → ≤ 70 ms): a leitura passa a cobrir no máximo ~64 commits em vez
+do WAL inteiro, uma vez só. As outras fases e `mixed_oltp` ficam dentro de ±5%
+(o checkpoint grava 8 bytes a mais na DBRT, que já é regravada).
+
+### Resultado da T26
+
+A/B alternado, 5 repetições ([dados](profiling/2026-09/t26-summary.md)):
+
+| caso | reinício antes | reinício depois | fator |
+|---|---|---|---|
+| `restart_recovery.10k` | 125,8 ms | **18,1 ms** | **7,0×** |
+| `restart_recovery.100k` | 1.137,2 ms | **60,5 ms** | **18,8×** |
+
+**Confirmada, bem além do previsto** (≥ 2×). O tempo de abrir o banco deixa de
+crescer com a idade do WAL: a 100k, o antigo lia ~1 s de WAL; o novo lê só o
+trecho depois do último checkpoint.
+
+`mixed_oltp.10k` na mesma rodada mostrou duas repetições da variante nova a
+~4.700 ops/s (as outras três a ~19.000). Repetido com 8 repetições alternadas
+([dados](profiling/2026-09/t26-mixed-summary.md)): antes 16.121–20.007, depois
+17.825–19.773 — **iguais, sem outliers**. Os dois valores baixos foram
+intermitência do ambiente, do mesmo tipo dos outliers isolados de "P1
+revisado" (uma repetição a 8.235 e outra a 270). A causa desses outliers não foi
+isolada; eles aparecem em qualquer binário e somem ao repetir.
+
+## T16 — WAL com imagens de página inteiras
+
+**16.1 — custo por byte vs por commit.** Um commit de `mixed_oltp` grava ~29 KB
+de WAL (3,5 imagens de página de 8 KiB, T3.4), e esse número **não depende do
+tamanho do registro**: o payload muda os bytes do objeto, não o número de
+páginas sujas. Microbenchmark no mesmo disco (append de N bytes + `fsync`,
+tamanhos alternados, 5 × 60 medidas):
+
+| bytes antes do `fsync` | 1 KiB | 8 KiB | 29 KiB | 64 KiB |
+|---|---|---|---|---|
+| mediana por `fsync` | 320 µs | 323 µs | 399 µs | 403 µs |
+
+O `fsync` tem um **piso de ~320 µs**; os 29 KB de um commit acrescentam ~80 µs
+(+25%). Somando o que resta de `wal_append` depois da T7.1 (~78 µs por commit
+em `mixed_oltp`), um WAL lógico ou delta (~1 KB por commit) economizaria algo
+como **~130 µs de um commit de ~400 µs: teto de ~1,3–1,4×** nos workloads que
+commitam a cada operação, e bem menos com `batch=1000`.
+
+**16.2/16.3 — decisão: não agora.** O teto é real mas moderado, e o custo é
+grande: muda o formato do WAL, a recuperação (que hoje só copia páginas
+inteiras e é idempotente por construção) e as réplicas (ADR-016/020, que
+aplicam as mesmas imagens). Sai deste ciclo com o teto medido; se entrar,
+entra com ADR próprio. O piso de ~320 µs por `fsync` é a durabilidade em si:
+nenhuma mudança de formato o remove — só agrupar commits (T8).
+
+## T12 — Workloads ainda não perfilados depois das otimizações
+
+`stage-profile`, 3 repetições, 10k objetos: `range_scan_sweep`,
+`cascade_delete`, `blob_lifecycle`, `oversubscribed_churn`, `restart_recovery`
+e o alvo `loopback` (`create_only` e `crud_full`). `remote_colocated` precisa de
+servidor em outra máquina (`run-remote-load.ps1`) e fica fora.
+
+### Predição (escrita antes de rodar)
+
+Nenhuma fase tem um estágio isolado acima de 50% do tempo de motor, **exceto**
+as que commitam a cada operação (onde `wal_sync` domina, como em
+`mixed_oltp`), e `oversubscribed_churn`, onde `buffer_pool_miss` deve ser o
+maior estágio (cache de 10% do necessário). No `loopback`, a vazão de
+`create_only` fica abaixo da metade da do embedded, porque cada objeto cruza o
+protocolo.
+
+### Resultado da T12
+
+([dados](profiling/2026-09/t12-summary.md); cascade/blob depois da correção
+em [t12b](profiling/2026-09/t12b-summary.md))
+
+| workload · fase | vazão | maiores estágios (% do tempo de motor) |
+|---|---|---|
+| `range_scan_sweep` · varredura por índice 0,01% / 1% / 100% | 16.042 / 323.756 / 401.060 linhas/s | — (a varredura não cronometra por operação) |
+| `oversubscribed_churn` · `delete` (cache em 10%) | 188.620 ops/s | `tx_commit` 30%, `heap_record_read` 23%, `buffer_pool_miss` 23% |
+| `oversubscribed_churn` · `create` | 67.208 ops/s | `tx_commit` 23%, `object_encode` 12%, `wal_append` 10% |
+| `cascade_delete` · `create_hierarchy` / `cascade_delete` | 185.960 / 517.397 objetos/s | — |
+| `blob_lifecycle` · create / read / grow / shrink / delete | 18 / 73 / 12 / 17 / 31 blobs/s | — |
+| `create_only` · `loopback` | 117.950 ops/s (embedded: 61.144) | — |
+
+**Predição: parcialmente refutada.**
+
+- Nenhum estágio isolado passa de 50%, como previsto. Mas em
+  `oversubscribed_churn` o maior custo do `delete` ainda é o commit (30%), não
+  `buffer_pool_miss` (23%): com o `view` da T15.5 e o read-ahead, 10% de cache
+  basta para o miss não dominar.
+- **`loopback` é mais rápido que o embedded, não mais lento.** A predição
+  supunha um objeto por mensagem; o alvo usa `CreateBatch`, um lote por
+  `--batch`, e a validação do harness fica fora do laço cronometrado do lado
+  cliente. Os dois números não medem a mesma coisa e não devem ser comparados.
+- A varredura mais seletiva (0,01%) processa 25× menos linhas por segundo que a
+  completa: há um custo fixo por varredura (~60 µs) que domina quando ela
+  devolve poucas linhas.
+
+**Três defeitos do harness encontrados:**
+
+1. `cascade_delete` e `blob_lifecycle` preenchiam `operations` e `duration_ns`
+   mas **nunca `ops_per_second`**, que ficava 0 — na série histórica esses
+   workloads nunca tiveram vazão. Corrigido (7 fases).
+2. As mesmas fases não registram bytes de WAL (`wal_bytes` = 0). Não corrigido;
+   anotado.
+3. O `measure_load.py` aceitava um caso que falhou com `case_error` (alvo
+   `loopback` sem `crud_full`), porque o processo sai com 0 e a campanha fecha
+   `completed`. Agora falha alto.
+
+## T14 — Resto do caminho de update
+
+Dados: `stage-profile` de `crud_full.100k` depois da T15.5 e da correção do
+harness, em que o tempo de motor já inclui o commit
+([t15-5-sp](profiling/2026-09/t15-5-sp-summary.md)).
+
+**14.1 — sem objeto** (T3.2: `heap_candidate_scan` foi a 0,7%).
+
+**14.2 — bytes por update.** Cada update grava **uma página inteira** no
+buffer da transação — `heap_page_write` 8.354–8.875 bytes por operação — para
+um registro de 167 B (`shrink`), 359 B (`inplace`) ou 615 B (`grow`): 14× a 50×
+de amplificação dentro do motor (é `memcpy`, não disco). No WAL, amortizado por
+lote de 1.000, são 954 / 1.721 / 2.656 B por operação: `update_shrink` suja
+~325 páginas distintas por commit, porque o registro encolhido muda de página.
+
+**14.3 — cobertura e o que sobra.** As folhas somam **59%** do tempo de motor
+em `update_inplace` e `update_grow` e **72%** em `update_shrink`; o resto é o
+tempo exclusivo dos envelopes (`identity_lookup`, `heap_record_read`,
+`tx_commit`) e o não atribuído.
+
+| fase | motor ns/op | maiores estágios |
+|---|---|---|
+| `update_inplace` | 11.837 | `tx_commit` 24%, `identity_lookup` 9%, `object_encode` 9%, `wal_append` 9% |
+| `update_grow` | 12.706 | `tx_commit` 28%, `wal_append` 12%, `identity_lookup` 9%, `object_encode` 8% |
+| `update_shrink` | 14.526 | `tx_commit` 32%, **`heap_candidate_try` 16%**, **`buffer_pool_miss` 15%**, `wal_append` 13% |
+
+**Conclusão:** nenhum estágio domina sozinho o update; o commit é o maior
+(24–32%) e já foi atacado. O alvo novo é o `update_shrink`: quando o registro
+encolhido não fica no lugar, `heap_candidate_try` custa ~13,5 µs por chamada e
+lê páginas candidatas do disco (`buffer_pool_miss`). Fica anotado; não é
+corrigido neste ciclo.
+
+## T15 — Dívidas de CPU no caminho de leitura (Fase 10C)
+
+Tetos a partir da atribuição da fase `read` depois da T15.5 (tempo de motor
+~1.700 ns/op em `crud_full.100k`; [t15-5-sp](profiling/2026-09/t15-5-sp-summary.md)):
+`object_decode` 406 ns (~24%), `materialize` 289 ns (~17%).
+
+| item | teto medido | decisão |
+|---|---|---|
+| 15.1 `std::function` por campo no Binding | uma fração de `materialize` (17%): 7 campos a poucos ns por chamada indireta — **≤ ~2%** | não vale: não implementado |
+| 15.2 zero-copy em `to_field_values` / strings na leitura | o tipo do usuário é dono das strings, então a cópia final é inevitável; dá para tirar a intermediária (`AttributeValue`), **≤ ~6%** | não agora |
+| 15.3 `Handle::get<Member>()` materializa o objeto inteiro | só existe no padrão "ler um campo"; nenhum workload o exercita. Por objeto de 7 campos, decode + materialize ≈ 700 ns contra ~100 ns de um campo | adiado até um workload usar o padrão |
+| 15.4 append de coleções O(n) | ver abaixo | **feito** |
+| 15.5 cópia de página inteira na leitura | 27% do motor | **feito** (ver T15.5) |
+
+### 15.4 — `PersistentVector::push_back` incremental
+
+`push_back` lia o blob inteiro e o regravava inteiro: O(n) por inserção, O(n²)
+para montar um vetor. O próprio código registrava a dívida ("fica para a Fase
+10, com medição"). O `BlobStore` ganha `append` (completa a última página e
+encadeia páginas novas), `overwrite_prefix` e `read_prefix`; `push_back` lê só
+o `count`, acrescenta o elemento e regrava o `count`. O formato em disco
+(`count u32 | elemento...`) não muda. Teste novo em `blob_store_test`: appends
+de tamanhos variados cruzando fronteiras de página resultam no mesmo blob que
+gravar tudo de uma vez; `overwrite_prefix` muda só o começo.
+
+**Sem predição pré-registrada** — ao contrário das outras tarefas, a medição
+do "depois" rodou antes deste texto. A expectativa (não registrada a tempo) era
+≥ 10× a 20.000 elementos.
+
+Microbenchmark (tempo médio de um `push_back` na altura `n`, `int64`, uma
+transação), duas rodadas alternadas:
+
+| n | antes | depois |
+|---|---|---|
+| 100 | 2,5–5,4 µs | 2,7–2,8 µs |
+| 1.000 | 30,7–51,9 µs | 2,9–4,1 µs |
+| 5.000 | 34,1–36,2 µs | 4,9–5,0 µs |
+| 10.000 | 67,5–75,3 µs | 8,6–10,4 µs |
+| 20.000 | 145,3–201,9 µs | **12,9–13,4 µs** |
+
+**Resultado: 12–15× a 20.000.** O que ainda cresce é a caminhada pela cadeia
+até a última página (~22 páginas a 20.000 elementos), O(páginas) e não
+O(elementos); guardar o id da última página eliminaria até isso.

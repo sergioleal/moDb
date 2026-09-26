@@ -1,0 +1,195 @@
+{
+ "meta": {
+  "label": "T12 cascade/blob",
+  "binary": "C:\\tmp\\apps\\cpp\\moDb2\\build\\relwithdebinfo\\modb_load.exe",
+  "repeat": 3,
+  "seed": 1,
+  "extra_args": [],
+  "raw_files": {
+   "load.cascade_delete.embedded.10k": [
+    "modb-load-20260926T152311.959Z-eed7f9320ea3-eac301be.jsonl",
+    "modb-load-20260926T152315.790Z-eed7f9320ea3-eac301be.jsonl",
+    "modb-load-20260926T152316.675Z-eed7f9320ea3-eac301be.jsonl"
+   ],
+   "load.blob_lifecycle.embedded.10k": [
+    "modb-load-20260926T152312.790Z-eed7f9320ea3-eac301be.jsonl",
+    "modb-load-20260926T152314.308Z-eed7f9320ea3-eac301be.jsonl",
+    "modb-load-20260926T152317.521Z-eed7f9320ea3-eac301be.jsonl"
+   ]
+  }
+ },
+ "cases": {
+  "load.cascade_delete.embedded.10k": {
+   "create_hierarchy": {
+    "repetitions": 3,
+    "operations": 11111,
+    "ops_per_second": [
+     185960.0,
+     0.004871573277519158
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.059750233333333326,
+     0.004876886366431473
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   },
+   "cascade_delete": {
+    "repetitions": 3,
+    "operations": 11111,
+    "ops_per_second": [
+     517396.6666666667,
+     0.054649596021767444
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.021517033333333335,
+     0.053880315303249535
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "load.blob_lifecycle.embedded.10k": {
+   "create": {
+    "repetitions": 3,
+    "operations": 3,
+    "ops_per_second": [
+     18.43166666666667,
+     0.013924477423712946
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.16278423333333333,
+     0.01390949313179669
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   },
+   "read": {
+    "repetitions": 3,
+    "operations": 3,
+    "ops_per_second": [
+     73.29836666666667,
+     0.01348063874134765
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.0409336,
+     0.013548362664202725
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   },
+   "update_grow": {
+    "repetitions": 3,
+    "operations": 3,
+    "ops_per_second": [
+     12.013566666666668,
+     0.05476471645270145
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.25020376666666666,
+     0.053295424814135385
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   },
+   "update_shrink": {
+    "repetitions": 3,
+    "operations": 3,
+    "ops_per_second": [
+     16.5137,
+     0.08422798440248032
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.18251463333333331,
+     0.08274331055243372
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   },
+   "delete": {
+    "repetitions": 3,
+    "operations": 3,
+    "ops_per_second": [
+     30.86106666666667,
+     0.06397329310778731
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.09748596666666666,
+     0.06638392633086651
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   }
+  }
+ }
+}

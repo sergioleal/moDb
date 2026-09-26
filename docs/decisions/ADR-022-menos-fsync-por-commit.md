@@ -2,8 +2,11 @@
 
 - Estado: **aceito** (medições em
   [PROFILING_2026-09.md](../../docs-process/PROFILING_2026-09.md), tarefas T5, T7.3 e T9).
-  A/B alternado: `mixed_oltp` 7.024 → 19.126 ops/s (**2,72×**), `snapshot_hold`
-  900 → 2.518 (**2,80×**), fases de `crud_full.100k` +4% a +19%, nenhuma pior
+  A/B alternado, sem power throttling (medianas; ver "P1 revisado" no
+  relatório): só a parte B (T9) rende `mixed_oltp` **2,30×** e `snapshot_hold`
+  **2,51×**; com a parte A e o CRC da T7.1, **2,65×** e **3,51×** sobre o motor
+  anterior. Fases de `crud_full.100k` +6% a +34%, nenhuma pior. *(Uma versão
+  anterior citava 2,72×/2,80×, medidos com o processo sob power throttling.)*
 - Data: 2026-09-26
 - Substitui a descrição do protocolo de commit em
   [GARANTIAS_TRANSACIONAIS.md §2](../GARANTIAS_TRANSACIONAIS.md)

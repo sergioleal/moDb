@@ -1,0 +1,133 @@
+{
+ "meta": {
+  "label": "T26 mixed recheck",
+  "binary": "C:\\tmp\\apps\\cpp\\moDb2\\build\\relwithdebinfo\\modb_load.exe",
+  "repeat": 8,
+  "seed": 1,
+  "extra_args": [],
+  "raw_files": {
+   "@build/ab-pre26/modb_load.exe load.mixed_oltp.embedded.10k": [
+    "modb-load-20260926T151446.708Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151458.413Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151502.424Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151513.359Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151516.931Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151527.820Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151531.347Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151542.189Z-34c3b792b770-eac301be.jsonl"
+   ],
+   "@build/relwithdebinfo/modb_load.exe load.mixed_oltp.embedded.10k": [
+    "modb-load-20260926T151450.894Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151454.609Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151506.059Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151509.680Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151520.488Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151524.197Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151535.017Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T151538.617Z-34c3b792b770-eac301be.jsonl"
+   ]
+  }
+ },
+ "cases": {
+  "@build/ab-pre26/modb_load.exe load.mixed_oltp.embedded.10k": {
+   "create": {
+    "repetitions": 8,
+    "operations": 10000,
+    "ops_per_second": [
+     64164.35,
+     0.027355044922124316
+    ],
+    "engine_ops_per_second": [
+     115693.375,
+     0.04080893604628557
+    ],
+    "duration_s": [
+     0.15595085,
+     0.027080556934717382
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.445069875,
+     0.02522582536715416
+    ]
+   },
+   "mixed_oltp": {
+    "repetitions": 8,
+    "operations": 50000,
+    "ops_per_second": [
+     18608.1875,
+     0.07612400265839048
+    ],
+    "engine_ops_per_second": [
+     18652.0625,
+     0.0762561507840835
+    ],
+    "duration_s": [
+     2.7016212875,
+     0.08140557646418696
+    ],
+    "wal_bytes_per_op": [
+     2686.95408,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0023429799999999997,
+     0.07987309344134436
+    ]
+   }
+  },
+  "@build/relwithdebinfo/modb_load.exe load.mixed_oltp.embedded.10k": {
+   "create": {
+    "repetitions": 8,
+    "operations": 10000,
+    "ops_per_second": [
+     65140.1,
+     0.020863368854950458
+    ],
+    "engine_ops_per_second": [
+     116885.75,
+     0.029072985865891063
+    ],
+    "duration_s": [
+     0.153573625,
+     0.020818860137249293
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.442576,
+     0.013793353260603807
+    ]
+   },
+   "mixed_oltp": {
+    "repetitions": 8,
+    "operations": 50000,
+    "ops_per_second": [
+     18864.1375,
+     0.03644807257729366
+    ],
+    "engine_ops_per_second": [
+     18911.85,
+     0.03652671019998137
+    ],
+    "duration_s": [
+     2.6536409,
+     0.036744532196632665
+    ],
+    "wal_bytes_per_op": [
+     2686.95408,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0025213125,
+     0.04968091673968024
+    ]
+   }
+  }
+ }
+}

@@ -1,0 +1,1306 @@
+{
+ "meta": {
+  "label": "T15.5 stage-profile",
+  "binary": "C:\\tmp\\apps\\cpp\\moDb2\\build\\stage-profile\\modb_load.exe",
+  "repeat": 2,
+  "seed": 1,
+  "extra_args": [],
+  "raw_files": {
+   "load.crud_full.embedded.100k": [
+    "modb-load-20260926T145805.879Z-34c3b792b770-eac301be.jsonl",
+    "modb-load-20260926T145814.774Z-34c3b792b770-eac301be.jsonl"
+   ]
+  }
+ },
+ "cases": {
+  "load.crud_full.embedded.100k": {
+   "create": {
+    "repetitions": 2,
+    "operations": 100000,
+    "ops_per_second": [
+     61640.1,
+     0.013247332676524327
+    ],
+    "engine_ops_per_second": [
+     105060.0,
+     0.004334444765697093
+    ],
+    "duration_s": [
+     1.6224634,
+     0.013247971628695163
+    ],
+    "wal_bytes_per_op": [
+     481.40206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4132985,
+     0.012662270217679551
+    ],
+    "attributed_fraction": [
+     0.3280485,
+     0.013482618930804017
+    ],
+    "stages": {
+     "buffer_pool_hit": {
+      "ns_per_operation": [
+       464.4565,
+       0.028729950098171357
+      ],
+      "calls_per_operation": [
+       3.0476,
+       0.0
+      ],
+      "units_per_operation": [
+       24965.9,
+       0.0
+      ],
+      "max_ns": 70100
+     },
+     "buffer_pool_writeback": {
+      "ns_per_operation": [
+       669.2484999999999,
+       0.03569193532038221
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       479.15,
+       0.0
+      ],
+      "max_ns": 1219800
+     },
+     "heap_candidate_scan": {
+      "ns_per_operation": [
+       68.28399999999999,
+       0.06571524271293164
+      ],
+      "calls_per_operation": [
+       0.99999,
+       0.0
+      ],
+      "units_per_operation": [
+       0.95238,
+       0.0
+      ],
+      "max_ns": 19700
+     },
+     "heap_page_write": {
+      "ns_per_operation": [
+       299.7345,
+       0.002092530939589763
+      ],
+      "calls_per_operation": [
+       1.04761,
+       0.0
+      ],
+      "units_per_operation": [
+       8582.02,
+       0.0
+      ],
+      "max_ns": 94400
+     },
+     "object_bind": {
+      "ns_per_operation": [
+       247.928,
+       0.03716811159862168
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       7.0,
+       0.0
+      ],
+      "max_ns": 24000
+     },
+     "object_encode": {
+      "ns_per_operation": [
+       1015.9870000000001,
+       0.03960544622145924
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       359.465,
+       0.0
+      ],
+      "max_ns": 57800
+     },
+     "page_file_sync": {
+      "ns_per_operation": [
+       116.94550000000001,
+       0.0036218320664817764
+      ],
+      "calls_per_operation": [
+       2e-05,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 11439600
+     },
+     "persist_root": {
+      "ns_per_operation": [
+       689.424,
+       0.024802235174077352
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 34200
+     },
+     "wal_append": {
+      "ns_per_operation": [
+       1047.229,
+       0.08260739324820518
+      ],
+      "calls_per_operation": [
+       0.06049,
+       0.0
+      ],
+      "units_per_operation": [
+       481.154,
+       0.0
+      ],
+      "max_ns": 479600
+     },
+     "wal_sync": {
+      "ns_per_operation": [
+       702.7570000000001,
+       0.03673195735367429
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 4565800
+     }
+    },
+    "envelopes": {
+     "tx_commit": {
+      "ns_per_operation": [
+       2562.885,
+       0.03348630548487798
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 14625500
+     }
+    }
+   },
+   "read": {
+    "repetitions": 2,
+    "operations": 100000,
+    "ops_per_second": [
+     120431.5,
+     0.025405737221525858
+    ],
+    "engine_ops_per_second": [
+     484532.5,
+     0.040180526603291244
+    ],
+    "duration_s": [
+     0.8306152,
+     0.02540600260507974
+    ],
+    "wal_bytes_per_op": [
+     481.40206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.751374,
+     0.004891759694383489
+    ],
+    "attributed_fraction": [
+     0.1513285,
+     0.019900863228496383
+    ],
+    "stages": {
+     "buffer_pool_hit": {
+      "ns_per_operation": [
+       206.304,
+       0.042466714260999856
+      ],
+      "calls_per_operation": [
+       2.98654,
+       0.0
+      ],
+      "units_per_operation": [
+       8192.0,
+       0.0
+      ],
+      "max_ns": 386400
+     },
+     "buffer_pool_miss": {
+      "ns_per_operation": [
+       356.47,
+       0.07750066468695375
+      ],
+      "calls_per_operation": [
+       0.01346,
+       0.0
+      ],
+      "units_per_operation": [
+       441.057,
+       0.0
+      ],
+      "max_ns": 278000
+     },
+     "materialize": {
+      "ns_per_operation": [
+       288.9665,
+       0.035714255705826384
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       7.0,
+       0.0
+      ],
+      "max_ns": 49000
+     },
+     "object_decode": {
+      "ns_per_operation": [
+       405.5375,
+       0.02525646019292201
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       375.465,
+       0.0
+      ],
+      "max_ns": 70200
+     }
+    },
+    "envelopes": {
+     "heap_record_read": {
+      "ns_per_operation": [
+       489.67150000000004,
+       0.0677357325985224
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       375.465,
+       0.0
+      ],
+      "max_ns": 389400
+     },
+     "identity_lookup": {
+      "ns_per_operation": [
+       547.4124999999999,
+       0.04773572232776726
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       1.0,
+       0.0
+      ],
+      "max_ns": 291600
+     }
+    }
+   },
+   "update_inplace": {
+    "repetitions": 2,
+    "operations": 100000,
+    "ops_per_second": [
+     77847.75,
+     0.13984587497809772
+    ],
+    "engine_ops_per_second": [
+     84479.45,
+     0.1393389433417308
+    ],
+    "duration_s": [
+     1.29724335,
+     0.13984607941324587
+    ],
+    "wal_bytes_per_op": [
+     954.41356,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.07853360000000001,
+     0.006009186714526021
+    ],
+    "attributed_fraction": [
+     0.5398499999999999,
+     0.014701429122974563
+    ],
+    "stages": {
+     "buffer_pool_hit": {
+      "ns_per_operation": [
+       918.2829999999999,
+       0.14711758681453826
+      ],
+      "calls_per_operation": [
+       9.03416,
+       0.0
+      ],
+      "units_per_operation": [
+       41350.1,
+       0.0
+      ],
+      "max_ns": 65900
+     },
+     "buffer_pool_miss": {
+      "ns_per_operation": [
+       356.9575,
+       0.12553729237832256
+      ],
+      "calls_per_operation": [
+       0.01346,
+       0.0
+      ],
+      "units_per_operation": [
+       441.057,
+       0.0
+      ],
+      "max_ns": 192400
+     },
+     "buffer_pool_writeback": {
+      "ns_per_operation": [
+       655.598,
+       0.04809117349282005
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       471.04,
+       0.0
+      ],
+      "max_ns": 1012400
+     },
+     "heap_candidate_scan": {
+      "ns_per_operation": [
+       90.9785,
+       0.0918134768781271
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       0.95238,
+       0.0
+      ],
+      "max_ns": 16700
+     },
+     "heap_page_write": {
+      "ns_per_operation": [
+       295.062,
+       0.11097086920587625
+      ],
+      "calls_per_operation": [
+       1.04762,
+       0.0
+      ],
+      "units_per_operation": [
+       8582.1,
+       0.0
+      ],
+      "max_ns": 25500
+     },
+     "object_bind": {
+      "ns_per_operation": [
+       251.69650000000001,
+       0.19334877521777918
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       7.0,
+       0.0
+      ],
+      "max_ns": 29800
+     },
+     "object_decode": {
+      "ns_per_operation": [
+       447.1095,
+       0.18547755346459222
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       375.465,
+       0.0
+      ],
+      "max_ns": 37400
+     },
+     "object_encode": {
+      "ns_per_operation": [
+       1077.755,
+       0.17356922395433202
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       359.465,
+       0.0
+      ],
+      "max_ns": 115900
+     },
+     "page_file_sync": {
+      "ns_per_operation": [
+       423.858,
+       0.1453057406993576
+      ],
+      "calls_per_operation": [
+       4e-05,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 29294700
+     },
+     "persist_root": {
+      "ns_per_operation": [
+       740.3795,
+       0.1759210809966793
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 60300
+     },
+     "wal_append": {
+      "ns_per_operation": [
+       1073.485,
+       0.08907627961253
+      ],
+      "calls_per_operation": [
+       0.0595,
+       0.0
+      ],
+      "units_per_operation": [
+       473.012,
+       0.0
+      ],
+      "max_ns": 371500
+     },
+     "wal_sync": {
+      "ns_per_operation": [
+       664.807,
+       0.026726823269994926
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 2718100
+     }
+    },
+    "envelopes": {
+     "heap_record_read": {
+      "ns_per_operation": [
+       720.9625000000001,
+       0.14604721282966532
+      ],
+      "calls_per_operation": [
+       2.0,
+       0.0
+      ],
+      "units_per_operation": [
+       750.93,
+       0.0
+      ],
+      "max_ns": 193500
+     },
+     "identity_lookup": {
+      "ns_per_operation": [
+       1085.6055,
+       0.14361503057698274
+      ],
+      "calls_per_operation": [
+       2.0,
+       0.0
+      ],
+      "units_per_operation": [
+       2.0,
+       0.0
+      ],
+      "max_ns": 131200
+     },
+     "tx_commit": {
+      "ns_per_operation": [
+       2847.005,
+       0.07490053301712755
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 32314800
+     }
+    }
+   },
+   "update_grow": {
+    "repetitions": 2,
+    "operations": 100000,
+    "ops_per_second": [
+     72363.65,
+     0.000702576190771457
+    ],
+    "engine_ops_per_second": [
+     78703.35,
+     0.0005812942999601359
+    ],
+    "duration_s": [
+     1.3819098,
+     0.0007028547555258844
+    ],
+    "wal_bytes_per_op": [
+     1721.22206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.080552,
+     0.0013922327874688724
+    ],
+    "attributed_fraction": [
+     0.5450225,
+     0.0018358069536193527
+    ],
+    "stages": {
+     "buffer_pool_hit": {
+      "ns_per_operation": [
+       833.235,
+       0.01417209220185827
+      ],
+      "calls_per_operation": [
+       9.06557,
+       0.0
+      ],
+      "units_per_operation": [
+       41642.7,
+       0.0
+      ],
+      "max_ns": 58700
+     },
+     "buffer_pool_miss": {
+      "ns_per_operation": [
+       428.615,
+       0.0015144687543115736
+      ],
+      "calls_per_operation": [
+       0.01777,
+       0.0
+      ],
+      "units_per_operation": [
+       582.287,
+       0.0
+      ],
+      "max_ns": 225000
+     },
+     "buffer_pool_writeback": {
+      "ns_per_operation": [
+       912.1655000000001,
+       0.023907810850743987
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       763.658,
+       0.0
+      ],
+      "max_ns": 1822600
+     },
+     "heap_candidate_scan": {
+      "ns_per_operation": [
+       91.4245,
+       0.00840721109931998
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       0.91666,
+       0.0
+      ],
+      "max_ns": 28200
+     },
+     "heap_page_write": {
+      "ns_per_operation": [
+       324.3375,
+       0.010292522801038097
+      ],
+      "calls_per_operation": [
+       1.08334,
+       0.0
+      ],
+      "units_per_operation": [
+       8874.72,
+       0.0
+      ],
+      "max_ns": 56700
+     },
+     "object_bind": {
+      "ns_per_operation": [
+       240.779,
+       0.015928910665613857
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       7.0,
+       0.0
+      ],
+      "max_ns": 32400
+     },
+     "object_decode": {
+      "ns_per_operation": [
+       404.203,
+       0.0360408356840629
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       375.465,
+       0.0
+      ],
+      "max_ns": 35100
+     },
+     "object_encode": {
+      "ns_per_operation": [
+       994.3005,
+       0.012643714312439455
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       615.465,
+       0.0
+      ],
+      "max_ns": 102800
+     },
+     "page_file_sync": {
+      "ns_per_operation": [
+       285.3215,
+       0.022723356202387277
+      ],
+      "calls_per_operation": [
+       2e-05,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 28464700
+     },
+     "persist_root": {
+      "ns_per_operation": [
+       656.501,
+       0.016330748949888056
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 59800
+     },
+     "wal_append": {
+      "ns_per_operation": [
+       1583.355,
+       0.016474618236574645
+      ],
+      "calls_per_operation": [
+       0.09522,
+       0.0
+      ],
+      "units_per_operation": [
+       766.808,
+       0.0
+      ],
+      "max_ns": 630400
+     },
+     "wal_sync": {
+      "ns_per_operation": [
+       777.4855,
+       0.004903001608874676
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 2430400
+     }
+    },
+    "envelopes": {
+     "heap_record_read": {
+      "ns_per_operation": [
+       657.2090000000001,
+       0.008764474983674397
+      ],
+      "calls_per_operation": [
+       2.0,
+       0.0
+      ],
+      "units_per_operation": [
+       750.93,
+       0.0
+      ],
+      "max_ns": 225500
+     },
+     "identity_lookup": {
+      "ns_per_operation": [
+       1102.77,
+       0.03054722839370588
+      ],
+      "calls_per_operation": [
+       2.0,
+       0.0
+      ],
+      "units_per_operation": [
+       2.0,
+       0.0
+      ],
+      "max_ns": 133600
+     },
+     "tx_commit": {
+      "ns_per_operation": [
+       3591.2349999999997,
+       0.010004384439360957
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 31744500
+     }
+    }
+   },
+   "update_shrink": {
+    "repetitions": 2,
+    "operations": 100000,
+    "ops_per_second": [
+     65263.6,
+     0.005588500752885579
+    ],
+    "engine_ops_per_second": [
+     68842.3,
+     0.005191165420267437
+    ],
+    "duration_s": [
+     1.5322713000000001,
+     0.005588200246327456
+    ],
+    "wal_bytes_per_op": [
+     2655.57381,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.051984749999999996,
+     0.007237728723699978
+    ],
+    "attributed_fraction": [
+     0.679411,
+     0.0018650498032653348
+    ],
+    "stages": {
+     "buffer_pool_hit": {
+      "ns_per_operation": [
+       821.328,
+       0.0028290194453117834
+      ],
+      "calls_per_operation": [
+       8.92108,
+       0.0
+      ],
+      "units_per_operation": [
+       40531.5,
+       0.0
+      ],
+      "max_ns": 84400
+     },
+     "buffer_pool_miss": {
+      "ns_per_operation": [
+       2236.16,
+       0.02469637217849765
+      ],
+      "calls_per_operation": [
+       0.09874,
+       0.0
+      ],
+      "units_per_operation": [
+       3235.02,
+       0.0
+      ],
+      "max_ns": 859600
+     },
+     "buffer_pool_writeback": {
+      "ns_per_operation": [
+       1317.625,
+       0.013915399932581014
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       930.529,
+       0.0
+      ],
+      "max_ns": 7277700
+     },
+     "heap_candidate_scan": {
+      "ns_per_operation": [
+       91.025,
+       0.015660832418259638
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       0.98018,
+       0.0
+      ],
+      "max_ns": 26000
+     },
+     "heap_page_write": {
+      "ns_per_operation": [
+       373.6295,
+       0.03195923291361423
+      ],
+      "calls_per_operation": [
+       1.01982,
+       0.0
+      ],
+      "units_per_operation": [
+       8354.37,
+       0.0
+      ],
+      "max_ns": 86100
+     },
+     "object_bind": {
+      "ns_per_operation": [
+       231.968,
+       0.014698876133266373
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       7.0,
+       0.0
+      ],
+      "max_ns": 33000
+     },
+     "object_decode": {
+      "ns_per_operation": [
+       430.5965,
+       0.012275118793045135
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       631.465,
+       0.0
+      ],
+      "max_ns": 25800
+     },
+     "object_encode": {
+      "ns_per_operation": [
+       986.988,
+       0.01072207573672413
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       167.465,
+       0.0
+      ],
+      "max_ns": 82000
+     },
+     "page_file_sync": {
+      "ns_per_operation": [
+       552.7225,
+       0.015954350814698943
+      ],
+      "calls_per_operation": [
+       4e-05,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 38329700
+     },
+     "persist_root": {
+      "ns_per_operation": [
+       666.955,
+       0.0006021945284373719
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 453400
+     },
+     "wal_append": {
+      "ns_per_operation": [
+       1840.44,
+       0.004018787317821452
+      ],
+      "calls_per_operation": [
+       0.11559,
+       0.0
+      ],
+      "units_per_operation": [
+       934.352,
+       0.0
+      ],
+      "max_ns": 408300
+     },
+     "wal_sync": {
+      "ns_per_operation": [
+       860.919,
+       0.06797405703788471
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 3801800
+     }
+    },
+    "envelopes": {
+     "heap_candidate_try": {
+      "ns_per_operation": [
+       2256.165,
+       0.05540165090334528
+      ],
+      "calls_per_operation": [
+       0.16739,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 501300
+     },
+     "heap_record_read": {
+      "ns_per_operation": [
+       852.547,
+       0.029828722966115596
+      ],
+      "calls_per_operation": [
+       2.0,
+       0.0
+      ],
+      "units_per_operation": [
+       1262.93,
+       0.0
+      ],
+      "max_ns": 377000
+     },
+     "identity_lookup": {
+      "ns_per_operation": [
+       1104.31,
+       0.0061342222417320085
+      ],
+      "calls_per_operation": [
+       2.0,
+       0.0
+      ],
+      "units_per_operation": [
+       2.0,
+       0.0
+      ],
+      "max_ns": 860400
+     },
+     "tx_commit": {
+      "ns_per_operation": [
+       4620.844999999999,
+       0.020540603123167
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 40449400
+     }
+    }
+   },
+   "delete": {
+    "repetitions": 2,
+    "operations": 100000,
+    "ops_per_second": [
+     192526.0,
+     0.05741298943263825
+    ],
+    "engine_ops_per_second": [
+     196645.5,
+     0.05742205231631529
+    ],
+    "duration_s": [
+     0.5202667000000001,
+     0.05741318892081139
+    ],
+    "wal_bytes_per_op": [
+     2720.46081,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.020948599999999998,
+     0.0004050524318684636
+    ],
+    "attributed_fraction": [
+     0.651591,
+     0.01494320881801425
+    ],
+    "stages": {
+     "buffer_pool_hit": {
+      "ns_per_operation": [
+       487.525,
+       0.008360111761979934
+      ],
+      "calls_per_operation": [
+       4.91861,
+       0.0
+      ],
+      "units_per_operation": [
+       24576.0,
+       0.0
+      ],
+      "max_ns": 43100
+     },
+     "buffer_pool_miss": {
+      "ns_per_operation": [
+       1570.715,
+       0.12123837057731612
+      ],
+      "calls_per_operation": [
+       0.08139,
+       0.0
+      ],
+      "units_per_operation": [
+       2666.91,
+       0.0
+      ],
+      "max_ns": 772500
+     },
+     "buffer_pool_writeback": {
+      "ns_per_operation": [
+       169.223,
+       0.12401936654956308
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       64.553,
+       0.0
+      ],
+      "max_ns": 939600
+     },
+     "object_decode": {
+      "ns_per_operation": [
+       412.424,
+       0.0010149923730492537
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       183.465,
+       0.0
+      ],
+      "max_ns": 71800
+     },
+     "page_file_sync": {
+      "ns_per_operation": [
+       130.066,
+       0.032184215280122185
+      ],
+      "calls_per_operation": [
+       2e-05,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 12973600
+     },
+     "wal_append": {
+      "ns_per_operation": [
+       170.6395,
+       0.04184058890022859
+      ],
+      "calls_per_operation": [
+       0.00988,
+       0.0
+      ],
+      "units_per_operation": [
+       64.887,
+       0.0
+      ],
+      "max_ns": 314800
+     },
+     "wal_sync": {
+      "ns_per_operation": [
+       450.871,
+       0.058610987680519845
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 914600
+     }
+    },
+    "envelopes": {
+     "heap_record_read": {
+      "ns_per_operation": [
+       1663.085,
+       0.12594190895550575
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       183.465,
+       0.0
+      ],
+      "max_ns": 189100
+     },
+     "identity_lookup": {
+      "ns_per_operation": [
+       628.296,
+       0.01497054637200216
+      ],
+      "calls_per_operation": [
+       1.0,
+       0.0
+      ],
+      "units_per_operation": [
+       1.0,
+       0.0
+      ],
+      "max_ns": 774200
+     },
+     "tx_commit": {
+      "ns_per_operation": [
+       937.9435000000001,
+       0.05546599258083013
+      ],
+      "calls_per_operation": [
+       0.001,
+       0.0
+      ],
+      "units_per_operation": [
+       0.0,
+       0.0
+      ],
+      "max_ns": 13798700
+     }
+    }
+   }
+  }
+ }
+}
