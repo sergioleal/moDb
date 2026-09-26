@@ -300,23 +300,24 @@ Result<std::optional<storage::PageId>> IdentityMap::resolve_idmp(
     // Caminha pela cadeia de diretórios até o de ordem `directory_ordinal`.
     PageId current = directory_root_;
     for (std::uint64_t step = 0; step < directory_ordinal; ++step) {
-        auto page = file_->read(current);
+        // Visão sem cópia: só o ponteiro `next` interessa (T30).
+        auto page = file_->view(current);
         if (!page) {
             return std::unexpected(page.error());
         }
-        const auto next = load_le<std::uint64_t>(page->bytes().subspan(next_dir_offset, 8));
+        const auto next = load_le<std::uint64_t>((*page)->bytes().subspan(next_dir_offset, 8));
         if (next == 0) {
             // O diretório não é profundo o bastante: a entrada não existe.
             return std::nullopt;
         }
         current = PageId{next};
     }
-    auto page = file_->read(current);
+    auto page = file_->view(current);
     if (!page) {
         return std::unexpected(page.error());
     }
     const auto pointer = load_le<std::uint64_t>(
-        page->bytes().subspan(idm_header_size + static_cast<std::size_t>(slot) * dir_pointer_size,
+        (*page)->bytes().subspan(idm_header_size + static_cast<std::size_t>(slot) * dir_pointer_size,
                               dir_pointer_size));
     if (pointer == 0) {
         return std::nullopt;
