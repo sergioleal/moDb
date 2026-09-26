@@ -229,7 +229,7 @@ Só entra se T5.2 mostrar teto grande.
 - [x] 9.3 Implementação
 - [x] 9.4 Antes/depois em `mixed_oltp`, `snapshot_hold` e `restart_recovery`
 
-#### T10 — Relatório e gates do ciclo (Etapa 4) *(médio)* 🔄
+#### T10 — Relatório e gates do ciclo (Etapa 4) *(médio)* ✅
 
 > Relatório: [PROFILING_2026-09.md](PROFILING_2026-09.md). Baselines em `load-history/baselines.json`. 10.4 aguarda decisão de versão.
 
@@ -240,7 +240,7 @@ Fecha o ciclo P1; repetir ao fim de cada ciclo seguinte.
 - [x] 10.2 Baselines RelWithDebInfo pós-otimizações para os casos principais
 - [x] 10.3 Casos de `modb_load gate` (vazão de motor por fase, `tx_commit` ns/op)
   — `desktop-windows` é ruidoso: gate só em ambiente calibrado
-- [ ] 10.4 Tag de versão com o ciclo fechado
+- [x] 10.4 Tag de versão com o ciclo fechado *(tag `perf-2026-09` em `34c3b79`, publicada; `0.0.10` colidiria com a série `0.0.10a`–`f` da Fase 10)*
 
 ### Novas — achadas no ciclo P1
 
