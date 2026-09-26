@@ -41,6 +41,16 @@
 #include <string_view>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 namespace {
 
 using modb::loadtest::CampaignOptions;
@@ -732,7 +742,44 @@ int command_not_implemented(std::string_view command, std::string_view subfase) 
 
 } // namespace
 
+namespace {
+
+// O Windows rebaixa processos de console em segundo plano (power throttling /
+// EcoQoS) depois de um tempo rodando, e aí TODO o trabalho de CPU fica 2-2,5x
+// mais lento -- era a causa de M5, a "contaminação por ordem" que fazia um caso
+// de 10k rodar na metade da vazão depois de um de 100k no mesmo processo
+// (docs-process/PROFILING_2026-09.md, T11). Um harness de medição não pode ser
+// rebaixado no meio da campanha, então pede para não ser.
+// `MODB_LOAD_ALLOW_POWER_THROTTLING=1` mantém o comportamento padrão do SO.
+void opt_out_of_power_throttling() {
+#ifdef _WIN32
+    if (const char* allow = std::getenv("MODB_LOAD_ALLOW_POWER_THROTTLING");
+        allow != nullptr && std::string_view{allow} == "1") {
+        return;
+    }
+    // Resolvida em tempo de execução: o toolchain não declara a função com o
+    // _WIN32_WINNT padrão, e em Windows sem ela isto vira no-op.
+    using SetProcessInformationFn = BOOL(WINAPI*)(HANDLE, PROCESS_INFORMATION_CLASS, LPVOID, DWORD);
+    const auto kernel32 = GetModuleHandleW(L"kernel32.dll");
+    const auto set_information = kernel32 == nullptr
+        ? nullptr
+        : reinterpret_cast<SetProcessInformationFn>(
+              reinterpret_cast<void*>(GetProcAddress(kernel32, "SetProcessInformation")));
+    if (set_information == nullptr) {
+        return;
+    }
+    PROCESS_POWER_THROTTLING_STATE state{};
+    state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    state.StateMask = 0; // controlado e desligado: sem EcoQoS
+    (void)set_information(GetCurrentProcess(), ProcessPowerThrottling, &state, sizeof(state));
+#endif
+}
+
+} // namespace
+
 int main(int argc, char** argv) {
+    opt_out_of_power_throttling();
     if (argc < 2) {
         print_usage();
         return 2;

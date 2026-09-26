@@ -113,7 +113,15 @@ std::string phase_summary_object(const JsonValue& line) {
         << ",\"errors\":" << json_uint(static_cast<std::uint64_t>(line.get_number("errors")))
         << ",\"cache_hit_rate\":" << line.get_number("cache_hit_rate", -1.0)
         << ",\"retained_versions\":"
-        << json_uint(static_cast<std::uint64_t>(line.get_number("retained_versions"))) << "}";
+        << json_uint(static_cast<std::uint64_t>(line.get_number("retained_versions")));
+    // Vazão do motor e overhead do harness (PLANO_PROFILER.md §9.3.1): só nas
+    // campanhas que os emitem. Aditivo -- pontos antigos simplesmente não têm
+    // os campos, e ninguém deve ler 0 como "medido".
+    if (line.find("engine_ops_per_second") != nullptr) {
+        oss << ",\"engine_ops_per_second\":" << line.get_number("engine_ops_per_second")
+            << ",\"harness_overhead_fraction\":" << line.get_number("harness_overhead_fraction");
+    }
+    oss << "}";
     return oss.str();
 }
 

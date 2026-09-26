@@ -1016,6 +1016,36 @@ Canonical field names — the dashboard (§13.11) reads exactly these:
 Missing fields are `null`, never an invented zero; units are part of the
 name (`_ns`, `_bytes`, `ops_per_second`), same as the benchmark plan.
 
+### 13.3.1 What the two throughput numbers measure (decided 2026-09)
+
+Every phase carries two throughputs, and both are kept on purpose
+([PROFILING_2026-09.md](../docs-process/PROFILING_2026-09.md), T13):
+
+- `ops_per_second` — wall clock of the phase loop: the engine **plus** the
+  harness work a client would also do (generating, validating and formatting
+  each object). It is the end-to-end number, and what the gate uses.
+- `engine_ops_per_second` — operations over the sum of the timed engine
+  calls, commits included. It is the number to compare engine changes with.
+
+The harness work is not moved out of the loop: that would make
+`ops_per_second` an engine number too and leave no end-to-end measurement.
+
+Caveats for anyone reading the series:
+
+1. **Do not compare phases with each other on `ops_per_second`.** The harness
+   share varies by phase (~20% on `delete` to ~70% on `read`).
+2. **Points before 2026-09-26 may have run under Windows power throttling.**
+   A console process in the background gets throttled after ~1.3 s and all
+   CPU work becomes 2–2.5× slower (this was M5). `modb_load` opts out since
+   then; set `MODB_LOAD_ALLOW_POWER_THROTTLING=1` to reproduce the old
+   behavior.
+3. **`engine_ops_per_second` of batched phases before 2026-09-26 excluded the
+   commit** (it ran outside the per-operation timer). `ops_per_second` was
+   not affected.
+4. The rollup carries `engine_ops_per_second` and
+   `harness_overhead_fraction` only for campaigns that emit them; older
+   points have no such field, which must be read as "not measured", not 0.
+
 ### 13.4 `series_key` — what can be compared with what
 
 `series_key` is a stable hash over the set of attributes that must be

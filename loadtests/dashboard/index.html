@@ -685,6 +685,12 @@ const METRICS = {
     label: "Objetos por segundo", unit: "obj/s", scope: "phase", better: "up",
     alert: 0.05, fail: 0.10, get: p => p && p.ops_per_second, fmt: v => fmtCompact(v),
   },
+  engine_ops_per_second: {
+    // Vazão só do motor: exclui o laço do harness (validação, formatação). A de
+    // cima é a ponta a ponta de um cliente. Pontos anteriores a 2026-08 não têm.
+    label: "Objetos por segundo (só motor)", unit: "obj/s", scope: "phase", better: "up",
+    alert: 0.05, fail: 0.10, get: p => p && p.engine_ops_per_second, fmt: v => fmtCompact(v),
+  },
   p50: {
     label: "Latência p50", unit: "ms", scope: "phase", better: "down",
     alert: 0.05, fail: 0.10, get: p => p && p.latency_ns && p.latency_ns.p50 / 1e6, fmt: fmtTwo,
@@ -1972,6 +1978,7 @@ const PHASE_COLUMNS = [
   { label: "Duração", get: p => fmtDur(p.duration_ns), total: (ph, r) => fmtDur(r.totals && r.totals.duration_ns) },
   { label: "Share", get: (p, t) => t ? nf0.format((p.duration_ns / t) * 100) + "%" : "—", total: () => "100%" },
   { label: "obj/s", get: p => fmtUnmeasured(p.ops_per_second, fmtCompact), total: (ph, r) => fmtUnmeasured(caseOps(r), fmtCompact) },
+  { label: "obj/s motor", get: p => fmtUnmeasured(p.engine_ops_per_second, fmtCompact) },
   { label: "p50", get: p => fmtUnmeasured(p.latency_ns && p.latency_ns.p50, fmtLat) },
   { label: "p95", get: p => fmtUnmeasured(p.latency_ns && p.latency_ns.p95, fmtLat) },
   { label: "p99", get: p => fmtUnmeasured(p.latency_ns && p.latency_ns.p99, fmtLat) },
