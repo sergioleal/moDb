@@ -1,0 +1,408 @@
+{
+ "meta": {
+  "label": "T4.4 payload",
+  "binary": "C:\\tmp\\apps\\cpp\\moDb2\\build\\relwithdebinfo\\modb_load.exe",
+  "repeat": 3,
+  "seed": 1,
+  "extra_args": [],
+  "raw_files": {
+   "load.create_only.embedded.10k --payload slim": [
+    "modb-load-20260926T130349.863Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130406.290Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130407.133Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.create_only.embedded.10k --payload normal": [
+    "modb-load-20260926T130350.648Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130405.352Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130408.036Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.create_only.embedded.10k --payload fat": [
+    "modb-load-20260926T130351.659Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130401.421Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130409.057Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.crud_full.embedded.10k --payload slim": [
+    "modb-load-20260926T130355.781Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130400.160Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130413.093Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.crud_full.embedded.10k --payload normal": [
+    "modb-load-20260926T130357.017Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130358.552Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T130414.365Z-8aee7f1b2656-eac301be.jsonl"
+   ]
+  }
+ },
+ "cases": {
+  "load.create_only.embedded.10k --payload slim": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     98644.09999999999,
+     0.05652726820752955
+    ],
+    "engine_ops_per_second": [
+     193397.0,
+     0.034099977933042105
+    ],
+    "duration_s": [
+     0.10158803333333333,
+     0.055825074403108486
+    ],
+    "wal_bytes_per_op": [
+     283.0246,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.49018566666666663,
+     0.024916545260455232
+    ]
+   }
+  },
+  "load.create_only.embedded.10k --payload normal": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     61835.63333333333,
+     0.06374752189657329
+    ],
+    "engine_ops_per_second": [
+     170103.33333333334,
+     0.05002148838267812
+    ],
+    "duration_s": [
+     0.16214553333333334,
+     0.06189975375447822
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.6366453333333334,
+     0.00767209226514
+    ]
+   }
+  },
+  "load.create_only.embedded.10k --payload fat": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     6397.09,
+     0.03251584676879838
+    ],
+    "engine_ops_per_second": [
+     37000.26666666667,
+     0.09176969345169352
+    ],
+    "duration_s": [
+     1.5643230666666668,
+     0.03279390073221785
+    ],
+    "wal_bytes_per_op": [
+     8315.5596,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.826463,
+     0.012739073789369589
+    ]
+   }
+  },
+  "load.crud_full.embedded.10k --payload slim": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     96359.8,
+     0.032992318465904634
+    ],
+    "engine_ops_per_second": [
+     189641.66666666666,
+     0.022567374515450652
+    ],
+    "duration_s": [
+     0.10385289999999998,
+     0.03291194183459895
+    ],
+    "wal_bytes_per_op": [
+     283.0246,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.49177,
+     0.036267063062786424
+    ]
+   },
+   "read": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     253220.33333333334,
+     0.0017864928630218105
+    ],
+    "engine_ops_per_second": [
+     508248.0,
+     0.004729067009177349
+    ],
+    "duration_s": [
+     0.0394914,
+     0.0017858128895936393
+    ],
+    "wal_bytes_per_op": [
+     283.0246,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.5017733333333333,
+     0.00297641891591913
+    ]
+   },
+   "update_inplace": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     90821.56666666667,
+     0.018058923960447417
+    ],
+    "engine_ops_per_second": [
+     137018.0,
+     0.013545168090476487
+    ],
+    "duration_s": [
+     0.11013006666666668,
+     0.01815439211016135
+    ],
+    "wal_bytes_per_op": [
+     564.3936,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.3371786666666667,
+     0.01159979962762447
+    ]
+   },
+   "update_grow": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     88966.66666666667,
+     0.028903684067081607
+    ],
+    "engine_ops_per_second": [
+     134727.0,
+     0.013525304071183677
+    ],
+    "duration_s": [
+     0.11246386666666668,
+     0.028720362997934193
+    ],
+    "wal_bytes_per_op": [
+     901.6926,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.339714,
+     0.03712026151075126
+    ]
+   },
+   "update_shrink": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     89159.7,
+     0.039813357168363525
+    ],
+    "engine_ops_per_second": [
+     139723.66666666666,
+     0.0071929513633862
+    ],
+    "duration_s": [
+     0.11227586666666667,
+     0.03944738506216367
+    ],
+    "wal_bytes_per_op": [
+     1210.2041,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.36198033333333335,
+     0.05793349328432286
+    ]
+   },
+   "delete": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     209532.0,
+     0.02116861332958474
+    ],
+    "engine_ops_per_second": [
+     365287.3333333333,
+     0.032602527978073045
+    ],
+    "duration_s": [
+     0.047739533333333334,
+     0.02091553569581305
+    ],
+    "wal_bytes_per_op": [
+     1274.4331,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.42618700000000004,
+     0.028598611048306848
+    ]
+   }
+  },
+  "load.crud_full.embedded.10k --payload normal": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     62445.96666666667,
+     0.06802685744311916
+    ],
+    "engine_ops_per_second": [
+     169760.0,
+     0.07312496234843227
+    ],
+    "duration_s": [
+     0.1606515,
+     0.07042737665258811
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.6320526666666667,
+     0.0038597323523592007
+    ]
+   },
+   "read": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     123290.66666666667,
+     0.027377323563659805
+    ],
+    "engine_ops_per_second": [
+     478410.6666666667,
+     0.03264937285984178
+    ],
+    "duration_s": [
+     0.08114986666666667,
+     0.02758982763779273
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.7422610000000001,
+     0.0018505948754033745
+    ]
+   },
+   "update_inplace": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     77336.40000000001,
+     0.08326042651363785
+    ],
+    "engine_ops_per_second": [
+     126553.0,
+     0.06431306879372493
+    ],
+    "duration_s": [
+     0.1298863,
+     0.08064847304393459
+    ],
+    "wal_bytes_per_op": [
+     955.0811,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.38930399999999993,
+     0.0408553940133188
+    ]
+   },
+   "update_grow": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     60860.36666666667,
+     0.0315295026212137
+    ],
+    "engine_ops_per_second": [
+     104413.43333333333,
+     0.04146971883802824
+    ],
+    "duration_s": [
+     0.16442013333333336,
+     0.03171224022349164
+    ],
+    "wal_bytes_per_op": [
+     1720.9026000000001,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4169530000000001,
+     0.015871962049874982
+    ]
+   },
+   "update_shrink": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     52611.200000000004,
+     0.08638722942695035
+    ],
+    "engine_ops_per_second": [
+     104776.63333333335,
+     0.10174101892741359
+    ],
+    "duration_s": [
+     0.19107169999999998,
+     0.09070967227185919
+    ],
+    "wal_bytes_per_op": [
+     2705.5091,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4972973333333333,
+     0.018901508552559326
+    ]
+   },
+   "delete": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     170548.0,
+     0.04073123051770725
+    ],
+    "engine_ops_per_second": [
+     271596.0,
+     0.05678801735272981
+    ],
+    "duration_s": [
+     0.05870073333333333,
+     0.04155905703572318
+    ],
+    "wal_bytes_per_op": [
+     2769.7381,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.37162500000000004,
+     0.037413761442907596
+    ]
+   }
+  }
+ }
+}

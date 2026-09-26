@@ -1,0 +1,199 @@
+{
+ "meta": {
+  "label": "T5.3 batch",
+  "binary": "C:\\tmp\\apps\\cpp\\moDb2\\build\\relwithdebinfo\\modb_load.exe",
+  "repeat": 3,
+  "seed": 1,
+  "extra_args": [],
+  "raw_files": {
+   "load.create_only.embedded.10k --batch 1": [
+    "modb-load-20260926T131037.764Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131106.973Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131121.222Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.create_only.embedded.10k --batch 10": [
+    "modb-load-20260926T131052.011Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131104.645Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131135.528Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.create_only.embedded.10k --batch 100": [
+    "modb-load-20260926T131054.302Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131103.467Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131137.876Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.create_only.embedded.10k --batch 1000": [
+    "modb-load-20260926T131055.340Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131102.566Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131139.000Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.create_only.embedded.10k --batch 10000": [
+    "modb-load-20260926T131056.354Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131101.641Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131139.845Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.create_only.embedded.10k --batch 1 --durability disabled_diagnostic": [
+    "modb-load-20260926T131057.274Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131059.482Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T131140.850Z-8aee7f1b2656-eac301be.jsonl"
+   ]
+  }
+ },
+ "cases": {
+  "load.create_only.embedded.10k --batch 1": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     740.9029999999999,
+     0.0013363184111953258
+    ],
+    "engine_ops_per_second": [
+     68623.59999999999,
+     0.007768890632992052
+    ],
+    "duration_s": [
+     13.497066233333333,
+     0.0013373133915236092
+    ],
+    "wal_bytes_per_op": [
+     33416.5156,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.9892029999999999,
+     9.662569276763552e-05
+    ]
+   }
+  },
+  "load.create_only.embedded.10k --batch 10": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     6383.973333333332,
+     0.017577926636262214
+    ],
+    "engine_ops_per_second": [
+     129339.0,
+     0.02110579889507046
+    ],
+    "duration_s": [
+     1.5667468,
+     0.017685823641837024
+    ],
+    "wal_bytes_per_op": [
+     3787.6206,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.950637,
+     0.000615606969343068
+    ]
+   }
+  },
+  "load.create_only.embedded.10k --batch 100": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     32886.566666666666,
+     0.11358378832741849
+    ],
+    "engine_ops_per_second": [
+     155270.66666666666,
+     0.11318762533515118
+    ],
+    "duration_s": [
+     0.3066185666666667,
+     0.10969004874985488
+    ],
+    "wal_bytes_per_op": [
+     819.9606,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.7881119999999999,
+     0.007989557753485876
+    ]
+   }
+  },
+  "load.create_only.embedded.10k --batch 1000": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     64489.13333333333,
+     0.04646670127609676
+    ],
+    "engine_ops_per_second": [
+     177501.33333333334,
+     0.04811518597829815
+    ],
+    "duration_s": [
+     0.1552828,
+     0.04530257415451543
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.6366396666666666,
+     0.007825793534194716
+    ]
+   }
+  },
+  "load.create_only.embedded.10k --batch 10000": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     70061.46666666667,
+     0.04299765729416174
+    ],
+    "engine_ops_per_second": [
+     172807.33333333334,
+     0.04768424812684903
+    ],
+    "duration_s": [
+     0.142912,
+     0.04398554494391045
+    ],
+    "wal_bytes_per_op": [
+     445.81299999999993,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.594506,
+     0.004059064858787994
+    ]
+   }
+  },
+  "load.create_only.embedded.10k --batch 1 --durability disabled_diagnostic": {
+   "create": {
+    "repetitions": 3,
+    "operations": 10000,
+    "ops_per_second": [
+     7248.973333333332,
+     0.0223957226195143
+    ],
+    "engine_ops_per_second": [
+     153909.0,
+     0.015064412633329763
+    ],
+    "duration_s": [
+     1.3799677,
+     0.022404014864140454
+    ],
+    "wal_bytes_per_op": [
+     33416.5156,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.952896,
+     0.0011962043334527962
+    ]
+   }
+  }
+ }
+}

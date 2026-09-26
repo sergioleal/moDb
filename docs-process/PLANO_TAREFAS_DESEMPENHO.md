@@ -149,78 +149,126 @@ partir deles — os `.md` continuam sendo a fonte; nada é editado à mão no HT
 
 ### P1
 
-#### T3 — Rodada única de remedição com `stage-profile` *(máquina)*
+#### T3 — Rodada única de remedição com `stage-profile` *(máquina)* ✅
+
+> Resultado em [PROFILING_2026-09.md §T3](PROFILING_2026-09.md#t3--rodada-única-de-remedição-com-stage-profile): 3.1 e 3.4 confirmadas; 3.2 e 3.3 refutadas. O commit são **4 `fsync`** (~330 µs cada).
 
 Uma mesma rodada (`mixed_oltp.10k`, `snapshot_hold.10k`, `crud_full.100k`,
 5 repetições, preset `stage-profile`) responde quatro perguntas. As subtarefas
 3.2–3.4 pertencem a tarefas P2 (T14, T15, T16), mas saem de graça aqui e
 decidem se essas tarefas valem.
 
-- [ ] 3.1 Atribuição atual de `tx_commit` (depois das três ações de commit):
+- [x] 3.1 Atribuição atual de `tx_commit` (depois das três ações de commit):
   `page_file_sync`, `wal_sync`, `wal_append`, `buffer_pool_writeback`
-- [ ] 3.2 `heap_candidate_scan` em `update_shrink` com páginas de 8 KiB
+- [x] 3.2 `heap_candidate_scan` em `update_shrink` com páginas de 8 KiB
   (era 75,7% e 6.723 iterações/op, medido a 4 KiB) → decide T14
-- [ ] 3.3 Peso de `materialize` e `object_decode` na fase `read` → decide T15
-- [ ] 3.4 Bytes de WAL por operação em RelWithDebInfo (o "3 KB/op" é de Debug) → decide T16
+- [x] 3.3 Peso de `materialize` e `object_decode` na fase `read` → decide T15
+- [x] 3.4 Bytes de WAL por operação em RelWithDebInfo (o "3 KB/op" é de Debug) → decide T16
 
-#### T4 — Varreduras sem código *(máquina)*
+#### T4 — Varreduras sem código *(máquina)* ✅
 
-- [ ] 4.1 Pred. 1 e Pred. 2 a **100k** (`mixed_oltp`, `--reads-per-write 4,10`)
+> [PROFILING_2026-09.md](PROFILING_2026-09.md): 4.1 e 4.5 confirmadas; 4.2 — 16 KiB pior em tudo, 8 KiB fica; 4.4 — `fat` 4,6× e amplificação ~2×; `crud_full` com `fat` não roda.
+
+- [x] 4.1 Pred. 1 e Pred. 2 a **100k** (`mixed_oltp`, `--reads-per-write 4,10`)
   — o passo 10 do PLANO_PROFILER pedia 100k; só 10k foi medido
-- [ ] 4.2 Page size 16 KiB depois da A2 — o contra-termo continua ausente?
-- [ ] 4.3 Cache `warm` vs `oversubscribed` (buffer pool)
-- [ ] 4.4 Payload slim/normal/fat → custo por byte vs por operação
-- [ ] 4.5 Escala 1k/10k/25k/50k/100k/250k em `create_only` → expoente de
+- [x] 4.2 Page size 16 KiB depois da A2 — o contra-termo continua ausente?
+- [x] 4.3 *(reclassificada: a dimensão `cache` não tem dispatch; o cenário é o workload `oversubscribed_churn`, em T12.4)* Cache `warm` vs `oversubscribed` (buffer pool)
+- [x] 4.4 Payload slim/normal/fat → custo por byte vs por operação
+- [x] 4.5 Escala 1k/10k/25k/50k/100k/250k em `create_only` → expoente de
   crescimento depois da A2 (a mais lenta: o 250k pode levar dezenas de minutos)
 
-#### T5 — Varreduras de `durability` e `--batch` *(pequeno + máquina)*
+#### T5 — Varreduras de `durability` e `--batch` *(pequeno + máquina)* ✅
+
+> [PROFILING_2026-09.md](PROFILING_2026-09.md): seletores `--batch`, `--durability` (e `--checkpoint-interval`) na CLI; sem `fsync` o commit fica 9–11× mais rápido; achado um defeito do harness (commit fora do tempo de motor), corrigido.
 
 Não aparecem no `--help` do `modb_load`; existem na matriz, mas talvez sem flag.
 
-- [ ] 5.1 Confirmar como selecionar `durability` e `batch`; expor na CLI se preciso
-- [ ] 5.2 `durability` `sync_real` vs `disabled_diagnostic` → teto puro do
+- [x] 5.1 Confirmar como selecionar `durability` e `batch`; expor na CLI se preciso
+- [x] 5.2 `durability` `sync_real` vs `disabled_diagnostic` → teto puro do
   `fsync` (predição escrita antes de rodar) → decide T9
-- [ ] 5.3 `--batch` 1/100/1k/10k em `create_only` e `mixed_oltp` → custo de commit amortizado
+- [x] 5.3 `--batch` 1/100/1k/10k em `create_only` e `mixed_oltp` → custo de commit amortizado
 
-#### T6 — Pred. 3: a leitura fecha em `materialize`/`object_decode` *(pequeno)*
+#### T6 — Pred. 3: a leitura fecha em `materialize`/`object_decode` *(pequeno)* ✅
 
-- [ ] 6.1 Cobertura de estágios medida contra `operation_ns_total` (tempo de
+> Refutada: fecha em localizar/ler o registro (35%) e copiar páginas (27%); cobertura contra o tempo de motor 88%.
+
+- [x] 6.1 Cobertura de estágios medida contra `operation_ns_total` (tempo de
   motor), não contra `duration_ns` (que inclui o harness)
-- [ ] 6.2 Registrar o veredito: confirmada, ou refutada se `buffer_pool_miss` dominar
+- [x] 6.2 Registrar o veredito: confirmada, ou refutada se `buffer_pool_miss` dominar
 
-#### T7 — Investigar `wal_append` *(médio)*
+#### T7 — Investigar `wal_append` e os `fsync` do WAL *(médio)* ✅
+
+> 7.1/7.2: CRC slicing-by-8 + buffer reaproveitado, `wal_append` −23 a −39%, `mixed_oltp` +9%. 7.3: um `wal_sync` por commit, +31%. Juntar as escritas de um commit numa só fica para depois (muda a semântica de `Wal`).
 
 ~124 µs/op na fase `hold`.
 
-- [ ] 7.1 Localizar o custo: cópia da imagem de página, alocação, codificação?
-- [ ] 7.2 Se houver correção barata: predição e medição antes/depois
+- [x] 7.1 Localizar o custo: cópia da imagem de página, alocação, codificação?
+- [x] 7.2 Se houver correção barata: predição e medição antes/depois
+- [x] 7.3 *(novo, achado da T3)* Remover o 1º `wal_sync` do commit (entre as
+  imagens de página e o registro de commit): confirmar que cada registro do WAL
+  tem checksum e que a recuperação para no primeiro inválido; se sim, um `fsync`
+  depois do registro de commit basta — 4 → 3 `fsync` por commit
 
-#### T8 — Desenho de group commit *(médio, só documento)*
+#### T8 — Desenho de group commit *(médio, só documento)* ✅
 
-- [ ] 8.1 Desenho: vários commits concorrentes → um `fsync` de WAL
-- [ ] 8.2 Estimar o teto em `mixed_oltp` com sessões concorrentes
-- [ ] 8.3 Registrar a decisão: fazer ou não
+> Adiado: só rende com escritores concorrentes, que o motor serializa; teto até 1/c do `fsync`.
 
-#### T9 — Checkpoint preguiçoso: 1 `page_file_sync` por commit *(grande)*
+- [x] 8.1 Desenho: vários commits concorrentes → um `fsync` de WAL
+- [x] 8.2 Estimar o teto em `mixed_oltp` com sessões concorrentes
+- [x] 8.3 Registrar a decisão: fazer ou não
+
+#### T9 — Checkpoint preguiçoso: 1 `page_file_sync` por commit *(grande)* ✅
+
+> [ADR-022](../docs/decisions/ADR-022-menos-fsync-por-commit.md) aceito. 2,09× em `mixed_oltp` sobre T7.3; recuperação +7,7 ms; testes de queda L1–L4 (com mutação).
 
 Só entra se T5.2 mostrar teto grande.
 
-- [ ] 9.1 ADR: avançar o checkpoint a cada N commits; impacto na recuperação
+- [x] 9.1 ADR: avançar o checkpoint a cada N commits; impacto na recuperação
   (replay mais longo) e na invariante "páginas duráveis antes do checkpoint"
-- [ ] 9.2 Teste de crash/recovery com checkpoint defasado
-- [ ] 9.3 Implementação
-- [ ] 9.4 Antes/depois em `mixed_oltp`, `snapshot_hold` e `restart_recovery`
+- [x] 9.2 Teste de crash/recovery com checkpoint defasado
+- [x] 9.3 Implementação
+- [x] 9.4 Antes/depois em `mixed_oltp`, `snapshot_hold` e `restart_recovery`
 
-#### T10 — Relatório e gates do ciclo (Etapa 4) *(médio)*
+#### T10 — Relatório e gates do ciclo (Etapa 4) *(médio)* 🔄
+
+> Relatório: [PROFILING_2026-09.md](PROFILING_2026-09.md). Baselines em `load-history/baselines.json`. 10.4 aguarda decisão de versão.
 
 Fecha o ciclo P1; repetir ao fim de cada ciclo seguinte.
 
-- [ ] 10.1 `docs-process/PROFILING_<tag>.md`: por gargalo, hipótese,
+- [x] 10.1 `docs-process/PROFILING_2026-09.md`: por gargalo, hipótese,
   evidência, teto, custo e decisão
-- [ ] 10.2 Baselines RelWithDebInfo pós-otimizações para os casos principais
-- [ ] 10.3 Casos de `modb_load gate` (vazão de motor por fase, `tx_commit` ns/op)
+- [x] 10.2 Baselines RelWithDebInfo pós-otimizações para os casos principais
+- [x] 10.3 Casos de `modb_load gate` (vazão de motor por fase, `tx_commit` ns/op)
   — `desktop-windows` é ruidoso: gate só em ambiente calibrado
 - [ ] 10.4 Tag de versão com o ciclo fechado
+
+### Novas — achadas no ciclo P1
+
+Numeradas depois de T25 para não renumerar o plano; a prioridade vai ao lado.
+
+#### T26 — Truncar/segmentar o WAL *(P2, médio)*
+
+A abertura lê o WAL inteiro (`Wal::read_all`) e ele nunca é truncado: 134 ms a
+10k objetos, crescendo com a idade do banco (T9.4).
+
+- [ ] 26.1 Desenho: truncar até o menor LSN ainda necessário (checkpoint e réplicas, `oldest_available_lsn`)
+- [ ] 26.2 Ou recuperação que leia só a partir do checkpoint
+- [ ] 26.3 Antes/depois em `restart_recovery`
+
+#### T27 — Registros maiores que uma página *(P3, grande)*
+
+`crud_full` com payload `fat` falha em `update_grow`; o caso de `load-heavy`
+falha sempre (T4.4).
+
+- [ ] 27.1 Decidir: overflow records, ou recusar registros acima de um limite documentado
+- [ ] 27.2 Enquanto isso, tirar `crud_full.*.payload_fat` do `load-heavy`
+
+#### T28 — `--case` sem ambiente não indexa *(P3, pequeno)*
+
+Com `--case`, a campanha não atribui ambiente e o rollup rejeita o ponto
+(`rollup sem 'environment'`), em silêncio para quem não lê o aviso (T10.2).
+
+- [ ] 28.1 Atribuir o ambiente padrão também com `--case`, ou falhar cedo
 
 ### P2
 
@@ -256,12 +304,17 @@ De 37% a 74% de cada número de fase é o medidor.
 
 #### T14 — Resto do caminho de update (H4) *(médio; depende de T3.2)*
 
-- [ ] 14.1 Se `heap_candidate_scan` ainda dominar `update_shrink`: explicar por
+- [x] 14.1 *(sem objeto: T3.2 mediu `heap_candidate_scan` em 0,7% de `update_shrink`
+  a 8 KiB; a fase agora é 77% commit)* Se `heap_candidate_scan` ainda dominar `update_shrink`: explicar por
   que `lower_bound` + "para na primeira" ainda itera milhares de vezes
 - [ ] 14.2 Bytes movidos e escritas de página por update vs tamanho do registro
 - [ ] 14.3 Cobertura de `update_inplace`/`update_grow` (66–67%): o que falta atribuir
 
 #### T15 — Dívidas de CPU no caminho de leitura (H6 / Fase 10C) *(médio; depende de T3.3)*
+
+> T3.3: `materialize` é 11% do tempo de motor da leitura (teto baixo para 15.1–15.3). O teto
+> maior está nas **três cópias de página de 8 KiB por leitura** e na navegação de
+> identidade/slot (62% juntas) — ver 15.5.
 
 Medir com `modb_bench object_store.read_hotpath` e o estágio `materialize`.
 Cada item: predição, antes/depois, e decisão mesmo que seja "não vale".
@@ -270,6 +323,8 @@ Cada item: predição, antes/depois, e decisão mesmo que seja "não vale".
 - [ ] 15.2 Zero-copy em `to_field_values` / strings (na leitura; a escrita foi refutada)
 - [ ] 15.3 `Handle::get<Member>()` materializa o objeto inteiro → projeção de um campo
 - [ ] 15.4 Append incremental de coleções (hoje O(n))
+- [ ] 15.5 *(novo, achado da T3)* Leitura sem copiar a página inteira: `buffer_pool_hit`
+  copia 24.466 B por leitura de um registro de 375 B
 
 #### T16 — WAL grava imagens de página inteiras (A4 / H3) *(grande; depende de T3.4 e T5)*
 
@@ -339,3 +394,4 @@ Só se, depois de T6 e T13, sobrar resíduo de motor sem explicação.
 |---|---|---|---|
 | 2026-09-26 | T1 | — (não commitado) | RESULTADOS_PROFILING, PLANO_PROFILING e PLANO_PROFILER atualizados e linkados a este plano |
 | 2026-09-26 | T2 | — (não commitado) | `scripts/build_docs_site.py` (+ `build-docs.ps1`/`.sh`, `docs_site_assets/`): 148 documentos, 8 seções, 115 páginas de código com âncora de linha, busca local; build em ~3 s; 91 links quebrados corrigidos nos `.md` (90 apontavam para arquivos movidos para `docs/`, 1 para arquivo removido). 2.7 (publicar) não feito — opcional |
+| 2026-09-26 | T3–T10 (P1) | (este commit) | Relatório: [PROFILING_2026-09.md](PROFILING_2026-09.md). ADR-022 (1 `fsync` por commit) + CRC slicing-by-8: `mixed_oltp` ~2,97×, `hold` ~2,8–3,0×. Defeitos corrigidos: commit fora do tempo de motor no harness; `set_wal_file_factory` com WAL aberto (testes de failpoint passavam pelo motivo errado). 10.4 pendente |

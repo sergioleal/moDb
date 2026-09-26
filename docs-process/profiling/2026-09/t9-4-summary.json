@@ -1,0 +1,127 @@
+{
+ "meta": {
+  "label": "T9.4 restart_recovery ckpt1 vs 64",
+  "binary": "C:\\tmp\\apps\\cpp\\moDb2\\build\\relwithdebinfo\\modb_load.exe",
+  "repeat": 5,
+  "seed": 1,
+  "extra_args": [],
+  "raw_files": {
+   "load.restart_recovery.embedded.10k --checkpoint-interval 1": [
+    "modb-load-20260926T140834.613Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T140840.621Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T140843.234Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T140849.343Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T140851.893Z-8aee7f1b2656-eac301be.jsonl"
+   ],
+   "load.restart_recovery.embedded.10k": [
+    "modb-load-20260926T140837.132Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T140838.868Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T140845.808Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T140847.596Z-8aee7f1b2656-eac301be.jsonl",
+    "modb-load-20260926T140854.397Z-8aee7f1b2656-eac301be.jsonl"
+   ]
+  }
+ },
+ "cases": {
+  "load.restart_recovery.embedded.10k --checkpoint-interval 1": {
+   "create": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     60840.7,
+     0.03196065128675316
+    ],
+    "engine_ops_per_second": [
+     103606.98000000001,
+     0.04545808147617518
+    ],
+    "duration_s": [
+     0.16450241999999998,
+     0.03301038010825376
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.4124738,
+     0.020171004969780307
+    ]
+   },
+   "restart_recovery": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     0.0,
+     0.0
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.13369092,
+     0.05738232367666392
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "load.restart_recovery.embedded.10k": {
+   "create": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     66745.16,
+     0.03418673208423805
+    ],
+    "engine_ops_per_second": [
+     119792.0,
+     0.05228119266616396
+    ],
+    "duration_s": [
+     0.14996042,
+     0.033378700911653056
+    ],
+    "wal_bytes_per_op": [
+     482.8921,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.44240779999999996,
+     0.02344905167387443
+    ]
+   },
+   "restart_recovery": {
+    "repetitions": 5,
+    "operations": 10000,
+    "ops_per_second": [
+     0.0,
+     0.0
+    ],
+    "engine_ops_per_second": [
+     NaN,
+     NaN
+    ],
+    "duration_s": [
+     0.1413633,
+     0.055472679684362265
+    ],
+    "wal_bytes_per_op": [
+     0.0,
+     0.0
+    ],
+    "harness_overhead_fraction": [
+     0.0,
+     0.0
+    ]
+   }
+  }
+ }
+}
