@@ -917,3 +917,139 @@ transação), duas rodadas alternadas:
 **Resultado: 12–15× a 20.000.** O que ainda cresce é a caminhada pela cadeia
 até a última página (~22 páginas a 20.000 elementos), O(páginas) e não
 O(elementos); guardar o id da última página eliminaria até isso.
+
+---
+
+# Ciclo P3
+
+## T18 — Excluir o ponto contaminado das análises
+
+A série é append-only (§13.2 do plano de carga), então o ponto medido de
+propósito sob M5 não é apagado. Novo: `load-history/excluded_runs.json`, lido
+por `compute_trend` (e, por ele, pelo gate): cada entrada tem `run_id`, um
+`case_id` opcional e o motivo, e o ponto correspondente vira `comparable=false`.
+O `case_id` importa: aquela execução rodou dois casos, e só o segundo estava
+contaminado — o primeiro (100k, primeiro caso do processo) continua comparável.
+Teste em `load_history_test`: o ponto excluído continua na série, não reprova o
+gate, e um `excluded_runs.json` ilegível é erro, não "nada excluído".
+
+## T19 — `device_class`
+
+Fato da máquina, então declarado por ambiente em `loadtests/environments.json`
+(`desktop-windows`: `nvme` — WD PC SN740, `BusType NVMe`), e o rollup passa a
+emiti-lo em vez de `null`. Não entra no `series_key`: a chave não muda.
+
+## T28 — `--case` sem ambiente não indexava
+
+Com exatamente **um** ambiente `local` não deprecado no catálogo, ele vira o
+padrão dos casos sem `--environment`; com zero ou vários, nada é escolhido
+(adivinhar misturaria séries). Teste em `load_campaign_test` para os dois
+casos.
+
+## T27 — Registros maiores que uma página
+
+**Decisão:** sem registro de overflow por enquanto; registros acima do que
+cabe numa página continuam recusados (`record_too_large`), e o limite fica
+documentado no plano de carga. `crud_full` com `payload=fat` saiu do
+`load-heavy` (falhava sempre), com um teste que impede a volta.
+
+## T30 — A última cópia de página por leitura
+
+Era a resolução do diretório do `IdentityMap` (`resolve_idmp`), que lia a página
+IDMD por valor para tirar um ponteiro de 8 bytes; passa a usar
+`PageFile::view`. Bytes copiados por leitura: **8.192 → 0**;
+`identity_lookup` 547 → 249 ns. **Sem predição pré-registrada.** A/B
+alternado, 5 repetições, `crud_full.100k` ([dados](profiling/2026-09/t30ab-summary.md)):
+
+| fase | parede | motor |
+|---|---|---|
+| `read` | 1,03× | **1,23×** |
+| `update_inplace` | 1,10× | 1,11× |
+| `update_grow` | 1,09× | 1,10× |
+| `update_shrink` | 1,07× | 1,08× |
+| `delete` | 1,15× | 1,15× |
+| `create` | 1,00× | 1,01× |
+
+## T31 — `wal_bytes` em `cascade_delete`/`blob_lifecycle`
+
+As 7 fases passam a registrar o tamanho do WAL no fim da fase, como as demais.
+
+## T32 — Outliers intermitentes
+
+Investigado sem conclusão. O Defender está fora: a proteção em tempo real está
+**desligada** e o processo dele nem roda. Em 15 repetições de
+`mixed_oltp.10k`, com os três processos que mais usaram CPU durante cada uma
+registrados, **nenhum outlier** (17.492–19.695 ops/s); o que concorre é o
+esperado numa máquina de trabalho (o app do Claude, CLion e seu `fsnotifier`,
+Teams). Nas rodadas anteriores eles apareceram em ~2 de ~60 execuções. É mais
+um motivo para gates só em ambiente dedicado.
+
+## T20 — Regressão de `delete` do índice de capacidade
+
+O `delete` de `crud_full.100k` hoje: **34% `buffer_pool_miss`**, 24% commit,
+36% `heap_record_read` (envelope que contém as páginas lidas). A manutenção do
+`std::set` de capacidades não tem estágio próprio e está dentro dos 30% não
+atribuídos — um teto, não um custo medido. **Decisão: não trocar o índice
+agora**; o custo dominante do `delete` são páginas lidas do disco (o `delete`
+percorre os objetos numa ordem que o cache não acompanha), e esse é o alvo se
+o `delete` voltar a importar.
+
+## T21 — Custo real da retenção MVCC
+
+`snapshot_hold` já lia todo o working set pela snapshot duas vezes — antes do
+churn (nada retido) e depois (1/3 dos objetos lidos da versão `previous`, 1/3
+removidos) — mas nenhuma das duas era cronometrada. Agora são as fases
+`snapshot_read_fresh` e `snapshot_read_retained`; `hold` não muda.
+
+**Predição (escrita antes de rodar):** a leitura com retenção fica no máximo
+20% mais lenta; acima de 50%, a retenção tem custo real.
+
+3 repetições ([dados](profiling/2026-09/t21-summary.md)), motor ops/s:
+
+| escala | sem retenção | com retenção | diferença |
+|---|---|---|---|
+| 10k | 886.637 | 802.957 | −9% |
+| 100k | 804.918 | 837.045 | +4% |
+
+**Confirmada.** Ler sob retenção custa o mesmo que ler sem ela, dentro do
+ruído — a versão `previous` é resolvida pela mesma entrada do `IdentityMap`.
+Junto com a T5/H5 (a fase `hold` é commit, não retenção), **a retenção MVCC não
+tem custo mensurável nem na escrita nem na leitura** nestes workloads.
+
+## T23, T24, T25 — Opcionais: não necessárias agora
+
+Cada uma tinha, no plano, a condição em que valeria. Nenhuma se cumpriu:
+
+- **T23 (atribuição por função, gprof/perf):** "só se sobrar resíduo de motor
+  sem explicação". A leitura fecha em 88% do tempo de motor (T6) e, no update,
+  o que falta está no tempo exclusivo dos envelopes (T14), que já diz onde
+  procurar. Um profiler amostral não mudaria nenhuma decisão deste ciclo.
+- **T24 (histograma log₂ por estágio):** "só se as caudas virarem a pergunta".
+  Nenhuma decisão deste ciclo dependeu de p99/p999 por estágio; `max_ns`
+  bastou.
+- **T25 (núcleos físicos em Linux):** "quando houver ambiente Linux calibrado".
+  Não há.
+
+## T22 — Calibração por classe de build
+
+`default_calibration_path()` passa a preferir
+`loadtests/calibration/<plataforma>-<CMAKE_BUILD_TYPE>.json` e cai no arquivo sem
+sufixo — o legado, agora declarado `"build_type": "Debug"` — quando não há um
+específico. `scripts/calibrate_load.py` gerou
+`windows-x86_64-RelWithDebInfo.json` com **todas as escalas medidas** (uma
+execução por ponto, processo e work dir próprios, opt-out de throttling);
+nenhuma extrapolada. Duração do caso, em segundos:
+
+| workload | 1k | 10k | 100k | 250k | 500k | 1M |
+|---|---|---|---|---|---|---|
+| `create_only` | 0,02 | 0,17 | 1,54 | 4,05 | 7,64 | 15,91 |
+| `create_delete_forward` | 0,02 | 0,17 | 1,78 | 4,61 | 9,08 | 18,68 |
+| `create_delete_reverse` | 0,02 | 0,17 | 1,76 | 4,20 | 8,71 | 18,19 |
+| `create_delete_interleaved` | 0,02 | 0,17 | 2,00 | 4,76 | 10,25 | 20,71 |
+| `crud_full` | 0,06 | 0,55 | 5,58 | 14,57 | 28,88 | 59,29 |
+
+O crescimento é linear de 10k a 1M em todos os workloads. A calibração antiga
+(Debug, julho) tinha `crud_full` a 250k em ~44 minutos e precisava extrapolar
+500k/1M; hoje o caso inteiro a 1M leva menos de um minuto. Conferido:
+`list-cases` de um binário `relwithdebinfo` estima 5,6 s para
+`crud_full.100k`; um binário Debug continua no arquivo legado (242 s).

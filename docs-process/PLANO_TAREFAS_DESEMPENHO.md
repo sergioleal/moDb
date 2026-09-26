@@ -257,20 +257,24 @@ A abertura lê o WAL inteiro (`Wal::read_all`) e ele nunca é truncado: 134 ms a
 - [x] 26.2 Ou recuperação que leia só a partir do checkpoint
 - [x] 26.3 Antes/depois em `restart_recovery`
 
-#### T27 — Registros maiores que uma página *(P3, grande)*
+#### T27 — Registros maiores que uma página *(P3, grande)* ✅
+
+> Decisão: sem overflow records por enquanto; limite documentado. `crud_full` `fat` saiu do `load-heavy`, com teste.
 
 `crud_full` com payload `fat` falha em `update_grow`; o caso de `load-heavy`
 falha sempre (T4.4).
 
-- [ ] 27.1 Decidir: overflow records, ou recusar registros acima de um limite documentado
-- [ ] 27.2 Enquanto isso, tirar `crud_full.*.payload_fat` do `load-heavy`
+- [x] 27.1 Decidir: overflow records, ou recusar registros acima de um limite documentado
+- [x] 27.2 Enquanto isso, tirar `crud_full.*.payload_fat` do `load-heavy`
 
-#### T28 — `--case` sem ambiente não indexa *(P3, pequeno)*
+#### T28 — `--case` sem ambiente não indexa *(P3, pequeno)* ✅
+
+> Com exatamente um ambiente local no catálogo, ele é o padrão; com zero ou vários, nada é adivinhado.
 
 Com `--case`, a campanha não atribui ambiente e o rollup rejeita o ponto
 (`rollup sem 'environment'`), em silêncio para quem não lê o aviso (T10.2).
 
-- [ ] 28.1 Atribuir o ambiente padrão também com `--case`, ou falhar cedo
+- [x] 28.1 Atribuir o ambiente padrão também com `--case`, ou falhar cedo
 
 #### T29 — `update_shrink`: candidatas lidas do disco *(P2, médio)*
 
@@ -280,23 +284,29 @@ T14: quando o registro encolhido muda de página, `heap_candidate_try` custa
 - [ ] 29.1 Entender por que a candidata raramente está no cache
 - [ ] 29.2 Predição e antes/depois
 
-#### T30 — Uma cópia de página por leitura ainda sobra *(P3, pequeno)*
+#### T30 — Uma cópia de página por leitura ainda sobra *(P3, pequeno)* ✅
+
+> Era `resolve_idmp`; agora `view`. Cópia por leitura 8.192 → 0 B; `read` 1,23× no motor, updates/delete +7–15%.
 
 T15.5: 8.192 B copiados por leitura (eram 24.466); provável resolução do
 diretório do `IdentityMap`.
 
-- [ ] 30.1 Localizar e trocar por `PageFile::view`
+- [x] 30.1 Localizar e trocar por `PageFile::view`
 
-#### T31 — `wal_bytes` ausente em `cascade_delete`/`blob_lifecycle` *(P3, pequeno)*
+#### T31 — `wal_bytes` ausente em `cascade_delete`/`blob_lifecycle` *(P3, pequeno)* ✅
 
-- [ ] 31.1 Preencher `wal_bytes` nessas fases (T12)
+> Preenchido nas 7 fases.
 
-#### T32 — Outliers intermitentes do ambiente *(P3, pequeno)*
+- [x] 31.1 Preencher `wal_bytes` nessas fases (T12)
+
+#### T32 — Outliers intermitentes do ambiente *(P3, pequeno)* ✅
+
+> Inconclusivo: Defender desligado; 15 repetições sem outlier. Reforça gate só em ambiente dedicado.
 
 Repetições isoladas 2–4× mais lentas em qualquer binário, que somem ao repetir
 (P1 revisado, T26).
 
-- [ ] 32.1 Correlacionar com Defender/indexação/estado do disco
+- [x] 32.1 Correlacionar com Defender/indexação/estado do disco
 
 ### P2
 
@@ -380,50 +390,66 @@ Cada item: predição, antes/depois, e decisão mesmo que seja "não vale".
 - [ ] 17.1 Listar o que será apagado (7,6 GB de `.modb` descartáveis, §13.2 do
   plano de carga) e confirmar antes de apagar
 
-#### T18 — Excluir o ponto contaminado das análises *(pequeno)*
+#### T18 — Excluir o ponto contaminado das análises *(pequeno)* ✅
 
-- [ ] 18.1 Lista de exclusão para `run-20260726T211057.125Z-03b9fe9b` nas análises da série
+> `load-history/excluded_runs.json` (run_id + case_id opcional), lido pela tendência e pelo gate; o ponto fica na série como `comparable=false`.
 
-#### T19 — `device_class` em `loadtests/environments.json` *(pequeno)*
+- [x] 18.1 Lista de exclusão para `run-20260726T211057.125Z-03b9fe9b` nas análises da série
 
-- [ ] 19.1 Campo por máquina (nvme/ssd/hdd), não por corrida
+#### T19 — `device_class` em `loadtests/environments.json` *(pequeno)* ✅
 
-#### T20 — Regressão de `delete` do índice de capacidade *(médio)*
+> `desktop-windows`: `nvme`; o rollup emite o valor declarado em vez de `null`.
 
-- [ ] 20.1 Remedir o custo residual com 8 KiB (8 KiB já devolveu 1,26×)
-- [ ] 20.2 Se ainda relevante: índice intrusivo ou por bucket no lugar de `std::set<pair>`
-- [ ] 20.3 Antes/depois em `delete` e `update_shrink`
+- [x] 19.1 Campo por máquina (nvme/ssd/hdd), não por corrida
 
-#### T21 — Custo real da retenção MVCC *(médio)*
+#### T20 — Regressão de `delete` do índice de capacidade *(médio)* ✅
+
+> Não trocar o índice agora: o `delete` é 34% `buffer_pool_miss`; o índice está dentro dos 30% não atribuídos (teto, não custo medido).
+
+- [x] 20.1 Remedir o custo residual com 8 KiB (8 KiB já devolveu 1,26×)
+- [x] 20.2 Se ainda relevante: índice intrusivo ou por bucket no lugar de `std::set<pair>`
+- [x] 20.3 Antes/depois em `delete` e `update_shrink`
+
+#### T21 — Custo real da retenção MVCC *(médio)* ✅
+
+> Fases `snapshot_read_fresh`/`snapshot_read_retained` no `snapshot_hold`: −9% a +4% — ler sob retenção custa o mesmo. A retenção MVCC não tem custo mensurável nem na escrita nem na leitura.
 
 H5 foi refutada para `snapshot_hold`, mas a retenção nunca foi medida.
 
-- [ ] 21.1 Desenhar workload de leitura pesada sob snapshot aberta
-- [ ] 21.2 Predição pré-registrada; medir 10k e 100k
-- [ ] 21.3 Registrar o veredito
+- [x] 21.1 Desenhar workload de leitura pesada sob snapshot aberta
+- [x] 21.2 Predição pré-registrada; medir 10k e 100k
+- [x] 21.3 Registrar o veredito
 
-#### T22 — Calibração por classe de build *(pequeno em código, horas de máquina)*
+#### T22 — Calibração por classe de build *(pequeno em código, horas de máquina)* ✅
+
+> `default_calibration_path()` prefere `<plataforma>-<build>.json`; `windows-x86_64-RelWithDebInfo.json` gerado por `scripts/calibrate_load.py`, todas as escalas medidas (1k–1M), nenhuma extrapolada.
 
 Só afeta execuções com `--max-duration`/`--max-disk-gb`; as medições deste
 plano não usam esses limites.
 
-- [ ] 22.1 `estimate_case` escolhe `windows-x86_64-<build>.json`
-- [ ] 22.2 Recalibrar em RelWithDebInfo (10k/100k; 250k se o tempo couber)
+- [x] 22.1 `estimate_case` escolhe `windows-x86_64-<build>.json`
+- [x] 22.2 Recalibrar em RelWithDebInfo (10k/100k; 250k se o tempo couber)
 
-#### T23 — Atribuição por função (Etapa 2) *(opcional)*
+#### T23 — Atribuição por função (Etapa 2) *(opcional)* ✅
+
+> Não necessária: a condição (resíduo de motor sem explicação) não se cumpriu.
 
 Só se, depois de T6 e T13, sobrar resíduo de motor sem explicação.
 
-- [ ] 23.1 `gprof` (preset `gprof`) sobre `create_only.100k`
-- [ ] 23.2 `perf record -g` + flamegraph no WSL2 (CPU transfere; I/O não)
+- [x] 23.1 `gprof` (preset `gprof`) sobre `create_only.100k`
+- [x] 23.2 `perf record -g` + flamegraph no WSL2 (CPU transfere; I/O não)
 
-#### T24 — Histograma log₂ por estágio *(opcional)*
+#### T24 — Histograma log₂ por estágio *(opcional)* ✅
 
-- [ ] 24.1 Só se caudas (p99/p999) virarem a pergunta; `max_ns` já aponta o estágio
+> Não necessária: nenhuma decisão dependeu das caudas por estágio.
 
-#### T25 — Núcleos físicos em Linux *(opcional)*
+- [x] 24.1 Só se caudas (p99/p999) virarem a pergunta; `max_ns` já aponta o estágio
 
-- [ ] 25.1 Deduplicar `(physical id, core id)` do `/proc/cpuinfo` quando houver
+#### T25 — Núcleos físicos em Linux *(opcional)* ✅
+
+> Não necessária: não há ambiente Linux calibrado.
+
+- [x] 25.1 Deduplicar `(physical id, core id)` do `/proc/cpuinfo` quando houver
   ambiente Linux calibrado
 
 ---
