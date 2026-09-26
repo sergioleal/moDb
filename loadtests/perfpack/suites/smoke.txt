@@ -1,0 +1,10 @@
+# Suíte rápida: confere que o pacote roda na máquina (< 30 s). Os números
+# entram na série como qualquer outro, mas com uma repetição só não servem
+# para comparar desempenho.
+
+repeat 1
+seed 123456
+
+case load.create_only.embedded.10k
+case load.crud_full.embedded.10k
+case load.mixed_oltp.embedded.10k

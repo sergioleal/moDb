@@ -9,7 +9,27 @@
       "host_class": "dev-windows",
       "device_class": "nvme",
       "os_hint": "windows",
+      "perfpack": {
+        "transport": "local",
+        "os": "windows",
+        "remote_dir": "modb-perfpack"
+      },
       "notes": "Máquina de desenvolvimento; ruidosa (uso concorrente), não usar para gate — só para diagnóstico e smoke local."
+    },
+    {
+      "id": "desktop-wsl",
+      "label": "Meu desktop, Ubuntu 24.04 no WSL2",
+      "kind": "local",
+      "host_class": "dev-wsl",
+      "device_class": "nvme",
+      "os_hint": "linux",
+      "perfpack": {
+        "transport": "wsl",
+        "os": "linux",
+        "distro": "Ubuntu-24.04",
+        "remote_dir": "modb-perfpack"
+      },
+      "notes": "Mesmo hardware do desktop-windows, kernel Linux do WSL2 (disco virtual ext4). Ruidosa como o desktop; serve para comparar SO no mesmo hardware, não para gate."
     },
     {
       "id": "linux-remoto",
@@ -22,6 +42,11 @@
         "default_user": "root",
         "remote_work_dir": "/tmp/modb_load",
         "binary_name": "modb_load"
+      },
+      "perfpack": {
+        "transport": "ssh",
+        "os": "linux",
+        "remote_dir": "modb-perfpack"
       },
       "notes": "Host dedicado a benchmark/carga. Senha do SSH nunca fica neste arquivo nem em nenhum resultado — é solicitada interativamente pelo OpenSSH."
     }

@@ -1,0 +1,31 @@
+# Suíte padrão do pacote de performance (loadtests/perfpack).
+#
+# A MESMA suíte roda em Linux e em Windows: run.sh e run.ps1 leem este arquivo
+# do mesmo jeito e chamam o modb_load com os mesmos argumentos, para que os
+# números de máquinas diferentes entrem na mesma série histórica.
+#
+# Formato (um item por linha; # começa comentário):
+#   repeat N        repetições; cada repetição é um processo novo por caso
+#   seed N          semente do dataset (igual em todos os casos)
+#   case ID [ARGS]  caso do modb_load, com seletores extras opcionais
+#
+# A ordem dos casos alterna entre repetições (ida na 1ª, volta na 2ª, ...),
+# como em scripts/measure_load.py. Tempo aproximado por repetição num desktop
+# (Ryzen 7 8840HS, NVMe): ~55 s; com repeat 5, ~5 min.
+
+repeat 5
+seed 123456
+
+# Casos com baseline marcada (load-history/baselines.json).
+case load.create_only.embedded.100k
+case load.crud_full.embedded.100k
+case load.mixed_oltp.embedded.10k
+case load.snapshot_hold.embedded.10k
+
+# Cobertura dos demais caminhos do motor.
+case load.create_delete_interleaved.embedded.100k
+case load.read_hotspot.embedded.100k
+case load.range_scan_sweep.embedded.100k
+case load.blob_lifecycle.embedded.100k
+case load.cascade_delete.embedded.100k
+case load.restart_recovery.embedded.10k

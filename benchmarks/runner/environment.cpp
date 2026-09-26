@@ -283,7 +283,19 @@ std::string filesystem_name(std::string_view path) {
 
 EnvironmentInfo collect_environment(std::string_view argv_joined) {
     EnvironmentInfo info;
-    info.git_commit = run_git("rev-parse HEAD");
+    // Pacote de performance (loadtests/perfpack): o binário roda longe do
+    // repositório, onde `git` não responde -- ou responde por OUTRO repositório
+    // que contenha o diretório. O runner do pacote informa o commit com que o
+    // binário foi compilado; quando informado, vale mais que o git local.
+    if (const char* commit = std::getenv("MODB_GIT_COMMIT"); commit != nullptr && *commit != '\0') {
+        info.git_commit = commit;
+        const char* branch = std::getenv("MODB_GIT_BRANCH");
+        info.git_branch = branch != nullptr && *branch != '\0' ? branch : "unknown";
+        const char* dirty = std::getenv("MODB_GIT_DIRTY");
+        info.git_dirty = dirty != nullptr && std::string_view{dirty} == "1";
+    } else {
+        info.git_commit = run_git("rev-parse HEAD");
+    }
     if (info.git_commit.size() >= 12) {
         info.git_commit_short = info.git_commit.substr(0, 12);
     } else if (!info.git_commit.empty()) {
@@ -292,12 +304,14 @@ EnvironmentInfo collect_environment(std::string_view argv_joined) {
         info.git_commit = "unknown";
         info.git_commit_short = "unknown";
     }
-    info.git_branch = run_git("rev-parse --abbrev-ref HEAD");
     if (info.git_branch.empty()) {
-        info.git_branch = "unknown";
+        info.git_branch = run_git("rev-parse --abbrev-ref HEAD");
+        if (info.git_branch.empty()) {
+            info.git_branch = "unknown";
+        }
+        const auto dirty = run_git("status --porcelain");
+        info.git_dirty = !dirty.empty();
     }
-    const auto dirty = run_git("status --porcelain");
-    info.git_dirty = !dirty.empty();
 
 #if defined(__clang__)
     info.compiler_id = "Clang";

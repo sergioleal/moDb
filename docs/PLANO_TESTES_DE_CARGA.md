@@ -815,6 +815,15 @@ which overestimates an optimized binary by ~2.5×. Regenerate a table with
 
 ## 11. Remote execution
 
+> **2026-09: the performance package supersedes this flow for measurement
+> runs.** [`loadtests/perfpack/`](../loadtests/perfpack/README.md) ships one
+> package for Linux *and* Windows (prebuilt binaries, the same commit's
+> source, the suites and two equivalent runners), runs it over SSH
+> (`scripts/perfpack.py deploy/run/fetch`), verifies every file's SHA-256
+> against a manifest and indexes the results into the historical series.
+> What follows documents `run-remote-load.ps1`, still valid for one-off
+> campaigns with arbitrary selectors.
+
 Flow, evolving the current `scripts/run-remote-benchmark.ps1`:
 
 1. host, user and remote path come from the registered environment (§4.4,
@@ -1451,6 +1460,9 @@ scripts/
   run-remote-benchmark.ps1        already consumes loadtests/environments.json (implemented)
   run-load.ps1 / run-load.sh      read YAML and call `modb_load run` locally (implemented, §6.5)
   run-remote-load.ps1             partial (Subphase I) -- see §11
+  perfpack.py                     package for Linux+Windows, SSH run and fetch into the series (2026-09, §11)
+loadtests/perfpack/
+  run.sh / run.ps1                equivalent runners of the package; suites/ has standard and smoke
 tests/
   load_matrix_test.cpp           implemented (`ctest -R modb.load_matrix`) -- expansion,
                                  selectors, ids, empty set

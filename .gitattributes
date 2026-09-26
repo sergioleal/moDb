@@ -1,0 +1,3 @@
+# Scripts do pacote de performance rodam em Linux: LF sempre, mesmo num
+# checkout Windows com core.autocrlf=true (loadtests/perfpack/README.md).
+loadtests/perfpack/*.sh text eol=lf

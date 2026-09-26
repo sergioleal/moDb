@@ -177,7 +177,7 @@ Result<TableHeapRepairReport> repair_table_heap(PageFile& file, PageId root) {
             }
             current_id = *next;
         }
-        rebuilt = RootMetadata{metadata->first, last, pages, records};
+        rebuilt = RootMetadata{metadata->first, last, pages, records, std::nullopt};
     }
     // A lista livre não é derivável da cadeia de dados: o reparo a preserva.
     rebuilt.free_head = metadata->free_head;
