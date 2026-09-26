@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -47,6 +48,26 @@ void overwrite_byte(const std::filesystem::path& path, std::streamoff offset, ch
     std::fstream stream{path, std::ios::binary | std::ios::in | std::ios::out};
     stream.seekp(offset);
     stream.put(value);
+}
+
+// CRC-32 de referência, byte a byte -- independente da implementação do WAL.
+// Serve para provar que uma otimização do CRC não mudou o formato em disco.
+std::uint32_t reference_crc32(const std::vector<unsigned char>& bytes, std::size_t begin,
+                              std::size_t length) {
+    std::uint32_t crc = 0xFFFFFFFFU;
+    for (std::size_t i = begin; i < begin + length; ++i) {
+        crc ^= bytes[i];
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc & 1U) ? (0xEDB88320U ^ (crc >> 1)) : (crc >> 1);
+        }
+    }
+    return crc ^ 0xFFFFFFFFU;
+}
+
+std::uint32_t load_u32(const std::vector<unsigned char>& bytes, std::size_t at) {
+    return static_cast<std::uint32_t>(bytes[at]) | (static_cast<std::uint32_t>(bytes[at + 1]) << 8) |
+           (static_cast<std::uint32_t>(bytes[at + 2]) << 16) |
+           (static_cast<std::uint32_t>(bytes[at + 3]) << 24);
 }
 
 } // namespace
@@ -133,6 +154,46 @@ int main() {
         auto records = Wal::read_all(file.path());
         suite.check(records.has_value() && records->size() == 2,
                     "reading stops at the last intact record");
+    }
+
+    // O CRC gravado em cada registro é o CRC-32 padrão (0xEDB88320) dos bytes do
+    // registro -- o mesmo de antes da versão "slicing-by-8" (T7.1). Página com
+    // conteúdo variado, para exercitar todas as tabelas.
+    {
+        suite.check(reference_crc32({'1', '2', '3', '4', '5', '6', '7', '8', '9'}, 0, 9) == 0xCBF43926U,
+                    "reference CRC matches the standard check value");
+        TemporaryFile temporary{"crc-format"};
+        {
+            auto wal = Wal::create(temporary.path());
+            suite.check(wal.has_value(), "crc-format WAL is created");
+            if (wal) {
+                storage::Page page;
+                for (std::size_t i = 0; i < page.bytes().size(); ++i) {
+                    page.bytes()[i] = static_cast<std::byte>((i * 131 + 7) % 251);
+                }
+                suite.check(wal->append_begin(42).has_value() &&
+                                wal->append_page_image(42, storage::PageId{5}, page.bytes()).has_value() &&
+                                wal->append_commit(42).has_value() && wal->sync().has_value(),
+                            "crc-format records are appended");
+            }
+        }
+        std::ifstream in{temporary.path(), std::ios::binary};
+        const std::vector<unsigned char> bytes{std::istreambuf_iterator<char>(in),
+                                               std::istreambuf_iterator<char>()};
+        constexpr std::size_t header = 32;
+        constexpr std::size_t fixed = 8 + 8 + 1 + 8 + 4;
+        std::size_t offset = header;
+        int records = 0;
+        bool all_match = true;
+        while (offset + fixed <= bytes.size()) {
+            const auto length = load_u32(bytes, offset + 25);
+            const auto stored = load_u32(bytes, offset + fixed + length);
+            all_match = all_match && stored == reference_crc32(bytes, offset, fixed + length);
+            offset += fixed + length + 4;
+            ++records;
+        }
+        suite.check(records == 3 && all_match,
+                    "every stored record CRC equals the byte-wise reference CRC-32");
     }
 
     return suite.finish();

@@ -145,6 +145,11 @@ private:
     std::unique_ptr<WalSink> sink_;
     std::uint64_t write_offset_{wal_header_size};
     std::uint64_t next_lsn_{1};
+    // Buffer do registro reaproveitado entre `append`s: um commit grava uma
+    // imagem de página inteira por página suja, e alocar um vetor novo de
+    // page_size+33 bytes por registro aparecia no custo de `wal_append`
+    // (PROFILING_2026-09.md, T7.1).
+    std::vector<std::byte> record_buffer_;
 };
 
 } // namespace modb::tx

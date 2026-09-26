@@ -38,22 +38,44 @@ constexpr std::array<std::byte, 4> wal_magic{
 constexpr std::size_t record_fixed_size = 8 + 8 + 1 + 8 + 4;
 constexpr std::size_t record_crc_size = 4;
 
+// CRC-32 (polinômio refletido 0xEDB88320), o mesmo valor de sempre -- o
+// formato do WAL não muda. "Slicing-by-8": oito tabelas deixam processar 8
+// bytes por iteração em vez de 1. Cada imagem de página inteira passa por aqui
+// na escrita e na recuperação, e a versão byte a byte era ~1/3 do custo de
+// `wal_append` (PROFILING_2026-09.md, T7.1).
 std::uint32_t crc32(std::span<const std::byte> bytes) noexcept {
-    static const std::array<std::uint32_t, 256> table = [] {
-        std::array<std::uint32_t, 256> result{};
+    static const auto tables = [] {
+        std::array<std::array<std::uint32_t, 256>, 8> result{};
         for (std::uint32_t index = 0; index < 256; ++index) {
             std::uint32_t value = index;
             for (int bit = 0; bit < 8; ++bit) {
                 value = (value & 1U) ? (0xEDB88320U ^ (value >> 1)) : (value >> 1);
             }
-            result[index] = value;
+            result[0][index] = value;
+        }
+        for (std::uint32_t index = 0; index < 256; ++index) {
+            for (std::size_t slice = 1; slice < 8; ++slice) {
+                const auto previous = result[slice - 1][index];
+                result[slice][index] = (previous >> 8) ^ result[0][previous & 0xFFU];
+            }
         }
         return result;
     }();
+    const auto byte_at = [&](std::size_t i) { return std::to_integer<std::uint32_t>(bytes[i]); };
     std::uint32_t crc = 0xFFFFFFFFU;
-    for (const auto byte : bytes) {
-        const auto octet = std::to_integer<std::uint8_t>(byte);
-        crc = table[(crc ^ octet) & 0xFFU] ^ (crc >> 8);
+    std::size_t i = 0;
+    for (; i + 8 <= bytes.size(); i += 8) {
+        const std::uint32_t low = crc ^ (byte_at(i) | (byte_at(i + 1) << 8) | (byte_at(i + 2) << 16) |
+                                         (byte_at(i + 3) << 24));
+        const std::uint32_t high =
+            byte_at(i + 4) | (byte_at(i + 5) << 8) | (byte_at(i + 6) << 16) | (byte_at(i + 7) << 24);
+        crc = tables[7][low & 0xFFU] ^ tables[6][(low >> 8) & 0xFFU] ^
+              tables[5][(low >> 16) & 0xFFU] ^ tables[4][low >> 24] ^
+              tables[3][high & 0xFFU] ^ tables[2][(high >> 8) & 0xFFU] ^
+              tables[1][(high >> 16) & 0xFFU] ^ tables[0][high >> 24];
+    }
+    for (; i < bytes.size(); ++i) {
+        crc = tables[0][(crc ^ byte_at(i)) & 0xFFU] ^ (crc >> 8);
     }
     return crc ^ 0xFFFFFFFFU;
 }
@@ -310,7 +332,8 @@ Result<void> Wal::append(WalRecordType type, std::uint64_t tx_id, std::uint64_t 
     // escrita das imagens de página inteiras (H1/H3, docs-process/
     // PLANO_PROFILING.md).
     diag::ScopedStage stage{diag::Stage::wal_append};
-    std::vector<std::byte> record(record_fixed_size + payload.size() + record_crc_size);
+    auto& record = record_buffer_;
+    record.resize(record_fixed_size + payload.size() + record_crc_size);
     stage.add_units(record.size());
     const std::span<std::byte> view{record};
     store_le(view.subspan(0, 8), next_lsn_);
