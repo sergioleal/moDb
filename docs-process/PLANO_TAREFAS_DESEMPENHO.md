@@ -276,13 +276,15 @@ Com `--case`, a campanha não atribui ambiente e o rollup rejeita o ponto
 
 - [x] 28.1 Atribuir o ambiente padrão também com `--case`, ou falhar cedo
 
-#### T29 — `update_shrink`: candidatas lidas do disco *(P2, médio)*
+#### T29 — `update_shrink`: candidatas lidas do disco *(P2, médio)* ✅
+
+> As duas hipóteses (candidata fria; cache pequeno) refutadas por A/B. A causa: o arquivo cresce 3,8× nas fases de update sem snapshot aberta — versões antigas não são recuperadas sem `collect_garbage()` → T33.
 
 T14: quando o registro encolhido muda de página, `heap_candidate_try` custa
 ~13,5 µs por chamada (16% da fase) e `buffer_pool_miss` 15%.
 
-- [ ] 29.1 Entender por que a candidata raramente está no cache
-- [ ] 29.2 Predição e antes/depois
+- [x] 29.1 Entender por que a candidata raramente está no cache
+- [x] 29.2 Predição e antes/depois
 
 #### T30 — Uma cópia de página por leitura ainda sobra *(P3, pequeno)* ✅
 
@@ -307,6 +309,17 @@ Repetições isoladas 2–4× mais lentas em qualquer binário, que somem ao rep
 (P1 revisado, T26).
 
 - [x] 32.1 Correlacionar com Defender/indexação/estado do disco
+
+#### T33 — Versões antigas sem snapshot não são recuperadas *(P2, médio)*
+
+T29: o arquivo de `crud_full.100k` vai de 41,9 MB a 159,6 MB (3,8×) nas três
+fases de update, com `retained_versions` = 0. Cada update grava uma versão nova
+e mantém a anterior até um `collect_garbage()` explícito. Espalha os registros
+por 20 mil páginas e é a causa dos misses de `update_shrink`/`delete`.
+
+- [ ] 33.1 Confirmar: `collect_garbage()` entre as fases de update devolve o espaço e reduz os misses?
+- [ ] 33.2 Desenho: recuperar a versão anterior no commit quando nenhuma snapshot a enxerga (ADR — toca MVCC e réplicas)
+- [ ] 33.3 Predição e antes/depois (tamanho do arquivo, misses, vazão)
 
 ### P2
 
@@ -465,3 +478,4 @@ Só se, depois de T6 e T13, sobrar resíduo de motor sem explicação.
 | 2026-09-26 | T3–T10 (P1) | (este commit) | Relatório: [PROFILING_2026-09.md](PROFILING_2026-09.md). ADR-022 (1 `fsync` por commit) + CRC slicing-by-8: `mixed_oltp` ~2,97×, `hold` ~2,8–3,0×. Defeitos corrigidos: commit fora do tempo de motor no harness; `set_wal_file_factory` com WAL aberto (testes de failpoint passavam pelo motivo errado). 10.4 pendente |
 | 2026-09-26 | T11–T16, T26 (P2) | `6d70a5e` `d8750ac` `eed7f93` + seguintes | M5 = power throttling do Windows (opt-out no `modb_load`); P1 remedido: `mixed_oltp` 2,65×, `hold` 3,51×. Leitura sem cópia de página (1,51× no motor); `push_back` incremental (12–15×); abertura lendo do checkpoint (7–19×); corrigido: commits após rabo rasgado do WAL se perdiam. Novas: T29–T32 |
 | 2026-09-26 | T17–T32 (P3) | `4152810` `33fddb7` `1430f23` `63fc24b` `0709083` + este | Leitura sem cópia (último caso): `read` 1,23× no motor; exclusões na série; `device_class`; ambiente padrão; retenção MVCC sem custo de leitura; calibração RelWithDebInfo medida 1k–1M; `load-results/` 7,6 GB → 332 KB. T23–T25 não necessárias |
+| 2026-09-26 | T29 | (este commit) | Hipóteses refutadas (candidata residente: 0 efeito; cache 8×: 0 efeito ou pior). Causa: arquivo 3,8× sem GC automático de versões → T33. Fica `load_trusted` com uma cópia a menos |

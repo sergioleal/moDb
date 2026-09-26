@@ -1060,3 +1060,68 @@ Confirmado com o usuário antes de apagar: removidos os 164 arquivos
 `.modb`/`.modb.wal` que sobraram de execuções de julho (**7,6 GB → 332 KB**).
 Mantidos os 10 resultados brutos de campanha (`.jsonl`/`.partial`, 0,3 MB), que
 o §13.2 do plano de carga trata como imutáveis e a retenção pode consultar.
+
+---
+
+## T29 — `update_shrink`: candidatas lidas do disco
+
+**29.1 — por quê.** O índice de capacidade escolhe a candidata por
+*best-fit*: a página com a menor capacidade que ainda comporta o registro, em
+qualquer ponto do arquivo. No `update_shrink` o espaço liberado fica espalhado
+por páginas antigas, e o cache padrão tem 1.024 páginas (8 MB) contra mais de
+5.000 páginas de heap em `crud_full.100k` — a candidata tende a ser uma página
+fria. Pela T3, `heap_candidate_try` roda 0,167 vez por operação e
+`buffer_pool_miss` 0,099: ~60% das tentativas leem do disco. Além disso,
+`try_insert` carrega a candidata com `load_trusted`, que copia a página duas
+vezes (scratch e `SlottedPage`).
+
+**Mudança:** (1) entre as até 8 primeiras candidatas em ordem de capacidade,
+preferir uma **já residente** (buffer da transação ou cache —
+`BufferPool::contains`, sem mexer no LRU); se nenhuma estiver, a primeira, como
+antes; (2) `load_trusted` passa a partir de `PageFile::view`, uma cópia a menos
+em toda inserção e todo update.
+
+### Predição (escrita antes de rodar)
+
+Em `update_shrink`, `buffer_pool_miss` cai de ~0,10 para menos de 0,04 chamada
+por operação, e a fase fica **10–20% mais rápida**; as outras fases de escrita
+ganham 0–5% (a cópia a menos). O arquivo cresce no máximo 5%, porque a escolha
+deixa de ser best-fit puro. *Refutação:* `update_shrink` melhorando menos de
+5%, ou o arquivo crescendo mais de 10%.
+
+### Resultado — as duas hipóteses refutadas, e a causa real
+
+A/B alternado, 5 repetições ([dados](profiling/2026-09/t29-summary.md);
+estágios em [t29-sp](profiling/2026-09/t29-sp-summary.md)): `update_shrink`
+**×0,998**, e `buffer_pool_miss` **0,099 → 0,099** chamada por operação. A
+sondagem das candidatas aconteceu (iterações da varredura 0,98 → 1,52 por
+operação), mas os misses não mudaram — e o `delete`, que não tenta candidata
+nenhuma, tem 0,081 miss por operação. **Os misses não vêm das candidatas:
+vêm da leitura do objeto que vai ser mudado.** A preferência por candidata
+residente foi revertida (heurística sem efeito não fica no código).
+
+Segunda hipótese, testada à parte: falta de cache. Um build temporário com
+`page_cache_capacity` = 8.192 páginas (8× o padrão) contra o normal
+([dados](profiling/2026-09/t29-cache-summary.md)): `update_shrink` ×0,98,
+`delete` ×1,03, e `update_inplace`/`update_grow` **9–12% mais lentos**, com 38 MB
+a mais de RSS. **Refutada também.**
+
+**A causa:** o arquivo de dados cresce **3,8× durante as três fases de update**,
+sem nenhuma snapshot aberta (`retained_versions` = 0):
+
+| fase | arquivo | páginas | bytes/objeto |
+|---|---|---|---|
+| `create` | 41,9 MB | 5.357 | 438 |
+| `update_inplace` | 79,1 MB | 10.119 | 828 |
+| `update_grow` | 144,2 MB | 18.453 | 1.511 |
+| `update_shrink` | 159,6 MB | 20.435 | 1.674 |
+
+Até o update "no lugar" praticamente dobra o arquivo: cada update grava uma
+versão nova e mantém a anterior, e nada recupera as anteriores enquanto
+`collect_garbage()` não for chamado — mesmo sem snapshot que precise delas. Os
+registros ficam espalhados por 20 mil páginas, e nenhum tamanho razoável de
+cache acompanha. Isso vira a **T33**.
+
+O que ficou da T29: `load_trusted` com uma cópia de página a menos (de `view`
+direto para o `SlottedPage`), neutro a levemente positivo no A/B (`create`
++6%, `update_inplace` +3%, `delete` +4%, `update_grow` −4% com CV 11%).

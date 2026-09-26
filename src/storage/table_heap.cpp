@@ -305,20 +305,15 @@ Result<SlottedPage> TableHeap::load(PageId id) {
 
 // Lê uma página confiável sem repetir a validação estrutural completa.
 Result<SlottedPage> TableHeap::load_trusted(PageId id) {
-    // Reutiliza o mesmo buffer emprestado, evitando alocações por leitura.
-    auto scratch = scratch_page_pool_->try_acquire();
-    // Mesmo contrato do load: falta de buffer vira erro explícito, não bloqueio.
-    if (!scratch) {
-        return std::unexpected(
-            Error{ErrorCode::io_error, "no scratch page buffer available for read"});
-    }
-    auto read = file_->read(id, scratch->get());
-    if (!read) {
-        return std::unexpected(read.error());
+    // Uma cópia só: da visão do PageFile direto para o SlottedPage (antes eram
+    // duas, passando por um buffer de scratch -- T29).
+    auto page = file_->view(id);
+    if (!page) {
+        return std::unexpected(page.error());
     }
     // A cadeia foi validada ao abrir e as escritas preservam as invariantes,
     // então pular validate_page aqui elimina o sort e a alocação por leitura.
-    return SlottedPage::from_trusted_page(scratch->get());
+    return SlottedPage::from_trusted_page(**page);
 }
 
 // Insere um registro escolhendo ou criando a página necessária.
