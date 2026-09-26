@@ -403,6 +403,13 @@ void test_load_heavy_pairwise_secondary_dimensions(TestSuite& suite) {
                    "nenhum caso de load-heavy pode prometer dimensão sem dispatch: " + c.case_id());
     }
     suite.check(has_fat_payload, "load-heavy deve ter ao menos 1 caso com payload=fat");
+    bool has_fat_crud_full = false;
+    for (const auto& c : profile->cases) {
+        has_fat_crud_full = has_fat_crud_full || (c.workload == "crud_full" && c.payload == "fat");
+    }
+    suite.check(!has_fat_crud_full,
+               "load-heavy não pode ter crud_full com payload=fat: o registro cresce além de "
+               "uma página em update_grow e o caso falha sempre (T27)");
     suite.check(has_concurrent_mixed_oltp,
                "load-heavy deve ter ao menos 1 caso mixed_oltp com concurrency > 1");
 }

@@ -75,9 +75,10 @@ std::vector<Case> load_heavy_cases() {
         fat_create_only.payload = "fat";
         cases.push_back(fat_create_only);
 
-        Case fat_crud_full = fat_create_only;
-        fat_crud_full.workload = "crud_full";
-        cases.push_back(fat_crud_full);
+        // Sem `crud_full` com `fat`: `update_grow` faz o registro de ~4 KiB passar
+        // do que cabe numa página e o caso falha sempre (`record exceeds the
+        // maximum TableHeap page payload`; não há registro de overflow). Um caso
+        // que nunca completa só esconde os outros resultados (T27).
 
         Case mixed_oltp_c4;
         mixed_oltp_c4.workload = "mixed_oltp";

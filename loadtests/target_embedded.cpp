@@ -263,6 +263,13 @@ modb::object::DatabaseOptions database_options(const WorkloadParams& params) {
     return options;
 }
 
+// Tamanho atual do WAL, para `wal_bytes` das fases que não o mediam (T31).
+std::uint64_t wal_size_now(const std::filesystem::path& wal_path) {
+    std::error_code error;
+    const auto size = std::filesystem::file_size(wal_path, error);
+    return error ? 0 : static_cast<std::uint64_t>(size);
+}
+
 // Vazão de uma fase a partir de operações e duração. Os workloads de blob e de
 // cascata preenchiam `operations` e `duration_ns` mas nunca `ops_per_second`,
 // que ficava 0 -- na série histórica eles nunca tiveram vazão (T12).
@@ -1724,9 +1731,19 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
 
     // Leitura pela snapshot ANTES do churn -- "o estado da abertura" que
     // precisa continuar idêntico até o fechamento (§4.2.1).
+    // T21: as duas leituras pela snapshot viram fases cronometradas -- a de
+    // antes do churn (nenhuma versão retida) e a de depois (1/3 lido da versão
+    // `previous`, 1/3 de objetos já removidos). A diferença entre elas é o custo
+    // de ler sob retenção, que a fase `hold` (dominada por commit) não mostra.
+    std::vector<double> fresh_latencies;
+    fresh_latencies.reserve(create_outcome.ids.size());
+    const auto fresh_start = std::chrono::steady_clock::now();
     std::ostringstream baseline_stream;
     for (const auto id : create_outcome.ids) {
+        const auto op_start = std::chrono::steady_clock::now();
         auto value = attached.database->get<User>(id, *held);
+        fresh_latencies.push_back(
+            static_cast<double>(ns_between(op_start, std::chrono::steady_clock::now())));
         if (!value) {
             result.status = "failed";
             result.error = "leitura inicial pela snapshot falhou: " + value.error().message;
@@ -1734,6 +1751,7 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
         }
         baseline_stream << canonical_line(from_engine_user(*value)) << '\n';
     }
+    const auto fresh_end = std::chrono::steady_clock::now();
     const auto baseline_hash = sha256_hex(sha256_text(baseline_stream.str()));
 
     // Churn: cada id tocado no máximo uma vez (update OU delete, nunca os
@@ -1846,9 +1864,15 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
 
     // Releitura pela MESMA snapshot ainda aberta -- deve bater byte a byte
     // com a leitura antes do churn (isolamento MVCC de verdade, não simulado).
+    std::vector<double> retained_latencies;
+    retained_latencies.reserve(create_outcome.ids.size());
+    const auto retained_start = std::chrono::steady_clock::now();
     std::ostringstream after_churn_stream;
     for (const auto id : create_outcome.ids) {
+        const auto op_start = std::chrono::steady_clock::now();
         auto value = attached.database->get<User>(id, *held);
+        retained_latencies.push_back(
+            static_cast<double>(ns_between(op_start, std::chrono::steady_clock::now())));
         if (!value) {
             result.status = "failed";
             result.error = "releitura pela snapshot (ainda aberta) falhou: " + value.error().message;
@@ -1856,6 +1880,7 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
         }
         after_churn_stream << canonical_line(from_engine_user(*value)) << '\n';
     }
+    const auto retained_end = std::chrono::steady_clock::now();
     const auto after_churn_hash = sha256_hex(sha256_text(after_churn_stream.str()));
     const bool snapshot_stable = after_churn_hash == baseline_hash;
 
@@ -1955,6 +1980,25 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
     phase.operation_classes = hold_classes;
     result.phases.push_back(phase);
 
+    // Fases de leitura pela snapshot (T21). A de depois do churn também está
+    // dentro da duração de `hold` (que não mudou, para a série continuar
+    // comparável); aqui ela aparece isolada.
+    const auto read_phase = [&](const char* name, std::chrono::steady_clock::time_point start,
+                                std::chrono::steady_clock::time_point end,
+                                std::vector<double> latencies, std::uint64_t retained) {
+        PhaseMetrics read;
+        read.phase = name;
+        read.operations = create_outcome.ids.size();
+        read.duration_ns = ns_between(start, end);
+        read.ops_per_second = ops_per_second_of(read.operations, read.duration_ns);
+        read.retained_versions = retained;
+        set_operation_latencies(read, std::move(latencies));
+        result.phases.push_back(read);
+    };
+    read_phase("snapshot_read_fresh", fresh_start, fresh_end, std::move(fresh_latencies), 0);
+    read_phase("snapshot_read_retained", retained_start, retained_end,
+               std::move(retained_latencies), retained_while_open);
+
     result.total_duration_ns = create_outcome.phase.duration_ns + phase.duration_ns;
     result.peak_disk_bytes = phase.db_bytes;
     // `collect_garbage()` devolve uma CONTAGEM de registros recuperados, não
@@ -2053,6 +2097,7 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     create_phase.duration_ns = ns_between(create_start, create_end);
     create_phase.ops_per_second =
         ops_per_second_of(create_phase.operations, create_phase.duration_ns);
+    create_phase.wal_bytes = wal_size_now(wal_path);
     create_phase.db_bytes = size_error ? 0 : db_bytes_after_create;
     create_phase.peak_rss_bytes = create_rss.peak();
     result.phases.push_back(create_phase);
@@ -2086,6 +2131,7 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     read_phase.duration_ns = ns_between(read_start, read_end);
     read_phase.ops_per_second =
         ops_per_second_of(read_phase.operations, read_phase.duration_ns);
+    read_phase.wal_bytes = wal_size_now(wal_path);
     read_phase.errors = read_mismatches;
     read_phase.peak_rss_bytes = read_rss.peak();
     result.phases.push_back(read_phase);
@@ -2125,6 +2171,7 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     grow_phase.duration_ns = ns_between(grow_start, grow_end);
     grow_phase.ops_per_second =
         ops_per_second_of(grow_phase.operations, grow_phase.duration_ns);
+    grow_phase.wal_bytes = wal_size_now(wal_path);
     grow_phase.errors = grow_mismatches;
     grow_phase.db_bytes = grow_size_error ? 0 : db_bytes_after_grow;
     grow_phase.peak_rss_bytes = grow_rss.peak();
@@ -2162,6 +2209,7 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     shrink_phase.duration_ns = ns_between(shrink_start, shrink_end);
     shrink_phase.ops_per_second =
         ops_per_second_of(shrink_phase.operations, shrink_phase.duration_ns);
+    shrink_phase.wal_bytes = wal_size_now(wal_path);
     shrink_phase.errors = shrink_mismatches;
     shrink_phase.peak_rss_bytes = shrink_rss.peak();
     result.phases.push_back(shrink_phase);
@@ -2205,6 +2253,7 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     delete_phase.duration_ns = ns_between(delete_start, delete_end);
     delete_phase.ops_per_second =
         ops_per_second_of(delete_phase.operations, delete_phase.duration_ns);
+    delete_phase.wal_bytes = wal_size_now(wal_path);
     delete_phase.errors = delete_errors;
     delete_phase.db_bytes = post_delete_size_error ? 0 : db_bytes_after_delete;
     delete_phase.peak_rss_bytes = delete_rss.peak();
@@ -2404,6 +2453,7 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
     create_phase.duration_ns = ns_between(create_start, create_end);
     create_phase.ops_per_second =
         ops_per_second_of(create_phase.operations, create_phase.duration_ns);
+    create_phase.wal_bytes = wal_size_now(wal_path);
     create_phase.db_bytes = size_error ? 0 : db_bytes_after_create;
     create_phase.peak_rss_bytes = create_rss.peak();
     result.phases.push_back(create_phase);
@@ -2466,6 +2516,7 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
     delete_phase.duration_ns = ns_between(delete_start, delete_end);
     delete_phase.ops_per_second =
         ops_per_second_of(delete_phase.operations, delete_phase.duration_ns);
+    delete_phase.wal_bytes = wal_size_now(wal_path);
     delete_phase.peak_rss_bytes = delete_rss.peak();
     result.phases.push_back(delete_phase);
 

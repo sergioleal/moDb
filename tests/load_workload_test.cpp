@@ -411,9 +411,18 @@ void test_snapshot_hold(TestSuite& suite) {
                "leitura estável pela snapshot + estado pós-churn devem conferir: " + result.error);
     suite.check(result.all_deleted,
                "objetos removidos durante o churn não devem resolver após o fechamento");
-    suite.check(result.phases.size() == 2, "snapshot_hold deve produzir 2 fases (create + hold)");
-    if (result.phases.size() == 2) {
+    // T21: + as duas leituras pela snapshot, antes e depois do churn.
+    suite.check(result.phases.size() == 4,
+               "snapshot_hold deve produzir 4 fases (create, hold, snapshot_read_fresh, "
+               "snapshot_read_retained)");
+    if (result.phases.size() == 4) {
         suite.check(result.phases[1].phase == "hold", "a 2a fase deve se chamar 'hold'");
+        suite.check(result.phases[2].phase == "snapshot_read_fresh" &&
+                        result.phases[3].phase == "snapshot_read_retained",
+                    "as leituras pela snapshot vêm depois de 'hold', antes e depois do churn");
+        suite.check(result.phases[2].operations == result.phases[0].operations &&
+                        result.phases[3].operations == result.phases[0].operations,
+                    "cada leitura pela snapshot lê todo o working set criado");
     }
 }
 
@@ -430,8 +439,8 @@ void test_snapshot_hold_retained_versions_excludes_extra_objects(TestSuite& suit
         run_snapshot_hold_embedded(small_params(work_dir, /*object_count=*/1, /*batch=*/1), db_path);
 
     suite.check(result.ok, "snapshot_hold com object_count=1 deve completar: " + result.error);
-    suite.check(result.phases.size() == 2, "deve produzir 2 fases (create + hold)");
-    if (result.phases.size() == 2) {
+    suite.check(result.phases.size() == 4, "deve produzir 4 fases (create, hold e as leituras)");
+    if (result.phases.size() == 4) {
         suite.check(result.phases[1].retained_versions == 0,
                    "sem nenhum update/delete no working set original, retained_versions deve ser "
                    "exatamente 0 -- não deve incluir o objeto extra criado fora dele");
