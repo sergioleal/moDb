@@ -53,6 +53,11 @@ public:
     [[nodiscard]] std::uint64_t next_lsn() const noexcept { return next_lsn_; }
     // Maior commit_lsn cujas páginas já estão duráveis no arquivo de dados.
     [[nodiscard]] std::uint64_t checkpoint_lsn() const noexcept { return checkpoint_lsn_; }
+    // Offset do WAL logo depois do último registro coberto pelo checkpoint
+    // (T26). 0 = desconhecido: a recuperação lê o WAL desde o início.
+    [[nodiscard]] std::uint64_t checkpoint_wal_offset() const noexcept {
+        return checkpoint_wal_offset_;
+    }
     // Maior applied_lsn ACK'd por um follower (retenção); 0 = nenhum ACK.
     [[nodiscard]] std::uint64_t follower_ack_lsn() const noexcept { return follower_ack_lsn_; }
     // Menor LSN ainda retido: min(checkpoint, ack) com ack==0 → só checkpoint.
@@ -70,7 +75,9 @@ public:
     [[nodiscard]] Result<void> set_database_uuid(DatabaseUuid uuid);
     [[nodiscard]] Result<void> set_timeline_id(TimelineId timeline);
     [[nodiscard]] Result<void> set_next_lsn(std::uint64_t next);
-    [[nodiscard]] Result<void> set_checkpoint_lsn(std::uint64_t lsn);
+    // Grava o checkpoint e o offset do WAL correspondente. Quem não sabe o
+    // offset passa 0 -- nunca um offset que possa estar errado.
+    [[nodiscard]] Result<void> set_checkpoint_lsn(std::uint64_t lsn, std::uint64_t wal_offset = 0);
     [[nodiscard]] Result<void> set_follower_ack_lsn(std::uint64_t lsn);
 
 private:
@@ -97,6 +104,7 @@ private:
     std::uint64_t next_lsn_{1};
     std::uint64_t checkpoint_lsn_{0};
     std::uint64_t follower_ack_lsn_{0};
+    std::uint64_t checkpoint_wal_offset_{0};
 };
 
 } // namespace modb::object

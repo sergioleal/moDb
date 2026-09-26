@@ -161,6 +161,10 @@ Result<DatabaseRoot> DatabaseRoot::open(storage::PageFile& file) {
         if (auto ack = reader.read_u64(); ack) {
             root.follower_ack_lsn_ = *ack;
         }
+        // T26: ausente (zero) em arquivos anteriores -- "desconhecido".
+        if (auto wal_offset = reader.read_u64(); wal_offset) {
+            root.checkpoint_wal_offset_ = *wal_offset;
+        }
         if (root.database_uuid_.is_nil()) {
             root.database_uuid_ = generate_database_uuid();
             root.timeline_id_ = root.timeline_id_ == 0 ? 1 : root.timeline_id_;
@@ -207,6 +211,7 @@ Result<void> DatabaseRoot::persist() {
     writer.write_u64(next_lsn_);
     writer.write_u64(checkpoint_lsn_);
     writer.write_u64(follower_ack_lsn_);
+    writer.write_u64(checkpoint_wal_offset_);
 
     Page page;
     const auto bytes = writer.bytes();
@@ -320,11 +325,14 @@ Result<void> DatabaseRoot::set_next_lsn(std::uint64_t next) {
     return {};
 }
 
-Result<void> DatabaseRoot::set_checkpoint_lsn(std::uint64_t lsn) {
+Result<void> DatabaseRoot::set_checkpoint_lsn(std::uint64_t lsn, std::uint64_t wal_offset) {
     const auto previous = checkpoint_lsn_;
+    const auto previous_offset = checkpoint_wal_offset_;
     checkpoint_lsn_ = lsn;
+    checkpoint_wal_offset_ = wal_offset;
     if (auto persisted = persist(); !persisted) {
         checkpoint_lsn_ = previous;
+        checkpoint_wal_offset_ = previous_offset;
         return std::unexpected(persisted.error());
     }
     return {};

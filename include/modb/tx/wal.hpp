@@ -71,11 +71,17 @@ struct WalRecord {
     WalRecordType type{WalRecordType::begin};
     std::uint64_t page_id{};
     std::vector<std::byte> payload; // page_image: página; commit v2: commit_lsn u64
+    // Offset absoluto, no arquivo, do byte seguinte a este registro. Só em
+    // memória (não faz parte do formato) e fora da igualdade.
+    std::uint64_t end_offset{0};
 
     // Para registros commit v2, extrai o commit_lsn do payload (0 se ausente).
     [[nodiscard]] std::uint64_t commit_lsn() const noexcept;
 
-    friend bool operator==(const WalRecord&, const WalRecord&) = default;
+    friend bool operator==(const WalRecord& a, const WalRecord& b) {
+        return a.lsn == b.lsn && a.tx_id == b.tx_id && a.type == b.type &&
+               a.page_id == b.page_id && a.payload == b.payload;
+    }
 };
 
 // Bytes do cabeçalho do arquivo WAL:
@@ -107,6 +113,8 @@ public:
                                                    const WalFileFactory& append_factory);
 
     [[nodiscard]] std::uint64_t next_lsn() const noexcept { return next_lsn_; }
+    // Offset em que o próximo registro será gravado (= fim do último anexado).
+    [[nodiscard]] std::uint64_t write_offset() const noexcept { return write_offset_; }
     [[nodiscard]] std::uint64_t last_appended_lsn() const noexcept {
         return next_lsn_ == 0 ? 0 : next_lsn_ - 1;
     }
@@ -122,6 +130,11 @@ public:
     [[nodiscard]] Result<void> sync();
 
     // Lê todos os registros íntegros até o fim lógico (truncamento/CRC = fim).
+    // Lê a partir de um offset absoluto que precisa ser um limite de registro
+    // (o fim de um registro anterior, como o `checkpoint_wal_offset` da DBRT).
+    // Mesmo modo tolerante de `read_all`: para no primeiro registro inválido.
+    [[nodiscard]] static Result<std::vector<WalRecord>> read_from_offset(
+        const std::filesystem::path& path, std::uint64_t start_offset);
     [[nodiscard]] static Result<std::vector<WalRecord>> read_all(
         const std::filesystem::path& path);
 

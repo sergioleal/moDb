@@ -106,7 +106,8 @@ private:
 enum class ReadMode { soft_eof, strict };
 
 Result<std::vector<WalRecord>> read_wal_records(const std::filesystem::path& path,
-                                                std::uint64_t from_lsn, ReadMode mode) {
+                                                std::uint64_t from_lsn, ReadMode mode,
+                                                std::uint64_t start_offset = wal_header_size) {
     std::error_code size_error;
     const auto size = std::filesystem::file_size(path, size_error);
     if (size_error) {
@@ -130,15 +131,26 @@ Result<std::vector<WalRecord>> read_wal_records(const std::filesystem::path& pat
     if (!file) {
         return std::unexpected(file.error());
     }
-    std::vector<std::byte> bytes(static_cast<std::size_t>(size));
-    if (auto read = file->read_at(0, bytes); !read) {
+    // Só o cabeçalho e o trecho a partir de `start_offset`: ler do checkpoint em
+    // diante não precisa trazer o WAL inteiro para a memória (T26).
+    if (start_offset < wal_header_size || start_offset > size) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "WAL start offset out of range"});
+    }
+    std::vector<std::byte> header_bytes(wal_header_size);
+    if (auto read = file->read_at(0, header_bytes); !read) {
         return std::unexpected(read.error());
     }
+    std::vector<std::byte> bytes(static_cast<std::size_t>(size - start_offset));
+    if (!bytes.empty()) {
+        if (auto read = file->read_at(start_offset, bytes); !read) {
+            return std::unexpected(read.error());
+        }
+    }
 
-    if (!std::equal(wal_magic.begin(), wal_magic.end(), bytes.begin())) {
+    if (!std::equal(wal_magic.begin(), wal_magic.end(), header_bytes.begin())) {
         return std::unexpected(Error{ErrorCode::invalid_file_format, "file is not a moDb WAL"});
     }
-    const std::span<const std::byte> header{bytes.data(), wal_header_size};
+    const std::span<const std::byte> header{header_bytes.data(), wal_header_size};
     const auto version = load_le<std::uint16_t>(header.subspan(4, 2));
     if (version != wal_version && version != wal_version_v1) {
         return std::unexpected(
@@ -149,7 +161,7 @@ Result<std::vector<WalRecord>> read_wal_records(const std::filesystem::path& pat
     }
 
     std::vector<WalRecord> records;
-    std::size_t offset = wal_header_size;
+    std::size_t offset = 0;
     const std::size_t total = bytes.size();
     while (offset + record_fixed_size <= total) {
         const std::span<const std::byte> fixed{bytes.data() + offset, record_fixed_size};
@@ -179,13 +191,14 @@ Result<std::vector<WalRecord>> read_wal_records(const std::filesystem::path& pat
         record.page_id = load_le<std::uint64_t>(full.subspan(17, 8));
         record.payload.assign(full.begin() + record_fixed_size,
                               full.begin() + record_fixed_size + length);
+        record.end_offset = start_offset + offset + record_size;
         if (record.lsn >= from_lsn) {
             records.push_back(std::move(record));
         }
         offset += record_size;
     }
     if (mode == ReadMode::strict && offset < total && offset + record_fixed_size > total &&
-        total > wal_header_size) {
+        total > 0) {
         // Bytes sobrando sem caber um header de registro: truncamento.
         return std::unexpected(
             Error{ErrorCode::wal_corrupt, "WAL has trailing truncated bytes (replication)"});
@@ -377,6 +390,11 @@ Result<void> Wal::sync() {
     // que é exatamente por que a Etapa 1 existe.
     diag::ScopedStage stage{diag::Stage::wal_sync};
     return sink_->sync();
+}
+
+Result<std::vector<WalRecord>> Wal::read_from_offset(const std::filesystem::path& path,
+                                                     std::uint64_t start_offset) {
+    return read_wal_records(path, 0, ReadMode::soft_eof, start_offset);
 }
 
 Result<std::vector<WalRecord>> Wal::read_all(const std::filesystem::path& path) {

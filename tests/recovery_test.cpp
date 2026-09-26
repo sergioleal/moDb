@@ -9,10 +9,12 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
+#include <utility>
 
 using namespace modb;
 using namespace modb::object;
@@ -804,6 +806,194 @@ int main() {
         suite.check(database->commits_since_checkpoint() == 0,
                     "the rollback checkpoints the pending commits before removing the WAL");
         detach(database_id);
+    }
+
+    // ---- T26: o rabo do WAL depois do último commit ----------------------------
+    //
+    // `Wal::open_durable` anexa no fim do ARQUIVO. Se a última queda deixou um
+    // registro rasgado ou uma transação sem commit no fim, os commits da sessão
+    // seguinte ficavam atrás dele -- e a recuperação para no primeiro registro
+    // inválido. A abertura agora corta o WAL no fim do último commit.
+    const auto append_garbage = [](const std::filesystem::path& path) {
+        std::ofstream out(path, std::ios::binary | std::ios::app);
+        const std::string garbage(50, '\xAB');
+        out.write(garbage.data(), static_cast<std::streamsize>(garbage.size()));
+        return static_cast<bool>(out);
+    };
+    const auto open_bound = [&](const std::filesystem::path& path) {
+        auto opened = Database::open(path);
+        auto database = share(opened);
+        if (database) {
+            auto id = attach(database);
+            if (!database->bind(employee_builder())) {
+                detach(id);
+                return std::pair<std::shared_ptr<Database>, Result<DatabaseId>>{nullptr, id};
+            }
+            return std::pair<std::shared_ptr<Database>, Result<DatabaseId>>{database, id};
+        }
+        return std::pair<std::shared_ptr<Database>, Result<DatabaseId>>{
+            nullptr, std::unexpected(Error{ErrorCode::io_error, "open failed"})};
+    };
+    const auto commit_one = [&](Database& database, const Employee& employee) -> std::optional<ObjectId> {
+        auto transaction = database.begin();
+        if (!transaction) {
+            return std::nullopt;
+        }
+        auto handle = database.create(*transaction, employee);
+        if (!handle || !transaction->commit()) {
+            return std::nullopt;
+        }
+        return handle->id();
+    };
+
+    // (W1) rabo rasgado -> reabre -> commit novo -> segunda queda.
+    {
+        TemporaryDatabase temporary{"torn-tail"};
+        auto first_data = temporary.path();
+        first_data += ".first";
+        auto reopened_data = temporary.path();
+        reopened_data += ".reopened";
+        std::optional<ObjectId> a;
+        std::optional<ObjectId> b;
+        {
+            DatabaseOptions options;
+            options.checkpoint_interval = 1000;
+            auto created = Database::create(temporary.path(), options);
+            auto database = share(created);
+            suite.check(database != nullptr, "torn-tail database is created");
+            if (!database) {
+                return suite.finish();
+            }
+            auto database_id = attach(database);
+            suite.check(database->bind(employee_builder()).has_value() &&
+                            database->checkpoint().has_value(),
+                        "torn-tail baseline checkpoint");
+            suite.check(copy_over(temporary.path(), first_data), "torn-tail data file is copied");
+            a = commit_one(*database, Employee{padded(100), 100});
+            suite.check(a.has_value(), "commit A before the crash");
+            suite.check(copy_over(temporary.wal_path(), temporary.wal_copy_path()),
+                        "WAL with commit A is copied");
+            detach(database_id);
+        }
+        // Queda 1: arquivo de dados do checkpoint + WAL com A e um rabo rasgado.
+        suite.check(append_garbage(temporary.wal_copy_path()) &&
+                        copy_over(first_data, temporary.path()) &&
+                        copy_over(temporary.wal_copy_path(), temporary.wal_path()),
+                    "first crash image has a torn WAL tail");
+        {
+            auto [database, database_id] = open_bound(temporary.path());
+            suite.check(database != nullptr, "the database reopens over a torn tail");
+            if (!database) {
+                return suite.finish();
+            }
+            suite.check(copy_over(temporary.path(), reopened_data),
+                        "the data file right after recovery is copied");
+            b = commit_one(*database, Employee{padded(200), 200});
+            suite.check(b.has_value(), "commit B after reopening");
+            suite.check(copy_over(temporary.wal_path(), temporary.wal_copy_path()),
+                        "WAL with commit B is copied");
+            detach(database_id);
+        }
+        // Queda 2: dados logo depois da reabertura + WAL com B (sem checkpoint).
+        suite.check(copy_over(reopened_data, temporary.path()) &&
+                        copy_over(temporary.wal_copy_path(), temporary.wal_path()),
+                    "second crash image is assembled");
+        {
+            auto [database, database_id] = open_bound(temporary.path());
+            suite.check(database != nullptr, "the database reopens after the second crash");
+            if (database && a && b) {
+                auto ha = database->get<Employee>(*a);
+                auto hb = database->get<Employee>(*b);
+                suite.check(ha && database->materialize(*ha) &&
+                                *database->materialize(*ha) == Employee{padded(100), 100},
+                            "commit A survives both crashes");
+                suite.check(hb && database->materialize(*hb) &&
+                                *database->materialize(*hb) == Employee{padded(200), 200},
+                            "commit B, made after a torn tail, survives the second crash");
+            }
+            detach(database_id);
+        }
+        remove_quiet(first_data);
+        remove_quiet(reopened_data);
+    }
+
+    // (W2) transação sem commit no fim do WAL -> reabre -> commits novos. O
+    // tx_id recomeça a cada sessão; a morta nunca pode ser tomada por commitada.
+    {
+        TemporaryDatabase temporary{"dead-tail"};
+        auto first_data = temporary.path();
+        first_data += ".first";
+        auto reopened_data = temporary.path();
+        reopened_data += ".reopened";
+        std::vector<ObjectId> fresh;
+        {
+            DatabaseOptions options;
+            options.checkpoint_interval = 1000;
+            auto created = Database::create(temporary.path(), options);
+            auto database = share(created);
+            suite.check(database != nullptr, "dead-tail database is created");
+            if (!database) {
+                return suite.finish();
+            }
+            auto database_id = attach(database);
+            suite.check(database->bind(employee_builder()).has_value() &&
+                            database->checkpoint().has_value(),
+                        "dead-tail baseline checkpoint");
+            suite.check(copy_over(temporary.path(), first_data), "dead-tail data file is copied");
+            {
+                auto transaction = database->begin();
+                suite.check(transaction && database->create(*transaction, Employee{"dead", 13}) &&
+                                transaction->commit(CommitPhase::stop_after_images),
+                            "a commit is interrupted after its page images");
+                suite.check(copy_over(temporary.wal_path(), temporary.wal_copy_path()),
+                            "WAL with the dead transaction is copied");
+            }
+            detach(database_id);
+        }
+        suite.check(copy_over(first_data, temporary.path()) &&
+                        copy_over(temporary.wal_copy_path(), temporary.wal_path()),
+                    "crash image with a dead transaction at the WAL end");
+        {
+            auto [database, database_id] = open_bound(temporary.path());
+            suite.check(database != nullptr, "the database reopens over a dead transaction");
+            if (!database) {
+                return suite.finish();
+            }
+            suite.check(copy_over(temporary.path(), reopened_data),
+                        "dead-tail data file after recovery is copied");
+            for (int i = 0; i < 4; ++i) {
+                if (auto id = commit_one(*database, Employee{"fresh-" + std::to_string(i), i})) {
+                    fresh.push_back(*id);
+                }
+            }
+            suite.check(fresh.size() == 4, "four transactions commit after reopening");
+            suite.check(copy_over(temporary.wal_path(), temporary.wal_copy_path()),
+                        "WAL with the fresh commits is copied");
+            detach(database_id);
+        }
+        suite.check(copy_over(reopened_data, temporary.path()) &&
+                        copy_over(temporary.wal_copy_path(), temporary.wal_path()),
+                    "second dead-tail crash image is assembled");
+        {
+            auto [database, database_id] = open_bound(temporary.path());
+            suite.check(database != nullptr, "dead-tail database reopens after the second crash");
+            if (database) {
+                int intact = 0;
+                for (std::size_t i = 0; i < fresh.size(); ++i) {
+                    auto handle = database->get<Employee>(fresh[i]);
+                    auto employee = handle ? database->materialize(*handle) : Result<Employee>{
+                        std::unexpected(Error{ErrorCode::record_not_found, "missing"})};
+                    if (employee && employee->name == "fresh-" + std::to_string(i)) {
+                        ++intact;
+                    }
+                }
+                suite.check(intact == 4,
+                            "every fresh commit is intact; the dead transaction never resurfaces");
+            }
+            detach(database_id);
+        }
+        remove_quiet(first_data);
+        remove_quiet(reopened_data);
     }
 
     return suite.finish();

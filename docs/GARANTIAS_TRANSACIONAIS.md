@@ -64,7 +64,16 @@ refeita).
 3. reaplica, na ordem do log, as `page_image` das transações commitadas depois
    do `checkpoint_lsn` gravado (no máximo `checkpoint_interval` commits);
 4. `flush` do arquivo de dados e avança o checkpoint. O WAL é mantido (ele
-   também alimenta réplicas).
+   também alimenta réplicas);
+5. **corta o WAL no fim do último registro de commit**, com sync: o que vem
+   depois é de transação que não commitou ou é o rabo rasgado da queda. Sem o
+   corte, os commits seguintes seriam anexados atrás desse lixo, e a próxima
+   recuperação, que para no primeiro registro inválido, nunca os veria.
+
+A leitura começa em `checkpoint_wal_offset` (DBRT) quando esse offset é
+confiável — dentro do arquivo, com o primeiro registro ali legível e de LSN
+posterior ao checkpoint —, e no início do WAL quando não é. O custo de abrir o
+banco é o do trecho depois do último checkpoint, não o do WAL inteiro.
 
 Um superbloco que declara mais páginas do que o arquivo tem — rastro de uma
 queda entre a alocação e a extensão do arquivo — é aceito quando há WAL: as

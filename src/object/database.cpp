@@ -50,6 +50,39 @@ bool same_structure(const TypeDefinition& stored, const TypeDefinition& canonica
 
 } // namespace
 
+namespace {
+
+// Corta o WAL logo depois do último registro de commit. O que vem depois é de
+// transação que não commitou: as imagens de um commit interrompido ou o rabo
+// rasgado de uma queda. Deixado lá, ele fazia os commits seguintes -- anexados
+// no fim do arquivo por `Wal::open_durable` -- ficarem atrás de um registro
+// inválido que a recuperação nunca atravessa: uma segunda queda perdia todos
+// eles (PROFILING_2026-09.md, T26). O sync torna o corte durável antes de
+// qualquer registro novo ser anexado no lugar.
+Result<void> truncate_wal_after_last_commit(const std::filesystem::path& wal_path,
+                                            std::uint64_t last_commit_end) {
+    if (last_commit_end < tx::wal_header_size) {
+        return {};
+    }
+    std::error_code error;
+    const auto size = std::filesystem::file_size(wal_path, error);
+    if (error || size <= last_commit_end) {
+        return {};
+    }
+    std::filesystem::resize_file(wal_path, last_commit_end, error);
+    if (error) {
+        return std::unexpected(
+            Error{ErrorCode::io_error, "could not truncate the WAL tail: " + error.message()});
+    }
+    auto sink = tx::open_append_wal_sink(wal_path);
+    if (!sink) {
+        return std::unexpected(sink.error());
+    }
+    return (*sink)->sync();
+}
+
+} // namespace
+
 Database::Database(Database&& other) noexcept = default;
 
 Database::~Database() {
@@ -192,22 +225,19 @@ Result<Database> Database::open(const std::filesystem::path& path, const Databas
                 return std::unexpected(ckpt.error());
             }
         }
-        if (auto records = tx::Wal::read_all(wal_path); records) {
-            std::uint64_t max_lsn = 0;
-            for (const auto& record : *records) {
-                if (record.lsn > max_lsn) {
-                    max_lsn = record.lsn;
-                }
+        // `recover` já leu o WAL: o maior LSN vem de lá, sem uma segunda leitura.
+        if (recovered->max_lsn > 0 && recovered->max_lsn + 1 > store.next_lsn()) {
+            if (auto set_lsn = store.set_next_lsn(recovered->max_lsn + 1); !set_lsn) {
+                return std::unexpected(set_lsn.error());
             }
-            if (max_lsn > 0 && max_lsn + 1 > store.next_lsn()) {
-                if (auto set_lsn = store.set_next_lsn(max_lsn + 1); !set_lsn) {
-                    return std::unexpected(set_lsn.error());
-                }
-            }
+        }
+        if (auto cut = truncate_wal_after_last_commit(wal_path, recovered->last_commit_end); !cut) {
+            return std::unexpected(cut.error());
         }
         Database db{std::move(file), std::move(store), std::move(wal_path), path,
                     PrimaryStorage::wal_only, opts.commit_ack, opts.commit_ack_timeout,
                     opts.wal_io};
+        db.next_tx_id_ = std::max<std::uint64_t>(db.next_tx_id_, recovered->max_tx_id + 1);
         db.data_replica_seen_ = control->follower_ack_lsn > 0;
         if (auto persisted = db.persist_instance_control(); !persisted) {
             return std::unexpected(persisted.error());
@@ -232,13 +262,17 @@ Result<Database> Database::open(const std::filesystem::path& path, const Databas
     }
     auto file = std::make_unique<storage::PageFile>(std::move(*page_file));
     std::uint64_t after_lsn = 0;
+    std::uint64_t checkpoint_offset = 0;
     if (file->catalog_root()) {
         if (auto root = object::DatabaseRoot::open(*file); root) {
             after_lsn = root->checkpoint_lsn();
+            checkpoint_offset = root->checkpoint_wal_offset();
         }
     }
     auto wal_path = wal_path_for(path);
-    auto recovered = tx::recover(*file, wal_path, after_lsn);
+    // Lê o WAL só a partir do checkpoint quando o offset gravado é confiável
+    // (T26); antes a abertura lia o arquivo inteiro, e duas vezes.
+    auto recovered = tx::recover(*file, wal_path, after_lsn, checkpoint_offset);
     if (!recovered) {
         return std::unexpected(recovered.error());
     }
@@ -246,34 +280,41 @@ Result<Database> Database::open(const std::filesystem::path& path, const Databas
     if (!store) {
         return std::unexpected(store.error());
     }
-    if (recovered->max_commit_lsn > store->checkpoint_lsn()) {
-        if (auto ckpt = store->set_checkpoint_lsn(recovered->max_commit_lsn); !ckpt) {
+    // Tudo depois do último commit é de transação morta: corta antes de gravar
+    // o checkpoint, para o offset abaixo ser o fim real do WAL.
+    if (auto cut = truncate_wal_after_last_commit(wal_path, recovered->last_commit_end); !cut) {
+        return std::unexpected(cut.error());
+    }
+    // `recover` já leu o WAL: o maior LSN vem de lá, sem uma segunda leitura.
+    // Registros anteriores ao checkpoint não precisam ser vistos: o `next_lsn`
+    // gravado já passou deles no último checkpoint.
+    if (recovered->max_lsn > 0 && recovered->max_lsn + 1 > store->next_lsn()) {
+        if (auto set_lsn = store->set_next_lsn(recovered->max_lsn + 1); !set_lsn) {
+            return std::unexpected(set_lsn.error());
+        }
+    }
+    // O checkpoint passa a cobrir tudo o que foi reaplicado, e o offset do WAL
+    // (o fim do último commit, agora o fim do arquivo) acompanha, para a
+    // próxima abertura ler só dali. Só grava se algo mudou.
+    const auto checkpoint = std::max(store->checkpoint_lsn(), recovered->max_commit_lsn);
+    const auto offset = recovered->last_commit_end;
+    if (checkpoint != store->checkpoint_lsn() ||
+        (offset >= tx::wal_header_size && offset != store->checkpoint_wal_offset())) {
+        if (auto ckpt = store->set_checkpoint_lsn(checkpoint, offset); !ckpt) {
             return std::unexpected(ckpt.error());
         }
         if (auto flushed = file->flush(); !flushed) {
             return std::unexpected(flushed.error());
         }
     }
-    if (auto records = tx::Wal::read_all(wal_path); records) {
-        std::uint64_t max_lsn = 0;
-        for (const auto& record : *records) {
-            if (record.lsn > max_lsn) {
-                max_lsn = record.lsn;
-            }
-        }
-        if (max_lsn > 0 && max_lsn + 1 > store->next_lsn()) {
-            if (auto set_lsn = store->set_next_lsn(max_lsn + 1); !set_lsn) {
-                return std::unexpected(set_lsn.error());
-            }
-            if (auto flushed = file->flush(); !flushed) {
-                return std::unexpected(flushed.error());
-            }
-        }
-    }
     Database db{std::move(file), std::move(*store), std::move(wal_path), path,
                 PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout, opts.wal_io};
     db.durability_ = opts.durability;
     db.checkpoint_interval_ = std::max<std::uint32_t>(1, opts.checkpoint_interval);
+    // tx_id recomeça a cada sessão; a recuperação decide "commitado" por tx_id.
+    // Começar acima do maior tx_id do WAL impede que uma transação nova repita
+    // o id de uma morta que tenha sobrado no log (defesa além do corte acima).
+    db.next_tx_id_ = std::max<std::uint64_t>(db.next_tx_id_, recovered->max_tx_id + 1);
     return db;
 }
 
@@ -574,7 +615,11 @@ Result<void> Database::advance_checkpoint() {
     if (auto flushed = sync_device ? file_->flush() : Result<void>{}; !flushed) {
         return std::unexpected(flushed.error());
     }
-    if (auto ckpt = store_.set_checkpoint_lsn(last_commit_lsn_); !ckpt) {
+    // O offset do WAL no checkpoint (T26): o fim do último registro anexado,
+    // que é o último commit -- não há transação em voo aqui. Com uma fábrica de
+    // WAL de teste o arquivo é recriado por commit e o offset não vale nada.
+    const auto wal_offset = (!custom_wal_factory_ && open_wal_) ? open_wal_->write_offset() : 0;
+    if (auto ckpt = store_.set_checkpoint_lsn(last_commit_lsn_, wal_offset); !ckpt) {
         return std::unexpected(ckpt.error());
     }
     if (auto flushed = sync_device ? file_->flush() : Result<void>{}; !flushed) {
@@ -624,6 +669,12 @@ Result<void> Database::rollback_transaction() {
     open_wal_.reset();
     std::error_code remove_error;
     std::filesystem::remove(wal_path_, remove_error);
+    // O WAL recomeça do cabeçalho: o offset do checkpoint deixa de valer.
+    if (primary_storage_ == PrimaryStorage::full && store_.checkpoint_wal_offset() != 0) {
+        if (auto reset = store_.set_checkpoint_lsn(store_.checkpoint_lsn(), 0); !reset) {
+            return std::unexpected(reset.error());
+        }
+    }
     // O buffer de páginas do PageFile já foi descartado (o arquivo voltou ao
     // estado pré-transação); agora reconstrói store_ para casar com ele — sem
     // isto, os contadores em memória do TableHeap/IdentityMap ficariam

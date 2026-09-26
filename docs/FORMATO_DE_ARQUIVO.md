@@ -49,6 +49,14 @@ Versão corrente **2**. Campos incluem raízes de heaps de objetos/catálogo,
 mapa de identidade, próximo ObjectId e época MVCC. v1 é lida e regravada como v2
 na abertura (migração explícita, ADR-009).
 
+Campos acrescentados no fim da v2, sem mudar a versão — ausentes (zero) em
+arquivos anteriores, e zero significa "desconhecido":
+
+| campo | desde | significado |
+|---|---|---|
+| uuid, timeline, `next_lsn`, `checkpoint_lsn`, `follower_ack_lsn` | Fase 14 | identidade e posições do WAL |
+| `checkpoint_wal_offset` `u64` | 2026-09 (T26) | offset do WAL logo depois do último commit coberto pelo checkpoint; a recuperação lê dali em diante quando o valor é confiável, e o WAL inteiro quando não é |
+
 ### IDMD / IDMP
 
 - IDMD v1: diretório de páginas de entradas.

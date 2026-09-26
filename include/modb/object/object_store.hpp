@@ -119,8 +119,11 @@ public:
         return root_.oldest_available_lsn();
     }
     [[nodiscard]] Result<void> set_next_lsn(std::uint64_t next) { return root_.set_next_lsn(next); }
-    [[nodiscard]] Result<void> set_checkpoint_lsn(std::uint64_t lsn) {
-        return root_.set_checkpoint_lsn(lsn);
+    [[nodiscard]] std::uint64_t checkpoint_wal_offset() const noexcept {
+        return root_.checkpoint_wal_offset();
+    }
+    [[nodiscard]] Result<void> set_checkpoint_lsn(std::uint64_t lsn, std::uint64_t wal_offset = 0) {
+        return root_.set_checkpoint_lsn(lsn, wal_offset);
     }
     [[nodiscard]] Result<void> set_follower_ack_lsn(std::uint64_t lsn) {
         return root_.set_follower_ack_lsn(lsn);
