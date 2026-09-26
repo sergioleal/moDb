@@ -546,6 +546,7 @@ add_library(modb_load_core STATIC
     loadtests/history/rollup.cpp
     loadtests/history/index.cpp
     loadtests/history/trend.cpp
+    loadtests/history/excluded_runs.cpp
     loadtests/history/gate.cpp
     loadtests/history/baselines.cpp
     loadtests/history/retention.cpp

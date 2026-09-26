@@ -566,6 +566,24 @@ ResolveResult resolve_cases(const CampaignOptions& options) {
             result.error = loaded.error;
             return result;
         }
+        // Caso sem ambiente (sem --environment) gerava pontos que o índice
+        // rejeita depois da execução, com um aviso fácil de perder (T28). Com
+        // exatamente UM ambiente local não deprecado no catálogo, ele é o
+        // padrão; com zero ou vários, nada é escolhido -- adivinhar entre dois
+        // ambientes misturaria séries.
+        const EnvironmentEntry* only_local = nullptr;
+        std::size_t local_count = 0;
+        for (const auto& entry : loaded.catalog.environments) {
+            if (entry.kind == "local" && !entry.deprecated) {
+                only_local = &entry;
+                ++local_count;
+            }
+        }
+        for (auto& c : expanded.cases) {
+            if (c.environment.empty() && local_count == 1) {
+                c.environment = only_local->id;
+            }
+        }
         for (const auto& c : expanded.cases) {
             if (c.environment.empty()) {
                 continue;

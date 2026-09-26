@@ -847,6 +847,43 @@ void test_trend_rejects_unknown_metric(TestSuite& suite) {
 
 } // namespace
 
+// T18: uma execução listada em excluded_runs.json fica na série (append-only)
+// mas não entra na janela: a queda de 50% do 5o ponto, excluída, deixa de
+// reprovar; e só o caso listado sai, não a execução inteira.
+void test_trend_honors_excluded_runs(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    const auto history_path = dir / "series.jsonl";
+    const auto env_path = dir / "environments.json";
+    write_file(env_path, fake_environments_json());
+    const std::vector<double> values = {100, 100, 100, 100, 50};
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        const auto run_id = "run-excl-" + std::to_string(i);
+        const auto started_at = "2026010" + std::to_string(i + 1) + "T000000.000Z";
+        const auto campaign_path = dir / (run_id + ".jsonl");
+        write_file(campaign_path, fake_campaign_jsonl(run_id, started_at, values[i]));
+        (void)index_campaign(campaign_path, history_path, env_path);
+    }
+    write_file(dir / "excluded_runs.json",
+               R"({"schema":"modb.loadtest.excluded_runs","schema_version":1,"runs":[)"
+               R"({"run_id":"run-excl-4","case_id":"load.create_only.embedded.10k","reason":"teste"},)"
+               R"({"run_id":"run-excl-4","case_id":"load.outro.embedded.10k","reason":"outro caso"}]})");
+    auto trend = compute_trend(history_path, "load.create_only.embedded.10k", "ops_per_second",
+                               "create");
+    suite.check(trend.ok, "compute_trend com exclusões não deve falhar: " + trend.error);
+    suite.check(trend.points.size() == 5, "o ponto excluído continua na série");
+    if (trend.points.size() == 5) {
+        suite.check(!trend.points[4].comparable, "o ponto excluído vira comparable=false");
+        suite.check(trend.points[4].verdict != "fail", "o ponto excluído não reprova no gate");
+        suite.check(trend.points[3].comparable, "os outros pontos continuam comparáveis");
+    }
+
+    write_file(dir / "excluded_runs.json", "isto não é json");
+    auto broken = compute_trend(history_path, "load.create_only.embedded.10k", "ops_per_second",
+                                "create");
+    suite.check(!broken.ok || !broken.error.empty(),
+                "um excluded_runs.json ilegível é erro, não 'nada excluído'");
+}
+
 int main() {
     TestSuite suite;
     test_series_key_stable(suite);
@@ -868,5 +905,6 @@ int main() {
     test_prune_keeps_point_with_missing_started_at(suite);
     test_prune_does_not_delete_raw_file_needed_by_another_series(suite);
     test_trend_rejects_unknown_metric(suite);
+    test_trend_honors_excluded_runs(suite);
     return suite.finish();
 }

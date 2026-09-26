@@ -1,5 +1,7 @@
 #include "history/trend.hpp"
 
+#include "history/excluded_runs.hpp"
+
 #include "json_value.hpp"
 
 #include <algorithm>
@@ -144,6 +146,13 @@ TrendResult compute_trend(const std::filesystem::path& history_path, const std::
     std::ifstream file(history_path, std::ios::binary);
     std::ostringstream buffer;
     buffer << file.rdbuf();
+    // Execuções medidas sob contaminação conhecida ficam na série (append-only)
+    // mas não entram na janela nem no gate: viram comparable=false aqui.
+    const auto excluded = load_excluded_runs(history_path);
+    if (!excluded.error.empty()) {
+        result.error = excluded.error;
+        return result;
+    }
 
     struct Row {
         std::string started_at, commit_short, series_key, status;
@@ -174,7 +183,8 @@ TrendResult compute_trend(const std::filesystem::path& history_path, const std::
         row.commit_short = parsed.value.get_string("commit_short");
         row.series_key = parsed.value.get_string("series_key");
         row.status = parsed.value.get_string("status");
-        row.comparable = parsed.value.get_bool("comparable", true);
+        row.comparable = parsed.value.get_bool("comparable", true) &&
+                         !excluded.contains(parsed.value.get_string("run_id"), case_id);
         row.value = extract_value(parsed.value, metric_id, phase);
         rows.push_back(std::move(row));
     }

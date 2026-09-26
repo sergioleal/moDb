@@ -1,0 +1,11 @@
+{
+  "schema": "modb.loadtest.excluded_runs",
+  "schema_version": 1,
+  "runs": [
+    {
+      "run_id": "run-20260726T211057.125Z-03b9fe9b",
+      "case_id": "load.create_delete_forward.embedded.10k",
+      "reason": "M5: create_delete_forward.10k medido de propósito logo depois de um caso de 100k no mesmo processo (24.262 ops/s contra ~49.998 limpo); indexado por engano. A causa de M5 é o power throttling do Windows (PROFILING_2026-09.md, T11)."
+    }
+  ]
+}

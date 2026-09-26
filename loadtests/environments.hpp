@@ -22,6 +22,10 @@ struct EnvironmentEntry {
     std::string label;
     std::string kind;         // "local" | "ssh"
     std::string host_class;   // rótulo de comparabilidade (§13.4)
+    // Classe do dispositivo de armazenamento do work dir (nvme/ssd/hdd). Fato da
+    // máquina, não da corrida, por isso mora aqui e não é detectado a cada
+    // execução (PLANO_PROFILING.md §8). Vazio = não declarado.
+    std::string device_class;
     std::string os_hint;
     std::string notes;
     bool deprecated{false};

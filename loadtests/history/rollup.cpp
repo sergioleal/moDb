@@ -322,6 +322,10 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             const auto* entry = catalog.find(acc.environment);
             return entry ? entry->host_class : std::string{};
         }();
+        const std::string device_class = [&] {
+            const auto* entry = catalog.find(acc.environment);
+            return entry ? entry->device_class : std::string{};
+        }();
 
         SeriesKeyInput key_input;
         key_input.case_id = case_id;
@@ -373,10 +377,10 @@ RollupExtractResult extract_rollups(const std::filesystem::path& campaign_path,
             << ",\"cores_logical\":" << uint_or_null(cores_logical)
             << ",\"ram_gb\":" << ram_gb_or_null(ram_bytes)
             << ",\"fs\":" << string_or_null(fs)
-            // device_class (nvme/ssd/hdd) exige IOCTL_STORAGE_QUERY_PROPERTY por
-            // volume; permanece não coletado em vez de adivinhado
+            // device_class (nvme/ssd/hdd) vem do catálogo de ambientes, declarado
+            // por máquina; null quando o ambiente não declara -- nunca adivinhado
             // (docs-process/PLANO_PROFILING.md §8).
-            << ",\"device_class\":null"
+            << ",\"device_class\":" << string_or_null(device_class)
             << ",\"build_type\":" << json_string(build_type) << ",\"compiler\":"
             << json_string(compiler_id + " " + compiler_version)
             << ",\"sanitizers\":" << string_or_null(sanitizers_field)

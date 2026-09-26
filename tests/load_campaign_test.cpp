@@ -555,8 +555,45 @@ void test_resume_rejects_non_partial_extension(TestSuite& suite) {
 
 } // namespace
 
+// T28: caso sem --environment. Com exatamente um ambiente local no catálogo,
+// ele vira o padrão (senão o índice rejeitaria o ponto depois da execução);
+// com dois, nada é adivinhado.
+void test_single_local_environment_is_the_default(TestSuite& suite) {
+    auto dir = make_temp_dir();
+    auto options = two_case_options(dir);
+    options.environments_file = dir / "environments.json";
+    {
+        std::ofstream out(options.environments_file);
+        out << R"({"schema":"modb.loadtest.environments","schema_version":1,"environments":[)"
+            << R"({"id":"so-local","label":"l","kind":"local","host_class":"h"},)"
+            << R"({"id":"remoto","label":"r","kind":"ssh","host_class":"h2",)"
+            << R"("connection":{"host":"x","default_user":"u","remote_work_dir":"/tmp","binary_name":"b"}}]})";
+    }
+    auto resolved = resolve_cases(options);
+    suite.check(resolved.ok, "resolve_cases com um ambiente local: " + resolved.error);
+    bool all_default = !resolved.cases.empty();
+    for (const auto& c : resolved.cases) {
+        all_default = all_default && c.environment == "so-local";
+    }
+    suite.check(all_default, "sem --environment, o único ambiente local vira o padrão");
+
+    {
+        std::ofstream out(options.environments_file);
+        out << R"({"schema":"modb.loadtest.environments","schema_version":1,"environments":[)"
+            << R"({"id":"a","label":"a","kind":"local","host_class":"h"},)"
+            << R"({"id":"b","label":"b","kind":"local","host_class":"h"}]})";
+    }
+    auto ambiguous = resolve_cases(options);
+    bool none_chosen = ambiguous.ok && !ambiguous.cases.empty();
+    for (const auto& c : ambiguous.cases) {
+        none_chosen = none_chosen && c.environment.empty();
+    }
+    suite.check(none_chosen, "com dois ambientes locais, nenhum é escolhido por adivinhação");
+}
+
 int main() {
     TestSuite suite;
+    test_single_local_environment_is_the_default(suite);
     test_resume_does_not_rerun_completed_case(suite);
     test_resume_handles_repeated_case_id(suite);
     test_unimplemented_error_text_matches_real_phrasings(suite);

@@ -61,6 +61,7 @@ LoadCatalogResult load_environment_catalog(const std::filesystem::path& path) {
         entry.label = item.get_string("label");
         entry.kind = item.get_string("kind");
         entry.host_class = item.get_string("host_class");
+        entry.device_class = item.get_string("device_class");
         entry.os_hint = item.get_string("os_hint");
         entry.notes = item.get_string("notes");
 
