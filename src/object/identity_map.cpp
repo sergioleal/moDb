@@ -426,14 +426,15 @@ Result<storage::RecordId> IdentityMap::find(ObjectId id) const {
         return std::unexpected(
             Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
     }
-    auto page = file_->read(**idmp_id);
+    // Visão sem cópia: só a entrada interessa, não a página inteira.
+    auto page = file_->view(**idmp_id);
     if (!page) {
         return std::unexpected(page.error());
     }
-    if (auto valid = check_magic(*page, idmp_magic, idmp_version, "entries"); !valid) {
+    if (auto valid = check_magic(**page, idmp_magic, idmp_version, "entries"); !valid) {
         return std::unexpected(valid.error());
     }
-    const auto entry = read_entry(*page, entry_index);
+    const auto entry = read_entry(**page, entry_index);
     if (!entry.allocated() || entry.removed()) {
         return std::unexpected(
             Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
@@ -455,14 +456,15 @@ Result<storage::RecordId> IdentityMap::find_at(ObjectId id, std::uint64_t snapsh
         return std::unexpected(
             Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});
     }
-    auto page = file_->read(**idmp_id);
+    // Visão sem cópia: só a entrada interessa, não a página inteira.
+    auto page = file_->view(**idmp_id);
     if (!page) {
         return std::unexpected(page.error());
     }
-    if (auto valid = check_magic(*page, idmp_magic, idmp_version, "entries"); !valid) {
+    if (auto valid = check_magic(**page, idmp_magic, idmp_version, "entries"); !valid) {
         return std::unexpected(valid.error());
     }
-    const auto entry = read_entry(*page, entry_index);
+    const auto entry = read_entry(**page, entry_index);
     if (!entry.allocated()) {
         return std::unexpected(
             Error{ErrorCode::record_not_found, "no object with id " + std::to_string(id.value)});

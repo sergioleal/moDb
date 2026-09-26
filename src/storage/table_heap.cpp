@@ -518,19 +518,21 @@ Result<std::vector<std::byte>> TableHeap::read(RecordId id) {
             "record page does not belong to this TableHeap",
         });
     }
-    auto current = load_trusted(id.page);
-    if (!current) {
-        return std::unexpected(current.error());
+    // Lê o registro direto da página no cache, sem copiá-la (duas cópias de
+    // 8 KiB por leitura antes: para o scratch e para o SlottedPage).
+    auto page = file_->view(id.page);
+    if (!page) {
+        return std::unexpected(page.error());
     }
     // Um SlotId reutilizado não pode satisfazer um RecordId antigo.
-    auto generation = current->generation(id.slot);
+    auto generation = SlottedPage::generation_in(**page, id.slot);
     if (!generation || *generation != id.generation) {
         return std::unexpected(Error{
             ErrorCode::record_not_found,
             "record generation does not match the occupied slot",
         });
     }
-    auto record = current->read(id.slot);
+    auto record = SlottedPage::read_in(**page, id.slot);
     if (record) {
         stage.add_units(record->size());
     }

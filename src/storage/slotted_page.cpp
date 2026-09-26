@@ -345,31 +345,39 @@ Result<SlotId> SlottedPage::insert(std::span<const std::byte> record) {
 
 // Copia os bytes pertencentes a um slot existente.
 Result<std::vector<std::byte>> SlottedPage::read(SlotId slot) const {
+    return read_in(page_, slot);
+}
+
+Result<std::vector<std::byte>> SlottedPage::read_in(const Page& page, SlotId slot) {
     // Rejeita índices que ainda não foram criados.
-    if (slot.value >= slot_count() || record_size(page_, slot) == 0) {
+    if (slot.value >= read_u16(page, slot_count_offset) || record_size(page, slot) == 0) {
         return std::unexpected(Error{
             ErrorCode::slot_not_found,
             "slot does not exist: " + std::to_string(slot.value),
         });
     }
     // Obtém a posição inicial persistida no diretório.
-    const auto offset = static_cast<std::size_t>(record_offset(page_, slot));
+    const auto offset = static_cast<std::size_t>(record_offset(page, slot));
     // Obtém a quantidade de bytes persistida no diretório.
-    const auto size = static_cast<std::size_t>(record_size(page_, slot));
+    const auto size = static_cast<std::size_t>(record_size(page, slot));
     // Cria uma visão limitada exatamente ao intervalo validado do registro.
-    const auto bytes = page_.bytes().subspan(offset, size);
+    const auto bytes = page.bytes().subspan(offset, size);
     // Copia o intervalo para que o resultado não dependa da vida da página.
     return std::vector<std::byte>{bytes.begin(), bytes.end()};
 }
 
 // Retorna a geração apenas de slots atualmente ocupados.
 Result<std::uint16_t> SlottedPage::generation(SlotId slot) const {
+    return generation_in(page_, slot);
+}
+
+Result<std::uint16_t> SlottedPage::generation_in(const Page& page, SlotId slot) {
     // Reutiliza as mesmas regras de existência da leitura.
-    if (slot.value >= slot_count() || record_size(page_, slot) == 0) {
+    if (slot.value >= read_u16(page, slot_count_offset) || record_size(page, slot) == 0) {
         return std::unexpected(
             Error{ErrorCode::slot_not_found, "slot does not exist: " + std::to_string(slot.value)});
     }
-    return slot_generation(page_, slot);
+    return slot_generation(page, slot);
 }
 
 // Substitui um registro sem alterar seu identificador lógico.

@@ -467,6 +467,33 @@ Result<void> PageFile::write_recovered_page(PageId id, const Page& page) {
     return write_at(id, page);
 }
 
+Result<const Page*> PageFile::view(PageId id) {
+    if (id.value >= page_count_) {
+        return std::unexpected(
+            Error{ErrorCode::page_not_found, "page does not exist: " + std::to_string(id.value)});
+    }
+    // Mesma ordem de `read`: buffer da transação (read-your-writes), cache, disco.
+    if (in_transaction_) {
+        if (const auto found = tx_pages_.find(id.value); found != tx_pages_.end()) {
+            diag::ScopedStage stage{diag::Stage::buffer_pool_hit};
+            return &found->second;
+        }
+    }
+    if (const Page* cached = cache_->get(id.value)) {
+        diag::ScopedStage stage{diag::Stage::buffer_pool_hit};
+        return cached;
+    }
+    // Miss: `read` traz a página (e o read-ahead) para o cache; se ela ficou
+    // residente, devolve a residente; senão, a cópia no buffer interno.
+    if (auto loaded = read(id, view_scratch_); !loaded) {
+        return std::unexpected(loaded.error());
+    }
+    if (const Page* cached = cache_->get(id.value)) {
+        return cached;
+    }
+    return &view_scratch_;
+}
+
 // Persiste no dispositivo todas as escritas já aceitas (durabilidade real).
 Result<void> PageFile::flush() {
     diag::ScopedStage stage{diag::Stage::page_file_sync};

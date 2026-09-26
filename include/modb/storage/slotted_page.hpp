@@ -97,6 +97,11 @@ public:
     [[nodiscard]] Result<SlotId> insert(std::span<const std::byte> record);
     // Lê e copia os bytes pertencentes ao slot solicitado.
     [[nodiscard]] Result<std::vector<std::byte>> read(SlotId slot) const;
+    // `read` e `generation` sobre uma página que não é dona -- p.ex. uma visão
+    // de `PageFile::view` -- sem copiar a página inteira para um SlottedPage.
+    // A página precisa ser confiável (já validada), como em `from_trusted_page`.
+    [[nodiscard]] static Result<std::vector<std::byte>> read_in(const Page& page, SlotId slot);
+    [[nodiscard]] static Result<std::uint16_t> generation_in(const Page& page, SlotId slot);
     // Retorna a geração atual de um slot ocupado.
     [[nodiscard]] Result<std::uint16_t> generation(SlotId slot) const;
     // Substitui o conteúdo, preservando SlotId e geração.
