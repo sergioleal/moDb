@@ -1053,3 +1053,10 @@ O crescimento é linear de 10k a 1M em todos os workloads. A calibração antiga
 500k/1M; hoje o caso inteiro a 1M leva menos de um minuto. Conferido:
 `list-cases` de um binário `relwithdebinfo` estima 5,6 s para
 `crud_full.100k`; um binário Debug continua no arquivo legado (242 s).
+
+## T17 — Limpar `load-results/`
+
+Confirmado com o usuário antes de apagar: removidos os 164 arquivos
+`.modb`/`.modb.wal` que sobraram de execuções de julho (**7,6 GB → 332 KB**).
+Mantidos os 10 resultados brutos de campanha (`.jsonl`/`.partial`, 0,3 MB), que
+o §13.2 do plano de carga trata como imutáveis e a retenção pode consultar.

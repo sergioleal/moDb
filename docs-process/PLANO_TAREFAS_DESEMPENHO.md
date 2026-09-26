@@ -385,9 +385,11 @@ Cada item: predição, antes/depois, e decisão mesmo que seja "não vale".
 
 ### P3
 
-#### T17 — Limpar `load-results/` *(pequeno)*
+#### T17 — Limpar `load-results/` *(pequeno)* ✅
 
-- [ ] 17.1 Listar o que será apagado (7,6 GB de `.modb` descartáveis, §13.2 do
+> 2026-09-26, confirmado: apagados os 164 arquivos `.modb`/`.modb.wal` de execuções antigas (7,6 GB → 332 KB); mantidos os 10 resultados brutos `.jsonl`/`.partial` (§13.2).
+
+- [x] 17.1 Listar o que será apagado (7,6 GB de `.modb` descartáveis, §13.2 do
   plano de carga) e confirmar antes de apagar
 
 #### T18 — Excluir o ponto contaminado das análises *(pequeno)* ✅
@@ -462,3 +464,4 @@ Só se, depois de T6 e T13, sobrar resíduo de motor sem explicação.
 | 2026-09-26 | T2 | — (não commitado) | `scripts/build_docs_site.py` (+ `build-docs.ps1`/`.sh`, `docs_site_assets/`): 148 documentos, 8 seções, 115 páginas de código com âncora de linha, busca local; build em ~3 s; 91 links quebrados corrigidos nos `.md` (90 apontavam para arquivos movidos para `docs/`, 1 para arquivo removido). 2.7 (publicar) não feito — opcional |
 | 2026-09-26 | T3–T10 (P1) | (este commit) | Relatório: [PROFILING_2026-09.md](PROFILING_2026-09.md). ADR-022 (1 `fsync` por commit) + CRC slicing-by-8: `mixed_oltp` ~2,97×, `hold` ~2,8–3,0×. Defeitos corrigidos: commit fora do tempo de motor no harness; `set_wal_file_factory` com WAL aberto (testes de failpoint passavam pelo motivo errado). 10.4 pendente |
 | 2026-09-26 | T11–T16, T26 (P2) | `6d70a5e` `d8750ac` `eed7f93` + seguintes | M5 = power throttling do Windows (opt-out no `modb_load`); P1 remedido: `mixed_oltp` 2,65×, `hold` 3,51×. Leitura sem cópia de página (1,51× no motor); `push_back` incremental (12–15×); abertura lendo do checkpoint (7–19×); corrigido: commits após rabo rasgado do WAL se perdiam. Novas: T29–T32 |
+| 2026-09-26 | T17–T32 (P3) | `4152810` `33fddb7` `1430f23` `63fc24b` `0709083` + este | Leitura sem cópia (último caso): `read` 1,23× no motor; exclusões na série; `device_class`; ambiente padrão; retenção MVCC sem custo de leitura; calibração RelWithDebInfo medida 1k–1M; `load-results/` 7,6 GB → 332 KB. T23–T25 não necessárias |
