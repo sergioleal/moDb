@@ -1,7 +1,7 @@
 > ⚠️ **Documento supersedido.** Descreve o MVP do modelo **relacional**
 > abandonado. O escopo vigente é o MVP OO (Fases 0–3) em
 > [PLANO_ODB.md](PLANO_ODB.md); limites atualizados na
-> [ADR-007](decisions/ADR-007-limites-mvp-oo.md). Mantido para histórico.
+> [ADR-007](../docs/decisions/ADR-007-limites-mvp-oo.md). Mantido para histórico.
 
 # Escopo do MVP
 

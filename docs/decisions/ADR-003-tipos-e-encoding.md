@@ -9,7 +9,7 @@
 ## Contexto
 
 O codec é único e genérico: interpreta qualquer objeto a partir do catálogo,
-sem conhecer classes C++ (ver [arquitetura.md](../arquitetura.md) §21). Para
+sem conhecer classes C++ (ver [arquitetura.md](../../arquitetura.md) §21). Para
 isso, o payload precisa ser autodescritivo por tags de tipo, e o conjunto de
 tipos e seu encoding binário precisam ser fixados antes de qualquer escrita.
 Dados vindos do arquivo são não confiáveis e cada decodificação valida limites
@@ -33,7 +33,7 @@ Tag de tipo (`AttributeType`, u8) e encoding do valor no payload:
 
 - Inteiros e reais são reinterpretados por `std::bit_cast` para u64 e gravados
   em little-endian por `store_le`/`load_le`
-  ([endian.hpp](../include/modb/storage/endian.hpp)).
+  ([endian.hpp](../../include/modb/storage/endian.hpp)).
 - `null` é um estado separado, nunca um sentinela de valor.
 - Conversões permitidas no `ProjectionPlan::Convert` (Fase 3):
   `int64 ↔ float64` (float→int trunca; overflow → erro) e `boolean → int64`.

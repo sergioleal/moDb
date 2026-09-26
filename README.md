@@ -44,6 +44,18 @@ auto db = modb::object::Database::create("shop.modb");
 
 ## Documentação
 
+Toda a documentação (`*.md` do repositório) pode ser lida como um site HTML
+navegável, com menu por seção, busca e links para o código-fonte com número de
+linha. O site é gerado a partir dos `.md` (que continuam sendo a fonte), abre
+direto do disco e fica fora do git:
+
+```powershell
+.\scripts\build-docs.ps1 -Open      # gera build\docs-site\index.html e abre
+```
+
+(`./scripts/build-docs.sh` no Linux/WSL. Requer Python 3 com o pacote
+`markdown`. O build falha se algum link interno estiver quebrado.)
+
 | Documento | Uso |
 |---|---|
 | [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | guia passo a passo para quem chega agora (EN) |

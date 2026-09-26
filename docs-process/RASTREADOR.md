@@ -71,15 +71,15 @@ Definição completa: [PLANO_ODB.md §Fase 0](PLANO_ODB.md#fase-0--decisões-e-f
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 0.1 | Escopo oficial do MVP OO e o que fica pós-MVP | ✅ | [ADR-007](decisions/ADR-007-limites-mvp-oo.md) — commit `4928468` |
-| 0.2 | Representação do `ObjectId` | ✅ | [ADR-001](decisions/ADR-001-identidade.md) |
-| 0.3 | Identificadores fortes (ObjectId, TypeDefinitionId, FieldId, BlobId, BaselineId, DatabaseId) | ✅ | [ADR-001](decisions/ADR-001-identidade.md) |
-| 0.4 | Tipos de atributo primitivos e regras de conversão | ✅ | [ADR-003](decisions/ADR-003-tipos-e-encoding.md) |
-| 0.5 | Layout do `ObjectHeader` e do payload | ✅ | [ADR-003](decisions/ADR-003-tipos-e-encoding.md) |
-| 0.6 | Estratégia e formato do mapa de identidade | ✅ | [ADR-005](decisions/ADR-005-mapa-de-identidade.md) |
-| 0.7 | Bootstrap do catálogo-como-objetos | ✅ | [ADR-002](decisions/ADR-002-bootstrap-do-catalogo.md) |
-| 0.8 | Política para o código relacional existente | ✅ | [ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md) |
-| 0.9 | Marcar docs relacionais como supersedidos + glossário OO | ✅ | `README.md`, `PLANO_DE_DESENVOLVIMENTO.md`, `ESCOPO_MVP.md`, [GLOSSARIO.md](GLOSSARIO.md) |
+| 0.1 | Escopo oficial do MVP OO e o que fica pós-MVP | ✅ | [ADR-007](../docs/decisions/ADR-007-limites-mvp-oo.md) — commit `4928468` |
+| 0.2 | Representação do `ObjectId` | ✅ | [ADR-001](../docs/decisions/ADR-001-identidade.md) |
+| 0.3 | Identificadores fortes (ObjectId, TypeDefinitionId, FieldId, BlobId, BaselineId, DatabaseId) | ✅ | [ADR-001](../docs/decisions/ADR-001-identidade.md) |
+| 0.4 | Tipos de atributo primitivos e regras de conversão | ✅ | [ADR-003](../docs/decisions/ADR-003-tipos-e-encoding.md) |
+| 0.5 | Layout do `ObjectHeader` e do payload | ✅ | [ADR-003](../docs/decisions/ADR-003-tipos-e-encoding.md) |
+| 0.6 | Estratégia e formato do mapa de identidade | ✅ | [ADR-005](../docs/decisions/ADR-005-mapa-de-identidade.md) |
+| 0.7 | Bootstrap do catálogo-como-objetos | ✅ | [ADR-002](../docs/decisions/ADR-002-bootstrap-do-catalogo.md) |
+| 0.8 | Política para o código relacional existente | ✅ | [ADR-006](../docs/decisions/ADR-006-destino-do-codigo-relacional.md) |
+| 0.9 | Marcar docs relacionais como supersedidos + glossário OO | ✅ | `README.md`, `PLANO_DE_DESENVOLVIMENTO.md`, `ESCOPO_MVP.md`, [GLOSSARIO.md](../docs/GLOSSARIO.md) |
 | 0.10 | Registrar as decisões em `docs/decisions/` | ✅ | 7 ADRs (ADR-001..007) |
 
 Critério de aceite: ✅ demonstrado — decisões revisadas e consistentes entre si.
@@ -120,7 +120,7 @@ público — evolução é sempre um novo objeto estampado, nunca mutação in-p
 demo em memória do modelo desta fase (`TypeDefinition`/`TypeRegistry`/
 `validate_object`), no mesmo espírito de `modb catalog`. Não persiste nada;
 não é uma tarefa de nenhuma fase, só uma vitrine útil enquanto a Fase 2 não
-chega. Ver [USO_DA_CLI.md](USO_DA_CLI.md#modb-types--modelo-de-objetos-em-memória-odb).
+chega. Ver [USO_DA_CLI.md](../docs/USO_DA_CLI.md#modb-types--modelo-de-objetos-em-memória-odb).
 
 ---
 
@@ -213,7 +213,7 @@ Status: ✅ Concluída (9/9) — critério de aceite verde (grafo do critério e
 | 4.4 | `BlobStore` (páginas encadeadas) | ✅ | `blob_store.hpp/.cpp` (BLBP); create/read/read_chunks/rewrite/remove |
 | 4.5 | `PersistentVector<T>` | ✅ | `collection.hpp`; push_back = rewrite O(n) (limitação de MVP documentada) |
 | 4.6 | `PersistentSet<T>` / `PersistentMap<K,V>` | ✅ | ordenados por codificação canônica, busca binária na leitura |
-| 4.7 | Política de integridade para `Ref` órfã | ✅ | [ADR-008](decisions/ADR-008-integridade-de-referencias.md): Ref pendente detectável; cascata só em OwnedRef; ciclo → `invalid_argument` |
+| 4.7 | Política de integridade para `Ref` órfã | ✅ | [ADR-008](../docs/decisions/ADR-008-integridade-de-referencias.md): Ref pendente detectável; cascata só em OwnedRef; ciclo → `invalid_argument` |
 | 4.8 | Estender `database_check` (blobs, coleções, cascatas) | ✅ | Reconhecimento + validação estrutural de BLBP (versão/comprimento). Checagem semântica (cadeia de blob, refs órfãs, invariantes de catálogo) deferida — ver nota abaixo |
 | 4.9 | Testes de grafo/cascata/coleção/blob | ✅ | três alvos CTest; grafo do critério verde |
 
@@ -257,7 +257,7 @@ Fase 4 (no espírito do `modb oo` da Fase 3) — `modb blob` (put/get/info sobre
 BlobStore), `modb demo graph` (associação + embedded + cascata + vector-de-refs
 de ponta a ponta) e `modb demo coll` (vector/set/map). Cobertos por seis testes
 `modb.cli.*` (help + demos); suíte total em 48/48. Ver
-[USO_DA_CLI.md](USO_DA_CLI.md#modb-blob--binários-encadeados-odb-fase-4).
+[USO_DA_CLI.md](../docs/USO_DA_CLI.md#modb-blob--binários-encadeados-odb-fase-4).
 
 ---
 
@@ -267,7 +267,7 @@ Status: ✅ Concluída (11/11) — matriz de failpoints verde. Commit `bc51f6e`,
 2026-07-17. Definição completa:
 [PLANO_ODB.md §Fase 5](PLANO_ODB.md#fase-5--transações-wal-e-recuperação) ·
 [PROTOCOLO_FASES.md §Fase 5](PROTOCOLO_FASES.md#fase-5--transações-wal-e-recuperação) ·
-Garantias: [GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md)
+Garantias: [GARANTIAS_TRANSACIONAIS.md](../docs/GARANTIAS_TRANSACIONAIS.md)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
@@ -294,7 +294,7 @@ Garantias: [GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md)
 Critério de aceite: ✅ matriz de failpoints 100% verde — nenhuma transação
 aparece parcialmente aplicada. Suíte completa (59 testes) verde em Debug,
 `-Werror` e `sanitizers`. Garantias documentadas em
-[GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md).
+[GARANTIAS_TRANSACIONAIS.md](../docs/GARANTIAS_TRANSACIONAIS.md).
 
 **Nota de ambiente:** a toolchain do CLion migrou para GCC 15.2, cujo
 `libwinpthread.a` estático quebra o link `-static`
@@ -310,10 +310,10 @@ heap na próxima escrita real após um `rollback → create → commit → reope
 Corrigido com `Database::resync_store_after_rollback()` (reconstrói `store_`
 via `ObjectStore::open`, puramente leitura) mais um watermark que impede o
 contador de `ObjectId` de retroceder através do resync (preservando "nunca
-reutilizado" do [ADR-001](decisions/ADR-001-identidade.md) mesmo após um
+reutilizado" do [ADR-001](../docs/decisions/ADR-001-identidade.md) mesmo após um
 rollback). Coberto por um novo caso em `modb.recovery`
 ("rollback-then-write") e detalhado em
-[GARANTIAS_TRANSACIONAIS.md §6](GARANTIAS_TRANSACIONAIS.md#6-limitações-e-desvios-documentados-mvp).
+[GARANTIAS_TRANSACIONAIS.md §6](../docs/GARANTIAS_TRANSACIONAIS.md#6-limitações-e-desvios-documentados-mvp).
 
 **Extra (fora da lista de tarefas):** a CLI ganhou o grupo `modb tx`
 (`demo`/`crash`/`wal-info`/`get`), no espírito de `modb oo`/`graph`/`coll`.
@@ -324,7 +324,7 @@ Isso permitiu observar a garantia de atomicidade (`before-commit` → ausente;
 `after-commit`/`mid-apply`/`before-cleanup` → presente após recuperação) via
 `modb tx wal-info`/`modb tx get` em invocações separadas. Nove testes
 `modb.cli.tx_*`; suíte total em 59/59. Ver
-[USO_DA_CLI.md](USO_DA_CLI.md#modb-tx--transações-wal-e-recuperação-odb-fase-5).
+[USO_DA_CLI.md](../docs/USO_DA_CLI.md#modb-tx--transações-wal-e-recuperação-odb-fase-5).
 
 ---
 
@@ -355,7 +355,7 @@ Status: ✅ Concluída (2/2) — commit `1e08cf4`, 2026-07-17.
 Critério de aceite 6A: ✅ bancos v1/v2 reabrem com os mesmos objetos e época
 monotônica através de commit e reabertura — demonstrado por
 `modb.identity_map`/`modb.binding` e pela CLI (`modb mvcc status/upgrade/tick`,
-ver [USO_DA_CLI.md §MVCC](USO_DA_CLI.md#mvcc--fase-6a)). Suíte completa 60/60
+ver [USO_DA_CLI.md §MVCC](../docs/USO_DA_CLI.md#mvcc--fase-6a)). Suíte completa 60/60
 em Debug, `-Werror` e sanitizers. `database_check` estendido para diagnóstico
 somente-leitura de WAL/DBRT/IDMP (nunca migra/reaplica/apaga durante o check) —
 ver [RELATORIO_CHECK_RECOVERY_FASES_5_6.md](RELATORIO_CHECK_RECOVERY_FASES_5_6.md).
@@ -370,8 +370,8 @@ Status: ✅ Concluída (3/3) — commit `ecc80e9`, 2026-07-17.
 | 6B.2 | Visibilidade por época em `get` e `scan` | ✅ | `find_at`; `get_at`/`scan_at` filtram físicos por identidade |
 | 6B.3 | `snapshot_conflict` para limite de uma versão anterior | ✅ | `check_snapshot_conflict`: só há uma posição `previous` |
 
-Consequência física documentada (ver [ADR-009](decisions/ADR-009-epocas-e-idmp-v2.md)
-e [GARANTIAS_TRANSACIONAIS.md](GARANTIAS_TRANSACIONAIS.md)): para preservar a
+Consequência física documentada (ver [ADR-009](../docs/decisions/ADR-009-epocas-e-idmp-v2.md)
+e [GARANTIAS_TRANSACIONAIS.md](../docs/GARANTIAS_TRANSACIONAIS.md)): para preservar a
 versão `previous`, `update` **sempre** insere um registro físico novo e `remove`
 **não** apaga fisicamente; a recuperação de espaço fica para a Fase 6C. Por isso
 `scan`/`scan_at` filtram cada registro físico contra a identidade resolvida,
@@ -601,7 +601,7 @@ Status: ✅ Concluída (2/2) — commit `9f65f81`, tag `0.0.8a`.
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 8A.1 | ADR-011: concorrência do servidor + revisão single-thread | ✅ | [ADR-011](decisions/ADR-011-concorrencia-do-servidor.md): leitor/workers/escritor; fila de 1 frame; `ScratchPagePool` isolado |
+| 8A.1 | ADR-011: concorrência do servidor + revisão single-thread | ✅ | [ADR-011](../docs/decisions/ADR-011-concorrencia-do-servidor.md): leitor/workers/escritor; fila de 1 frame; `ScratchPagePool` isolado |
 | 8A.2 | `QueryDescription` + codec de mensagens/`ObjectEnvelope`/`ObjectFrame` (`none`) | ✅ | `modb/net/protocol.hpp`; ErrorCode `protocol_error`/`frame_too_large`/`connection_closed` |
 
 ### Testes automatizados desta subfase
@@ -722,7 +722,7 @@ Status: ✅ Concluída (10/10) — commit `eaaabf3`, tag `0.0.9`.
 Definição completa:
 [PLANO_ODB.md §Fase 9](PLANO_ODB.md#fase-9--runtime-de-módulos-de-domínio) ·
 [PROTOCOLO_FASES.md §Fase 9](PROTOCOLO_FASES.md#fase-9--runtime-de-módulos-de-domínio) ·
-[OPERACAO_MODULOS.md](OPERACAO_MODULOS.md)
+[OPERACAO_MODULOS.md](../docs/OPERACAO_MODULOS.md)
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
@@ -734,7 +734,7 @@ Definição completa:
 | 9.6 | `ModuleManifest` + `ModuleLoader` confiável no processo | ✅ | allowlist de hash; ADR-012 |
 | 9.7 | `client.call<Op>(...)` | ✅ | `Client::call(op_id, args)` |
 | 9.8 | Migrações como Operations | ✅ | `MigrationBumpBalance` |
-| 9.9 | Documentar modelo de falhas (crash/supervisor/WAL recovery) | ✅ | [OPERACAO_MODULOS.md](OPERACAO_MODULOS.md) |
+| 9.9 | Documentar modelo de falhas (crash/supervisor/WAL recovery) | ✅ | [OPERACAO_MODULOS.md](../docs/OPERACAO_MODULOS.md) |
 | 9.10 | Exemplo `TransferFunds` completo + teste de atomicidade | ✅ | `examples/transfer_funds/` |
 
 ### Testes automatizados desta fase
@@ -762,12 +762,12 @@ Definição completa:
 | 10.1 | Plano completo e runner de benchmarks reproduzíveis | ✅ | 10A · merge `9b0cfba`, tag `0.0.10a`; [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md) |
 | 10.2 | Completar o BufferPool (LRU, pin/unpin, métricas) | ✅ | 10B · merge `2a45e39`, tag `0.0.10b` |
 | 10.3 | Profiling antes de cada otimização | ✅ | 10C · merge `2438c1b`, tag `0.0.10c`; [OTIMIZACOES_10C.md](OTIMIZACOES_10C.md) |
-| 10.4 | Fuzzing dos decoders | ✅ | 10D · merge `616cc10`, tag `0.0.10d`; [FUZZING.md](FUZZING.md) |
+| 10.4 | Fuzzing dos decoders | ✅ | 10D · merge `616cc10`, tag `0.0.10d`; [FUZZING.md](../docs/FUZZING.md) |
 | 10.5 | Testar bancos maiores que o cache | ✅ | 10B · merge `2a45e39`; working set ≥10× |
-| 10.6 | Política de compatibilidade (formato + protocolo) | ✅ | 10E · merge `dc33551`, tag `0.0.10e`; [COMPATIBILIDADE.md](COMPATIBILIDADE.md) |
-| 10.7 | Estabilizar e documentar a API pública | ✅ | 10E · merge `dc33551`; [API_PUBLICA.md](API_PUBLICA.md); `modb.consumer` |
-| 10.8 | Reescrever `README.md`/formato de arquivo | ✅ | 10F · merge `8d6a7a5`, tag `0.0.10f`; [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) |
-| 10.9 | Guia de backup/restauração/diagnóstico | ✅ | 10F · merge `8d6a7a5`; [OPERACAO.md](OPERACAO.md) |
+| 10.6 | Política de compatibilidade (formato + protocolo) | ✅ | 10E · merge `dc33551`, tag `0.0.10e`; [COMPATIBILIDADE.md](../docs/COMPATIBILIDADE.md) |
+| 10.7 | Estabilizar e documentar a API pública | ✅ | 10E · merge `dc33551`; [API_PUBLICA.md](../docs/API_PUBLICA.md); `modb.consumer` |
+| 10.8 | Reescrever `README.md`/formato de arquivo | ✅ | 10F · merge `8d6a7a5`, tag `0.0.10f`; [FORMATO_DE_ARQUIVO.md](../docs/FORMATO_DE_ARQUIVO.md) |
+| 10.9 | Guia de backup/restauração/diagnóstico | ✅ | 10F · merge `8d6a7a5`; [OPERACAO.md](../docs/OPERACAO.md) |
 
 ### Fase 10A — Runner e baseline de benchmarks
 
@@ -802,7 +802,7 @@ Status: ✅ Concluída — merge `616cc10`, tag `0.0.10d` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Alvos para objeto/tipo/blob/protocolo/WAL + corpus | ✅ | Preset `fuzz`; [FUZZING.md](FUZZING.md) |
+| Alvos para objeto/tipo/blob/protocolo/WAL + corpus | ✅ | Preset `fuzz`; [FUZZING.md](../docs/FUZZING.md) |
 | Campanha com sanitizers | ✅ | Corpus + `ctest` debug/sanitizers; 1 h/alvo documentado (Clang) |
 
 ### Fase 10E — Compatibilidade e API pública
@@ -811,8 +811,8 @@ Status: ✅ Concluída — merge `dc33551`, tag `0.0.10e` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| Matriz formato/protocolo | ✅ | [COMPATIBILIDADE.md](COMPATIBILIDADE.md); `modb.compatibility` |
-| API C++ pública estabilizada | ✅ | [API_PUBLICA.md](API_PUBLICA.md); `find_package` + `modb.consumer` |
+| Matriz formato/protocolo | ✅ | [COMPATIBILIDADE.md](../docs/COMPATIBILIDADE.md); `modb.compatibility` |
+| API C++ pública estabilizada | ✅ | [API_PUBLICA.md](../docs/API_PUBLICA.md); `find_package` + `modb.consumer` |
 
 ### Fase 10F — Documentação, operação e fechamento
 
@@ -820,8 +820,8 @@ Status: ✅ Concluída — merge `8d6a7a5`, tag `0.0.10f` (2026-07-19).
 
 | Entrega | Status | Aceite |
 |---|---|---|
-| README OO + formato + API | ✅ | [README.md](../README.md); [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) |
-| Backup/restauração/diagnóstico/supervisor | ✅ | [OPERACAO.md](OPERACAO.md); `db check` reconhece IXDR/BTLF/BTIN |
+| README OO + formato + API | ✅ | [README.md](../README.md); [FORMATO_DE_ARQUIVO.md](../docs/FORMATO_DE_ARQUIVO.md) |
+| Backup/restauração/diagnóstico/supervisor | ✅ | [OPERACAO.md](../docs/OPERACAO.md); `db check` reconhece IXDR/BTLF/BTIN |
 | Matriz final e baseline consolidada | ✅ | [FECHAMENTO_10F.md](FECHAMENTO_10F.md) |
 
 **Dívidas de performance herdadas da Fase 3** (nenhuma bloqueou o critério de
@@ -868,7 +868,7 @@ aceite; candidatas a medir na 10.1/10.3 antes de otimizar):
 | Item | Local | Status |
 |---|---|---|
 | `modb.buffer_pool` (teste) | `tests/buffer_pool_test.cpp` | ✅ 10B |
-| Runner `modb_bench` + JSONL | `benchmarks/` + [plano](PLANO_BENCHMARKS.md) | ✅ 10A |
+| Runner `modb_bench` + JSONL | `benchmarks/` + [plano](../docs/PLANO_BENCHMARKS.md) | ✅ 10A |
 | `modb.benchmark_runner` (infra do runner) | `tests/benchmark_runner_test.cpp` | ✅ 10A |
 | Cenário `storage.buffer_pool.oversubscribed` | `benchmarks/scenarios/` | ✅ 10B |
 | Alvos de fuzzing (preset `fuzz`) | `tests/fuzz/` | ✅ 10D |
@@ -887,7 +887,7 @@ Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 11.1 | ADR do modelo de facades/handles e separação com a Fase 9 | ✅ | 11A · [ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md) |
+| 11.1 | ADR do modelo de facades/handles e separação com a Fase 9 | ✅ | 11A · [ADR-014](../docs/decisions/ADR-014-catalogo-de-facades-e-handles.md) |
 | 11.2 | `FacadeDescriptor` / `MethodDescriptor` + catálogo `vector<>` | ✅ | 11A · Posição no vetor ≠ identidade |
 | 11.3 | `FacadeCatalog` (registro, listagem, lookup) | ✅ | 11A · merge `07ab67c`, tag `0.0.11a` |
 | 11.4 | `FacadeHandle<TFacade>` no cliente (`invoke<Method>`) | ✅ | 11B · merge `ed0d661`, tag `0.0.11b` |
@@ -896,7 +896,7 @@ Definição completa:
 | 11.7 | Delegação ao `OperationRegistry` / `OpCall` | ✅ | 11B · Mesmo commit/rollback/cancel da Fase 9 |
 | 11.8 | Facades a partir de módulos carregados (manifesto) | ✅ | 11D · merge `2252aa1`, tag `0.0.11d` |
 | 11.9 | Exemplo `Accounts`/`transfer` ponta a ponta | ✅ | 11D · `examples/accounts_facade` |
-| 11.10 | Documentar contrato consumidor → handle → facade → registry | ✅ | 11D · [FACADES.md](FACADES.md) |
+| 11.10 | Documentar contrato consumidor → handle → facade → registry | ✅ | 11D · [FACADES.md](../docs/FACADES.md) |
 
 ### Fase 11A — Contratos e FacadeCatalog
 
@@ -954,7 +954,7 @@ Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 12.1 | ADR de handles de arestas e algoritmos de grafos | ✅ | 12A · [ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md), merge `e0f32cb`, tag `0.0.12a` |
+| 12.1 | ADR de handles de arestas e algoritmos de grafos | ✅ | 12A · [ADR-018](../docs/decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md), merge `e0f32cb`, tag `0.0.12a` |
 | 12.2 | `EdgeHandle<From, To, EdgeKind>` runtime-only | ✅ | 12A · Origem, alvo, FieldId e DatabaseId |
 | 12.3 | Factories tipadas para `Ref` / `OwnedRef` | ✅ | 12A · `Embedded` e campo inválido rejeitados |
 | 12.4 | Adjacência em `PersistentVector<Ref<T>>` | ✅ | 12B · merge `dd2adb3`, tag `0.0.12b` |
@@ -1034,14 +1034,14 @@ Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 13.1 | ADR de I/O assíncrono: contrato, fallback, cancelamento e sync | ✅ | [ADR-019](decisions/ADR-019-io-assincrono.md) |
+| 13.1 | ADR de I/O assíncrono: contrato, fallback, cancelamento e sync | ✅ | [ADR-019](../docs/decisions/ADR-019-io-assincrono.md) |
 | 13.2 | `AsyncFile` com backend assíncrono e API próxima de `NativeFile` | ✅ | `include/modb/storage/async_file.hpp`; `modb.async_file` verde no Windows |
 | 13.3 | Backends nativos por plataforma | ✅ | IOCP validado no Windows; POSIX AIO validado em WSL Ubuntu 24.04 (g++ 13.3, toolchain CLion, preset `local-gcc13`) — `modb.async_file` verde nos dois |
 | 13.4 | Integração ao caminho de storage preservando WAL antes de páginas | ✅ | `AsyncWalSink` (`src/tx/wal.cpp`) + `DatabaseOptions::wal_io` (default `sync`); `modb.wal_async_sink` verde no Windows e no Linux |
 | 13.5 | Fila limitada e backpressure | ✅ | `max_inflight`; `modb.async_file` verde no Windows |
 | 13.6 | Cancelamento e propagação de falhas como `Result` | ✅ | `cancel_all` + erros; `modb.async_file` verde no Windows |
-| 13.7 | Benchmarks de I/O assíncrono vs. síncrono | ✅ | Cenário `storage.async_io.{sync,async}`; sem ganho consistente medido (ver [OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md)) |
-| 13.8 | Documentação operacional e limites de uso | ✅ | [OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md) |
+| 13.7 | Benchmarks de I/O assíncrono vs. síncrono | ✅ | Cenário `storage.async_io.{sync,async}`; sem ganho consistente medido (ver [OPERACAO_IO_ASSINCRONO.md](../docs/OPERACAO_IO_ASSINCRONO.md)) |
+| 13.8 | Documentação operacional e limites de uso | ✅ | [OPERACAO_IO_ASSINCRONO.md](../docs/OPERACAO_IO_ASSINCRONO.md) |
 
 ### Testes/artefatos desta fase
 
@@ -1072,7 +1072,7 @@ Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 14.1 | ADR de replicação física read-only, WAL durável, retenção e consistência | ✅ | 14A · [ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md) |
+| 14.1 | ADR de replicação física read-only, WAL durável, retenção e consistência | ✅ | 14A · [ADR-016](../docs/decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md) |
 | 14.2 | Identidade persistente: `DatabaseUuid` + `timeline_id` | ✅ | 14A · `modb.database_identity` |
 | 14.3 | WAL v2: LSN global monotônico persistente + `commit_lsn` | ✅ | 14B · `modb.wal_v2` |
 | 14.4 | Segmentação, checkpoint como posição e política de retenção | ✅ | 14B · `oldest_available_lsn` / checkpoint + ACK |
@@ -1083,7 +1083,7 @@ Definição completa:
 | 14.9 | Modo read-only ao follower | ✅ | 14D · `replica_read_only` |
 | 14.10 | Leitura consistente na réplica | ✅ | 14D · apply sob exclusão; queries no follower |
 | 14.11 | Reconexão, gap, UUID/timeline mismatch e métricas de lag | ✅ | 14E · `modb.replication_recovery` |
-| 14.12 | CLI `modb replicate bootstrap/apply-wal/status`, failpoints e docs | ✅ | 14E · [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md) |
+| 14.12 | CLI `modb replicate bootstrap/apply-wal/status`, failpoints e docs | ✅ | 14E · [OPERACAO_REPLICACAO.md](../docs/OPERACAO_REPLICACAO.md) |
 
 ### Fase 14A — ADR e identidade persistente
 
@@ -1154,7 +1154,7 @@ Definição completa:
 
 | # | Tarefa | Status | Notas |
 |---|---|---|---|
-| 15.1 | ADR do modo `wal_only` | ✅ | 15A · [ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md) |
+| 15.1 | ADR do modo `wal_only` | ✅ | 15A · [ADR-017](../docs/decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md) |
 | 15.2 | Parâmetro `primary_storage` na abertura/CLI | ✅ | 15A · `modb.primary_storage_config` |
 | 15.3 | Primary `wal_only` sem arquivo de dados | ✅ | 15B · `modb.wal_only_primary` |
 | 15.4 | After-images em scratch; reopen restaura LSN/identidade | ✅ | 15B · MCTL + WAL |
@@ -1163,7 +1163,7 @@ Definição completa:
 | 15.7 | Retenção guiada por ACK (sem checkpoint de páginas) | ✅ | 15C · `follower_ack_lsn` |
 | 15.8 | Seed vazio+WAL / doação entre réplicas | ✅ | 15D · `modb.wal_only_bootstrap` |
 | 15.9 | CLI/status (`primary_storage`, ACK, lag) | ✅ | 15E · `seed-wal` + status |
-| 15.10 | Docs operacionais e suítes verdes | ✅ | 15E · [OPERACAO_REPLICACAO.md](OPERACAO_REPLICACAO.md) |
+| 15.10 | Docs operacionais e suítes verdes | ✅ | 15E · [OPERACAO_REPLICACAO.md](../docs/OPERACAO_REPLICACAO.md) |
 
 ### Fase 15A — ADR e parâmetro de instância
 

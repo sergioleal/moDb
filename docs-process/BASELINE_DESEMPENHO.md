@@ -48,4 +48,4 @@ gates oficiais usam Release/RelWithDebInfo e perfil `standard`, com máquina
 ociosa. Variação alta entre duas smokes Debug na mesma máquina não invalida a
 comparabilidade semântica (mesmo `parameters_key`).
 
-Detalhes: [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md).
+Detalhes: [PLANO_BENCHMARKS.md](../docs/PLANO_BENCHMARKS.md).

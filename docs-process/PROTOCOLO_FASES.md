@@ -1385,7 +1385,7 @@ tests/server_streaming_test.cpp                                    (8B–8F, cas
 docs/decisions/ADR-011-*.md                                        (8A)
 ```
 
-[ADR-010](decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md):
+[ADR-010](../docs/decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md):
 rede via sockets nativos próprios (`NativeSocket`, mesmo padrão do
 `NativeFile`) e protocolo próximo do armazenamento lógico — sem dependência
 externa no MVP; asio reavaliado se a complexidade crescer. ADR-011 (Fase 8A):
@@ -1560,7 +1560,7 @@ struct ModuleManifest { ModuleId id; std::uint32_t module_version;
 
 Contrato transacional do `dispatch` (doc codigo-local §Commit): sucesso →
 commit; `Result` de erro **ou** exceção capturada → rollback. Conforme a
-[ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md), módulos no
+[ADR-012](../docs/decisions/ADR-012-runtime-de-modulos-no-processo.md), módulos no
 primeiro runtime são carregados **dentro do processo** a partir de uma origem
 confiável configurada pelo operador. O `ModuleLoader` valida id, versão da API,
 baseline, exports e hash antes do registro; o cliente nunca envia binários nem
@@ -1626,7 +1626,7 @@ scripts/run-benchmarks.ps1|.sh
 ```
 
 O runner segue integralmente
-[PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md), preserva amostras brutas e gera um
+[PLANO_BENCHMARKS.md](../docs/PLANO_BENCHMARKS.md), preserva amostras brutas e gera um
 JSONL autocontido por campanha:
 `modb-benchmark-YYYYMMDDTHHMMSS.mmmZ-<commit>-<host>.jsonl`. TTFR, throughput,
 p50/p95/p99, CPU, memória, I/O, espaço, rede e correção são métricas de primeira
@@ -1696,7 +1696,7 @@ Usar Clang/libFuzzer quando disponível e manter fallback documentado. Cada alvo
 deve impor limites antes de alocar, transformar todo crash corrigido em corpus
 de regressão e rodar com ASan/UBSan. Critério: campanha mínima de 1 h por alvo
 sem crash/OOM/UB, corpus versionado e suítes debug/sanitizers verdes. Tag:
-`0.0.10d`. Entregue — ver [FUZZING.md](FUZZING.md).
+`0.0.10d`. Entregue — ver [FUZZING.md](../docs/FUZZING.md).
 
 ## Fase 10E — Compatibilidade e API pública
 
@@ -1710,8 +1710,8 @@ Artefatos incluem testes com fixtures de versões anteriores, teste de handshake
 incompatível e projeto consumidor que compila apenas contra a API instalada.
 Critério: recusas retornam erro específico e mensagem clara; matriz automatizada
 e exemplos externos compilam. Tag: `0.0.10e`. Entregue — ver
-[COMPATIBILIDADE.md](COMPATIBILIDADE.md), [API_PUBLICA.md](API_PUBLICA.md) e
-[ADR-015](decisions/ADR-015-compatibilidade.md).
+[COMPATIBILIDADE.md](../docs/COMPATIBILIDADE.md), [API_PUBLICA.md](../docs/API_PUBLICA.md) e
+[ADR-015](../docs/decisions/ADR-015-compatibilidade.md).
 
 ## Fase 10F — Documentação, operação e fechamento
 
@@ -1723,7 +1723,7 @@ restauração e diagnóstico com `modb db check`.
 Executar matriz final de build/teste/benchmark, registrar baseline final e
 compará-la à 10A. Critério: fluxo documental validado do zero; backup restaurado
 e verificado; documentação sem referências obsoletas; suíte inteira verde nos
-presets suportados. Tag: `0.0.10f`. Entregue — ver [OPERACAO.md](OPERACAO.md) e
+presets suportados. Tag: `0.0.10f`. Entregue — ver [OPERACAO.md](../docs/OPERACAO.md) e
 [FECHAMENTO_10F.md](FECHAMENTO_10F.md).
 
 ## Critério de conclusão
@@ -1740,7 +1740,7 @@ três presets.
 
 A Fase 11 começa depois das Fases 9 e 10. Cada subfase termina com capacidade
 consumível e prova automatizada. Decisão:
-[ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md).
+[ADR-014](../docs/decisions/ADR-014-catalogo-de-facades-e-handles.md).
 
 ## Fase 11A — Contratos e FacadeCatalog
 
@@ -1829,7 +1829,7 @@ cobertas. Status: ✅ (11A–11D).
 
 A fase reutiliza streaming, cancelamento e índices das Fases 6–7 e começa após
 a estabilização da Fase 10. Decisão:
-[ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md).
+[ADR-018](../docs/decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md).
 
 ## Fase 12A — EdgeHandle e factories
 
@@ -1994,7 +1994,7 @@ primary, escalando leitura sem violar o single-writer. Esta fase começa depois
 das Fases 5, 6 e 8: WAL/recuperação, snapshots/MVCC e rede com backpressure
 precisam existir. Ela também **transforma o WAL efêmero atual em um WAL
 durável, segmentado e retido** — pré-requisito da replicação. Decisão:
-[ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
+[ADR-016](../docs/decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
 
 Cinco entregas: 14A (identidade) → 14B (WAL v2) → 14C (protocolo/bootstrap) →
 14D (streaming/applier/read-only) → 14E (reconexão/CLI/docs).
@@ -2148,7 +2148,7 @@ Permitir que o primary de escrita, via parâmetro, **não crie arquivos de
 dados** — apenas mantenha o WAL e replique; as instâncias de leitura mantêm os
 arquivos de dados. Depende da Fase 14 completa (WAL v2, protocolo, applier,
 follower read-only). Decisão:
-[ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md).
+[ADR-017](../docs/decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md).
 
 Cinco entregas: 15A (parâmetro) → 15B (primary sem data files) → 15C
 (ACK/retenção) → 15D (bootstrap/seed) → 15E (CLI/docs).

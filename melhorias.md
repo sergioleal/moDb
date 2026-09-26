@@ -590,7 +590,8 @@ Dois itens menores confirmados, para quando estiver mexendo nos arquivos: o over
 `TableHeap::open` (usar o overload `read(PageId, Page&)` já existente); e
 `Catalog::table`/`mutable_table` fazem `find(std::string{name})` — habilitar lookup
 heterogêneo (`hash` transparente + `std::equal_to<>`) elimina a string temporária por
-consulta ([catalog.cpp:65, 92](src/catalog/catalog.cpp:65)).
+consulta (`src/catalog/catalog.cpp:65, 92` — arquivo removido junto com o modelo
+relacional em `1ed5437`; o item não se aplica mais).
 
 ---
 

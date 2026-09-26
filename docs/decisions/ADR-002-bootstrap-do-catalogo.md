@@ -8,7 +8,7 @@
 O catálogo do ODB++ também é composto por objetos: `TypeDefinition`,
 `AttributeDefinition`, `Baseline` são gravados no mesmo ObjectStore, usando o
 mesmo codec genérico dos objetos de usuário (ver
-[arquitetura.md](../arquitetura.md) §15 e §21). Isso cria um problema de
+[arquitetura.md](../../arquitetura.md) §15 e §21). Isso cria um problema de
 bootstrap: para decodificar uma `TypeDefinition` persistida seria preciso já
 conhecer a `TypeDefinition` que descreve `TypeDefinition` — uma recursão sem
 fundo.

@@ -92,29 +92,29 @@ centrais, e registrar o pivô formalmente.
 Tarefas:
 
 - [x] Definir o escopo oficial do MVP OO (fases 0–3) e o que fica pós-MVP.
-      ([ADR-007](decisions/ADR-007-limites-mvp-oo.md))
+      ([ADR-007](../docs/decisions/ADR-007-limites-mvp-oo.md))
 - [x] Definir a representação do `ObjectId` (largura, geração/sequência,
       relação com a localização física; a identidade nunca muda, o endereço
-      físico sim). ([ADR-001](decisions/ADR-001-identidade.md))
+      físico sim). ([ADR-001](../docs/decisions/ADR-001-identidade.md))
 - [x] Definir identificadores fortes: `ObjectId`, `TypeDefinitionId`,
       `FieldId`, `BlobId`, `BaselineId`, `DatabaseId`.
-      ([ADR-001](decisions/ADR-001-identidade.md))
+      ([ADR-001](../docs/decisions/ADR-001-identidade.md))
 - [x] Definir os tipos de atributo primitivos do MVP (`bool`, `int64`,
       `double`, `string`, `bytes`, `ObjectId`, `BlobId`, `null`) e suas regras
       de conversão no ProjectionPlan (`Convert`).
-      ([ADR-003](decisions/ADR-003-tipos-e-encoding.md))
+      ([ADR-003](../docs/decisions/ADR-003-tipos-e-encoding.md))
 - [x] Definir o layout do `ObjectHeader` (ObjectId, TypeDefinitionId) e do
       payload no formato binário.
-      ([ADR-003](decisions/ADR-003-tipos-e-encoding.md) e Fase 2 do protocolo)
+      ([ADR-003](../docs/decisions/ADR-003-tipos-e-encoding.md) e Fase 2 do protocolo)
 - [x] Definir a estratégia do mapa de identidade (ObjectId → localização
       física) e seu formato persistente.
-      ([ADR-005](decisions/ADR-005-mapa-de-identidade.md))
+      ([ADR-005](../docs/decisions/ADR-005-mapa-de-identidade.md))
 - [x] Definir o problema de bootstrap do catálogo-como-objetos (meta-tipos
       primordiais fixos que descrevem TypeDefinition/AttributeDefinition).
-      ([ADR-002](decisions/ADR-002-bootstrap-do-catalogo.md))
+      ([ADR-002](../docs/decisions/ADR-002-bootstrap-do-catalogo.md))
 - [x] Decidir a política para o código relacional: aposentar `Catalog`/`Table`/
       `Schema`/`Row` quando a fase 2 entregar o caminho vertical OO.
-      ([ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md))
+      ([ADR-006](../docs/decisions/ADR-006-destino-do-codigo-relacional.md))
 - [x] Marcar como supersedidos os documentos relacionais e atualizar o
       `GLOSSARIO.md` com os termos OO.
 - [x] Registrar as decisões em `docs/decisions/`.
@@ -186,7 +186,7 @@ Tarefas:
       (`type define/list`, `object create/get/remove`). Removido o Anel 1
       (`Catalog`/`Table`/comando `catalog`/`catalog_test`); `Row`/`Value`/
       `Schema` e o codec relacional ficam como tooling de storage cru
-      ([ADR-006, Atualização](decisions/ADR-006-destino-do-codigo-relacional.md)).
+      ([ADR-006, Atualização](../docs/decisions/ADR-006-destino-do-codigo-relacional.md)).
 - [x] Teste de integração: centenas de objetos em múltiplas páginas,
       fechamento e reabertura. (500 objetos em `object_store_test`)
 
@@ -253,7 +253,7 @@ Tarefas:
       `BlobId` (o objeto pai guarda apenas a referência).
 - [x] Implementar `PersistentSet<T>` e `PersistentMap<K,V>`.
 - [x] Regras de integridade: remoção de objeto referenciado por `Ref`
-      ([ADR-008](decisions/ADR-008-integridade-de-referencias.md): referência
+      ([ADR-008](../docs/decisions/ADR-008-integridade-de-referencias.md): referência
       pendente permitida e detectável na resolução).
 - [x] Estender `database_check` para blobs (reconhecimento + validação
       estrutural de BLBP). Checagem semântica (cadeia de blob, refs órfãs,
@@ -576,7 +576,7 @@ Tarefas:
       e modo `read_only`/`read_write`; implementar `ModuleLoader` dentro do
       processo, restrito a uma origem confiável configurada pelo operador — o
       cliente nunca envia binários nem escolhe caminhos de carga
-      ([ADR-012](decisions/ADR-012-runtime-de-modulos-no-processo.md)).
+      ([ADR-012](../docs/decisions/ADR-012-runtime-de-modulos-no-processo.md)).
 - [x] Implementar `client.call<TransferFunds>(source, destination, amount)`.
 - [x] Migrações como Operations, reutilizando a mesma infraestrutura
       (`MigrationOperation` → ExecutionContext → Transaction → Projection).
@@ -602,7 +602,7 @@ ou artefato reproduzível e tag própria.
 
 #### Fase 10A — Runner e baseline de benchmarks
 
-- [x] Implementar o [plano completo de benchmarks](PLANO_BENCHMARKS.md):
+- [x] Implementar o [plano completo de benchmarks](../docs/PLANO_BENCHMARKS.md):
       runner, datasets determinísticos, perfis, coleta uniforme de todas as
       camadas e um JSONL autocontido por campanha, nomeado com data/hora UTC.
 - [x] Registrar a baseline antes das otimizações, incluindo TTFR, throughput,
@@ -645,7 +645,7 @@ perfil e benchmark reproduzível; nenhum ganho é aceito só por hipótese. Tag:
 
 Critério de aceite: alvos executam por 1 h sem crash/OOM/UB; corpus de regressão
 fica versionado; suítes debug/sanitizers continuam verdes. Tag: `0.0.10d`.
-Ver [FUZZING.md](FUZZING.md).
+Ver [FUZZING.md](../docs/FUZZING.md).
 
 #### Fase 10E — Compatibilidade e API pública
 
@@ -656,8 +656,8 @@ Ver [FUZZING.md](FUZZING.md).
 
 Critério de aceite: matriz de compatibilidade automatizada cobre
 arquivo/protocolo/API; exemplos públicos compilam como consumidores externos.
-Tag: `0.0.10e`. Ver [COMPATIBILIDADE.md](COMPATIBILIDADE.md) e
-[API_PUBLICA.md](API_PUBLICA.md).
+Tag: `0.0.10e`. Ver [COMPATIBILIDADE.md](../docs/COMPATIBILIDADE.md) e
+[API_PUBLICA.md](../docs/API_PUBLICA.md).
 
 #### Fase 10F — Documentação, operação e fechamento
 
@@ -670,7 +670,7 @@ Tag: `0.0.10e`. Ver [COMPATIBILIDADE.md](COMPATIBILIDADE.md) e
 Critério de aceite: usuário novo percorre o exemplo OO, faz backup/restauração e
 diagnóstico somente com a documentação; suíte inteira verde nos presets
 suportados e baseline final registrada. Tag: `0.0.10f`.
-Ver [OPERACAO.md](OPERACAO.md) e [FECHAMENTO_10F.md](FECHAMENTO_10F.md).
+Ver [OPERACAO.md](../docs/OPERACAO.md) e [FECHAMENTO_10F.md](FECHAMENTO_10F.md).
 
 Entregáveis: runner e arquivos históricos de benchmark; API e formato
 versionados; documentação completa para usuários e contribuidores.
@@ -688,7 +688,7 @@ A Fase 9 permanece a unidade de execução (`Operation` + despacho + contrato
 transacional). A Fase 11 acrescenta a superfície de API: catálogo heterogêneo
 (`vector<FacadeDescriptor>`), descoberta/negociação de versão e
 `FacadeHandle<TFacade>` com `invoke<Method>(args...)`.
-([ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md)).
+([ADR-014](../docs/decisions/ADR-014-catalogo-de-facades-e-handles.md)).
 
 A fase é dividida em quatro entregas verticais, cada uma com teste e tag própria.
 
@@ -696,7 +696,7 @@ A fase é dividida em quatro entregas verticais, cada uma com teste e tag própr
 
 - [x] Registrar em ADR o modelo de facades, handles, identidade estável
       (`FacadeId`) e a separação com o registry da Fase 9
-      ([ADR-014](decisions/ADR-014-catalogo-de-facades-e-handles.md)).
+      ([ADR-014](../docs/decisions/ADR-014-catalogo-de-facades-e-handles.md)).
 - [x] Definir `FacadeDescriptor` / `MethodDescriptor` e o catálogo em memória
       como `vector<FacadeDescriptor>` (posição no vetor nunca é identidade).
 - [x] Implementar `FacadeCatalog` (registro, listagem, lookup por `FacadeId`
@@ -752,7 +752,7 @@ algoritmos básicos de grafos sob snapshot, reutilizando `Ref<T>`,
 `EdgeHandle<From, To, Kind>` é uma visão runtime da aresta: guarda
 `DatabaseId`, origem, alvo e `FieldId`, mas não é persistido. `Ref<T>` e
 `OwnedRef<T>` continuam sendo a representação no arquivo; `Embedded<T>` não é
-vértice. ([ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md)).
+vértice. ([ADR-018](../docs/decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md)).
 
 A fase é dividida em cinco entregas verticais, cada uma com teste e tag própria.
 
@@ -760,7 +760,7 @@ A fase é dividida em cinco entregas verticais, cada uma com teste e tag própri
 
 - [x] Registrar em ADR identidade, persistência, direção, ownership e política
       de referências órfãs para arestas
-      ([ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md)).
+      ([ADR-018](../docs/decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md)).
 - [x] Implementar `EdgeHandle<From, To, EdgeKind>` runtime-only, com origem,
       alvo, `FieldId` e resolução sob `Snapshot`.
 - [x] Implementar factories tipadas para campos escalares `Ref<T>` e
@@ -847,7 +847,7 @@ Tag alvo: `0.0.13`. Concluída em 2026-07-24: `DatabaseOptions::wal_io` (sync
 default / async) via `AsyncWalSink`; backend assíncrono valida em Windows
 (IOCP) e Linux (POSIX AIO, WSL Ubuntu 24.04); benchmark
 `storage.async_io.{sync,async}` sem ganho consistente medido — ver
-[OPERACAO_IO_ASSINCRONO.md](OPERACAO_IO_ASSINCRONO.md).
+[OPERACAO_IO_ASSINCRONO.md](../docs/OPERACAO_IO_ASSINCRONO.md).
 
 ### Fase 14 — Réplica de leitura por streaming do WAL
 
@@ -859,7 +859,7 @@ O primary continua sendo o único produtor de commits. O follower tem arquivo
 local próprio (nunca volume compartilhado), aplica o stream de forma
 idempotente e serve apenas leituras. Promoção, eleição de líder, failover
 automático e replicação síncrona/quórum ficam fora desta fase; ver
-[ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
+[ADR-016](../docs/decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md).
 
 Esta fase depende de tornar o WAL durável: hoje ele é recriado e removido a
 cada commit e o `lsn` reinicia por sessão, o que impede reconexão e histórico.
@@ -870,7 +870,7 @@ A fase é dividida em cinco entregas verticais, cada uma com teste e tag própri
 
 - [x] Registrar em ADR o modelo de replicação física read-only, WAL durável,
       retenção, consistência na réplica e papel do follower
-      ([ADR-016](decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md)).
+      ([ADR-016](../docs/decisions/ADR-016-replica-de-leitura-por-streaming-do-wal.md)).
 - [x] Dar identidade persistente ao banco: `DatabaseUuid` e `timeline_id`
       gravados no DBRT (ou página de controle); expor no handshake futuro.
 
@@ -942,7 +942,7 @@ instâncias de leitura, que são as donas dos arquivos de dados.
 O modo padrão (`primary_storage=full`) permanece o da Fase 14: primary com
 dados + WAL. O modo novo (`primary_storage=wal_only`) é opt-in via parâmetro
 de instância. Promoção/failover automático e multi-writer ficam fora; ver
-[ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md).
+[ADR-017](../docs/decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md).
 
 Depende da Fase 14 (WAL v2, canal de replicação, follower read-only com apply).
 
@@ -952,7 +952,7 @@ A fase é dividida em cinco entregas verticais, cada uma com teste e tag própri
 
 - [x] Registrar em ADR o modo `wal_only`, papéis primary/réplica, durabilidade
       por ACK e bootstrap sem arquivo de dados no primary
-      ([ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md)).
+      ([ADR-017](../docs/decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md)).
 - [x] Introduzir o parâmetro `primary_storage` (`full` | `wal_only`) na abertura
       da instância primary (API + CLI); rejeitar `wal_only` em follower
       (`invalid_instance_config`).
@@ -1118,7 +1118,7 @@ operacional; testes de réplica vazia, réplica parcial, retomada, gap e hashes.
   por download de WAL para réplica vazia/parcial está na Fase 16);
 - containers, orquestração, funções como serviço e demais ambientes serverless
   como alvo de produto ou modelo operacional (ver Princípio VIII —
-  Bare Metal em [CONSTITUTION_RING0.md](CONSTITUTION_RING0.md)); o processo
+  Bare Metal em [CONSTITUTION_RING0.md](../docs/CONSTITUTION_RING0.md)); o processo
   nativo no SO hospedeiro é o modelo de implantação;
 - otimizador baseado em custos com estatísticas sofisticadas;
 - criptografia transparente do arquivo;

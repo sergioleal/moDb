@@ -888,3 +888,11 @@ bypass the WAL.
 - **`docs/decisions/`** — the ADRs behind specific design choices mentioned
   throughout this guide (schema evolution, ownership/cascade semantics,
   facades, replication, async I/O, and more).
+
+To browse all of this as one navigable HTML site — sidebar by section,
+full-text search, and code references such as `table_heap.cpp:353` opening at
+that line — run `.\scripts\build-docs.ps1 -Open` (or `./scripts/build-docs.sh`).
+It renders every `*.md` in the repository into `build/docs-site/` (not
+versioned), needs Python 3 with the `markdown` package, and fails if any
+internal link is broken. The `.md` files stay the source of truth; edit them,
+not the HTML.

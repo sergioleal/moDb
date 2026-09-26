@@ -14,7 +14,7 @@ Commit de entrega: `8d6a7a5` (merge em `master`).
 
 ## Demo operacional (backup/restore/`db check`)
 
-Validado conforme [OPERACAO.md](OPERACAO.md):
+Validado conforme [OPERACAO.md](../docs/OPERACAO.md):
 
 1. `modb demo employee` + `modb oo employee index`
 2. `modb db check` verde (reconhece DBRT/IDMD/IDMP/BLBP/IXDR/BTLF/BTIN)
@@ -62,6 +62,6 @@ Detalhes do formato JSONL: [BASELINE_DESEMPENHO.md](BASELINE_DESEMPENHO.md).
 ## Documentos entregues nesta tag
 
 - [README.md](../README.md) — OO first
-- [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) — DBRT…WAL
-- [OPERACAO.md](OPERACAO.md) — backup/restore/supervisor/`db check`
+- [FORMATO_DE_ARQUIVO.md](../docs/FORMATO_DE_ARQUIVO.md) — DBRT…WAL
+- [OPERACAO.md](../docs/OPERACAO.md) — backup/restore/supervisor/`db check`
 - `db check` reconhece páginas IXDR/BTLF/BTIN
