@@ -318,8 +318,8 @@ a anterior até um `collect_garbage()` explícito. Espalha os registros por 20 m
 páginas e é a causa dos misses de `update_shrink`/`delete`.
 
 - [x] 33.1 Confirmar: `collect_garbage()` entre as fases devolve o espaço? *(Não: recolhe 100k versões, mas o arquivo cresce igual e cada GC leva 30–64 s — dois defeitos, 33.2 e 33.3)*
-- [ ] 33.2 Reaproveitar páginas esvaziadas: hoje uma página que fica vazia sai da cadeia do heap e nunca mais é usada (sem lista de páginas livres)
-- [ ] 33.3 `BufferPool::evict_until` é O(páginas sujas) por operação: transação que suja mais páginas que o cache fica O(n²) (GC 10k: 70 ms; 100k: 30–64 s)
+- [x] 33.2 *(feito, ADR-023: lista livre por heap; com GC o arquivo para em 107 MB em vez de 159,6)* Reaproveitar páginas esvaziadas: hoje uma página que fica vazia sai da cadeia do heap e nunca mais é usada (sem lista de páginas livres)
+- [x] 33.3 *(feito: duas listas no BufferPool; GC a 100k 30–64 s → 1,1–1,4 s)* `BufferPool::evict_until` é O(páginas sujas) por operação: transação que suja mais páginas que o cache fica O(n²) (GC 10k: 70 ms; 100k: 30–64 s)
 - [ ] 33.4 Só depois: desenho de recuperação automática de versões (ADR — MVCC e réplicas), com predição e antes/depois
 
 ### P2

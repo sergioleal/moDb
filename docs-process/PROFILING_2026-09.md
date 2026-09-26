@@ -1185,3 +1185,71 @@ coleta é quadrática. Os dois defeitos vêm antes (T33.2 e T33.3 no plano).
 **Correção de um texto anterior:** a T29 dizia que o arquivo crescia "com
 `retained_versions` = 0". Esse campo só é calculado no `snapshot_hold`; no
 `crud_full` ele é sempre 0 e não prova nada. O crescimento em si foi medido.
+
+## T33.3 — Transação grande sem custo quadrático no buffer pool
+
+`BufferPool` passa a manter duas listas: `entries_`, só com frames
+evictáveis (limpos e não pinados) em ordem LRU, e `held_`, com os sujos ou
+pinados. Toda mudança de `dirty`/`pin` recoloca o frame na lista certa por
+`splice` (O(1), sem invalidar o iterador do índice), e despejar é tirar da
+cauda de `entries_`. Comportamento observável igual — teste novo em
+`buffer_pool_test` com 40 páginas sujas num pool de 4.
+
+Medida pelo mesmo experimento da T33.1 (build temporário com `collect_garbage()`
+entre as fases de `crud_full.100k`), antes 29,7 / 32,4 / 64,1 s.
+
+### Predição (escrita antes de rodar)
+
+Cada GC a 100k cai para **menos de 3 s** — perto do linear a partir dos 56–76 ms
+medidos a 10k. As fases normais (sem GC) ficam dentro de ±5%. *Refutação:*
+acima de 10 s.
+
+### Resultado da T33.3 — confirmada
+
+GC entre as fases de `crud_full.100k`, duas execuções:
+
+| depois de | antes | depois |
+|---|---|---|
+| `update_inplace` | 29,7 s | **1,12–1,16 s** |
+| `update_grow` | 32,4 s | **1,18–1,19 s** |
+| `update_shrink` | 64,1 s | **1,33–1,37 s** |
+
+**26–47× mais rápido**, dentro do previsto (< 3 s); o caso inteiro, com os três
+GCs, foi de 133 s para 10–11 s. Fases normais, A/B alternado, 5 repetições
+([dados](profiling/2026-09/t333-summary.md)): de −1,5% a +6,7%, nenhuma pior
+(`mixed_oltp` +6,7%, `update_inplace` +5,1%). O arquivo continua crescendo
+igual com o GC — é o defeito 1 (T33.2).
+
+## T33.2 — Reaproveitar as páginas esvaziadas ([ADR-023](../docs/decisions/ADR-023-lista-de-paginas-livres-do-heap.md))
+
+Cada `TableHeap` passa a ter uma lista de páginas livres: a raiz `THRP` ganha
+`free_head` (campo no fim, zero em raízes antigas = vazia); a página que o
+`erase` esvazia vira uma `SlottedPage` vazia cujo `next_page` aponta para a
+próxima livre; e o heap desempilha dali antes de pedir página nova ao arquivo.
+Sem tipo de página novo — o `database_check` a vê como página de heap vazia.
+Testes em `table_heap_test`: a página esvaziada é a próxima usada, o arquivo não
+cresce, a lista sobrevive a reabrir e ao reparo; com o reaproveitamento
+desligado (mutação), 4 checagens falham.
+
+### Predição (escrita antes de rodar)
+
+Com `collect_garbage()` entre as fases (experimento da T33.1), o arquivo para
+em ~100 MB em vez de 159,6 MB, e `update_shrink` não cresce. Sem GC, nada muda.
+*Refutação:* arquivo acima de 130 MB.
+
+### Resultado — confirmada
+
+| depois de | sem lista livre | com lista livre |
+|---|---|---|
+| `update_inplace` (+GC) | 79,1 MB | 79,1 MB |
+| `update_grow` (+GC) | 144,2 MB | **107,0 MB** |
+| `update_shrink` (+GC) | 159,6 MB | **107,0 MB** |
+
+Duas execuções, `hash_match` verdadeiro nas duas. Sem GC, A/B alternado contra
+o commit anterior, 5 repetições ([dados](profiling/2026-09/t332-summary.md)):
+todas as fases de `crud_full.100k` e `create_delete_interleaved.100k` entre
+−2,2% e +2,5% — ruído.
+
+O arquivo ainda não **encolhe** (páginas livres ocupam espaço até serem
+reusadas), e a lista é por heap: páginas livres do heap de dados não servem ao
+`IdentityMap`, aos índices nem ao `BlobStore`.

@@ -30,6 +30,9 @@ struct RootMetadata {
     std::optional<PageId> last;
     std::uint64_t page_count{};
     std::uint64_t record_count{};
+    // Campo acrescentado no fim da raiz (T33.2, ADR-023); zero em raízes
+    // anteriores = lista livre vazia. Não muda a versão do formato.
+    std::optional<PageId> free_head;
 };
 
 // Converte zero no sentinela de ausência usado pelo formato.
@@ -47,6 +50,7 @@ Page encode_root(const RootMetadata& metadata) {
     writer.write_u64(metadata.last ? metadata.last->value : 0);
     writer.write_u64(metadata.page_count);
     writer.write_u64(metadata.record_count);
+    writer.write_u64(metadata.free_head ? metadata.free_head->value : 0);
 
     Page page;
     std::copy(writer.bytes().begin(), writer.bytes().end(), page.bytes().begin());
@@ -82,8 +86,11 @@ Result<RootMetadata> decode_root(const Page& page) {
             Error{ErrorCode::corrupt_page, "TableHeap root contains unknown flags"});
     }
 
+    // Ausente (zero) nas raízes anteriores ao ADR-023.
+    auto free_head = reader.read_u64();
     RootMetadata metadata{optional_page_id(*first), optional_page_id(*last),
-                          *page_count, *record_count};
+                          *page_count, *record_count,
+                          free_head ? optional_page_id(*free_head) : std::nullopt};
     const auto empty = metadata.page_count == 0;
     if (metadata.first.has_value() != metadata.last.has_value() ||
         empty != !metadata.first.has_value() || (empty && metadata.record_count != 0)) {
@@ -172,6 +179,8 @@ Result<TableHeapRepairReport> repair_table_heap(PageFile& file, PageId root) {
         }
         rebuilt = RootMetadata{metadata->first, last, pages, records};
     }
+    // A lista livre não é derivável da cadeia de dados: o reparo a preserva.
+    rebuilt.free_head = metadata->free_head;
 
     // Só reescreve a raiz quando algum campo realmente mudou.
     const bool changed = rebuilt.first != metadata->first || rebuilt.last != metadata->last ||
@@ -231,6 +240,7 @@ Result<TableHeap> TableHeap::open(PageFile& file, PageId root,
     // Monta o objeto com o estado persistido para validar toda a cadeia.
     TableHeap heap{file, root, std::move(*pool), metadata->first, metadata->last,
                    metadata->page_count, metadata->record_count};
+    heap.free_head_ = metadata->free_head;
     // Percorre assinatura, versões, ligações e ciclos antes de retornar.
     if (auto pages = heap.layout(); !pages) {
         return std::unexpected(pages.error());
@@ -245,7 +255,26 @@ Result<void> TableHeap::persist_root() {
     // Direto no arquivo, NÃO por write_page: a raiz tem estágio próprio, e
     // passar por lá contaria o mesmo tempo duas vezes.
     return file_->write(root_, encode_root(RootMetadata{
-                                   first_, last_, page_count_, record_count_}));
+                                   first_, last_, page_count_, record_count_, free_head_}));
+}
+
+Result<PageId> TableHeap::acquire_page() {
+    if (!free_head_) {
+        return file_->allocate_page();
+    }
+    // A página livre é uma SlottedPage vazia; `next_page` é a próxima livre.
+    const auto id = *free_head_;
+    auto page = load_trusted(id);
+    if (!page) {
+        return std::unexpected(page.error());
+    }
+    if (page->record_count() != 0) {
+        return std::unexpected(Error{ErrorCode::corrupt_page,
+                                     "TableHeap free-list page " + std::to_string(id.value) +
+                                         " is not empty"});
+    }
+    free_head_ = page->next_page();
+    return id;
 }
 
 Result<void> TableHeap::write_page(PageId id, const Page& page) {
@@ -327,7 +356,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
     }
     // A primeira inserção cria a primeira página de dados do heap vazio.
     if (!first_) {
-        auto page_id = file_->allocate_page();
+        auto page_id = acquire_page();
         if (!page_id) {
             return std::unexpected(page_id.error());
         }
@@ -467,7 +496,7 @@ Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
             "TableHeap last page unexpectedly has a next-page link",
         });
     }
-    auto new_page_id = file_->allocate_page();
+    auto new_page_id = acquire_page();
     if (!new_page_id) {
         return std::unexpected(new_page_id.error());
     }
@@ -864,10 +893,22 @@ Result<void> TableHeap::erase(RecordId id) {
         first_.reset();
         last_.reset();
     }
+    // A página vazia vai para o topo da lista livre em vez de ficar órfã
+    // (T33.2, ADR-023): sem isso, o espaço que o GC libera nunca volta a ser
+    // usado e o arquivo só cresce. Continua sendo uma SlottedPage válida (o
+    // `database_check` a vê como página de heap vazia); só o `next_page` muda
+    // de papel.
+    auto freed = SlottedPage::create();
+    if (auto linked = freed.set_next_page(free_head_); !linked) {
+        return std::unexpected(linked.error());
+    }
+    if (auto written = write_page(id.page, freed.page()); !written) {
+        return std::unexpected(written.error());
+    }
+    free_head_ = id.page;
     if (auto persisted = persist_root(); !persisted) {
         return std::unexpected(persisted.error());
     }
-    // A página física órfã será reaproveitada por um futuro free-page manager.
     return {};
 }
 

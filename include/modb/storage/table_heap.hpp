@@ -156,6 +156,9 @@ private:
     // da raiz não passa por aqui, para os dois estágios não se contarem duas
     // vezes.
     [[nodiscard]] Result<void> write_page(PageId id, const Page& page);
+    // Página para crescer o heap: a do topo da lista livre, se houver; senão uma
+    // nova do arquivo (T33.2, ADR-023).
+    [[nodiscard]] Result<PageId> acquire_page();
 
     // Ponto único de escrita em insertion_capacity_by_page_ que mantém
     // capacity_index_ sincronizado (ação A2, docs-process/PLANO_PROFILING.md
@@ -190,6 +193,10 @@ private:
     // Identificam os extremos da cadeia de páginas de dados.
     std::optional<PageId> first_;
     std::optional<PageId> last_;
+    // Topo da lista de páginas livres do heap (T33.2, ADR-023): páginas que o
+    // `erase` esvaziou e tirou da cadeia de dados. Cada uma é uma SlottedPage
+    // vazia cujo `next_page` aponta para a próxima livre.
+    std::optional<PageId> free_head_;
     // Espelham os contadores persistidos na raiz dedicada.
     std::uint64_t page_count_{};
     std::uint64_t record_count_{};

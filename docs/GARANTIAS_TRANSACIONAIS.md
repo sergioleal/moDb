@@ -175,7 +175,10 @@ inválido mantém a semântica de fim lógico do formato.
   [ADR-001](decisions/ADR-001-identidade.md): `ObjectId` nunca é reutilizado,
   mesmo através de um rollback — apenas cria um **gap**.
 - **`allocate_page` é imediato.** Páginas alocadas por uma transação abortada
-  ficam órfãs no arquivo (sem free list no MVP), visíveis ao `database_check`.
+  ficam órfãs no arquivo, visíveis ao `database_check`. Páginas que o `erase`
+  esvazia vão para a lista livre do próprio `TableHeap` e são reusadas por ele
+  ([ADR-023](decisions/ADR-023-lista-de-paginas-livres-do-heap.md)); não há
+  lista livre global no `PageFile`.
 - **O WAL só é removido no rollback** (que antes faz um checkpoint, para não
   perder commits ainda não checkpointados — ADR-022). O checkpoint avança um
   LSN; não trunca o WAL. *(Até 2026-09 este item dizia "checkpoint = remoção do

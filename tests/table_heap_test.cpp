@@ -492,6 +492,85 @@ int main() {
         }
     }
 
+    // --- lista de páginas livres (T33.2, ADR-023) ---
+    // Uma página que o erase esvazia sai da cadeia de dados e vai para a lista
+    // livre; a próxima página de que o heap precisar é ela, sem crescer o
+    // arquivo -- inclusive depois de fechar e reabrir.
+    {
+        TemporaryDatabase free_db;
+        const std::vector<std::byte> big(1900, std::byte{0x5A});   // 4 por página
+        PageId free_root{};
+        PageId retired{};
+        std::uint64_t file_pages = 0;
+        {
+            auto file = PageFile::create(free_db.path());
+            auto heap = file ? TableHeap::create(*file) : Result<TableHeap>{std::unexpected(file.error())};
+            suite.check(file.has_value() && heap.has_value(), "free-list heap is created");
+            if (!file || !heap) {
+                return suite.finish();
+            }
+            free_root = heap->root_page();
+            std::vector<RecordId> ids;
+            for (int i = 0; i < 12; ++i) {
+                if (auto id = heap->insert(big)) {
+                    ids.push_back(*id);
+                }
+            }
+            suite.check(ids.size() == 12 && heap->page_count() == 3, "12 records fill three pages");
+            retired = ids.front().page;
+            for (const auto& id : ids) {
+                if (id.page == retired) {
+                    (void)heap->erase(id);
+                }
+            }
+            suite.check(heap->page_count() == 2, "the emptied page leaves the data chain");
+            file_pages = file->page_count();
+            bool reused = false;
+            for (int i = 0; i < 4; ++i) {
+                auto id = heap->insert(big);
+                reused = reused || (id && id->page == retired);
+            }
+            suite.check(reused, "the next page the heap needs is the emptied one");
+            suite.check(file->page_count() == file_pages, "reusing a free page does not grow the file");
+            // Esvazia de novo a mesma página e fecha: a lista livre precisa sobreviver.
+            auto records = heap->scan();
+            if (records) {
+                for (const auto& id : *records) {
+                    if (id.page == retired) {
+                        (void)heap->erase(id);
+                    }
+                }
+            }
+            suite.check(file->flush().has_value(), "free-list heap is flushed");
+        }
+        {
+            auto file = PageFile::open(free_db.path());
+            auto heap = file ? TableHeap::open(*file, free_root)
+                             : Result<TableHeap>{std::unexpected(file.error())};
+            suite.check(heap.has_value(), "free-list heap reopens");
+            if (heap) {
+                const auto before = file->page_count();
+                bool reused = false;
+                for (int i = 0; i < 4; ++i) {
+                    auto id = heap->insert(big);
+                    reused = reused || (id && id->page == retired);
+                }
+                suite.check(reused && file->page_count() == before,
+                            "after reopening, the persisted free page is reused without growing the file");
+                auto records = heap->scan();
+                suite.check(records.has_value() && records->size() == 12,
+                            "every live record is still in the data chain");
+            }
+        }
+        {
+            auto file = PageFile::open(free_db.path());
+            if (file) {
+                auto report = repair_table_heap(*file, free_root);
+                suite.check(report.has_value(), "repair works on a heap with a free list");
+            }
+        }
+    }
+
     // Encerra o processo com o resultado acumulado.
     return suite.finish();
 }

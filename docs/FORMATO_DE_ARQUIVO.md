@@ -37,7 +37,7 @@ Abertura rejeita major incompatível ou minor futura não suportada.
 | `BTLF` | B-tree leaf | folhas do índice |
 | `BTIN` | B-tree internal | nós internos |
 | `SLPG` | Slotted page | registros de tamanho variável (heaps) |
-| `THRP` | TableHeap root | raiz de um heap de registros |
+| `THRP` | TableHeap root | raiz de um heap de registros; desde 2026-09 guarda também `free_head`, a lista de páginas livres do heap (campo no fim, zero = vazia; [ADR-023](decisions/ADR-023-lista-de-paginas-livres-do-heap.md)) |
 
 `modb db check` classifica essas assinaturas e valida cabeçalhos básicos
 (versão/comprimento). Cadeias semânticas profundas (ciclos de blob, consistência
