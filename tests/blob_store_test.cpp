@@ -7,6 +7,7 @@
 #include "test_support.hpp"
 
 // Disponibiliza o relógio do nome único.
+#include <algorithm>
 #include <chrono>
 // Disponibiliza std::byte.
 #include <cstddef>
@@ -15,6 +16,7 @@
 // Disponibiliza shared_ptr para anexar o Database ao registro.
 #include <memory>
 // Disponibiliza std::error_code na limpeza.
+#include <span>
 #include <system_error>
 // Disponibiliza std::vector.
 #include <vector>
@@ -228,6 +230,49 @@ int main() {
                 suite.check_error(read, ErrorCode::corrupt_page,
                                   "an impossible payload length is rejected");
             }
+        }
+    }
+
+    // --- append incremental (T15.4): completa a última página, encadeia novas,
+    // e o resultado é idêntico a gravar tudo de uma vez ---
+    {
+        TemporaryFile file{"append"};
+        auto page_file = storage::PageFile::create(file.path());
+        suite.check(page_file.has_value(), "append page file is created");
+        if (!page_file) {
+            return suite.finish();
+        }
+        BlobStore blobs{*page_file};
+        const auto whole = pattern(3 * blob_page_capacity + 1234);
+        auto id = blobs.create(std::span<const std::byte>{whole}.subspan(0, 100));
+        suite.check(id.has_value(), "append base blob is created");
+        if (id) {
+            // Pedaços de tamanhos variados, alguns cruzando fronteiras de página.
+            std::size_t offset = 100;
+            const std::size_t sizes[] = {1, blob_page_capacity - 150, 7, blob_page_capacity + 300, 5000};
+            bool ok = true;
+            for (const auto size : sizes) {
+                const auto take = std::min(size, whole.size() - offset);
+                ok = ok && blobs.append(*id, std::span<const std::byte>{whole}.subspan(offset, take)).has_value();
+                offset += take;
+            }
+            ok = ok && blobs.append(*id, std::span<const std::byte>{whole}.subspan(offset)).has_value();
+            suite.check(ok, "every append succeeds");
+            auto read = blobs.read(*id);
+            suite.check(read.has_value() && *read == whole,
+                        "appended blob equals the same bytes written at once");
+
+            const std::vector<std::byte> head{std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}};
+            suite.check(blobs.overwrite_prefix(*id, head).has_value(), "prefix is overwritten");
+            auto prefix = blobs.read_prefix(*id, head.size());
+            suite.check(prefix.has_value() && *prefix == head, "read_prefix returns the new prefix");
+            auto after = blobs.read(*id);
+            auto expected = whole;
+            std::copy(head.begin(), head.end(), expected.begin());
+            suite.check(after.has_value() && *after == expected,
+                        "overwrite_prefix changes only the first bytes");
+            suite.check(!blobs.overwrite_prefix(*id, std::vector<std::byte>(blob_page_capacity + 1)),
+                        "a prefix longer than the first page is rejected");
         }
     }
 

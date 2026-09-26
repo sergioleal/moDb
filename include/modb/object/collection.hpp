@@ -83,8 +83,9 @@ template <typename T>
 // Vetor persistente de T. O objeto pai guarda apenas o BlobId; os elementos
 // vivem numa cadeia de páginas BLBP no formato `count u32 | elemento...`.
 //
-// Limitação de MVP: push_back reescreve o blob inteiro (O(n) por inserção).
-// O append incremental fica para a Fase 10, com medição (tarefa 10.1).
+// push_back é incremental: lê só o `count`, acrescenta o elemento no fim da
+// cadeia e regrava o `count` -- O(páginas da cadeia), não O(n) (T15.4 em
+// docs-process/PROFILING_2026-09.md; antes reescrevia o blob inteiro).
 template <typename T>
 class PersistentVector {
 public:
@@ -146,11 +147,14 @@ public:
         if (auto ready = require_collection_transaction(*blobs_, tx); !ready) {
             return std::unexpected(ready.error());
         }
-        auto raw = blobs_->read(id_);
-        if (!raw) {
-            return std::unexpected(raw.error());
+        // Só o `count` do início e o elemento novo no fim: antes o blob inteiro
+        // era lido e regravado, O(n) por push_back (T15.4). O formato em disco
+        // (`count u32 | elemento...`) não muda.
+        auto head = blobs_->read_prefix(id_, sizeof(std::uint32_t));
+        if (!head) {
+            return std::unexpected(head.error());
         }
-        auto count = collection_count(*raw);
+        auto count = collection_count(*head);
         if (!count) {
             return std::unexpected(count.error());
         }
@@ -158,17 +162,12 @@ public:
         if (!element) {
             return std::unexpected(element.error());
         }
+        if (auto appended = blobs_->append(id_, *element); !appended) {
+            return std::unexpected(appended.error());
+        }
         storage::BinaryWriter writer;
         writer.write_u32(*count + 1);
-        // Reaproveita os elementos existentes sem decodificá-los (após o u32).
-        writer.write_bytes(std::span<const std::byte>{*raw}.subspan(sizeof(std::uint32_t)));
-        writer.write_bytes(*element);
-        auto rewritten = blobs_->rewrite(id_, std::move(writer).take());
-        if (!rewritten) {
-            return std::unexpected(rewritten.error());
-        }
-        id_ = *rewritten;
-        return {};
+        return blobs_->overwrite_prefix(id_, std::move(writer).take());
     }
 
     // Percorre os elementos sem construir um vetor com todos de uma vez.

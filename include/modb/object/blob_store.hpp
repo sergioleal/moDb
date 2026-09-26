@@ -76,6 +76,16 @@ public:
     // list: as páginas ficam órfãs no arquivo, disponíveis para o database_check.
     [[nodiscard]] Result<void> remove(BlobId id);
 
+    // Acrescenta bytes ao fim do blob: completa a última página e encadeia
+    // páginas novas se faltar espaço. Custa O(páginas da cadeia), não O(bytes do
+    // blob) -- é o que tira o push_back das coleções de O(n) (T15.4).
+    [[nodiscard]] Result<void> append(BlobId id, std::span<const std::byte> data);
+    // Sobrescreve os primeiros bytes do conteúdo, sem mudar o tamanho. Os bytes
+    // precisam caber no que a primeira página já guarda.
+    [[nodiscard]] Result<void> overwrite_prefix(BlobId id, std::span<const std::byte> bytes);
+    // Lê só os primeiros `count` bytes (da primeira página).
+    [[nodiscard]] Result<std::vector<std::byte>> read_prefix(BlobId id, std::size_t count) const;
+
 private:
     [[nodiscard]] Result<void> require_write_transaction() const;
 

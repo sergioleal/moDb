@@ -167,6 +167,116 @@ Result<std::vector<std::byte>> BlobStore::read(BlobId id) const {
     return out;
 }
 
+Result<void> BlobStore::append(BlobId id, std::span<const std::byte> data) {
+    if (auto ready = require_write_transaction(); !ready) {
+        return std::unexpected(ready.error());
+    }
+    if (id.value == 0) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "null blob id"});
+    }
+    if (data.empty()) {
+        return {};
+    }
+    // Acha a última página da cadeia (validando e detectando ciclos).
+    std::unordered_set<std::uint64_t> visited;
+    storage::PageId last{id.value};
+    storage::Page last_page;
+    BlobPageHeader last_header;
+    for (storage::PageId current{id.value}; current.value != 0;) {
+        if (!visited.insert(current.value).second) {
+            return std::unexpected(
+                Error{ErrorCode::page_chain_cycle, "blob chain revisits a page"});
+        }
+        auto page = file_->read(current);
+        if (!page) {
+            return std::unexpected(page.error());
+        }
+        auto header = parse_header(*page);
+        if (!header) {
+            return std::unexpected(header.error());
+        }
+        last = current;
+        last_page = *page;
+        last_header = *header;
+        current = header->next;
+    }
+
+    // O que cabe na folga da última página fica nela.
+    const std::size_t room = blob_page_capacity - last_header.length;
+    const std::size_t in_last = std::min(room, data.size());
+    const auto rest = data.subspan(in_last);
+
+    // Páginas novas para o restante, alocadas antes para conhecer os `next`.
+    const std::size_t new_pages = (rest.size() + blob_page_capacity - 1) / blob_page_capacity;
+    std::vector<storage::PageId> ids;
+    ids.reserve(new_pages);
+    for (std::size_t index = 0; index < new_pages; ++index) {
+        auto allocated = file_->allocate_page();
+        if (!allocated) {
+            return std::unexpected(allocated.error());
+        }
+        ids.push_back(*allocated);
+    }
+    for (std::size_t index = 0; index < new_pages; ++index) {
+        const std::size_t offset = index * blob_page_capacity;
+        const auto chunk = rest.subspan(offset, std::min(blob_page_capacity, rest.size() - offset));
+        const storage::PageId next = index + 1 < new_pages ? ids[index + 1] : storage::PageId{0};
+        if (auto written = file_->write(ids[index], build_page(next, chunk)); !written) {
+            return std::unexpected(written.error());
+        }
+    }
+
+    // Regrava a última página com os bytes novos e o ponteiro para as novas.
+    std::vector<std::byte> merged(last_page.bytes().begin() + blob_header_size,
+                                  last_page.bytes().begin() + blob_header_size + last_header.length);
+    merged.insert(merged.end(), data.begin(), data.begin() + static_cast<std::ptrdiff_t>(in_last));
+    const storage::PageId next = ids.empty() ? storage::PageId{0} : ids.front();
+    return file_->write(last, build_page(next, merged));
+}
+
+Result<void> BlobStore::overwrite_prefix(BlobId id, std::span<const std::byte> bytes) {
+    if (auto ready = require_write_transaction(); !ready) {
+        return std::unexpected(ready.error());
+    }
+    if (id.value == 0) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "null blob id"});
+    }
+    auto page = file_->read(storage::PageId{id.value});
+    if (!page) {
+        return std::unexpected(page.error());
+    }
+    auto header = parse_header(*page);
+    if (!header) {
+        return std::unexpected(header.error());
+    }
+    if (bytes.size() > header->length) {
+        return std::unexpected(Error{ErrorCode::invalid_argument,
+                                     "blob prefix overwrite is longer than the first page content"});
+    }
+    std::copy(bytes.begin(), bytes.end(), page->bytes().begin() + blob_header_size);
+    return file_->write(storage::PageId{id.value}, *page);
+}
+
+Result<std::vector<std::byte>> BlobStore::read_prefix(BlobId id, std::size_t count) const {
+    if (id.value == 0) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "null blob id"});
+    }
+    auto page = file_->read(storage::PageId{id.value});
+    if (!page) {
+        return std::unexpected(page.error());
+    }
+    auto header = parse_header(*page);
+    if (!header) {
+        return std::unexpected(header.error());
+    }
+    if (count > header->length) {
+        return std::unexpected(
+            Error{ErrorCode::corrupt_page, "blob is shorter than the requested prefix"});
+    }
+    const auto begin = page->bytes().begin() + blob_header_size;
+    return std::vector<std::byte>(begin, begin + static_cast<std::ptrdiff_t>(count));
+}
+
 Result<BlobId> BlobStore::rewrite(BlobId id, std::span<const std::byte> data) {
     if (auto ready = require_write_transaction(); !ready) {
         return std::unexpected(ready.error());
