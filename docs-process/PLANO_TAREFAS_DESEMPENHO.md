@@ -313,13 +313,14 @@ Repetições isoladas 2–4× mais lentas em qualquer binário, que somem ao rep
 #### T33 — Versões antigas sem snapshot não são recuperadas *(P2, médio)*
 
 T29: o arquivo de `crud_full.100k` vai de 41,9 MB a 159,6 MB (3,8×) nas três
-fases de update, com `retained_versions` = 0. Cada update grava uma versão nova
-e mantém a anterior até um `collect_garbage()` explícito. Espalha os registros
-por 20 mil páginas e é a causa dos misses de `update_shrink`/`delete`.
+fases de update, sem snapshot aberta. Cada update grava uma versão nova e mantém
+a anterior até um `collect_garbage()` explícito. Espalha os registros por 20 mil
+páginas e é a causa dos misses de `update_shrink`/`delete`.
 
-- [ ] 33.1 Confirmar: `collect_garbage()` entre as fases de update devolve o espaço e reduz os misses?
-- [ ] 33.2 Desenho: recuperar a versão anterior no commit quando nenhuma snapshot a enxerga (ADR — toca MVCC e réplicas)
-- [ ] 33.3 Predição e antes/depois (tamanho do arquivo, misses, vazão)
+- [x] 33.1 Confirmar: `collect_garbage()` entre as fases devolve o espaço? *(Não: recolhe 100k versões, mas o arquivo cresce igual e cada GC leva 30–64 s — dois defeitos, 33.2 e 33.3)*
+- [ ] 33.2 Reaproveitar páginas esvaziadas: hoje uma página que fica vazia sai da cadeia do heap e nunca mais é usada (sem lista de páginas livres)
+- [ ] 33.3 `BufferPool::evict_until` é O(páginas sujas) por operação: transação que suja mais páginas que o cache fica O(n²) (GC 10k: 70 ms; 100k: 30–64 s)
+- [ ] 33.4 Só depois: desenho de recuperação automática de versões (ADR — MVCC e réplicas), com predição e antes/depois
 
 ### P2
 
@@ -479,3 +480,4 @@ Só se, depois de T6 e T13, sobrar resíduo de motor sem explicação.
 | 2026-09-26 | T11–T16, T26 (P2) | `6d70a5e` `d8750ac` `eed7f93` + seguintes | M5 = power throttling do Windows (opt-out no `modb_load`); P1 remedido: `mixed_oltp` 2,65×, `hold` 3,51×. Leitura sem cópia de página (1,51× no motor); `push_back` incremental (12–15×); abertura lendo do checkpoint (7–19×); corrigido: commits após rabo rasgado do WAL se perdiam. Novas: T29–T32 |
 | 2026-09-26 | T17–T32 (P3) | `4152810` `33fddb7` `1430f23` `63fc24b` `0709083` + este | Leitura sem cópia (último caso): `read` 1,23× no motor; exclusões na série; `device_class`; ambiente padrão; retenção MVCC sem custo de leitura; calibração RelWithDebInfo medida 1k–1M; `load-results/` 7,6 GB → 332 KB. T23–T25 não necessárias |
 | 2026-09-26 | T29 | (este commit) | Hipóteses refutadas (candidata residente: 0 efeito; cache 8×: 0 efeito ou pior). Causa: arquivo 3,8× sem GC automático de versões → T33. Fica `load_trusted` com uma cópia a menos |
+| 2026-09-26 | T33.1 | (este commit) | GC entre fases: recolhe 100k versões, mas o arquivo não encolhe (páginas vazias saem da cadeia sem free list) e o GC é O(n²) (evict_until pula frames sujos): 70 ms a 10k, 30–64 s a 100k |

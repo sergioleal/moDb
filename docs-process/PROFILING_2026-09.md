@@ -1107,7 +1107,9 @@ Segunda hipótese, testada à parte: falta de cache. Um build temporário com
 a mais de RSS. **Refutada também.**
 
 **A causa:** o arquivo de dados cresce **3,8× durante as três fases de update**,
-sem nenhuma snapshot aberta (`retained_versions` = 0):
+sem nenhuma snapshot aberta *(corrigido: a primeira versão dizia "com
+`retained_versions` = 0", mas esse campo só é calculado no `snapshot_hold` —
+ver T33.1)*:
 
 | fase | arquivo | páginas | bytes/objeto |
 |---|---|---|---|
@@ -1125,3 +1127,61 @@ cache acompanha. Isso vira a **T33**.
 O que ficou da T29: `load_trusted` com uma cópia de página a menos (de `view`
 direto para o `SlottedPage`), neutro a levemente positivo no A/B (`create`
 +6%, `update_inplace` +3%, `delete` +4%, `update_grow` −4% com CV 11%).
+
+## T33.1 — `collect_garbage()` entre as fases de update
+
+O GC (`ObjectStore::collect_garbage`) percorre todos os registros do heap e
+recolhe (a) a `previous` referenciada quando nenhuma snapshot aberta pode
+enxergá-la e (b) "cópias órfãs" — a `previous` antiga que perdeu a referência
+quando o objeto foi atualizado de novo. Sem chamada explícita, nada disso é
+recolhido. Experimento com um build **temporário** (patch só no diretório de
+build do experimento; o fonte não mudou): `crud_full.100k` chamando
+`collect_garbage()` depois de cada fase de update, fora do tempo
+cronometrado.
+
+### Predição (escrita antes de rodar)
+
+Cada GC recolhe da ordem de 100 mil registros (uma versão morta por objeto). O
+espaço liberado é reaproveitado, então o arquivo para de crescer tanto: ~100 MB
+depois de `update_grow` em vez de 144 MB, quase sem crescimento em
+`update_shrink`. `update_shrink` e `delete` ficam 10–30% mais rápidos. Cada GC
+custa 0,3–1 s (varredura completa). *Refutação:* o arquivo crescer igual — o
+espaço liberado não estaria sendo reaproveitado.
+
+### Resultado da T33.1 — "ainda não": dois defeitos na frente do GC
+
+`crud_full.100k` com `collect_garbage()` depois de cada fase de update:
+
+| depois de | recolhidos | tempo do GC | arquivo (com GC) | arquivo (sem GC) |
+|---|---|---|---|---|
+| `update_inplace` | 100.000 | **29,7 s** | 79,1 MB | 79,1 MB |
+| `update_grow` | 100.000 | **32,4 s** | 144,2 MB | 144,2 MB |
+| `update_shrink` | 100.000 | **64,1 s** | 159,6 MB | 159,6 MB |
+
+`hash_match` verdadeiro (o GC não corrompeu nada) e vazão das fases de update
+igual à sem GC. Contra a predição: recolheu o previsto (✅), mas **o arquivo
+cresceu exatamente igual** (❌) e **cada GC levou 30–64 s** em vez de 0,3–1 s
+(❌).
+
+**Defeito 1 — espaço liberado não é reaproveitado.** `TableHeap::erase`
+atualiza o índice de capacidade, mas uma página que fica vazia é **retirada da
+cadeia do heap**, e o motor não tem lista de páginas livres (limitação
+declarada do MVP em GARANTIAS_TRANSACIONAIS). Depois do `update_inplace`, as
+versões originais ocupavam páginas inteiras: o GC as esvazia, elas saem da
+cadeia e nunca mais são usadas; as inserções seguintes alocam páginas novas.
+
+**Defeito 2 — transação grande é O(n²) no buffer pool.** O mesmo GC a 10k
+leva 56–76 ms; a 100k, 30–64 s: 10× mais registros, **~500–850× mais tempo**.
+`BufferPool::evict_until` procura vítima a partir da cauda da LRU **pulando os
+frames sujos**, que não podem sair antes do commit. Quando uma transação suja
+mais páginas do que o cache comporta (1.024), cada inserção no cache percorre a
+lista inteira sem achar vítima — O(páginas sujas) por operação. O `delete`
+normal remove os mesmos 100k registros em ~0,4 s porque commita a cada 1.000; o
+GC faz tudo numa transação só. **Afeta qualquer transação grande**, não só o GC.
+
+**Conclusão:** um GC automático agora não ajudaria — o espaço não volta e a
+coleta é quadrática. Os dois defeitos vêm antes (T33.2 e T33.3 no plano).
+
+**Correção de um texto anterior:** a T29 dizia que o arquivo crescia "com
+`retained_versions` = 0". Esse campo só é calculado no `snapshot_hold`; no
+`crud_full` ele é sempre 0 e não prova nada. O crescimento em si foi medido.
