@@ -131,7 +131,8 @@ std::uint64_t page_offset(PageId id) {
 }
 
 // Confere os campos do superbloco e retorna a quantidade de páginas.
-Result<std::uint64_t> validate_superblock(const Page& superblock, std::uintmax_t file_size) {
+Result<std::uint64_t> validate_superblock(const Page& superblock, std::uintmax_t file_size,
+                                          bool tolerate_short_file) {
     // Compara os quatro primeiros bytes com a assinatura MODB.
     if (!std::equal(magic.begin(), magic.end(), superblock.bytes().begin())) {
         return std::unexpected(
@@ -178,6 +179,11 @@ Result<std::uint64_t> validate_superblock(const Page& superblock, std::uintmax_t
     // allocate_page e gravar o superbloco deixa páginas físicas órfãs além da
     // contagem, que são ignoradas aqui e reaproveitadas na próxima alocação.
     if (stored_page_count * page_size > file_size) {
+        // Superbloco persistido sem a extensão do arquivo: aceitável só quando
+        // o chamador tem WAL para reaplicar (ver `PageFile::open`).
+        if (tolerate_short_file && file_size / page_size >= 1) {
+            return static_cast<std::uint64_t>(file_size / page_size);
+        }
         return std::unexpected(Error{ErrorCode::corrupt_file,
                                      "stored page count is larger than the database file"});
     }
@@ -225,7 +231,7 @@ Result<PageFile> PageFile::create(const std::filesystem::path& path,
 
 // Abre um arquivo existente somente depois de validar seu formato.
 Result<PageFile> PageFile::open(const std::filesystem::path& path,
-                                std::size_t cache_capacity) {
+                                std::size_t cache_capacity, bool tolerate_short_file) {
     // Recebe erros do filesystem sem lançar exceção.
     std::error_code filesystem_error;
     // Retorna um erro específico quando o caminho não existe.
@@ -274,7 +280,7 @@ Result<PageFile> PageFile::open(const std::filesystem::path& path,
         return std::unexpected(result.error());
     }
     // Valida assinatura, versão, tamanho e contagem de páginas.
-    auto page_count = validate_superblock(superblock, size);
+    auto page_count = validate_superblock(superblock, size, tolerate_short_file);
     // Propaga qualquer inconsistência encontrada.
     if (!page_count) {
         return std::unexpected(page_count.error());

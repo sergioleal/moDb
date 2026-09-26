@@ -43,6 +43,14 @@ if (Test-Path shop.modb.wal) { Copy-Item shop.modb.wal backup\2026-07-19\ }
 
 Não faça backup “a quente” sem coordenação: páginas e WAL podem divergir.
 
+**O WAL não é opcional no backup.** Com o checkpoint preguiçoso
+([ADR-022](decisions/ADR-022-menos-fsync-por-commit.md)), o arquivo de dados só
+fica completo num checkpoint: a cada `checkpoint_interval` commits (padrão 64)
+e no fechamento limpo do banco. Depois de uma queda, ou com o processo ainda
+aberto, os últimos commits podem estar só no WAL. Copiar o par cobre os dois
+casos. Quem precisa copiar só o arquivo de dados deve chamar
+`Database::checkpoint()` antes, com escritores parados.
+
 ## Restauração
 
 1. Pare qualquer processo usando o destino.

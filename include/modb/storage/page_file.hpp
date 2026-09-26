@@ -56,9 +56,16 @@ public:
         const std::filesystem::path& path,
         std::size_t cache_capacity = page_cache_capacity);
     // Abre e valida um arquivo moDb existente.
+    //
+    // `tolerate_short_file`: aceita um superbloco cujo `page_count` exige mais
+    // bytes do que o arquivo tem, usando a contagem que cabe. Só faz sentido
+    // quando há WAL para reaplicar: com checkpoint preguiçoso (ADR-022), uma
+    // queda pode persistir o superbloco sem a extensão do arquivo, e as páginas
+    // além do fim têm imagem no WAL -- a recuperação as re-estende.
     [[nodiscard]] static Result<PageFile> open(
         const std::filesystem::path& path,
-        std::size_t cache_capacity = page_cache_capacity);
+        std::size_t cache_capacity = page_cache_capacity,
+        bool tolerate_short_file = false);
 
     // Acrescenta uma página zerada e retorna seu identificador.
     [[nodiscard]] Result<PageId> allocate_page();

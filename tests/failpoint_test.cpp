@@ -230,12 +230,36 @@ int main() {
         detach(database_id);
     }
 
-    // (A3/A4) Os dois syncs são costuras distintas: falhar antes ou depois de
-    // gravar o record commit não pode marcar o commit como durável.
-    check_precommit_failure("first-sync-failure", modb::test::failing_wal_factory(~std::size_t{0}, 0),
-                            false, "first WAL sync failure");
-    check_precommit_failure("commit-sync-failure", modb::test::failing_wal_factory(~std::size_t{0}, 1),
+    // (A3) O commit faz UM sync do WAL, depois do registro de commit (ADR-022,
+    // parte A: o CRC por registro torna desnecessário o sync separado das
+    // imagens). Falhar esse sync não pode marcar o commit como durável.
+    check_precommit_failure("commit-sync-failure", modb::test::failing_wal_factory(~std::size_t{0}, 0),
                             false, "commit WAL sync failure");
+
+    // (A4) E é um só: uma fábrica que só falha no SEGUNDO sync não é alcançada
+    // por um commit. Se alguém reintroduzir o sync das imagens, este teste
+    // falha -- e a mudança precisa voltar ao ADR-022.
+    {
+        TemporaryDatabase temporary{"single-wal-sync"};
+        auto created = Database::create(temporary.path());
+        auto database = share(created);
+        suite.check(database != nullptr, "single-sync database is created");
+        if (!database) {
+            return suite.finish();
+        }
+        auto database_id = attach(database);
+        suite.check(database->bind(item_builder()).has_value(), "single-sync type is bound");
+        database->set_wal_file_factory(modb::test::failing_wal_factory(~std::size_t{0}, 1));
+        auto transaction = database->begin();
+        suite.check(transaction.has_value(), "single-sync transaction begins");
+        if (transaction) {
+            suite.check(database->create(*transaction, Item{7, "one sync"}).has_value(),
+                        "single-sync object is staged");
+            suite.check(transaction->commit().has_value(),
+                        "a commit never reaches a second WAL sync");
+        }
+        detach(database_id);
+    }
 
     // (B) Queda ANTES do registro de commit: imagens no WAL, sem commit. A
     // transação inteira deve permanecer ausente.

@@ -49,6 +49,14 @@ Result<BootstrapSnapshot> create_bootstrap_snapshot(object::Database& primary,
             Error{ErrorCode::data_files_disabled,
                   "wal_only primary cannot donate a data-file bootstrap snapshot"});
     }
+    // Com checkpoint preguiçoso (ADR-022) o arquivo de dados pode estar até
+    // `checkpoint_interval` commits atrás do WAL, e `checkpoint_lsn` também.
+    // Checkpointar antes da cópia torna o snapshot completo e o corte atual;
+    // sem isso a cópia continuaria correta (a réplica reaplicaria o WAL a partir
+    // de um corte mais antigo), só mais cara.
+    if (auto checkpointed = primary.checkpoint(); !checkpointed) {
+        return std::unexpected(checkpointed.error());
+    }
     auto barrier = primary.begin();
     if (!barrier) {
         return std::unexpected(barrier.error());

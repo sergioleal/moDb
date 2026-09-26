@@ -10,6 +10,7 @@
 // está desligado (docs-process/PLANO_PROFILING.md, Etapa 1).
 #include "modb/diag/stage_profile.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
 #include <system_error>
@@ -52,6 +53,13 @@ bool same_structure(const TypeDefinition& stored, const TypeDefinition& canonica
 Database::Database(Database&& other) noexcept = default;
 
 Database::~Database() {
+    // Fechamento limpo: checkpoint dos commits pendentes, para a próxima
+    // abertura não precisar reaplicá-los. Melhor esforço -- se falhar, a
+    // recuperação reaplica do WAL, que é a garantia de verdade.
+    if (primary_storage_ == PrimaryStorage::full && file_ && !file_->in_transaction() &&
+        commits_since_checkpoint_ > 0) {
+        (void)advance_checkpoint();
+    }
     if (primary_storage_ == PrimaryStorage::wal_only && file_) {
         const auto scratch = file_->path();
         file_.reset();
@@ -110,8 +118,11 @@ Result<Database> Database::create(const std::filesystem::path& path, const Datab
     auto wal_path = wal_path_for(path);
     std::error_code remove_error;
     std::filesystem::remove(wal_path, remove_error);
-    return Database{std::move(file), std::move(*store), std::move(wal_path), path,
-                    PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout, opts.wal_io};
+    Database db{std::move(file), std::move(*store), std::move(wal_path), path,
+                PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout, opts.wal_io};
+    db.durability_ = opts.durability;
+    db.checkpoint_interval_ = std::max<std::uint32_t>(1, opts.checkpoint_interval);
+    return db;
 }
 
 Result<Database> Database::open(const std::filesystem::path& path, std::size_t cache_capacity) {
@@ -209,7 +220,13 @@ Result<Database> Database::open(const std::filesystem::path& path, const Databas
                                      "path is wal_only control; open with primary_storage=wal_only"});
     }
 
-    auto page_file = storage::PageFile::open(path, cache_capacity);
+    // Com WAL presente, um superbloco além do fim do arquivo é o rastro de uma
+    // queda com checkpoint preguiçoso, e a recuperação abaixo re-estende o
+    // arquivo a partir das imagens (ADR-022). Sem WAL continua sendo corrupção.
+    std::error_code wal_size_error;
+    const auto wal_size = std::filesystem::file_size(wal_path_for(path), wal_size_error);
+    const bool wal_present = !wal_size_error && wal_size > 0;
+    auto page_file = storage::PageFile::open(path, cache_capacity, wal_present);
     if (!page_file) {
         return std::unexpected(page_file.error());
     }
@@ -253,8 +270,11 @@ Result<Database> Database::open(const std::filesystem::path& path, const Databas
             }
         }
     }
-    return Database{std::move(file), std::move(*store), std::move(wal_path), path,
-                    PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout, opts.wal_io};
+    Database db{std::move(file), std::move(*store), std::move(wal_path), path,
+                PrimaryStorage::full, opts.commit_ack, opts.commit_ack_timeout, opts.wal_io};
+    db.durability_ = opts.durability;
+    db.checkpoint_interval_ = std::max<std::uint32_t>(1, opts.checkpoint_interval);
+    return db;
 }
 
 Result<void> Database::persist_instance_control() {
@@ -410,6 +430,9 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
         return std::unexpected(advanced.error());
     }
     std::uint64_t commit_lsn = 0;
+    // `false` só em medição (Durability::disabled_diagnostic): o commit segue a
+    // mesma sequência, sem sincronizar o dispositivo, e deixa de ser durável.
+    const bool sync_device = durability_ == Durability::sync_real;
     {
         // WAL v2 durável: append no arquivo existente com LSN global do DBRT.
         // Failpoints ainda usam a fábrica injetável; se a fábrica for a nativa
@@ -445,17 +468,24 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
                 return std::unexpected(appended.error());
             }
         }
-        if (auto synced = wal->sync(); !synced) {
-            return std::unexpected(synced.error());
-        }
+        // Um sync só, depois do registro de commit (ADR-022, parte A). Cada
+        // registro tem CRC e a recuperação para no primeiro truncado ou
+        // inválido, então um commit durável com uma imagem anterior perdida
+        // nunca é lido: a transação some, como numa queda antes do commit. O
+        // sync separado das imagens não protegia nada além disso e custava um
+        // fsync inteiro por commit. Fica só no caminho de teste que promete
+        // "imagens duráveis, sem commit".
         if (phase == CommitPhase::stop_after_images) {
+            if (auto synced = sync_device ? wal->sync() : Result<void>{}; !synced) {
+                return std::unexpected(synced.error());
+            }
             return {};
         }
         if (auto appended = wal->append_commit(current_tx_id_); !appended) {
             return std::unexpected(appended.error());
         }
         commit_lsn = wal->last_appended_lsn();
-        if (auto synced = wal->sync(); !synced) {
+        if (auto synced = sync_device ? wal->sync() : Result<void>{}; !synced) {
             return std::unexpected(synced.error());
         }
         commit_durable_ = true;
@@ -466,12 +496,17 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
             return std::unexpected(applied.error());
         }
         // BARREIRA, não conveniência: as páginas de dados precisam estar
-        // duráveis ANTES de o checkpoint LSN ficar durável (lá embaixo). Um
-        // checkpoint que afirma "tudo até o LSN N está no arquivo de dados" sem
-        // que as páginas estejam faz a recuperação PULAR o replay -- e aí a
-        // perda é silenciosa. Este flush é o que impede isso.
-        if (auto flushed = file_->flush(); !flushed) {
-            return std::unexpected(flushed.error());
+        // duráveis ANTES de o checkpoint LSN ficar durável. Um checkpoint que
+        // afirma "tudo até o LSN N está no arquivo de dados" sem que as páginas
+        // estejam faz a recuperação PULAR o replay -- e aí a perda é silenciosa.
+        // No modo `full` a barreira mora em `advance_checkpoint` (ADR-022,
+        // parte B): o checkpoint não avança a cada commit, então as páginas só
+        // precisam estar duráveis quando ele avança. Entre checkpoints, o que
+        // torna o commit durável é o sync do WAL acima.
+        if (primary_storage_ == PrimaryStorage::wal_only) {
+            if (auto flushed = sync_device ? file_->flush() : Result<void>{}; !flushed) {
+                return std::unexpected(flushed.error());
+            }
         }
         // Persiste o próximo LSN global antes do checkpoint (ainda na mesma
         // janela; DBRT já foi escrito via apply das páginas da tx).
@@ -501,25 +536,63 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
             return {};
         }
     }
-    // Checkpoint: páginas duráveis (full) ou controle MCTL (wal_only).
+    // Checkpoint: controle MCTL a cada commit (wal_only) ou preguiçoso, a cada
+    // `checkpoint_interval_` commits (full, ADR-022 parte B).
     if (commit_lsn != 0) {
-        if (auto ckpt = store_.set_checkpoint_lsn(commit_lsn); !ckpt) {
-            return std::unexpected(ckpt.error());
-        }
         if (primary_storage_ == PrimaryStorage::wal_only) {
+            if (auto ckpt = store_.set_checkpoint_lsn(commit_lsn); !ckpt) {
+                return std::unexpected(ckpt.error());
+            }
             if (auto persisted = persist_instance_control(); !persisted) {
                 return std::unexpected(persisted.error());
             }
             if (auto acked = await_commit_ack(commit_lsn); !acked) {
                 return std::unexpected(acked.error());
             }
-            // Torna durável o checkpoint E o `set_next_lsn` acima, que grava na
-            // mesma página DBRT -- ver o comentário lá.
-        } else if (auto flushed = file_->flush(); !flushed) {
-            return std::unexpected(flushed.error());
+        } else {
+            last_commit_lsn_ = commit_lsn;
+            ++commits_since_checkpoint_;
+            if (commits_since_checkpoint_ >= checkpoint_interval_) {
+                if (auto advanced = advance_checkpoint(); !advanced) {
+                    return std::unexpected(advanced.error());
+                }
+            }
         }
     }
     return {};
+}
+
+Result<void> Database::advance_checkpoint() {
+    if (commits_since_checkpoint_ == 0) {
+        return {};
+    }
+    const bool sync_device = durability_ == Durability::sync_real;
+    // A barreira: páginas de dados (e o `set_next_lsn` dos commits desde o
+    // último checkpoint) duráveis ANTES do novo checkpoint LSN. É isto que
+    // sustenta a invariante do ADR-022: toda página que pode diferir do estado
+    // no checkpoint gravado tem uma imagem inteira no WAL depois dele.
+    if (auto flushed = sync_device ? file_->flush() : Result<void>{}; !flushed) {
+        return std::unexpected(flushed.error());
+    }
+    if (auto ckpt = store_.set_checkpoint_lsn(last_commit_lsn_); !ckpt) {
+        return std::unexpected(ckpt.error());
+    }
+    if (auto flushed = sync_device ? file_->flush() : Result<void>{}; !flushed) {
+        return std::unexpected(flushed.error());
+    }
+    commits_since_checkpoint_ = 0;
+    return {};
+}
+
+Result<void> Database::checkpoint() {
+    if (primary_storage_ == PrimaryStorage::wal_only) {
+        return {};
+    }
+    if (file_->in_transaction()) {
+        return std::unexpected(Error{ErrorCode::transaction_active,
+                                     "checkpoint requires no active transaction"});
+    }
+    return advance_checkpoint();
 }
 
 Result<void> Database::rollback_transaction() {
@@ -534,6 +607,16 @@ Result<void> Database::rollback_transaction() {
     // que nunca durável) nunca deve ser reatribuído a outro objeto (ADR-001).
     const auto watermark_before_rollback = store_.next_object_id_watermark();
     file_->discard_transaction();
+    // O rollback apaga o WAL inteiro (ele pode ter um rabo parcial de um commit
+    // que falhou no meio). Com checkpoint preguiçoso, o WAL também guarda as
+    // imagens dos commits desde o último checkpoint, cujas páginas ainda não
+    // estão sincronizadas no arquivo de dados: apagá-lo antes de um checkpoint
+    // perderia esses commits numa queda logo em seguida (ADR-022, parte B).
+    if (primary_storage_ == PrimaryStorage::full) {
+        if (auto advanced = advance_checkpoint(); !advanced) {
+            return std::unexpected(advanced.error());
+        }
+    }
     // Fecha o handle ANTES do remove: o sink nativo abre sem FILE_SHARE_DELETE,
     // então apagar o arquivo com ele vivo falharia -- e `remove_error` é
     // ignorado logo abaixo, o que tornaria a falha invisível e deixaria um WAL

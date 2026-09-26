@@ -845,6 +845,11 @@ public:
     void set_wal_file_factory(tx::WalFileFactory factory) {
         wal_factory_ = std::move(factory);
         custom_wal_factory_ = true;
+        // Fecha o WAL durável mantido aberto entre commits: a fábrica recria o
+        // arquivo, e o handle vivo (sem FILE_SHARE_DELETE) a faria falhar por
+        // violação de compartilhamento -- e um teste que espera a falha injetada
+        // passaria pelo motivo errado.
+        open_wal_.reset();
     }
 
     // Uso restrito a testes: faz a aplicação das páginas falhar após N páginas,
@@ -872,6 +877,16 @@ public:
     [[nodiscard]] TimelineId timeline_id() const noexcept { return store_.timeline_id(); }
     [[nodiscard]] std::uint64_t next_lsn() const noexcept { return store_.next_lsn(); }
     [[nodiscard]] std::uint64_t checkpoint_lsn() const noexcept { return store_.checkpoint_lsn(); }
+    // Força um checkpoint agora (ADR-022, parte B): sincroniza o arquivo de
+    // dados e avança `checkpoint_lsn` até o último commit. Depois dele o
+    // arquivo de dados sozinho tem todo o estado commitado -- é o que um backup
+    // do arquivo de dados sem o WAL precisa. No-op em `wal_only` e quando não
+    // houve commit desde o último checkpoint; erro com transação ativa.
+    [[nodiscard]] Result<void> checkpoint();
+    // Commits aplicados ao arquivo de dados e ainda não cobertos pelo checkpoint.
+    [[nodiscard]] std::uint64_t commits_since_checkpoint() const noexcept {
+        return commits_since_checkpoint_;
+    }
     [[nodiscard]] std::uint64_t follower_ack_lsn() const noexcept {
         return store_.follower_ack_lsn();
     }
@@ -1070,6 +1085,8 @@ private:
     [[nodiscard]] Result<void> commit_transaction(CommitPhase phase);
     // Descarta o buffer da transação e remove qualquer WAL residual.
     [[nodiscard]] Result<void> rollback_transaction();
+    // Sincroniza os dados e avança o checkpoint até `last_commit_lsn_`.
+    [[nodiscard]] Result<void> advance_checkpoint();
     // Reconstrói `store_` a partir do que está atualmente no arquivo. Chamado
     // após o descarte de uma transação: TableHeap/IdentityMap/CatalogStore
     // guardam contadores em memória (record_count, page_count, cadeia de
@@ -1479,6 +1496,13 @@ private:
     CommitAckPolicy commit_ack_policy_{CommitAckPolicy::local_wal};
     std::chrono::milliseconds commit_ack_timeout_{std::chrono::seconds{5}};
     WalIoMode wal_io_{WalIoMode::sync};
+    // Só medição: `disabled_diagnostic` pula os fsync do commit (ver Durability).
+    Durability durability_{Durability::sync_real};
+    // Checkpoint preguiçoso (ADR-022, parte B; só `full`): commits desde o
+    // último checkpoint e o LSN do último commit aplicado ao arquivo de dados.
+    std::uint32_t checkpoint_interval_{1};
+    std::uint64_t commits_since_checkpoint_{0};
+    std::uint64_t last_commit_lsn_{0};
     bool data_replica_seen_{false};
     // Id da transação corrente e o próximo a atribuir (monotônico por sessão).
     std::uint64_t current_tx_id_{0};

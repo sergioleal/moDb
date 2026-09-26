@@ -62,12 +62,14 @@ int main() {
         suite.check(primary->create(*tx, Emp{"a"}).has_value() && tx->commit().has_value(),
                     "commit1");
     }
-    const auto cut = primary->checkpoint_lsn();
-
     auto snap = repl::create_bootstrap_snapshot(*primary, paths.root_ / "tmp");
     suite.check(snap.has_value() &&
                     repl::install_bootstrap_snapshot(*snap, paths.follower_).has_value(),
                 "bootstrap");
+    // A réplica está no corte que o snapshot declara. Antes do ADR-022 ele era
+    // igual ao `checkpoint_lsn` do primary lido antes do bootstrap; com
+    // checkpoint preguiçoso, só o snapshot sabe o corte certo.
+    const auto cut = snap ? snap->begin.cut_lsn : 0;
 
     {
         auto tx = primary->begin();

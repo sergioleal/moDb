@@ -27,15 +27,31 @@ aplicado.
 `Transaction::commit()` executa, em ordem
 ([src/object/database.cpp](../src/object/database.cpp), `commit_transaction`):
 
-1. escreve `begin` + uma `page_image` por página suja no WAL;
-2. **`sync` do WAL** (as imagens ficam duráveis);
-3. escreve o registro `commit` e **`sync` do WAL** — *este é o ponto de commit*;
-4. aplica as páginas ao arquivo de dados e faz **`flush`** (durabilidade real);
-5. checkpoint: remove o WAL (as páginas já estão duráveis no arquivo de dados).
+1. escreve `begin` + uma `page_image` por página suja + o registro `commit`
+   no WAL;
+2. **`sync` do WAL** — *este é o ponto de commit*;
+3. aplica as páginas ao arquivo de dados, **sem** `sync`;
+4. a cada `checkpoint_interval` commits (padrão 64, `DatabaseOptions`), e no
+   fechamento limpo, no rollback e em `Database::checkpoint()`: **`flush`** do
+   arquivo de dados, grava `checkpoint_lsn` = último commit, **`flush`**.
 
-A ordem WAL-antes-dos-dados é o que garante atomicidade e durabilidade: uma
-queda antes do passo 3 não deixa commit no log (a transação some); uma queda
-depois do passo 3 deixa o commit durável no log (a transação é refeita).
+Até 2026-09 eram quatro `sync` por commit (WAL depois das imagens, WAL depois
+do `commit`, dados, checkpoint); o
+[ADR-022](decisions/ADR-022-menos-fsync-por-commit.md) explica por que um basta:
+
+- **um `sync` de WAL:** cada registro tem CRC e a leitura para no primeiro
+  registro truncado ou inválido. Se uma queda deixar o `commit` no disco mas uma
+  imagem anterior não, a leitura para na imagem ruim e nunca vê o `commit` — a
+  transação some, como numa queda antes do passo 2;
+- **checkpoint preguiçoso:** o checkpoint só avança depois de um `flush` dos
+  dados, então toda página que pode diferir do estado no `checkpoint_lsn`
+  gravado tem uma imagem inteira no WAL depois dele. A recuperação reaplica
+  essas imagens.
+
+A ordem WAL-antes-dos-dados continua sendo o que garante atomicidade e
+durabilidade: uma queda antes do passo 2 não deixa commit no log (a transação
+some); uma queda depois dele deixa o commit durável no log (a transação é
+refeita).
 
 ## 3. Recuperação (na abertura)
 
@@ -45,8 +61,15 @@ depois do passo 3 deixa o commit durável no log (a transação é refeita).
 1. sem `<db>.wal` → nada a fazer;
 2. lê os registros íntegros até o fim lógico; identifica as transações que têm
    registro `commit`;
-3. reaplica as `page_image` das transações commitadas, na ordem do log;
-4. `flush` do arquivo de dados e remove o WAL.
+3. reaplica, na ordem do log, as `page_image` das transações commitadas depois
+   do `checkpoint_lsn` gravado (no máximo `checkpoint_interval` commits);
+4. `flush` do arquivo de dados e avança o checkpoint. O WAL é mantido (ele
+   também alimenta réplicas).
+
+Um superbloco que declara mais páginas do que o arquivo tem — rastro de uma
+queda entre a alocação e a extensão do arquivo — é aceito quando há WAL: as
+páginas além do fim foram alocadas depois do último checkpoint e são
+re-estendidas a partir das imagens. Sem WAL continua sendo corrupção.
 
 A recuperação é **idempotente**: reaplicar as mesmas imagens leva ao mesmo
 estado, então uma segunda queda durante a própria recuperação apenas reaplica na
@@ -95,7 +118,8 @@ disco permanece).
 | Ponto de falha | Mecanismo | Estado após reabertura |
 |---|---|---|
 | Falha de I/O na escrita do WAL | `FailpointWalSink` (io_error real) | transação revertida; banco não preso; objeto ausente |
-| Falha no `sync` antes/depois do record `commit` | `FailpointWalSink` (io_error real) | transação revertida; WAL incompleto removido |
+| Falha no `sync` do WAL (o único do commit, depois do record `commit`) | `FailpointWalSink` (io_error real) | transação revertida; WAL incompleto removido |
+| Queda com commits ainda não checkpointados (arquivo de dados atrás, superbloco além do fim) | imagem de queda montada de cópias (`recovery_test`, L2/L3) | todos os commits reaplicados do WAL |
 | Antes do registro de commit | interrupção + abandono | transação ausente por completo |
 | Após o commit durável, antes de aplicar | interrupção + abandono | transação presente por completo (redo) |
 | No meio da aplicação das páginas | apply-failpoint real + destrutor normal | presente por completo (reaplicação idempotente) |
@@ -143,8 +167,11 @@ inválido mantém a semântica de fim lógico do formato.
   mesmo através de um rollback — apenas cria um **gap**.
 - **`allocate_page` é imediato.** Páginas alocadas por uma transação abortada
   ficam órfãs no arquivo (sem free list no MVP), visíveis ao `database_check`.
-- **Checkpoint = remoção do WAL.** Não há checkpoint incremental; o WAL é
-  removido inteiro após a aplicação. Falha ao removê-lo não é silenciosa: o
+- **O WAL só é removido no rollback** (que antes faz um checkpoint, para não
+  perder commits ainda não checkpointados — ADR-022). O checkpoint avança um
+  LSN; não trunca o WAL. *(Até 2026-09 este item dizia "checkpoint = remoção do
+  WAL", o que já não valia desde o WAL durável da Fase 14.)* O texto a seguir é
+  o original sobre a falha de remoção: Falha ao removê-lo não é silenciosa: o
   commit/abertura retorna erro e o WAL fica para redo idempotente na reabertura;
   um commit futuro recria o WAL normalmente. Não há teste portável que force
   essa falha de `std::filesystem::remove`.

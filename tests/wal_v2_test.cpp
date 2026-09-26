@@ -86,6 +86,11 @@ int main() {
         suite.check(std::filesystem::exists(temp.wal_path()), "wal exists after commit");
         lsn_after_first = database->next_lsn();
         suite.check(lsn_after_first > 1, "next_lsn advanced");
+        // Checkpoint preguiçoso (ADR-022): um commit sozinho não avança o
+        // checkpoint; `checkpoint()` avança.
+        suite.check(database->checkpoint_lsn() == 0 && database->commits_since_checkpoint() > 0,
+                    "a single commit leaves the checkpoint pending");
+        suite.check(database->checkpoint().has_value(), "explicit checkpoint");
         suite.check(database->checkpoint_lsn() > 0, "checkpoint advanced");
         suite.check(database->oldest_available_lsn() == database->checkpoint_lsn(),
                     "oldest==checkpoint");

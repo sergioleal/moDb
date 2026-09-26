@@ -28,11 +28,29 @@ enum class WalIoMode : std::uint8_t {
                // transação e drena tudo num único sync/barrier
 };
 
+// Se o commit sincroniza o dispositivo (`fsync` do WAL e do arquivo de dados).
+//
+// `disabled_diagnostic` existe só para MEDIR quanto do commit é `fsync`
+// (docs-process/PLANO_TAREFAS_DESEMPENHO.md, T5.2): um commit sem sync não é
+// durável, e uma queda de energia pode perder transações confirmadas. Não use
+// fora de medição.
+enum class Durability : std::uint8_t {
+    sync_real = 0,           // default: commit durável
+    disabled_diagnostic = 1, // commit sem fsync -- NÃO durável
+};
+
 struct DatabaseOptions {
     PrimaryStorage primary_storage{PrimaryStorage::full};
     CommitAckPolicy commit_ack{CommitAckPolicy::local_wal};
     std::chrono::milliseconds commit_ack_timeout{std::chrono::seconds{5}};
     WalIoMode wal_io{WalIoMode::sync};
+    Durability durability{Durability::sync_real};
+    // Modo `full`: a cada quantos commits o checkpoint avança (ADR-022, parte
+    // B). Entre checkpoints o commit sincroniza só o WAL; o arquivo de dados é
+    // sincronizado no checkpoint, e a recuperação reaplica no máximo esta
+    // quantidade de commits. 1 = checkpoint em todo commit (comportamento
+    // anterior). Ignorado em `wal_only`.
+    std::uint32_t checkpoint_interval{64};
 };
 
 [[nodiscard]] inline constexpr std::string_view to_string(PrimaryStorage storage) noexcept {

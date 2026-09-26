@@ -1,11 +1,13 @@
 #include "modb/object/database.hpp"
 #include "modb/storage/database_check.hpp"
+#include "modb/storage/page.hpp"
 #include "test_support.hpp"
 
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -621,6 +623,187 @@ int main() {
                         "every real object survives reopening with the right value");
             detach(database_id);
         }
+    }
+
+    // ---- ADR-022, parte B: checkpoint preguiçoso -------------------------------
+    //
+    // Invariante: toda página que pode diferir do estado no checkpoint gravado
+    // tem uma imagem inteira no WAL depois dele. Os testes abaixo montam
+    // "imagens de queda" a partir de cópias dos arquivos e reabrem.
+    const auto copy_over = [](const std::filesystem::path& from, const std::filesystem::path& to) {
+        std::error_code error;
+        std::filesystem::copy_file(from, to, std::filesystem::copy_options::overwrite_existing, error);
+        return !error;
+    };
+    const auto remove_quiet = [](const std::filesystem::path& path) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+    };
+    const auto padded = [](int i) { return "lazy-" + std::to_string(i) + std::string(300, 'x'); };
+
+    // (L1) O checkpoint só avança a cada `checkpoint_interval` commits.
+    {
+        TemporaryDatabase temporary{"lazy-interval"};
+        DatabaseOptions options;
+        options.checkpoint_interval = 4;
+        auto created = Database::create(temporary.path(), options);
+        auto database = share(created);
+        suite.check(database != nullptr, "lazy-interval database is created");
+        if (!database) {
+            return suite.finish();
+        }
+        auto database_id = attach(database);
+        suite.check(database->bind(employee_builder()).has_value(), "lazy-interval type is bound");
+        suite.check(database->checkpoint().has_value(), "an explicit checkpoint succeeds");
+        const auto base = database->checkpoint_lsn();
+        suite.check(database->commits_since_checkpoint() == 0, "nothing is pending after checkpoint()");
+        for (int i = 0; i < 3; ++i) {
+            auto transaction = database->begin();
+            suite.check(transaction && database->create(*transaction, Employee{padded(i), i}) &&
+                            transaction->commit(),
+                        "lazy-interval commit succeeds");
+        }
+        suite.check(database->checkpoint_lsn() == base && database->commits_since_checkpoint() == 3,
+                    "three commits below the interval do not move the checkpoint");
+        {
+            auto transaction = database->begin();
+            suite.check(transaction && database->create(*transaction, Employee{padded(3), 3}) &&
+                            transaction->commit(),
+                        "fourth lazy-interval commit succeeds");
+        }
+        suite.check(database->checkpoint_lsn() > base && database->commits_since_checkpoint() == 0,
+                    "the fourth commit reaches the interval and advances the checkpoint");
+        detach(database_id);
+    }
+
+    // (L2, L3) Imagem de queda: arquivo de dados do último checkpoint + WAL atual.
+    {
+        TemporaryDatabase temporary{"lazy-crash"};
+        auto old_data = temporary.path();
+        old_data += ".old";
+        auto current_data = temporary.path();
+        current_data += ".cur";
+        constexpr int count = 40;
+        std::vector<ObjectId> ids;
+        {
+            DatabaseOptions options;
+            options.checkpoint_interval = 1000;
+            auto created = Database::create(temporary.path(), options);
+            auto database = share(created);
+            suite.check(database != nullptr, "lazy-crash database is created");
+            if (!database) {
+                return suite.finish();
+            }
+            auto database_id = attach(database);
+            suite.check(database->bind(employee_builder()).has_value(), "lazy-crash type is bound");
+            suite.check(database->checkpoint().has_value(), "lazy-crash baseline checkpoint");
+            suite.check(copy_over(temporary.path(), old_data),
+                        "the data file at the checkpoint is copied");
+            for (int i = 0; i < count; ++i) {
+                auto transaction = database->begin();
+                if (!transaction) {
+                    suite.check(false, "lazy-crash transaction begins");
+                    continue;
+                }
+                auto handle = database->create(*transaction, Employee{padded(i), i});
+                suite.check(handle.has_value() && transaction->commit().has_value(),
+                            "lazy-crash commit succeeds");
+                if (handle) {
+                    ids.push_back(handle->id());
+                }
+            }
+            suite.check(database->commits_since_checkpoint() == static_cast<std::uint64_t>(count),
+                        "no checkpoint happened during the lazy-crash commits");
+            suite.check(copy_over(temporary.wal_path(), temporary.wal_copy_path()),
+                        "the WAL with the un-checkpointed commits is copied");
+            suite.check(copy_over(temporary.path(), current_data),
+                        "the current data file is copied");
+            detach(database_id);
+        }
+        const auto verify = [&](const std::string& label) {
+            auto opened = Database::open(temporary.path());
+            auto database = share(opened);
+            suite.check(database != nullptr, label + ": the crash image opens");
+            if (!database) {
+                return;
+            }
+            auto database_id = attach(database);
+            suite.check(database->bind(employee_builder()).has_value(), label + ": type is rebound");
+            int found = 0;
+            for (std::size_t i = 0; i < ids.size(); ++i) {
+                auto handle = database->get<Employee>(ids[i]);
+                if (handle) {
+                    auto employee = database->materialize(*handle);
+                    const int index = static_cast<int>(i);
+                    if (employee && *employee == Employee{padded(index), index}) {
+                        ++found;
+                    }
+                }
+            }
+            suite.check(found == count,
+                        label + ": every commit since the checkpoint is recovered from the WAL");
+            detach(database_id);
+        };
+
+        // (L2) Arquivo de dados parado no checkpoint, WAL com os 40 commits.
+        suite.check(copy_over(old_data, temporary.path()) &&
+                        copy_over(temporary.wal_copy_path(), temporary.wal_path()),
+                    "L2 crash image is assembled");
+        verify("L2");
+
+        // (L3) Igual, mas com o superbloco já persistido com a contagem nova e o
+        // arquivo ainda no tamanho antigo: a extensão do arquivo se perdeu.
+        {
+            std::ifstream current(current_data, std::ios::binary);
+            std::ifstream old(old_data, std::ios::binary);
+            std::vector<char> superblock(storage::page_size);
+            current.read(superblock.data(), static_cast<std::streamsize>(superblock.size()));
+            std::vector<char> rest((std::istreambuf_iterator<char>(old)), std::istreambuf_iterator<char>());
+            std::ofstream image(temporary.path(), std::ios::binary | std::ios::trunc);
+            image.write(superblock.data(), static_cast<std::streamsize>(superblock.size()));
+            if (rest.size() > superblock.size()) {
+                image.write(rest.data() + superblock.size(),
+                            static_cast<std::streamsize>(rest.size() - superblock.size()));
+            }
+        }
+        suite.check(std::filesystem::file_size(temporary.path()) < std::filesystem::file_size(current_data),
+                    "L3 image is shorter than the page count its superblock declares");
+        suite.check(copy_over(temporary.wal_copy_path(), temporary.wal_path()), "L3 WAL is restored");
+        verify("L3");
+        remove_quiet(old_data);
+        remove_quiet(current_data);
+    }
+
+    // (L4) O rollback apaga o WAL, então precisa checkpointar antes: senão os
+    // commits pendentes perderiam as imagens que os protegem.
+    {
+        TemporaryDatabase temporary{"lazy-rollback"};
+        DatabaseOptions options;
+        options.checkpoint_interval = 1000;
+        auto created = Database::create(temporary.path(), options);
+        auto database = share(created);
+        suite.check(database != nullptr, "lazy-rollback database is created");
+        if (!database) {
+            return suite.finish();
+        }
+        auto database_id = attach(database);
+        suite.check(database->bind(employee_builder()).has_value(), "lazy-rollback type is bound");
+        for (int i = 0; i < 3; ++i) {
+            auto transaction = database->begin();
+            suite.check(transaction && database->create(*transaction, Employee{padded(i), i}) &&
+                            transaction->commit(),
+                        "lazy-rollback commit succeeds");
+        }
+        suite.check(database->commits_since_checkpoint() > 0, "commits are pending before the rollback");
+        {
+            auto transaction = database->begin();
+            suite.check(transaction && database->create(*transaction, Employee{"doomed", 9}) &&
+                            transaction->rollback(),
+                        "a transaction rolls back");
+        }
+        suite.check(database->commits_since_checkpoint() == 0,
+                    "the rollback checkpoints the pending commits before removing the WAL");
+        detach(database_id);
     }
 
     return suite.finish();

@@ -1,3 +1,4 @@
+#include "modb/object/binding.hpp"
 #include "modb/object/database.hpp"
 #include "modb/object/primary_storage.hpp"
 #include "test_support.hpp"
@@ -30,6 +31,16 @@ public:
 private:
     std::filesystem::path path_;
 };
+
+struct Note {
+    std::string text;
+};
+
+BindingBuilder<Note> note_builder() {
+    BindingBuilder<Note> builder{"Note"};
+    builder.field<1>("text", &Note::text);
+    return builder;
+}
 
 } // namespace
 
@@ -80,6 +91,55 @@ int main() {
             // Reabrir o mesmo path full como wal_only deve falhar (não é MCTL).
             auto reopened = Database::open(path.path(), bad);
             suite.check(!reopened, "full file cannot open as wal_only");
+        }
+    }
+
+    // Durability::disabled_diagnostic (só medição, T5 do plano de desempenho):
+    // o commit segue a mesma sequência sem fsync. Sem queda, o SO grava as
+    // páginas de qualquer forma, então o dado reaparece numa reabertura normal.
+    {
+        TempPath path{"nosync"};
+        DatabaseOptions opts;
+        opts.durability = Durability::disabled_diagnostic;
+        ObjectId id{};
+        {
+            auto created = Database::create(path.path(), opts);
+            suite.check(created.has_value(), "create with durability=disabled_diagnostic");
+            if (created) {
+                auto db = std::make_shared<Database>(std::move(*created));
+                auto attached = DatabaseRegistry::instance().attach(db);
+                suite.check(attached.has_value() && db->bind(note_builder()).has_value(), "bind Note");
+                auto tx = db->begin();
+                suite.check(tx.has_value(), "begin without fsync");
+                if (tx) {
+                    auto handle = db->create(*tx, Note{"sem fsync"});
+                    suite.check(handle.has_value() && tx->commit().has_value(),
+                                "commit without fsync succeeds");
+                    if (handle) {
+                        id = handle->id();
+                    }
+                }
+                if (attached) {
+                    DatabaseRegistry::instance().detach(*attached);
+                }
+            }
+        }
+        auto opened = Database::open(path.path());
+        suite.check(opened.has_value(), "reopen after a no-fsync session (no crash)");
+        if (opened) {
+            auto db = std::make_shared<Database>(std::move(*opened));
+            auto attached = DatabaseRegistry::instance().attach(db);
+            suite.check(attached.has_value() && db->bind(note_builder()).has_value(), "rebind Note");
+            auto handle = db->get<Note>(id);
+            suite.check(handle.has_value(), "the object id is found after reopen");
+            if (handle) {
+                auto note = db->materialize(*handle);
+                suite.check(note.has_value() && note->text == "sem fsync",
+                            "the committed object is there after a clean reopen");
+            }
+            if (attached) {
+                DatabaseRegistry::instance().detach(*attached);
+            }
         }
     }
 
