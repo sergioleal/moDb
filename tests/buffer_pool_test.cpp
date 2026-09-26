@@ -114,6 +114,42 @@ int main() {
         suite.check(pool.size() <= pool.capacity(), "pool shrinks to capacity after flush");
     }
 
+    // --- mais páginas sujas que a capacidade (T33.3) ---
+    // Numa transação grande o pool passa da capacidade com frames sujos. Uma
+    // página limpa lida nesse estado precisa ser despejada normalmente (antes
+    // cada inserção varria todos os sujos: O(n²) na transação), as sujas nunca
+    // saem, e o flush devolve tudo para dentro da capacidade.
+    {
+        BufferPool pool{4};
+        for (std::uint64_t page = 100; page < 140; ++page) {
+            pool.put_dirty(page, tagged_page(static_cast<std::uint8_t>(page)));
+        }
+        suite.check(pool.dirty_count() == 40 && pool.size() == 40,
+                    "40 dirty pages are kept beyond a capacity of 4");
+        for (std::uint64_t page = 1; page <= 20; ++page) {
+            pool.put(page, tagged_page(static_cast<std::uint8_t>(page)));
+        }
+        suite.check(pool.dirty_count() == 40, "clean pressure never evicts a dirty page");
+        suite.check(pool.size() == 41, "only the most recent clean page stays over the dirty spill");
+        suite.check(pool.get(20) != nullptr && pool.get(1) == nullptr,
+                    "clean pages are still evicted in LRU order");
+        suite.check(pool.pin(20).has_value(), "the clean page can be pinned");
+        pool.put(21, tagged_page(21));
+        suite.check(pool.get(20) != nullptr, "a pinned clean page survives the pressure");
+        pool.unpin(20);
+        auto flushed = pool.flush_dirty([](std::uint64_t, const Page&) -> Result<void> { return {}; });
+        suite.check(flushed.has_value() && pool.dirty_count() == 0,
+                    "flush cleans every dirty frame");
+        suite.check(pool.size() <= pool.capacity(), "after the flush the pool is back within capacity");
+
+        for (std::uint64_t page = 200; page < 210; ++page) {
+            pool.put_dirty(page, tagged_page(static_cast<std::uint8_t>(page)));
+        }
+        pool.discard_dirty();
+        suite.check(pool.dirty_count() == 0 && pool.get(205) == nullptr && pool.size() <= pool.capacity(),
+                    "discard drops the dirty spill and leaves the pool within capacity");
+    }
+
     // --- discard_dirty (rollback) ---
     {
         BufferPool pool{4};

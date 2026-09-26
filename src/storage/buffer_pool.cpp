@@ -22,6 +22,7 @@ void BufferPool::put(std::uint64_t page, const Page& contents) {
         // put limpo sobre dirty limpa o bit: o conteúdo agora bate com o disco
         // (write-through) ou substitui a versão suja pela limpa fornecida.
         it->second->dirty = false;
+        place(it->second);
         touch(it->second);
         return;
     }
@@ -40,7 +41,7 @@ void BufferPool::invalidate(std::uint64_t page) {
     if (it->second->pin_count > 0) {
         return;
     }
-    entries_.erase(it->second);
+    (it->second->held ? held_ : entries_).erase(it->second);
     index_.erase(it);
 }
 
@@ -51,6 +52,7 @@ Result<void> BufferPool::pin(std::uint64_t page) {
             Error{ErrorCode::page_not_found, "cannot pin a page that is not in the buffer pool"});
     }
     ++it->second->pin_count;
+    place(it->second);
     touch(it->second);
     return {};
 }
@@ -61,18 +63,20 @@ void BufferPool::unpin(std::uint64_t page) {
         return;
     }
     --it->second->pin_count;
+    place(it->second);
 }
 
 void BufferPool::put_dirty(std::uint64_t page, const Page& contents) {
     if (const auto it = index_.find(page); it != index_.end()) {
         it->second->page = contents;
         it->second->dirty = true;
+        place(it->second);
         touch(it->second);
         return;
     }
     // Dirty não é evictável; pode temporariamente exceder a capacidade.
-    entries_.emplace_front(Frame{.page_id = page, .page = contents, .dirty = true});
-    index_.emplace(page, entries_.begin());
+    held_.emplace_front(Frame{.page_id = page, .page = contents, .dirty = true, .held = true});
+    index_.emplace(page, held_.begin());
 }
 
 bool BufferPool::is_dirty(std::uint64_t page) const noexcept {
@@ -82,15 +86,19 @@ bool BufferPool::is_dirty(std::uint64_t page) const noexcept {
 
 Result<void> BufferPool::flush_dirty(
     const std::function<Result<void>(std::uint64_t, const Page&)>& writer) {
-    for (auto& frame : entries_) {
-        if (!frame.dirty) {
+    // Só `held_` pode ter frames sujos. `place` pode mover o frame para
+    // `entries_`, então o próximo é guardado antes.
+    for (auto it = held_.begin(); it != held_.end();) {
+        const auto current = it++;
+        if (!current->dirty) {
             continue;
         }
-        if (auto written = writer(frame.page_id, frame.page); !written) {
+        if (auto written = writer(current->page_id, current->page); !written) {
             return std::unexpected(written.error());
         }
-        frame.dirty = false;
+        current->dirty = false;
         ++metrics_.dirty_flushes;
+        place(current);
     }
     // Após write-back, encolhe spill de dirty para a capacidade.
     evict_until(capacity_);
@@ -98,7 +106,7 @@ Result<void> BufferPool::flush_dirty(
 }
 
 void BufferPool::discard_dirty() noexcept {
-    for (auto it = entries_.begin(); it != entries_.end();) {
+    for (auto it = held_.begin(); it != held_.end();) {
         if (!it->dirty) {
             ++it;
             continue;
@@ -106,7 +114,7 @@ void BufferPool::discard_dirty() noexcept {
         it->dirty = false;
         if (it->pin_count == 0) {
             index_.erase(it->page_id);
-            it = entries_.erase(it);
+            it = held_.erase(it);
         } else {
             ++it;
         }
@@ -116,7 +124,7 @@ void BufferPool::discard_dirty() noexcept {
 
 std::size_t BufferPool::pinned_count() const noexcept {
     std::size_t count = 0;
-    for (const auto& frame : entries_) {
+    for (const auto& frame : held_) {
         if (frame.pin_count > 0) {
             ++count;
         }
@@ -126,7 +134,7 @@ std::size_t BufferPool::pinned_count() const noexcept {
 
 std::size_t BufferPool::dirty_count() const noexcept {
     std::size_t count = 0;
-    for (const auto& frame : entries_) {
+    for (const auto& frame : held_) {
         if (frame.dirty) {
             ++count;
         }
@@ -145,7 +153,22 @@ BufferPool::Metrics BufferPool::metrics() const noexcept {
 }
 
 void BufferPool::touch(List::iterator it) {
-    entries_.splice(entries_.begin(), entries_, it);
+    auto& list = it->held ? held_ : entries_;
+    list.splice(list.begin(), list, it);
+}
+
+void BufferPool::place(List::iterator it) {
+    const bool should_hold = !can_evict(*it);
+    if (should_hold == it->held) {
+        return;
+    }
+    // splice move o nó sem invalidar o iterador guardado em `index_`.
+    if (should_hold) {
+        held_.splice(held_.begin(), entries_, it);
+    } else {
+        entries_.splice(entries_.begin(), held_, it);
+    }
+    it->held = should_hold;
 }
 
 bool BufferPool::can_evict(const Frame& frame) const noexcept {
@@ -153,22 +176,11 @@ bool BufferPool::can_evict(const Frame& frame) const noexcept {
 }
 
 void BufferPool::evict_until(std::size_t max_size) {
-    while (index_.size() > max_size) {
-        bool evicted = false;
-        for (auto it = entries_.end(); it != entries_.begin();) {
-            --it;
-            if (!can_evict(*it)) {
-                continue;
-            }
-            index_.erase(it->page_id);
-            it = entries_.erase(it);
-            ++metrics_.evictions;
-            evicted = true;
-            break;
-        }
-        if (!evicted) {
-            break;
-        }
+    // `entries_` só tem evictáveis: a vítima é sempre a cauda (menos recente).
+    while (index_.size() > max_size && !entries_.empty()) {
+        index_.erase(entries_.back().page_id);
+        entries_.pop_back();
+        ++metrics_.evictions;
     }
 }
 

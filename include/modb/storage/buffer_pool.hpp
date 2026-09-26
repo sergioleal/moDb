@@ -64,18 +64,31 @@ private:
         Page page{};
         std::uint32_t pin_count{0};
         bool dirty{false};
+        // Em qual lista o frame está: `held_` (dirty ou pinado) ou `entries_`.
+        bool held{false};
     };
 
     using Entry = Frame;
     using List = std::list<Entry>;
 
     void touch(List::iterator it);
-    // Remove vítimas limpas e sem pin até caber `need` slots (ou não houver).
+    // Recoloca o frame na lista que corresponde ao estado atual dele (O(1),
+    // por splice). Chamado depois de toda mudança de dirty/pin.
+    void place(List::iterator it);
+    // Remove vítimas limpas e sem pin até caber `max_size` (ou não houver).
     void evict_until(std::size_t max_size);
     [[nodiscard]] bool can_evict(const Frame& frame) const noexcept;
 
     std::size_t capacity_;
+    // Duas listas (T33.3): `entries_` guarda só frames evictáveis, em ordem
+    // LRU; `held_`, os dirty ou pinados, que não podem sair. Antes era uma lista
+    // só, e `evict_until` a percorria pulando os não evictáveis -- com mais
+    // frames sujos do que a capacidade, cada inserção no cache varria todos
+    // eles: O(páginas sujas) por operação, O(n²) numa transação grande
+    // (collect_garbage a 100k levava 30-64 s). Agora despejar é tirar do fim de
+    // `entries_`.
     List entries_;
+    List held_;
     std::unordered_map<std::uint64_t, List::iterator> index_;
     Metrics metrics_{};
 };
