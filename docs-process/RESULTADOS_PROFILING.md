@@ -14,6 +14,15 @@ aqui é uma otimização aplicada: a regra do repositório é que otimização e
 com comparação antes/depois registrada, e nenhuma mudança de caminho quente foi
 feita nesta rodada.
 
+> **Atualização de 2026-09-26.** O parágrafo acima descreve a rodada de
+> 2026-07-26. Desde então cinco otimizações entraram, todas com antes/depois
+> medido: A2 (§4.2), page size 8 KiB (A5), WAL mantido aberto entre commits, um
+> `fsync` de dados a menos por commit e uma leitura por leitura (as três últimas
+> em [PLANO_PROFILER.md §9.2.1–§9.2.4](PLANO_PROFILER.md)). H5 e a metade de
+> escrita de H6 foram refutadas. O estado de cada ação está em §6, e o que falta
+> fazer está em [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md), que
+> substitui a ordenação de §6 como lista de trabalho.
+
 ## 1. Resumo em cinco linhas
 
 1. **Corrigido**: o laço de candidatas de
@@ -133,6 +142,14 @@ erra os de 10k (prevê 32,2 µs para 16 KiB/10k, mediu 22,35). Os termos não s�
 separáveis por varredura — é para isso que existe a Etapa 1.
 
 ## 4.1 Etapa 1: a varredura de candidatas domina TUDO, não só a ingestão
+
+> **Números de antes da A2.** Esta seção mede o código anterior ao índice de
+> capacidade (§4.2), com páginas de 4 KiB. Depois da A2 `heap_candidate_scan`
+> caiu para 0,4–0,5% em `create`/`update_inplace`/`update_grow` e para 75,7% em
+> `update_shrink` (ainda a 4 KiB). Os percentuais de cobertura abaixo também
+> contavam tempo duas vezes (`heap_candidate_try` continha `heap_page_write` e
+> `persist_root`) — ver [PLANO_PROFILER.md §9.1](PLANO_PROFILER.md). A remedição
+> a 8 KiB é a tarefa T3.2 de [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md).
 
 Timers por estágio (preset `stage-profile`), `create_only` e `crud_full` a 100k,
 um processo por caso. Sobrecarga da instrumentação: dentro do ruído entre
@@ -285,9 +302,30 @@ de verdade num servidor.
 
 ## 6. Ações sugeridas
 
-Ordenadas por valor sobre custo. Nenhuma foi executada.
+Ordenadas por valor sobre custo, como escritas em 2026-07-26. Quando esta seção
+foi escrita nenhuma tinha sido executada. Estado em 2026-09-26:
 
-### A1 — Etapa 1: timers por estágio ✅ *parcialmente entregue*
+| Ação | Estado |
+|---|---|
+| A1 — timers por estágio | ✅ concluída ([PLANO_PROFILER.md §9](PLANO_PROFILER.md)) |
+| A2 — laço de candidatas | ✅ implementada e medida (§4.2) |
+| A3 — caminho de update | ✅ respondida por A1/A2 |
+| A4 — WAL com imagens de página inteiras | 🔄 parcial — o custo de commit foi atacado por outro lado (ações de H7, abaixo); o formato do WAL não mudou |
+| A5 — page size padrão | ✅ trocado para 8 KiB, por outro motivo que não a ingestão |
+| A6 — ambiguidade de M5 | ⬜ aberta |
+| A7 — higiene | ⬜ aberta |
+| H7 — WAL reaberto por commit | ✅ WAL mantido aberto: `mixed_oltp.1k` 2,01× ([PLANO_PROFILER.md §9.2.1](PLANO_PROFILER.md)) |
+| H7 — `fsync` de dados repetido | ✅ um flush a menos por commit: `mixed_oltp.10k` 1,19× ([PLANO_PROFILER.md §9.2.3](PLANO_PROFILER.md)) |
+| Leitura dupla (`peek_type` + `get`) | ✅ uma leitura por leitura: fase `read` 1,14× ([PLANO_PROFILER.md §9.2.4](PLANO_PROFILER.md)) |
+
+### A1 — Etapa 1: timers por estágio ✅ *concluída*
+
+> Entregue por completo em 2026-08-02 ([PLANO_PROFILER.md §9](PLANO_PROFILER.md)):
+> 18 estágios, leitura e escrita, envelopes fora de `attributed_ns`. A
+> cobertura de `create` e `read` não chega a 90%, e a instrumentação mostrou
+> por quê: o resíduo está no laço do harness, não no motor
+> ([PLANO_PROFILER.md §9.3.1](PLANO_PROFILER.md)). O texto abaixo é o da
+> entrega parcial original.
 
 Entregue: preset `stage-profile`, seis estágios instrumentados
 (`heap_candidate_scan`, `heap_candidate_try`, `heap_page_write`, `persist_root`,
@@ -317,7 +355,14 @@ Era o maior bloco de tempo absoluto e não tinha hipótese. Agora tem: 80–88% 
 insere a nova versão e paga a varredura inteira. **Não precisa de investigação
 própria — é a mesma correção.**
 
-### A4 — WAL: imagens de página inteiras *(implicado por dois caminhos)*
+### A4 — WAL: imagens de página inteiras *(implicado por dois caminhos)* 🔄 *parcial*
+
+> O formato do WAL não mudou. O custo de commit foi reduzido por outro lado — o
+> WAL deixou de ser reaberto por commit e um `fsync` de dados saiu — e as
+> varreduras de `--batch`/`durability` abaixo seguem pendentes (tarefas T3.4, T5
+> e T16 de [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md)). Com
+> páginas de 8 KiB o contra-termo por tamanho de página não apareceu em nenhuma
+> fase ([PLANO_PROFILER.md §9.2.2](PLANO_PROFILER.md)).
 
 [`wal.cpp:324`](../src/tx/wal.cpp) grava a página completa. Dois indícios
 independentes: o contra-termo por tamanho de página (§4) e os ~3 KB de WAL por
@@ -330,7 +375,13 @@ RelWithDebInfo)*.
 - **Esforço da medição:** baixo, é só tempo de máquina. **Da mudança:** alto —
   registro lógico/delta muda o formato do WAL e o recovery.
 
-### A5 — Decidir o page size padrão *(sem uma linha de código)*
+### A5 — Decidir o page size padrão ✅ *trocado para 8 KiB, por outro motivo*
+
+> Decidido em 2026-08-02 ([PLANO_PROFILER.md §9.2.2](PLANO_PROFILER.md)). O
+> "+46% de ingestão" abaixo não existia mais quando a matriz foi rodada: a A2
+> atacava o mesmo termo e o absorveu (ingestão a 100k ficou igual entre 4 e
+> 8 KiB). A troca se justificou por `update_shrink` 1,94× e `delete` 1,26×, sem
+> nenhuma fase pior. O texto abaixo é o original.
 
 8 KiB deu **+46% de ingestão a 100k** com arquivo **menor** (43,7 → 41,9 MB).
 16 KiB não acrescenta (+3%) e piora escalas pequenas.
@@ -391,6 +442,11 @@ patamar após o primeiro caso grande aponta cache do SO.
   duas fases, e o que falta está nomeado em A1, não adivinhado.
 - O teto de ~4,8× para A2 é **extrapolação** da fração medida por fase, não uma
   medição de antes/depois.
-- H5 (retenção MVCC) e H6 (dívidas de CPU do Binding) continuam **não testadas**.
+- ~~H5 (retenção MVCC) e H6 (dívidas de CPU do Binding) continuam **não testadas**.~~
+  *(Atualizado em 2026-09-26.)* H5 foi **refutada**: a fase `hold` do
+  `snapshot_hold` é ~98% durabilidade de commit, e o trabalho sob retenção é
+  0,8% dela ([PLANO_PROFILING.md §9.3](PLANO_PROFILING.md)). A metade de
+  escrita de H6 também foi **refutada** (`object_bind` move 0,3 p.p. de
+  `create`); a metade de leitura segue não medida.
   H2 foi confirmada mas é pequena (0,5–1,8%). H3 e H4 foram absorvidas: com
   `batch=1000` o WAL não domina, e o custo do update é a varredura de A2.

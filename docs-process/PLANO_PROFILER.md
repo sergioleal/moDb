@@ -1,7 +1,8 @@
 # Profiler in-process — análise e desenho
 
-- Estado: **passos 1–9 implementados e medidos** (ver §9, Andamento). Falta o
-  passo 10 (campanha 4:1 vs 10:1 em RelWithDebInfo) e o 11 (histograma, opcional)
+- Estado: **passos 1–9 implementados e medidos** (ver §9, Andamento). Passo 10
+  medido a 10k (§4.7), falta a 100k; passo 11 (histograma) opcional
+- Lista de trabalho pendente: [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md)
 - Versão: 2
 - Data de abertura: 2026-07-30
 - Data da execução: 2026-08-02
@@ -400,8 +401,8 @@ Legenda: ⬜ não começado · 🔄 em andamento · ✅ concluído
 | 7 | Contadores de mix alcançado (§4.4) | ✅ | emitidos no `phase_summary`, não no `stage_profile` — §9.3 |
 | 8 | Balde por classe (P4, §3.2) | ✅ | diferença de snapshot, como desenhado |
 | 9 | `workload_version` por workload (§4.5) | ✅ | `mixed_oltp`→2; `series_key_version` segue 2 |
-| 10 | Medir 4:1 vs 10:1 em RelWithDebInfo | ⬜ | tempo de máquina; Pred. 1 e 2 seguem por verificar |
-| 11 | Histograma log₂ (P5, 2º degrau) | ⬜ | opcional; `max_ns` já responde "qual estágio produz a cauda" |
+| 10 | Medir 4:1 vs 10:1 em RelWithDebInfo | 🔄 | medido a 10k em 2026-08-03: Pred. 1 e 2 confirmadas (§4.7). A 100k, como o passo pedia, falta — T4.1 de [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md) |
+| 11 | Histograma log₂ (P5, 2º degrau) | ⬜ | opcional; `max_ns` já responde "qual estágio produz a cauda" (T24) |
 
 138/138 testes passam em `stage-profile`, `relwithdebinfo` e `sanitizers`.
 
@@ -694,7 +695,8 @@ de por omissão.
 Achado colateral do mesmo bloco: `identity_lookup` e `heap_record_read` têm
 `calls_per_operation = 2,00` na fase `read` — o caminho de leitura **resolve o
 id e lê o registro duas vezes por operação** (`peek_type` seguido de `get`).
-Não corrigido aqui; registrado para não se perder.
+Não corrigido aqui; registrado para não se perder. *(Corrigido depois, em
+§9.2.4: uma leitura por leitura, fase `read` 1,14×.)*
 
 ## 7. Riscos
 
@@ -736,4 +738,7 @@ Não corrigido aqui; registrado para não se perder.
   são pré-requisitos de qualquer comparação, não deste desenho.
 - Não decide o page size padrão (A5) nem toca em H5 (retenção MVCC). H6 passa
   de "não testada" para "testável" pelo estágio `materialize`, o que não é o
-  mesmo que testada.
+  mesmo que testada. *(Atualizado em 2026-09-26: o page size foi decidido em
+  §9.2.2 — 8 KiB; H5 foi instrumentada e refutada em
+  [PLANO_PROFILING.md §9.3](PLANO_PROFILING.md); a metade de leitura de H6
+  segue não medida.)*

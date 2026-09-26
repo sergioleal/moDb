@@ -1,7 +1,9 @@
 # Plano de profiling de desempenho — onde estão os gargalhos
 
-- Estado: **Etapa 0 concluída; H1 confirmada; ação A2 implementada e medida**
+- Estado: **Etapas 0 e 1 concluídas; Etapa 3 parcial; H1, H2 e H7
+  confirmadas; H5 e H6 (escrita) refutadas; cinco otimizações medidas**
   (ver §8, Andamento)
+- Lista de trabalho pendente: [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md)
 - Resultados medidos e ações sugeridas: [RESULTADOS_PROFILING.md](RESULTADOS_PROFILING.md)
 - Desenho da ferramenta (lacunas de cobertura da Etapa 1, caminho de leitura,
   atribuição por classe de operação, dimensão leitura/escrita):
@@ -311,8 +313,18 @@ Legenda: ⬜ não começado · 🔄 em andamento · ✅ concluído · ⛔ bloque
 | 0.5 Baseline RelWithDebInfo, 3 repetições | ✅ | 30 pontos, CV 0,3–6%; válido entre repetições, não entre casos (M5) |
 | **Etapa 1** — `stage_profile` | ✅ | 18 estágios (13 folhas + 5 envelopes), caminho de leitura e escrita; `mixed_oltp` fecha em 94,8%. `create` (48%) e `read` (17%) não fecham, e a instrumentação mostra que o resíduo está no harness, não no motor ([PLANO_PROFILER.md §9.3](PLANO_PROFILER.md)) |
 | **Etapa 2** — atribuição por função | ⬜ | **provavelmente desnecessária agora** — ver abaixo |
-| **Etapa 3** — varreduras | 🔄 | page size ✅ (§9.1); faltam batch, durability, cache, payload, scale até 250k |
-| **Etapa 4** — relatório e gates | ⬜ | |
+| **Etapa 3** — varreduras | 🔄 | page size ✅ (§9.1, e remedida depois da A2 em [PLANO_PROFILER.md §9.2.2](PLANO_PROFILER.md)); `reads_per_write` 4:1 vs 10:1 ✅ a 10k ([PLANO_PROFILER.md §4.7](PLANO_PROFILER.md)); faltam batch, durability, cache, payload, scale até 250k — T4/T5 de [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md) |
+| **Etapa 4** — relatório e gates | ⬜ | T10 de [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md) |
+
+Otimizações aplicadas desde a abertura, todas com antes/depois medido:
+
+| Ação | Commit | Ganho |
+|---|---|---|
+| A2 — índice de candidatas por capacidade | `c1afe5b` | `crud_full.100k` 3,5× |
+| WAL mantido aberto entre commits (H7) | `9157e81` | `mixed_oltp.1k` 2,01× |
+| Page size padrão 8 KiB (A5) | `e1e0847` | `update_shrink` 1,94×, `delete` 1,26× |
+| Um `fsync` de dados a menos por commit (H7) | `c7fe4d1` | `mixed_oltp.10k` 1,19× |
+| Uma leitura por leitura | `9133234` | fase `read` 1,14× |
 
 Resultados medidos: [RESULTADOS_PROFILING.md §4.1](RESULTADOS_PROFILING.md).
 
@@ -349,11 +361,10 @@ hotspot já está achado, com um contador provando que o laço não produz nada.
 passa a ser opcional: vale se, depois de corrigir a varredura, o resíduo não
 atribuído de `create` (39%) continuar sem explicação pelos estágios que faltam.
 
-Próximo passo recomendado: revisitar H5 (retenção MVCC do `snapshot_hold`) ou
-H6 (dívidas de CPU do Binding, só visíveis em Release) -- ou seguir para a
-Etapa 3 (varreduras de `--batch`/`durability`/`payload`), agora que o gargalo
-dominante de update/create está corrigido e essas varreduras vão medir efeitos
-reais, não o ruído do laço de candidatas.
+Próximo passo: ver [PLANO_TAREFAS_DESEMPENHO.md](PLANO_TAREFAS_DESEMPENHO.md),
+que ordena o trabalho restante por prioridade e esforço. *(Atualizado em
+2026-09-26. A recomendação anterior — revisitar H5 — foi cumprida: H5 foi
+refutada, §9.3. O maior custo restante conhecido é a durabilidade do commit.)*
 
 ### O que ficou fora, deliberadamente
 
@@ -389,11 +400,11 @@ registrada para não ser reinvestigada.
 | 2026-07-26 | M1–M4b (defeitos de medição) | confirmados por leitura de código, corrigidos | §3 |
 | 2026-07-26 | M5 (contaminação por ordem) | **confirmado** por experimento | §3.1 |
 | 2026-07-26 | H1 | **confirmado, com um contra-termo novo** | §9.1 |
-| — | H2 | pendente | — |
-| — | H3 | reforçada indiretamente por §9.1 | — |
-| — | H4 | pendente | — |
+| 2026-07-26 | H2 (`persist_root` por registro) | **confirmada, pequena** | 1 chamada por operação, 0,5–1,8% das fases ([RESULTADOS_PROFILING.md §4.1](RESULTADOS_PROFILING.md)) |
+| — | H3 (WAL com imagens de página inteiras) | aberta; custo de commit atacado por outro lado (H7) | com `batch=1000` o WAL não domina; a 8 KiB o contra-termo de §9.1 não apareceu ([PLANO_PROFILER.md §9.2.2](PLANO_PROFILER.md)); bytes/op e varreduras de batch/durability pendentes (T3.4, T5, T16) |
+| — | H4 (update move registros) | **majoritariamente absorvida por H1** | 80–88% do update era a varredura de candidatas; resta `update_shrink` (75,7% em `heap_candidate_scan` pós-A2, a 4 KiB) — remedir a 8 KiB (T3.2, T14) |
 | 2026-08-03 | **H5 (retenção MVCC no `snapshot_hold`)** | **refutada** | a fase `hold` era 98% durabilidade de commit, não retenção — §9.3 |
-| — | H6 (leitura) | pendente | estágio `materialize` existe desde 2026-08-02; falta medir em Release |
+| — | H6 (leitura) | pendente | estágio `materialize` existe desde 2026-08-02; falta medir em Release (T3.3, T15) |
 | 2026-08-02 | H6 (escrita, `to_field_values`) | **refutada** | o estágio `object_bind` move 0,3 p.p. de `create` — a conversão do Binding é barata ([PLANO_PROFILER.md §9.2](PLANO_PROFILER.md)) |
 | 2026-08-02 | **H7 (nova): commit reabre o WAL e faz fsync de dados 3–4× por transação** | **confirmada por instrumentação** | [PLANO_PROFILER.md §9.2](PLANO_PROFILER.md) |
 
