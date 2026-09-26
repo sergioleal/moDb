@@ -90,6 +90,10 @@ def parse(path: Path) -> dict[str, dict]:
             phases[rec["phase"]]["profile"] = rec
         elif kind == "case_summary":
             status = rec.get("status")
+        elif kind == "case_error":
+            # O processo sai com 0 e o JSONL fecha "completed" mesmo quando o
+            # caso não roda (ex.: alvo sem implementação): falhar alto aqui.
+            raise SystemExit(f"{path}: {rec.get('case_id')}: {rec.get('error')}")
     if status not in (None, "completed"):
         raise SystemExit(f"{path}: caso terminou com status {status}")
     return phases

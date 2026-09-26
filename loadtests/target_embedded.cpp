@@ -263,6 +263,15 @@ modb::object::DatabaseOptions database_options(const WorkloadParams& params) {
     return options;
 }
 
+// Vazão de uma fase a partir de operações e duração. Os workloads de blob e de
+// cascata preenchiam `operations` e `duration_ns` mas nunca `ops_per_second`,
+// que ficava 0 -- na série histórica eles nunca tiveram vazão (T12).
+double ops_per_second_of(std::uint64_t operations, std::uint64_t duration_ns) {
+    return duration_ns > 0 ? static_cast<double>(operations) * 1'000'000'000.0 /
+                                 static_cast<double>(duration_ns)
+                           : 0.0;
+}
+
 SetupResult setup_database(AttachedDatabase& attached, const std::filesystem::path& db_path,
                            const WorkloadParams& params,
                            std::size_t cache_capacity_pages = modb::storage::page_cache_capacity) {
@@ -2042,6 +2051,8 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     create_phase.phase = "create";
     create_phase.operations = lifecycles.size();
     create_phase.duration_ns = ns_between(create_start, create_end);
+    create_phase.ops_per_second =
+        ops_per_second_of(create_phase.operations, create_phase.duration_ns);
     create_phase.db_bytes = size_error ? 0 : db_bytes_after_create;
     create_phase.peak_rss_bytes = create_rss.peak();
     result.phases.push_back(create_phase);
@@ -2073,6 +2084,8 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     read_phase.phase = "read";
     read_phase.operations = lifecycles.size();
     read_phase.duration_ns = ns_between(read_start, read_end);
+    read_phase.ops_per_second =
+        ops_per_second_of(read_phase.operations, read_phase.duration_ns);
     read_phase.errors = read_mismatches;
     read_phase.peak_rss_bytes = read_rss.peak();
     result.phases.push_back(read_phase);
@@ -2110,6 +2123,8 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     grow_phase.phase = "update_grow";
     grow_phase.operations = lifecycles.size();
     grow_phase.duration_ns = ns_between(grow_start, grow_end);
+    grow_phase.ops_per_second =
+        ops_per_second_of(grow_phase.operations, grow_phase.duration_ns);
     grow_phase.errors = grow_mismatches;
     grow_phase.db_bytes = grow_size_error ? 0 : db_bytes_after_grow;
     grow_phase.peak_rss_bytes = grow_rss.peak();
@@ -2145,6 +2160,8 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     shrink_phase.phase = "update_shrink";
     shrink_phase.operations = lifecycles.size();
     shrink_phase.duration_ns = ns_between(shrink_start, shrink_end);
+    shrink_phase.ops_per_second =
+        ops_per_second_of(shrink_phase.operations, shrink_phase.duration_ns);
     shrink_phase.errors = shrink_mismatches;
     shrink_phase.peak_rss_bytes = shrink_rss.peak();
     result.phases.push_back(shrink_phase);
@@ -2186,6 +2203,8 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     delete_phase.phase = "delete";
     delete_phase.operations = lifecycles.size();
     delete_phase.duration_ns = ns_between(delete_start, delete_end);
+    delete_phase.ops_per_second =
+        ops_per_second_of(delete_phase.operations, delete_phase.duration_ns);
     delete_phase.errors = delete_errors;
     delete_phase.db_bytes = post_delete_size_error ? 0 : db_bytes_after_delete;
     delete_phase.peak_rss_bytes = delete_rss.peak();
@@ -2383,6 +2402,8 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
     create_phase.phase = "create_hierarchy";
     create_phase.operations = total_created;
     create_phase.duration_ns = ns_between(create_start, create_end);
+    create_phase.ops_per_second =
+        ops_per_second_of(create_phase.operations, create_phase.duration_ns);
     create_phase.db_bytes = size_error ? 0 : db_bytes_after_create;
     create_phase.peak_rss_bytes = create_rss.peak();
     result.phases.push_back(create_phase);
@@ -2443,6 +2464,8 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
     delete_phase.phase = "cascade_delete";
     delete_phase.operations = total_created;
     delete_phase.duration_ns = ns_between(delete_start, delete_end);
+    delete_phase.ops_per_second =
+        ops_per_second_of(delete_phase.operations, delete_phase.duration_ns);
     delete_phase.peak_rss_bytes = delete_rss.peak();
     result.phases.push_back(delete_phase);
 
