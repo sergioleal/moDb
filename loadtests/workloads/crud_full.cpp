@@ -21,6 +21,8 @@ CaseRunResult run_crud_full(const Case& c, const std::filesystem::path& work_dir
     params.object_count = c.objects;
     params.batch = c.batch;
     params.payload = c.payload;
+    params.durability = c.durability;
+    params.checkpoint_interval = c.checkpoint_interval;
     params.on_progress = on_progress;
 
     return run_crud_full_embedded(params, out_db_path);

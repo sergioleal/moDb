@@ -466,6 +466,22 @@ Fixed at a default value; varied only for cases targeting a specific risk.
 `durability=disabled_diagnostic` is never published as a durable load
 number; it exists to isolate CPU/codec cost from `fsync` cost.
 
+Selectable from the CLI (2026-09, T5 of
+[PLANO_TAREFAS_DESEMPENHO.md](../docs-process/PLANO_TAREFAS_DESEMPENHO.md)):
+`--batch a,b` (every workload honors it) and `--durability a,b`.
+`disabled_diagnostic` opens the database with
+`DatabaseOptions::durability = Durability::disabled_diagnostic`, which runs the
+same commit sequence without syncing the device; it only has dispatch on the
+`embedded` target, because on the network targets the server opens the
+database and the option would not reach it. Example:
+`modb_load run --profile load-local --case load.create_only.embedded.10k --batch 1 --durability sync_real,disabled_diagnostic`.
+
+`payload=fat` does not work with `crud_full`: `update_grow` makes the ~4 KiB
+record exceed what fits in one 8 KiB page (`record exceeds the maximum
+TableHeap page payload`; there are no overflow records), so
+`load.crud_full.*.payload_fat` — including the one in `load-heavy` — always
+fails. `create_only` with `fat` works.
+
 `primary_storage=wal_only`
 ([ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md))
 changes the nature of the test: on the primary there is only WAL, so "file

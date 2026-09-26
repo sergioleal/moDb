@@ -22,6 +22,8 @@ CaseRunResult run_create_delete_interleaved(const Case& c, const std::filesystem
     params.object_count = c.objects;
     params.batch = c.batch;
     params.payload = c.payload;
+    params.durability = c.durability;
+    params.checkpoint_interval = c.checkpoint_interval;
     params.on_progress = on_progress;
 
     return run_create_delete_embedded(params, DeleteOrder::Interleaved,

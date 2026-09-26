@@ -209,6 +209,11 @@ struct WorkloadParams {
     // expressa aqui -- não há inteiro para "infinito" -- e não precisa: já
     // existe o workload `read_hotspot`. Só `mixed_oltp` lê isto.
     std::uint64_t reads_per_write{10};
+    // "sync_real" (padrão) ou "disabled_diagnostic" -- commit sem fsync, só para
+    // medir o custo do fsync (T5 do plano de desempenho). Só o alvo embedded lê.
+    std::string durability{"sync_real"};
+    // Commits entre checkpoints (ADR-022); só o alvo embedded lê.
+    std::uint64_t checkpoint_interval{64};
 
     // Subfase F: `on_progress` nulo (padrão) = não emite progress_window,
     // igual ao comportamento de antes desta subfase. `window_interval` só

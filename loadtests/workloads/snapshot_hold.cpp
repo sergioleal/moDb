@@ -21,6 +21,8 @@ CaseRunResult run_snapshot_hold(const Case& c, const std::filesystem::path& work
     params.object_count = c.objects;
     params.batch = c.batch;
     params.payload = c.payload;
+    params.durability = c.durability;
+    params.checkpoint_interval = c.checkpoint_interval;
     params.on_progress = on_progress;
 
     return run_snapshot_hold_embedded(params, out_db_path);

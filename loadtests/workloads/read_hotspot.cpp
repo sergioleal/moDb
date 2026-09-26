@@ -21,6 +21,8 @@ CaseRunResult run_read_hotspot(const Case& c, const std::filesystem::path& work_
     params.object_count = c.objects;
     params.batch = c.batch;
     params.payload = c.payload;
+    params.durability = c.durability;
+    params.checkpoint_interval = c.checkpoint_interval;
     params.on_progress = on_progress;
 
     return run_read_hotspot_embedded(params, out_db_path);

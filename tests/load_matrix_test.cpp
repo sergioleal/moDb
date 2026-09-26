@@ -232,6 +232,53 @@ void test_expand_matrix_accepts_implemented_payload(TestSuite& suite) {
                "o caso resultante deve carregar payload=fat");
 }
 
+// `--batch` e `--durability` (PLANO_TAREFAS_DESEMPENHO.md T5): batch tem dispatch
+// em todo workload; `disabled_diagnostic` só no alvo embedded, porque nos alvos
+// de rede quem abre o banco é o servidor.
+void test_expand_matrix_batch_and_durability(TestSuite& suite) {
+    std::vector<Case> cases(1);
+    cases[0].workload = "create_only";
+    cases[0].target = "embedded";
+    cases[0].scale = "10k";
+    cases[0].objects = 10'000;
+
+    MatrixSelectors selectors;
+    selectors.batch = {"1", "10000"};
+    selectors.durability = {"sync_real", "disabled_diagnostic"};
+    auto expanded = expand_matrix(cases, selectors);
+    suite.check(expanded.error.empty(), "--batch e --durability devem ser aceitos no embedded");
+    suite.check(expanded.cases.size() == 4, "2 batches x 2 durabilidades = 4 casos");
+    bool saw_nosync_batch1 = false;
+    for (const auto& c : expanded.cases) {
+        if (c.batch == 1 && c.durability == "disabled_diagnostic") {
+            saw_nosync_batch1 = c.case_id() == "load.create_only.embedded.10k.batch1_nosync";
+        }
+    }
+    suite.check(saw_nosync_batch1, "batch=1 sem fsync deve virar o sufixo .batch1_nosync");
+
+    MatrixSelectors ckpt;
+    ckpt.checkpoint_interval = {"1", "64"};
+    auto intervals = expand_matrix(cases, ckpt);
+    suite.check(intervals.error.empty() && intervals.cases.size() == 2 &&
+                    intervals.cases[0].case_id() == "load.create_only.embedded.10k.ckpt1" &&
+                    intervals.cases[1].case_id() == "load.create_only.embedded.10k",
+                "checkpoint_interval=1 vira .ckpt1; o padrão (64) não gera sufixo");
+
+    MatrixSelectors unknown;
+    unknown.durability = {"fast"};
+    auto rejected = expand_matrix(cases, unknown);
+    suite.check(!rejected.error.empty() && rejected.error.find("durability") != std::string::npos,
+               "durabilidade desconhecida deve falhar nomeando a dimensão");
+
+    std::vector<Case> network = cases;
+    network[0].target = "loopback";
+    MatrixSelectors nosync;
+    nosync.durability = {"disabled_diagnostic"};
+    auto remote = expand_matrix(network, nosync);
+    suite.check(!remote.error.empty(),
+               "disabled_diagnostic fora do embedded deve falhar: o servidor não recebe a opção");
+}
+
 void test_unimplemented_dimension_reason_direct(TestSuite& suite) {
     Case ok;
     ok.workload = "create_only";
@@ -385,6 +432,7 @@ int main() {
     test_expand_matrix_rejects_unimplemented_concurrency(suite);
     test_expand_matrix_rejects_reads_per_write_outside_mixed_oltp(suite);
     test_expand_matrix_accepts_reads_per_write_on_mixed_oltp(suite);
+    test_expand_matrix_batch_and_durability(suite);
     test_expand_matrix_accepts_implemented_payload(suite);
     test_unimplemented_dimension_reason_direct(suite);
     test_expand_matrix_repeat(suite);

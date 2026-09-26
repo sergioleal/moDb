@@ -21,6 +21,8 @@ CaseRunResult run_restart_recovery(const Case& c, const std::filesystem::path& w
     params.object_count = c.objects;
     params.batch = c.batch;
     params.payload = c.payload;
+    params.durability = c.durability;
+    params.checkpoint_interval = c.checkpoint_interval;
     params.on_progress = on_progress;
 
     return run_restart_recovery_embedded(params, out_db_path);

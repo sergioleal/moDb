@@ -52,6 +52,11 @@ void print_usage() {
         << "                [--environment a,b] [--case id,id] [--filter SUBSTR]\n"
         << "                [--exclude SUBSTR] [--concurrency a,b] [--payload a,b]\n"
         << "                [--reads-per-write a,b]  (só mixed_oltp; padrão 10, 0 = só escrita)\n"
+        << "                [--batch a,b]  (objetos por commit; padrão 1000)\n"
+        << "                [--durability a,b]  (sync_real | disabled_diagnostic: commit SEM fsync,\n"
+        << "                                     só para medir o custo do fsync; só embedded)\n"
+        << "                [--checkpoint-interval a,b]  (commits entre checkpoints; padrão 64,\n"
+        << "                                              1 = checkpoint em todo commit; só embedded)\n"
         << "                [--repeat N] [--seed N] [--output-dir DIR] [--work-dir DIR]\n"
         << "                [--environments-file PATH] [--calibration-file PATH] [--max-duration N]\n"
         << "                [--max-disk-gb N]\n"
@@ -159,6 +164,12 @@ bool parse_common_selectors(int argc, char** argv, int start, CampaignOptions& o
             extend(options.selectors.payload, need("--payload"));
         } else if (arg == "--reads-per-write") {
             extend(options.selectors.reads_per_write, need("--reads-per-write"));
+        } else if (arg == "--batch") {
+            extend(options.selectors.batch, need("--batch"));
+        } else if (arg == "--durability") {
+            extend(options.selectors.durability, need("--durability"));
+        } else if (arg == "--checkpoint-interval") {
+            extend(options.selectors.checkpoint_interval, need("--checkpoint-interval"));
         } else if (arg == "--repeat") {
             options.selectors.repeat = std::strtoull(need("--repeat"), nullptr, 10);
         } else if (arg == "--seed") {

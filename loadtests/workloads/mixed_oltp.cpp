@@ -21,6 +21,8 @@ CaseRunResult run_mixed_oltp(const Case& c, const std::filesystem::path& work_di
     params.object_count = c.objects;
     params.batch = c.batch;
     params.payload = c.payload;
+    params.durability = c.durability;
+    params.checkpoint_interval = c.checkpoint_interval;
     params.concurrency = c.concurrency;
     params.reads_per_write = c.reads_per_write;
     params.on_progress = on_progress;

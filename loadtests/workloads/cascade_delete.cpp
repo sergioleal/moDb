@@ -21,6 +21,8 @@ CaseRunResult run_cascade_delete(const Case& c, const std::filesystem::path& wor
     params.object_count = c.objects;
     params.batch = c.batch;
     params.payload = c.payload;
+    params.durability = c.durability;
+    params.checkpoint_interval = c.checkpoint_interval;
     params.on_progress = on_progress;
 
     return run_cascade_delete_embedded(params, out_db_path);

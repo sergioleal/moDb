@@ -179,6 +179,9 @@ std::string Case::case_id() const {
         if (reads_per_write != 10) {
             parts.push_back("rw" + std::to_string(reads_per_write));
         }
+        if (checkpoint_interval != 64) {
+            parts.push_back("ckpt" + std::to_string(checkpoint_interval));
+        }
         for (const auto& p : parts) {
             if (!suffix.empty()) {
                 suffix += "_";
@@ -225,8 +228,20 @@ std::string unimplemented_dimension_reason(const Case& c) {
         return "readers=" + std::to_string(c.readers) +
                " ainda não tem dispatch implementado -- " + c.case_id();
     }
-    if (c.durability != "sync_real") {
-        return "durability='" + c.durability + "' ainda não tem dispatch implementado -- " +
+    // `disabled_diagnostic` pula os fsync do commit (DatabaseOptions::durability)
+    // para medir quanto do commit é fsync (PLANO_TAREFAS_DESEMPENHO.md T5). Só o
+    // alvo embedded abre o banco no próprio processo; nos alvos de rede quem abre
+    // é o servidor, e a opção não chegaria lá.
+    if (c.durability != "sync_real" && c.durability != "disabled_diagnostic") {
+        return "durability desconhecida: '" + c.durability +
+               "' (válidas: sync_real, disabled_diagnostic) -- " + c.case_id();
+    }
+    if (c.checkpoint_interval != 64 && c.target != "embedded") {
+        return "checkpoint_interval=" + std::to_string(c.checkpoint_interval) +
+               " só tem dispatch no alvo embedded -- " + c.case_id();
+    }
+    if (c.durability != "sync_real" && c.target != "embedded") {
+        return "durability='" + c.durability + "' só tem dispatch no alvo embedded -- " +
                c.case_id();
     }
     if (c.cache != "warm") {
@@ -341,6 +356,20 @@ ExpandResult expand_matrix(const std::vector<Case>& profile_cases,
                            [](Case& c, const std::string& v) {
                                if (auto n = parse_u64(v)) {
                                    c.reads_per_write = *n;
+                               }
+                           });
+    working = cross_expand(std::move(working), selectors.batch,
+                           [](Case& c, const std::string& v) {
+                               if (auto n = parse_u64(v)) {
+                                   c.batch = *n;
+                               }
+                           });
+    working = cross_expand(std::move(working), selectors.durability,
+                           [](Case& c, const std::string& v) { c.durability = v; });
+    working = cross_expand(std::move(working), selectors.checkpoint_interval,
+                           [](Case& c, const std::string& v) {
+                               if (auto n = parse_u64(v); n && *n > 0) {
+                                   c.checkpoint_interval = *n;
                                }
                            });
 

@@ -251,10 +251,23 @@ struct SetupResult {
 
 // Cria o arquivo, registra e faz bind de `User` -- comum a todo workload
 // embedded desta subfase.
+// Opções do banco que vêm de WorkloadParams: `durability` ("disabled_diagnostic"
+// = commit sem fsync, só para medir o custo do fsync) e `checkpoint_interval`
+// (ADR-022).
+modb::object::DatabaseOptions database_options(const WorkloadParams& params) {
+    modb::object::DatabaseOptions options;
+    if (params.durability == "disabled_diagnostic") {
+        options.durability = modb::object::Durability::disabled_diagnostic;
+    }
+    options.checkpoint_interval = static_cast<std::uint32_t>(params.checkpoint_interval);
+    return options;
+}
+
 SetupResult setup_database(AttachedDatabase& attached, const std::filesystem::path& db_path,
+                           const WorkloadParams& params,
                            std::size_t cache_capacity_pages = modb::storage::page_cache_capacity) {
     SetupResult result;
-    auto created = Database::create(db_path, cache_capacity_pages);
+    auto created = Database::create(db_path, database_options(params), cache_capacity_pages);
     if (!created) {
         result.error = "Database::create: " + created.error().message;
         return result;
@@ -333,7 +346,6 @@ CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const Worklo
         auto created_handle = attached.database->create(*tx, to_engine_user(generated));
         const auto op_end = std::chrono::steady_clock::now();
         latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
-        window_tracker.record_operation(latencies_ns.back());
 
         if (!created_handle) {
             ++errors;
@@ -343,7 +355,12 @@ CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const Worklo
         }
         outcome.ids.push_back(created_handle->id());
 
+        // O commit (e o begin do lote seguinte) é tempo de motor da operação que
+        // fecha o lote: entra na amostra dela. Antes ficava fora do intervalo
+        // medido, então `engine_ops_per_second` excluía o commit e
+        // `harness_overhead` o contava como harness (PROFILING_2026-09.md, T5).
         if (i % batch == 0 || i == params.object_count) {
+            const auto commit_start = std::chrono::steady_clock::now();
             if (auto committed = tx->commit(); !committed) {
                 outcome.error = "commit(create): " + committed.error().message;
                 return outcome;
@@ -356,7 +373,10 @@ CreatePhaseOutcome perform_create_phase(AttachedDatabase& attached, const Worklo
                 }
                 tx.emplace(std::move(*next_tx));
             }
+            latencies_ns.back() +=
+                static_cast<double>(ns_between(commit_start, std::chrono::steady_clock::now()));
         }
+        window_tracker.record_operation(latencies_ns.back());
     }
     const auto create_end = std::chrono::steady_clock::now();
     const auto pages_read_after = attached.database->data_pages_read();
@@ -447,7 +467,6 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
         auto removed = attached.database->remove(*tx, ids_in_order[i]);
         const auto op_end = std::chrono::steady_clock::now();
         latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
-        window_tracker.record_operation(latencies_ns.back());
 
         if (!removed) {
             ++errors;
@@ -456,7 +475,12 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
         }
 
         const auto position = i + 1;
+        // O commit (e o begin do lote seguinte) é tempo de motor da operação que
+        // fecha o lote: entra na amostra dela. Antes ficava fora do intervalo
+        // medido, então `engine_ops_per_second` excluía o commit e
+        // `harness_overhead` o contava como harness (PROFILING_2026-09.md, T5).
         if (position % batch_size == 0 || position == ids_in_order.size()) {
+            const auto commit_start = std::chrono::steady_clock::now();
             if (auto committed = tx->commit(); !committed) {
                 outcome.error = "commit(delete): " + committed.error().message;
                 return outcome;
@@ -469,7 +493,10 @@ DeletePhaseOutcome perform_delete_phase(AttachedDatabase& attached,
                 }
                 tx.emplace(std::move(*next_tx));
             }
+            latencies_ns.back() +=
+                static_cast<double>(ns_between(commit_start, std::chrono::steady_clock::now()));
         }
+        window_tracker.record_operation(latencies_ns.back());
     }
     const auto delete_end = std::chrono::steady_clock::now();
     const auto pages_read_after = attached.database->data_pages_read();
@@ -709,7 +736,6 @@ UpdatePhaseOutcome perform_update_phase(
         }
         const auto op_end = std::chrono::steady_clock::now();
         latencies_ns.push_back(static_cast<double>(ns_between(op_start, op_end)));
-        window_tracker.record_operation(latencies_ns.back());
 
         if (!handle || !updated) {
             ++errors;
@@ -719,7 +745,12 @@ UpdatePhaseOutcome perform_update_phase(
         }
 
         const auto position = i + 1;
+        // O commit (e o begin do lote seguinte) é tempo de motor da operação que
+        // fecha o lote: entra na amostra dela. Antes ficava fora do intervalo
+        // medido, então `engine_ops_per_second` excluía o commit e
+        // `harness_overhead` o contava como harness (PROFILING_2026-09.md, T5).
         if (position % batch_size == 0 || position == ids.size()) {
+            const auto commit_start = std::chrono::steady_clock::now();
             if (auto committed = tx->commit(); !committed) {
                 outcome.error = std::string{phase_name} + ": commit: " + committed.error().message;
                 return outcome;
@@ -733,7 +764,10 @@ UpdatePhaseOutcome perform_update_phase(
                 }
                 tx.emplace(std::move(*next_tx));
             }
+            latencies_ns.back() +=
+                static_cast<double>(ns_between(commit_start, std::chrono::steady_clock::now()));
         }
+        window_tracker.record_operation(latencies_ns.back());
     }
     const auto phase_end = std::chrono::steady_clock::now();
     const auto pages_read_after = attached.database->data_pages_read();
@@ -798,7 +832,7 @@ CaseRunResult run_create_only_embedded(const WorkloadParams& params,
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -870,7 +904,7 @@ CaseRunResult run_create_delete_embedded(const WorkloadParams& params, DeleteOrd
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -937,7 +971,7 @@ CaseRunResult run_crud_full_embedded(const WorkloadParams& params,
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -1101,7 +1135,7 @@ CaseRunResult run_read_hotspot_embedded(const WorkloadParams& params,
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -1228,7 +1262,7 @@ CaseRunResult run_range_scan_sweep_embedded(const WorkloadParams& params,
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -1478,7 +1512,7 @@ CaseRunResult run_mixed_oltp_embedded(const WorkloadParams& params,
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -1657,7 +1691,7 @@ CaseRunResult run_snapshot_hold_embedded(const WorkloadParams& params,
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -1949,7 +1983,7 @@ CaseRunResult run_blob_lifecycle_embedded(const WorkloadParams& params,
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -2281,7 +2315,7 @@ CaseRunResult run_cascade_delete_embedded(const WorkloadParams& params,
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -2436,7 +2470,7 @@ CaseRunResult run_oversubscribed_churn_embedded(const WorkloadParams& params,
         static_cast<std::size_t>(std::max<std::uint64_t>(8, estimated_pages / 10));
 
     AttachedDatabase attached;
-    if (auto setup = setup_database(attached, db_path, cache_capacity_pages); !setup.ok) {
+    if (auto setup = setup_database(attached, db_path, params, cache_capacity_pages); !setup.ok) {
         result.status = "failed";
         result.error = setup.error;
         return result;
@@ -2521,7 +2555,7 @@ CaseRunResult run_restart_recovery_embedded(const WorkloadParams& params,
     // verdade, não reaproveite o objeto em memória.
     {
         AttachedDatabase attached;
-        if (auto setup = setup_database(attached, db_path); !setup.ok) {
+        if (auto setup = setup_database(attached, db_path, params); !setup.ok) {
             result.status = "failed";
             result.error = setup.error;
             return result;
@@ -2615,7 +2649,7 @@ CaseRunResult run_restart_recovery_embedded(const WorkloadParams& params,
     // verdade (o mesmo `Database::open` que um processo relançado chamaria).
     const auto restart_start = std::chrono::steady_clock::now();
     AttachedDatabase reopened;
-    auto opened = Database::open(db_path);
+    auto opened = Database::open(db_path, database_options(params));
     if (!opened) {
         result.status = "failed";
         result.error = "Database::open (reinício): " + opened.error().message;

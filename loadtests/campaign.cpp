@@ -74,6 +74,7 @@ std::string case_params_json(const Case& c) {
         << ",\"concurrency\":" << json_uint(c.concurrency) << ",\"readers\":" << json_uint(c.readers)
         << ",\"durability\":" << json_string(c.durability) << ",\"cache\":" << json_string(c.cache)
         << ",\"primary_storage\":" << json_string(c.primary_storage)
+        << ",\"checkpoint_interval\":" << json_uint(c.checkpoint_interval)
         << ",\"repeat_index\":" << json_uint(c.repeat_index)
         << ",\"explicit_variant\":" << json_string(c.explicit_variant);
     return oss.str();
@@ -495,6 +496,11 @@ Case case_from_case_start(const JsonValue& v) {
     c.durability = v.get_string("durability");
     c.cache = v.get_string("cache");
     c.primary_storage = v.get_string("primary_storage");
+    // Ausente em campanhas anteriores a esta dimensão: mantém o padrão.
+    if (const auto interval = static_cast<std::uint64_t>(v.get_number("checkpoint_interval"));
+        interval > 0) {
+        c.checkpoint_interval = interval;
+    }
     c.repeat_index = static_cast<std::uint64_t>(v.get_number("repeat_index"));
     c.explicit_variant = v.get_string("explicit_variant");
     return c;
