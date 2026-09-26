@@ -258,8 +258,13 @@ A fonte de verdade é `modb.snapshot` (casos de GC) e `modb.cli.mvcc_gc`.
   ainda pode enxergá-la. Enquanto um snapshot que a vê estiver aberto, a versão
   é preservada (o GC retorna 0 para ela).
 - **Coleta de órfãos.** Um registro que não é nem a `current` nem a `previous`
-  referenciada (ex.: um `previous` sobrescrito por uma segunda alteração, ou
-  qualquer cópia deixada por uma sessão anterior) é órfão e é sempre recuperado.
+  referenciada (ex.: cópias deixadas por versões do motor anteriores ao
+  ADR-024) é órfão e é sempre recuperado.
+- **Recuperação imediata da versão sobrescrita (ADR-024).** Desde 2026-09, um
+  `update` que sobrescreve a `previous` apaga o registro dela na mesma
+  transação: a regra de conflito já garante que nenhum snapshot aberto a
+  enxerga. Cada objeto vivo tem no máximo duas versões físicas, com ou sem GC.
+  O `remove` não faz isso (a cópia extra de um removido fica para o GC).
   Isso também limpa `previous` órfãos remanescentes de execuções anteriores na
   próxima coleta (snapshots não sobrevivem ao processo).
 - **Compactação da entrada.** Ao liberar a `previous` referenciada, o GC chama
@@ -275,7 +280,8 @@ A fonte de verdade é `modb.snapshot` (casos de GC) e `modb.cli.mvcc_gc`.
 
 Limitação mantida (ADR-009): **uma** versão anterior por objeto — uma segunda
 alteração enquanto a `previous` ainda é visível retorna `snapshot_conflict`. O
-GC não roda automaticamente em toda transação nem no fechamento de snapshot: ele
+GC não roda automaticamente em toda transação nem no fechamento de snapshot
+(só a `previous` sobrescrita é liberada no caminho de escrita, ADR-024): ele
 é explícito (`Database::collect_garbage()` / `modb mvcc gc`), o que mantém o
 commit barato; o custo de uma coleta é `O(registros do heap)` — reconciliação
 completa, candidata a otimização com um índice de reclamação na Fase 10.

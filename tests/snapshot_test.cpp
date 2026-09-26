@@ -352,16 +352,23 @@ int main() {
                 suite.check(current_value.has_value() && current_value->balance == 20,
                             "gc does not disturb the current version");
 
-                // Duas alterações SEM snapshot: a segunda sobrescreve a posição
-                // previous, deixando a versão intermediária órfã no heap. O GC
-                // recupera tanto a previous referenciada quanto a órfã.
+                // Várias alterações SEM snapshot: cada uma sobrescreve a posição
+                // previous, e a versão que sai dali é liberada na hora (T33.4,
+                // ADR-024) — nunca há mais que current + previous. O GC só
+                // recupera a previous referenciada.
                 suite.check(set_balance(*gc_db, *fabio, 30).has_value(), "Fabio updated to 30");
                 suite.check(set_balance(*gc_db, *fabio, 40).has_value(), "Fabio updated to 40");
-                suite.check(gc_db->data_record_count() == baseline + 2,
-                            "two snapshotless updates leave a previous and an orphan copy");
+                suite.check(gc_db->data_record_count() == baseline + 1,
+                            "an update releases the previous it overwrites (no orphan copy)");
+                for (int value = 41; value <= 60; ++value) {
+                    (void)set_balance(*gc_db, *fabio, value);
+                }
+                suite.check(gc_db->data_record_count() == baseline + 1,
+                            "twenty more snapshotless updates still leave only current + previous");
+                (void)set_balance(*gc_db, *fabio, 40);
                 auto swept = gc_db->collect_garbage();
-                suite.check(swept.has_value() && *swept == 2,
-                            "gc reclaims both the previous and the orphaned intermediate copy");
+                suite.check(swept.has_value() && *swept == 1,
+                            "gc reclaims the referenced previous version");
                 suite.check(gc_db->data_record_count() == baseline,
                             "only the latest version remains after the sweep");
                 auto latest = gc_db->get<Account>(*fabio);

@@ -195,6 +195,11 @@ private:
     // que este `previous` teria de virar.
     [[nodiscard]] Result<void> check_snapshot_conflict(
         ObjectId id, std::optional<std::uint64_t> oldest_open_snapshot_epoch) const;
+    // Recuperação imediata (T33.4, ADR-024): a `previous` que um update
+    // vai sobrescrever, e a liberação do seu registro depois da escrita. Com
+    // isso cada objeto tem no máximo duas versões físicas, sem esperar o GC.
+    [[nodiscard]] Result<std::optional<storage::RecordId>> overwritten_previous(ObjectId id) const;
+    [[nodiscard]] Result<void> release_overwritten(std::optional<storage::RecordId> record);
     // Cria um índice sobre (tipo, campo): monta a B+ tree, backfill dos objetos
     // atuais e registra no catálogo. Exige transação (as escritas passam pelo
     // WAL). Fase 7B.

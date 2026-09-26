@@ -171,7 +171,12 @@ whatever it can still see).
   older snapshot still needs the current `previous`) fails atomically with
   `snapshot_conflict`, before any write happens.
 - `update` always inserts a new physical record; `remove` only tombstones
-  the identity — physical reclamation is GC's job, not the write path's.
+  the identity. The one reclamation on the write path is the `previous` the
+  write overwrites — no open snapshot can see it, so it is erased in the same
+  transaction (ADR-024); each live object keeps at most two physical
+  versions. `remove` does not do this — a removed object's extra copy waits
+  for GC.
+  Everything else is GC's job.
 - `collect_garbage()` never reclaims a version some open snapshot could
   still see, and never touches the live `current`.
 - Snapshots do not survive the process — GC always cleans up leftover

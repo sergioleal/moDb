@@ -396,6 +396,35 @@ Result<void> ObjectStore::check_snapshot_conflict(
     return {};
 }
 
+Result<std::optional<storage::RecordId>> ObjectStore::overwritten_previous(ObjectId id) const {
+    auto info = identity_.inspect(id);
+    if (!info) {
+        // Entrada ausente: a própria escrita (rebind/erase) reporta o erro.
+        if (info.error().code == ErrorCode::record_not_found) {
+            return std::optional<storage::RecordId>{};
+        }
+        return std::unexpected(info.error());
+    }
+    return info->previous;
+}
+
+Result<void> ObjectStore::release_overwritten(std::optional<storage::RecordId> record) {
+    if (!record) {
+        return {};
+    }
+    // A escrita já passou por `check_snapshot_conflict`: se havia `previous`,
+    // nenhum snapshot aberto é mais antigo que a época `current`, então nenhum
+    // pode enxergar este registro — e snapshots abertos depois veem `current`
+    // ou mais novo. Apagá-lo agora, na mesma transação, é o que o GC faria com
+    // ele como órfão (T33.4, ADR-024).
+    if (auto erased = data_heap_.erase(*record); !erased) {
+        if (erased.error().code != ErrorCode::record_not_found) {
+            return std::unexpected(erased.error());
+        }
+    }
+    return {};
+}
+
 Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldValues fields,
                                  std::optional<std::uint64_t> oldest_open_snapshot_epoch) {
     if (!file_->in_transaction()) {
@@ -424,13 +453,22 @@ Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldV
     // Nunca reaproveita o registro antigo: um snapshot aberto pode depender
     // dos bytes exatamente como estavam antes desta escrita (Fase 6B). A nova
     // versão sempre ocupa um endereço físico próprio; o antigo permanece
-    // legível como `previous` até a Fase 6C decidir reciclá-lo.
+    // legível como `previous` até a próxima escrita no objeto (que o libera,
+    // T33.4) ou o GC (Fase 6C).
+    // A `previous` que o rebind vai sobrescrever (T33.4).
+    auto overwritten = overwritten_previous(id);
+    if (!overwritten) {
+        return std::unexpected(overwritten.error());
+    }
     auto location = data_heap_.insert(*record);
     if (!location) {
         return std::unexpected(location.error());
     }
     if (auto rebound = identity_.rebind(id, *location, root_.epoch() + 1); !rebound) {
         return std::unexpected(rebound.error());
+    }
+    if (auto released = release_overwritten(*overwritten); !released) {
+        return std::unexpected(released.error());
     }
     // Atualiza os índices: retira as chaves antigas e insere as novas.
     if (previous) {
@@ -460,8 +498,10 @@ Result<void> ObjectStore::remove(ObjectId id,
         }
     }
     // O registro físico não é tocado: um snapshot mais antigo pode precisar
-    // dele via `previous`. A reciclagem do espaço é responsabilidade da Fase
-    // 6C (retenção e GC), não desta escrita.
+    // dele via `previous`. A `previous` anterior, que esta remoção sobrescreve,
+    // também fica para o GC (ADR-024): um objeto removido não volta a ser
+    // escrito, então sobra no máximo uma cópia a mais por objeto — e liberá-la
+    // aqui deixava o delete 2,1x mais lento (T33.4).
     if (auto erased = identity_.erase(id, root_.epoch() + 1); !erased) {
         return std::unexpected(erased.error());
     }

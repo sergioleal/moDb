@@ -1253,3 +1253,56 @@ todas as fases de `crud_full.100k` e `create_delete_interleaved.100k` entre
 O arquivo ainda não **encolhe** (páginas livres ocupam espaço até serem
 reusadas), e a lista é por heap: páginas livres do heap de dados não servem ao
 `IdentityMap`, aos índices nem ao `BlobStore`.
+
+## T33.4 — Recuperação automática de versões ([ADR-024](../docs/decisions/ADR-024-recuperacao-imediata-da-versao-sobrescrita.md))
+
+`update` e `remove` movem `current` → `previous` e **sobrescrevem** a `previous`
+anterior, cujo registro físico fica órfão até um `collect_garbage()` completo.
+Mas a escrita só passa da regra de conflito (`check_snapshot_conflict`) quando
+nenhum snapshot aberto é mais antigo que a época `current` — ou seja, quando
+nenhum snapshot pode enxergar aquela `previous`. Então ela pode ser apagada
+**na mesma transação**, sem varrer nada. Com isso cada objeto tem no máximo duas
+versões físicas (`current` e `previous`), com ou sem GC.
+
+### Predição (escrita antes de rodar)
+
+Sem GC, `crud_full.100k`: `update_inplace` igual (não há `previous` antiga
+ainda); `update_grow` apaga as 100k originais e reusa suas páginas — arquivo
+~107 MB em vez de 144,2; `update_shrink` apaga as de `update_inplace` e cabe no
+espaço liberado — arquivo final ~105–112 MB em vez de 159,6.
+Tempo: `update_grow`/`update_shrink` até +20% (um `erase` a mais por update,
+em página em geral fria); demais fases no ruído.
+*Refutação:* arquivo final acima de 130 MB, ou alguma fase de update mais de
++30% mais lenta.
+
+### Resultado — tamanho confirmado; custo do delete refutado e corrigido
+
+Primeira versão (liberando em `update` **e** `remove`), A/B alternado contra
+`eddde62`, 5 repetições, sem GC ([dados](profiling/2026-09/t334-summary.md)):
+arquivo como previsto, mas o **delete ficou 2,1× mais lento** (motor 290k →
+136k ops/s; WAL 2.720 → 3.687 B/op) — a predição dizia "demais fases no ruído".
+Causa: a `previous` liberada no delete é a versão de `update_grow` (registros
+grandes, poucos por página), então quase todo delete esvazia uma página e grava
+imagens a mais no WAL. E ali a liberação não limita nada: um objeto removido não
+volta a ser escrito. Ficou só no `update` (ADR-024).
+
+Versão final (só `update`), mesma metodologia ([dados](profiling/2026-09/t334b-summary.md)):
+
+| fase | base: arquivo | T33.4: arquivo | motor ops/s base → T33.4 |
+|---|---|---|---|
+| update_inplace | 79,1 MiB | 79,1 MiB | 128.798 → 125.271 (−2,7%, ruído) |
+| update_grow | 144,2 MiB | **107,0 MiB** | 107.782 → 93.769 (**−13,0%**) |
+| update_shrink | 159,6 MiB | **107,0 MiB** | 94.295 → 77.656 (**−17,6%**) |
+| delete | 159,6 MiB | 107,0 MiB | 289.349 → 279.401 (−3,4%, CV 17%) |
+
+`create` e `read` no ruído. As cinco repetições de cada lado deram exatamente
+esses tamanhos. (Os tamanhos das seções T33.1–T33.2 são em MiB; o `db_bytes` bruto
+é 1,049× maior.)
+
+- Tamanho: **confirmado** — 107,0 MiB, dentro de 105–112, igual ao que se
+  obtinha chamando o GC entre as fases, agora sem GC.
+- Tempo dos updates: `update_shrink` custa +21% de tempo por operação, um pouco
+  acima dos +20% previstos e abaixo do limite de refutação (+30%). É o `erase`
+  que o GC faria depois, pago na hora e sem varredura do heap.
+- Testes: `snapshot_test` passou a exigir que 22 updates sem snapshot deixem só
+  `current` + `previous`; com a liberação desligada (mutação), ele falha.

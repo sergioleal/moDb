@@ -115,7 +115,7 @@ Payroll total at the SAME snapshot after Carla&#x27;s raise = 39500 (unchanged -
 A second raise while the snapshot is open failed as expected: object 20 already has a previous version visible to an older open snapshot
 Retried raise for Carla succeeded once the snapshot closed
 Payroll total on a fresh snapshot = 44500
-collect_garbage() reclaimed 12 record(s)</code></pre>
+collect_garbage() reclaimed 6 record(s)</code></pre>
 <h2>What to Notice</h2>
 <ul>
 <li>A snapshot is an epoch number, not a data copy — cheap to open, but every one you leave open blocks GC from reclaiming what it protects (the single retained <code>previous</code> version).</li>

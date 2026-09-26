@@ -83,7 +83,10 @@ A 6C recicla o espaço que a 6B preservava, mantendo a retenção correta:
   explícito (não roda em todo commit nem no destrutor do `Snapshot`, que
   permanece livre de I/O), o que mantém o commit barato; o custo por coleta é
   `O(registros do heap)`. Otimizar com um índice de reclamação por época fica
-  para a Fase 10.
+  para a Fase 10. *(2026-09: o `TableHeap` ganhou lista livre própria —
+  [ADR-023](ADR-023-lista-de-paginas-livres-do-heap.md) — e a `previous`
+  sobrescrita por uma escrita passou a ser liberada na hora —
+  [ADR-024](ADR-024-recuperacao-imediata-da-versao-sobrescrita.md).)*
 - **Concorrência.** Commits seguem serializados pela guarda single-writer de
   `begin()`. O registro de épocas de snapshots abertos é protegido por um mutex
   curto, sincronizando leitor (abre/fecha snapshot) e escritor (escrita/GC) sem

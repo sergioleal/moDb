@@ -814,7 +814,8 @@ list):
   queuing or blocking.
 - **Garbage collection is `O(number of heap records)`** — a full
   reconciliation each time you call `collect_garbage()`, not an incremental
-  sweep.
+  sweep. Without it, a live object still keeps at most two physical versions:
+  an `update` erases the `previous` it overwrites (ADR-024).
 - **`BlobStore` used directly (not through a collection) has no transactional
   guard of its own** — it's a low-level primitive, same trust level as the
   CLI's `blob`/`record`/`heap` diagnostic commands.

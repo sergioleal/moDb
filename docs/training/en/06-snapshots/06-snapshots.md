@@ -54,7 +54,7 @@ Payroll total at the SAME snapshot after Carla's raise = 39500 (unchanged -- the
 A second raise while the snapshot is open failed as expected: object 20 already has a previous version visible to an older open snapshot
 Retried raise for Carla succeeded once the snapshot closed
 Payroll total on a fresh snapshot = 44500
-collect_garbage() reclaimed 12 record(s)
+collect_garbage() reclaimed 6 record(s)
 ```
 
 ## What to Notice
