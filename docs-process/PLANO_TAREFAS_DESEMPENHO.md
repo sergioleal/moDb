@@ -310,7 +310,7 @@ Repetições isoladas 2–4× mais lentas em qualquer binário, que somem ao rep
 
 - [x] 32.1 Correlacionar com Defender/indexação/estado do disco
 
-#### T33 — Versões antigas sem snapshot não são recuperadas *(P2, médio)*
+#### T33 — Versões antigas sem snapshot não são recuperadas *(P2, médio)* ✅
 
 T29: o arquivo de `crud_full.100k` vai de 41,9 MB a 159,6 MB (3,8×) nas três
 fases de update, sem snapshot aberta. Cada update grava uma versão nova e mantém
@@ -481,3 +481,6 @@ Só se, depois de T6 e T13, sobrar resíduo de motor sem explicação.
 | 2026-09-26 | T17–T32 (P3) | `4152810` `33fddb7` `1430f23` `63fc24b` `0709083` + este | Leitura sem cópia (último caso): `read` 1,23× no motor; exclusões na série; `device_class`; ambiente padrão; retenção MVCC sem custo de leitura; calibração RelWithDebInfo medida 1k–1M; `load-results/` 7,6 GB → 332 KB. T23–T25 não necessárias |
 | 2026-09-26 | T29 | (este commit) | Hipóteses refutadas (candidata residente: 0 efeito; cache 8×: 0 efeito ou pior). Causa: arquivo 3,8× sem GC automático de versões → T33. Fica `load_trusted` com uma cópia a menos |
 | 2026-09-26 | T33.1 | (este commit) | GC entre fases: recolhe 100k versões, mas o arquivo não encolhe (páginas vazias saem da cadeia sem free list) e o GC é O(n²) (evict_until pula frames sujos): 70 ms a 10k, 30–64 s a 100k |
+| 2026-09-26 | T33.3 | `a681c62` | BufferPool com lista separada para frames sujos/pinados: GC a 100k 30–64 s → 1,1–1,4 s; fases normais no ruído |
+| 2026-09-26 | T33.2 | `eddde62` | ADR-023: lista de páginas livres por heap (`free_head` na raiz THRP). Com GC entre as fases, arquivo 159,6 → 107,0 MiB; sem GC, ruído |
+| 2026-09-26 | T33.4 | `1627505` | ADR-024: o `update` libera a `previous` que sobrescreve. Sem GC, arquivo 159,6 → 107,0 MiB; `update_grow`/`update_shrink` −13%/−18%. No `remove`: delete 2,1× mais lento → descartado. Lição 06: GC 12 → 6 |
