@@ -174,8 +174,21 @@ def wsl_command(distro: str) -> list[str]:
     return ["wsl.exe", "-d", distro, "--", "bash", "-l", "-s"]
 
 
-def wsl(distro: str, script: str, **kwargs) -> subprocess.CompletedProcess:
-    return subprocess.run(wsl_command(distro), input=script, **kwargs)
+def feed_stdin(process: subprocess.Popen, script: str) -> None:
+    # Em bytes, direto no buffer: o modo texto do Windows trocaria \n por \r\n,
+    # e o bash leria cada CR como parte do comando.
+    assert process.stdin is not None
+    process.stdin.buffer.write(script.encode("utf-8"))  # type: ignore[attr-defined]
+    process.stdin.close()
+
+
+def wsl(distro: str, script: str, capture_output: bool = False, **kwargs) -> subprocess.CompletedProcess:
+    kwargs.setdefault("text", True)
+    pipe = subprocess.PIPE if capture_output else None
+    process = subprocess.Popen(wsl_command(distro), stdin=subprocess.PIPE, stdout=pipe, stderr=pipe, **kwargs)
+    feed_stdin(process, script)
+    stdout, stderr = process.communicate()
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
 
 
 def wsl_path(distro: str, windows_path: Path) -> str:
@@ -539,9 +552,7 @@ def cmd_run(args: argparse.Namespace) -> str | None:
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace", **transport_popen_kwargs(transport))
     if stdin_script:
-        assert process.stdin is not None
-        process.stdin.write(stdin_script)
-        process.stdin.close()
+        feed_stdin(process, stdin_script)
     run_name = None
     assert process.stdout is not None
     for out_line in process.stdout:
