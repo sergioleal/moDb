@@ -75,11 +75,11 @@ O que falta:
 - [x] 1.3 `examples/server_procs/`: servidor mínimo com um módulo de exemplo e um cliente que chama uma proc; teste de ponta a ponta (servidor em processo filho, cliente real)
 - [x] 1.4 ADR "Servidor de aplicação com procedures compiladas" (este desenho, isolamento sem sandbox, um banco por servidor)
 
-#### S2 — Valores autodescritos para argumentos e resultados *(médio)*
+#### S2 — Valores autodescritos para argumentos e resultados *(médio)* ✅
 
-- [ ] 2.1 `ops::Valor` (nulo, bool, int64, double, texto, id, lista, mapa) + codificação binária versionada + testes de ida e volta
-- [ ] 2.2 Conversão `Valor` ↔ JSON (para gateways web e para o CLI)
-- [ ] 2.3 `Args` com leitura tipada e erro claro (`a.id("exemplar")`, `a.texto_ou("nome", "")`)
+- [x] 2.1 *(`ops::Value`, `include/modb/ops/value.hpp`)* `ops::Valor` (nulo, bool, int64, double, texto, id, lista, mapa) + codificação binária versionada + testes de ida e volta
+- [x] 2.2 *(`to_json`/`from_json`; id vira número e `Args::id` aceita inteiro ≥ 1)* Conversão `Valor` ↔ JSON (para gateways web e para o CLI)
+- [x] 2.3 *(`ops::Args`: `id`, `text`, `integer`, `boolean`, `ids`, `*_or`)* `Args` com leitura tipada e erro claro (`a.id("exemplar")`, `a.texto_ou("nome", "")`)
 
 #### S3 — Procs declaradas como função, com erros de regra *(médio)*
 
@@ -106,6 +106,7 @@ O que falta:
 - [ ] 6.1 Arquivo de configuração (banco, host, porta, tokens, limites de conexões e de tempo de proc)
 - [ ] 6.2 Log estruturado por chamada (proc, duração, resultado, código de erro)
 - [ ] 6.3 Rodar como serviço: unidade systemd e Windows Service (ou NSSM) documentados em `docs/OPERACAO.md`; teste de reinício depois de matar o processo (o WAL recupera)
+- [ ] 6.5 Desligamento ativo: `request_stop` fecha as sessões abertas; hoje `serve_forever` espera cada cliente ocioso até o idle timeout (30 s) — achado na S2
 - [ ] 6.4 Tempo máximo por proc (cooperativo: o `Contexto` checa o prazo a cada acesso ao banco) e desfaz a transação ao estourar
 
 #### S7 — Descoberta de procs *(pequeno)*
@@ -155,3 +156,4 @@ máquina local.
 |---|---|---|---|
 | 2026-09-27 | Plano | — | Levantamento do servidor, do protocolo e dos módulos por leitura de código |
 | 2026-09-27 | S1 | (este commit) | `modb::server_host` + `modb_add_server`; exemplo `notas-server`; teste ponta a ponta com o servidor em outro processo, morto à força e reaberto (nota confirmada sobrevive). ADR-025. Achado: o move de `net::Server` perdia o registro de procs e os limites — corrigido |
+| 2026-09-27 | S2 | (este commit) | `ops::Value` (binário versionado com limites contra entrada hostil, JSON), `ops::Args`; `notas` passa a usar `{texto}`/`{id}`. Achado: parar o servidor com cliente ocioso conectado leva até 30 s → S6.5 |

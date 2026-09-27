@@ -63,6 +63,15 @@ Result<app::ServerConnection> conectar(std::uint16_t porta, const std::filesyste
     return std::unexpected(ultimo);
 }
 
+// Chama uma proc com argumentos Value e decodifica o resultado.
+Result<ops::Value> chamar(app::ServerConnection& conn, std::string_view proc, const ops::Value& args) {
+    auto bytes = conn.call(proc, ops::encode(args));
+    if (!bytes) {
+        return std::unexpected(bytes.error());
+    }
+    return ops::decode(*bytes);
+}
+
 // Processo filho mínimo (Windows / POSIX): sobe, mata à força, espera.
 class Filho {
 public:
@@ -161,19 +170,30 @@ int main() {
         suite.check(srv.has_value(), "start abre o banco e carrega o módulo");
         if (srv) {
             std::thread laco{[&] { (void)srv->serve_forever(); }};
-            auto conn = conectar(srv->port(), db);
-            suite.check(conn.has_value(), "cliente conecta");
-            if (conn) {
-                auto id = conn->call(k_criar, texto_para_bytes("comprar café"));
-                suite.check(id.has_value(), "notas.criar pela rede");
-                if (!id) {
-                    std::cerr << "  notas.criar: " << id.error().message << '\n';
+            // O cliente fecha antes de parar o servidor: serve_forever espera as
+            // sessões abertas terminarem (ou o idle timeout de 30 s).
+            if (auto conn = conectar(srv->port(), db); !conn) {
+                suite.check(false, "cliente conecta");
+            } else {
+                auto criada = chamar(*conn, k_criar, ops::Value::object({{"texto", "comprar café"}}));
+                suite.check(criada && criada->field("id") && criada->field("id")->id(), "notas.criar devolve {id}");
+                if (!criada) {
+                    std::cerr << "  notas.criar: " << criada.error().message << '\n';
                 }
-                auto lido = id ? conn->call(k_ler, *id) : Result<std::vector<std::byte>>{std::unexpected(id.error())};
-                suite.check(lido && bytes_para_texto(*lido) == "comprar café", "notas.ler devolve o texto");
-                auto vazia = conn->call(k_criar, {});
+                if (criada && criada->field("id")) {
+                    auto lida = chamar(*conn, k_ler, ops::Value::object({{"id", *criada->field("id")}}));
+                    suite.check(lida && lida->field("texto") && *lida->field("texto")->text() == "comprar café",
+                                "notas.ler devolve {id, texto}");
+                }
+                auto vazia = chamar(*conn, k_criar, ops::Value::object({{"texto", ""}}));
                 suite.check(!vazia && vazia.error().code == ErrorCode::invalid_argument,
                             "erro de regra chega ao cliente com o código");
+                auto sem_texto = chamar(*conn, k_criar, ops::Value::object({}));
+                suite.check(!sem_texto && sem_texto.error().message.find("'texto' is required") != std::string::npos,
+                            "argumento obrigatório ausente é explicado");
+                auto tipo_errado = chamar(*conn, k_ler, ops::Value::object({{"id", "abc"}}));
+                suite.check(!tipo_errado && tipo_errado.error().message.find("must be an object id") != std::string::npos,
+                            "argumento com tipo errado é explicado");
                 auto sem_proc = conn->call("nao.existe", {});
                 suite.check(!sem_proc && sem_proc.error().code == ErrorCode::operation_not_found,
                             "proc desconhecida é operation_not_found");
@@ -197,10 +217,11 @@ int main() {
             auto conn = conectar(porta, db);
             suite.check(conn.has_value(), "conecta no servidor em outro processo");
             if (conn) {
-                auto id = conn->call(k_criar, texto_para_bytes("sobrevive ao crash"));
-                auto decodificado = id ? bytes_para_id(*id) : Result<std::uint64_t>{std::unexpected(id.error())};
-                suite.check(decodificado.has_value(), "cria a nota");
-                id_nota = decodificado.value_or(0);
+                auto criada = chamar(*conn, k_criar, ops::Value::object({{"texto", "sobrevive ao crash"}}));
+                suite.check(criada && criada->field("id") && criada->field("id")->id(), "cria a nota");
+                if (criada && criada->field("id") && criada->field("id")->id()) {
+                    id_nota = criada->field("id")->id()->value;
+                }
             }
             servidor.matar();  // sem desligamento limpo
         }
@@ -210,8 +231,8 @@ int main() {
             auto conn = conectar(porta, db);
             suite.check(conn.has_value(), "reconecta depois do crash");
             if (conn && id_nota != 0) {
-                auto lido = conn->call(k_ler, id_para_bytes(id_nota));
-                suite.check(lido && bytes_para_texto(*lido) == "sobrevive ao crash",
+                auto lida = chamar(*conn, k_ler, ops::Value::object({{"id", object::ObjectId{id_nota}}}));
+                suite.check(lida && lida->field("texto") && *lida->field("texto")->text() == "sobrevive ao crash",
                             "a nota confirmada sobreviveu à morte do processo (WAL)");
             }
             servidor.matar();

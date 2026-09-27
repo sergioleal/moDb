@@ -99,6 +99,7 @@ add_library(modb
     src/ops/operation_registry.cpp
     src/ops/module_manifest.cpp
     src/ops/facade_catalog.cpp
+    src/ops/value.cpp
     examples/transfer_funds/transfer_funds.cpp
     examples/accounts_facade/accounts_facade.cpp
     src/diag/stage_profile.cpp
@@ -609,6 +610,8 @@ if(BUILD_TESTING)
     endfunction()
 
     modb_add_test(modb_tests tests/version_test.cpp)
+    modb_add_test(modb_ops_value_tests tests/ops_value_test.cpp)
+    add_test(NAME modb.ops_value COMMAND modb_ops_value_tests)
     if(MODB_BUILD_EXAMPLES)
         # Servidor de aplicação ponta a ponta: sobe o notas-server em outro processo.
         modb_add_test(modb_server_host_tests tests/server_host_test.cpp)
