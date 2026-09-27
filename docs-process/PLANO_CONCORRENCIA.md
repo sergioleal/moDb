@@ -112,11 +112,11 @@ planos dedicados). Para concorrência, também:
 | `TableHeap::read_page_records` (contador) | C6.4 |
 | `NativeSocket::close` (fd lido por uma thread enquanto outra fecha) | **novo**: não estava no diagnóstico. Servidor e cliente de rede fecham o socket em uma thread enquanto outra ainda o usa (inclui o desligamento ativo da S5.5). Entra na C11 |
 
-#### C5 — Teste de estresse com invariantes *(médio)*
+#### C5 — Teste de estresse com invariantes *(médio)* ✅ (5.3 parcial)
 
-- [ ] 5.1 N leitores (snapshot e sem snapshot) + 1 escritor fazendo create/update/delete/rollback, com duração configurável e semente
-- [ ] 5.2 Invariantes: cada snapshot vê um estado que existiu num commit (contagem e checksum iguais aos gravados pelo escritor na época), nenhum leitor vê transação abortada, nenhum crash ou erro de página
-- [ ] 5.3 Entra no `ctest` numa versão curta; a versão longa entra como caso do `modb_load` (`concurrent_readers`), para a máquina dedicada
+- [x] 5.1 *(`tests/concurrency_stress_test.cpp`: escritor com create/update/remove e 20% de rollbacks com valor veneno; leitores só com snapshot por ora — leitura sem snapshot entra quando a C7.4 a tornar um snapshot implícito)* N leitores (snapshot e sem snapshot) + 1 escritor fazendo create/update/delete/rollback, com duração configurável e semente
+- [x] 5.2 *(contagem e soma de cada snapshot iguais às anotadas pelo escritor para a época; nenhum veneno; nenhuma leitura falha)* Invariantes: cada snapshot vê um estado que existiu num commit (contagem e checksum iguais aos gravados pelo escritor na época), nenhum leitor vê transação abortada, nenhum crash ou erro de página
+- [ ] 5.3 *(parcial: `modb.concurrency_stress_serial` — com lock global, valida o teste — roda em todo preset; `modb.concurrency_stress` — sem lock, o alvo das C6-C8 — só no `tsan`. Falta o caso `concurrent_readers` do `modb_load`, junto da C12)* Entra no `ctest` numa versão curta; a versão longa entra como caso do `modb_load` (`concurrent_readers`), para a máquina dedicada
 
 #### C6 — Caches e contadores do caminho de leitura *(médio)*
 
@@ -197,3 +197,4 @@ números de desempenho ficam pendentes, marcados como tal.
 | 2026-09-27 | C3 | (este commit) | Hipótese não confirmada com uma thread (o teste passa antes da correção); vira teste de regressão. Risco concorrente fica para a C8 |
 | 2026-09-27 | C4 | — | ~~Bloqueado~~ (resolvido no mesmo dia: ferramentas instaladas): o WSL (Ubuntu 24.04) tem GCC 13 (não testado com o moDb; o build cai para C++23 sem C++26) mas não tem cmake nem ninja, e instalar pacotes pede a senha de sudo. Sem TSan, as tarefas C4 em diante não têm como cumprir o critério "limpo no TSan" |
 | 2026-09-27 | C4 | (este commit) | TSan no WSL (GCC 14, CMake do venv, `setarch -R`). Linha de base: 132/146 limpos; o `concurrency_smoke` confirma o diagnóstico (LRU, views despejadas, `peeked_`, planos) e o servidor de rede mostra uma corrida nova em `NativeSocket::close` |
+| 2026-09-27 | C5 | (este commit) | Estresse 1 escritor + N leitores com invariantes por época. Serial (lock global): 880 commits, 206 rollbacks, 8.185 snapshots, todos exatos — o teste vale. O modo concorrente fica para depois das C6-C8 |

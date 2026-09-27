@@ -650,9 +650,14 @@ if(BUILD_TESTING)
     # C4.2: várias threads só lendo. Fica só no preset tsan até a C6 deixar o
     # caminho de leitura seguro entre threads (hoje o TSan acusa, e fora dele
     # pode quebrar ao acaso).
+    # C5: estresse com 1 escritor e N leitores. O modo serial (lock global)
+    # valida o próprio teste e roda sempre; o concorrente é o alvo das C6-C8.
+    modb_add_test(modb_concurrency_stress_tests tests/concurrency_stress_test.cpp)
+    add_test(NAME modb.concurrency_stress_serial COMMAND modb_concurrency_stress_tests serial 2 4)
     if(MODB_ENABLE_TSAN)
         modb_add_test(modb_concurrency_smoke_tests tests/concurrency_smoke_test.cpp)
         add_test(NAME modb.concurrency_smoke COMMAND modb_concurrency_smoke_tests 8 300)
+        add_test(NAME modb.concurrency_stress COMMAND modb_concurrency_stress_tests concurrent 3 4)
     endif()
     modb_add_test(modb_shm_ring_tests tests/shm_ring_test.cpp)
     add_test(NAME modb.shm_ring COMMAND modb_shm_ring_tests)
