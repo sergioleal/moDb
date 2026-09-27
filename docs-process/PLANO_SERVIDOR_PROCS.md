@@ -44,7 +44,6 @@ O que falta:
 - **argumentos e resultados com formato**: hoje são bytes crus, e cada operação decodifica os seus;
 - uma **API de dados completa para as procs**: `ObjectAccess` só tem `create`/`get`/`read`/`update`/`remove`, sem consulta, índice ou coleção;
 - **erros de regra** com código (inválido / não encontrado / conflito);
-- **autenticação**, que não existe: sem usuário e sem TLS;
 - **operação**: arquivo de configuração, log, serviço do sistema.
 
 ## Desenho
@@ -62,7 +61,6 @@ O que falta:
 3. **Valores autodescritos** para argumentos e resultados: nulo, bool, inteiro, double, texto, id, lista, mapa. É uma codificação binária própria (tag + valor, como o codec de objetos do ADR-003), com conversão para JSON e de JSON nos dois lados. Os clientes não precisam conhecer `TypeDefinitionId` nem `FieldId`.
 4. **Erros de regra**: `falha::invalido / nao_encontrado / conflito` → `OpResult{ok=false, code, message}`; o cliente recebe o código e decide (a web traduz em 400/404/409).
 5. **Descoberta**: a lista de procs (nome, modo, descrição, argumentos) sai por `FacadeList` ou por uma proc de sistema (`sys.procs`), para ferramentas e gateways.
-6. **Autenticação mínima**: chave compartilhada (token) no `Hello`, conferida antes de qualquer outra mensagem; o padrão continua escutando em `127.0.0.1`. TLS fica documentado como túnel (SSH/stunnel) até uma tarefa própria.
 
 ## Tarefas
 
@@ -93,62 +91,55 @@ O que falta:
 - [ ] 4.2 Procs `read_only` rodam sob snapshot, sem abrir transação de escrita
 - [ ] 4.3 Tipos e índices declarados pelo módulo (`modulo.tipo(binding)`, `modulo.indice<T>(campo)`) e aplicados na abertura pelo `server_host`
 
-### P1 — seguro de operar
+### P1 — pronto para operar
 
-#### S5 — Autenticação por token *(pequeno)*
+#### S5 — Operação *(médio)*
 
-- [ ] 5.1 Campo de credencial no `Hello` (versão menor nova do protocolo, compatível); servidor recusa sem token válido quando configurado
-- [ ] 5.2 Tokens no arquivo de configuração (nunca em argumento de linha de comando, que aparece em `ps`); cliente lê de variável de ambiente
-- [ ] 5.3 Documentar TLS por túnel até existir TLS nativo
+- [ ] 5.1 Arquivo de configuração (banco, host, porta, limites de conexões e de tempo de proc)
+- [ ] 5.2 Log estruturado por chamada (proc, duração, resultado, código de erro)
+- [ ] 5.3 Rodar como serviço: unidade systemd e Windows Service (ou NSSM) documentados em `docs/OPERACAO.md`; teste de reinício depois de matar o processo (o WAL recupera)
+- [ ] 5.4 Tempo máximo por proc (cooperativo: o `Contexto` checa o prazo a cada acesso ao banco) e desfaz a transação ao estourar
+- [ ] 5.5 Desligamento ativo: `request_stop` fecha as sessões abertas; hoje `serve_forever` espera cada cliente ocioso até o idle timeout (30 s) — achado na S2
 
-#### S6 — Operação *(médio)*
+#### S6 — Descoberta de procs *(pequeno)*
 
-- [ ] 6.1 Arquivo de configuração (banco, host, porta, tokens, limites de conexões e de tempo de proc)
-- [ ] 6.2 Log estruturado por chamada (proc, duração, resultado, código de erro)
-- [ ] 6.3 Rodar como serviço: unidade systemd e Windows Service (ou NSSM) documentados em `docs/OPERACAO.md`; teste de reinício depois de matar o processo (o WAL recupera)
-- [ ] 6.5 Desligamento ativo: `request_stop` fecha as sessões abertas; hoje `serve_forever` espera cada cliente ocioso até o idle timeout (30 s) — achado na S2
-- [ ] 6.4 Tempo máximo por proc (cooperativo: o `Contexto` checa o prazo a cada acesso ao banco) e desfaz a transação ao estourar
-
-#### S7 — Descoberta de procs *(pequeno)*
-
-- [ ] 7.1 `sys.procs` devolve nome, modo, descrição e argumentos esperados de cada proc
-- [ ] 7.2 `modb procs <host> <porta>` no CLI
+- [ ] 6.1 `sys.procs` devolve nome, modo, descrição e argumentos esperados de cada proc
+- [ ] 6.2 `modb procs <host> <porta>` no CLI
 
 ### P2 — biblioteca no novo modelo
 
-#### S8 — `biblioteca-server`: módulo de procs *(médio)*
+#### S7 — `biblioteca-server`: módulo de procs *(médio)*
 
-- [ ] 8.1 Reorganizar o repositório `biblioteca`: `modulo/` (modelo + procs), `servidor/` (o `main` via `modb_add_server`), `web/` (cliente)
-- [ ] 8.2 Portar as regras de `src/biblioteca.cpp` para procs: `autores.listar/obter/criar/atualizar/remover` (e o mesmo para editoras, livros, exemplares e leitores), `emprestimos.listar/emprestar/devolver`, `resumo`, `exemplo.carregar`
-- [ ] 8.3 Testes das procs contra o servidor de verdade (processo filho, banco em arquivo temporário): as 55 verificações de hoje, agora pela rede
+- [ ] 7.1 Reorganizar o repositório `biblioteca`: `modulo/` (modelo + procs), `servidor/` (o `main` via `modb_add_server`), `web/` (cliente)
+- [ ] 7.2 Portar as regras de `src/biblioteca.cpp` para procs: `autores.listar/obter/criar/atualizar/remover` (e o mesmo para editoras, livros, exemplares e leitores), `emprestimos.listar/emprestar/devolver`, `resumo`, `exemplo.carregar`
+- [ ] 7.3 Testes das procs contra o servidor de verdade (processo filho, banco em arquivo temporário): as 55 verificações de hoje, agora pela rede
 
-#### S9 — `biblioteca-web`: só cliente *(pequeno)*
+#### S8 — `biblioteca-web`: só cliente *(pequeno)*
 
-- [ ] 9.1 A web deixa de linkar o motor: só `modb::app_client` + cpp-httplib; cada rota HTTP vira uma chamada de proc (`Valor` ↔ JSON da S2.2), códigos de erro → 400/404/409
-- [ ] 9.2 Configuração do endereço e do token do servidor; reconexão se o servidor reiniciar
-- [ ] 9.3 Teste: web + servidor em processos separados, derrubar o servidor no meio e ver a web se recuperar
+- [ ] 8.1 A web deixa de linkar o motor: só `modb::app_client` + cpp-httplib; cada rota HTTP vira uma chamada de proc (`Valor` ↔ JSON da S2.2), códigos de erro → 400/404/409
+- [ ] 8.2 Configuração do endereço do servidor; reconexão se o servidor reiniciar
+- [ ] 8.3 Teste: web + servidor em processos separados, derrubar o servidor no meio e ver a web se recuperar
 
 ### P3 — depois
 
-#### S10 — Concorrência *(ver PLANO_CONCORRENCIA.md)*
+#### S9 — Concorrência *(ver PLANO_CONCORRENCIA.md)*
 
-- [ ] 10.1 Hoje o servidor serializa tudo (`engine_mutex_`), igual ao mutex da biblioteca: correto, mas uma proc por vez. Procs `read_only` concorrentes dependem das C6–C8; as de escrita seguem uma por vez (C10.2: fila de escritores)
+- [ ] 9.1 Hoje o servidor serializa tudo (`engine_mutex_`), igual ao mutex da biblioteca: correto, mas uma proc por vez. Procs `read_only` concorrentes dependem das C6–C8; as de escrita seguem uma por vez (C10.2: fila de escritores)
 
-#### S11 — Clientes em outras linguagens *(opcional)*
+#### S10 — Clientes em outras linguagens *(opcional)*
 
-- [ ] 11.1 Gateway HTTP/JSON genérico (`/proc/<nome>` → `OpCall`) como executável à parte, reaproveitando a S2.2; ou cliente do protocolo em outra linguagem, se aparecer a necessidade
+- [ ] 10.1 Gateway HTTP/JSON genérico (`/proc/<nome>` → `OpCall`) como executável à parte, reaproveitando a S2.2; ou cliente do protocolo em outra linguagem, se aparecer a necessidade
 
-#### S12 — Fora do escopo (registrar no ADR da S1.4)
+#### S11 — Fora do escopo (registrar no ADR da S1.4)
 
 - vários bancos por servidor; sandbox de procs; procs carregadas em tempo de execução (`.dll`/`.so`); multi-writer.
 
 ## Ordem sugerida
 
-S1 → S2 → S3 → S4 → S8 → S9 → S5 → S6 → S7 → S10 → S11.
+S1 → S2 → S3 → S4 → S7 → S8 → S5 → S6 → S9 → S10.
 
-A biblioteca (S8/S9) entra logo depois da API de procs porque ela é o teste real
-do desenho; autenticação e operação vêm antes de usar em qualquer lugar fora da
-máquina local.
+A biblioteca (S7/S8) entra logo depois da API de procs porque ela é o teste real
+do desenho; a operação (S5) vem antes de usar o servidor fora da máquina local.
 
 ## Registro de execução
 
@@ -156,4 +147,5 @@ máquina local.
 |---|---|---|---|
 | 2026-09-27 | Plano | — | Levantamento do servidor, do protocolo e dos módulos por leitura de código |
 | 2026-09-27 | S1 | (este commit) | `modb::server_host` + `modb_add_server`; exemplo `notas-server`; teste ponta a ponta com o servidor em outro processo, morto à força e reaberto (nota confirmada sobrevive). ADR-025. Achado: o move de `net::Server` perdia o registro de procs e os limites — corrigido |
-| 2026-09-27 | S2 | (este commit) | `ops::Value` (binário versionado com limites contra entrada hostil, JSON), `ops::Args`; `notas` passa a usar `{texto}`/`{id}`. Achado: parar o servidor com cliente ocioso conectado leva até 30 s → S6.5 |
+| 2026-09-27 | S2 | (este commit) | `ops::Value` (binário versionado com limites contra entrada hostil, JSON), `ops::Args`; `notas` passa a usar `{texto}`/`{id}`. Achado: parar o servidor com cliente ocioso conectado leva até 30 s → S5.5 |
+| 2026-09-27 | — | — | Mecanismos de segurança (autenticação, tokens, TLS) retirados do plano a pedido; tarefas renumeradas (S6→S5 … S12→S11) |

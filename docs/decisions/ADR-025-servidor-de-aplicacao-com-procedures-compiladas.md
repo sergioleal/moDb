@@ -62,5 +62,4 @@ Cada um vira uma decisão própria, se aparecer necessidade.
   - argumentos e resultados autodescritos (S2);
   - procs declaradas como função, com códigos de erro de regra (S3);
   - consulta, índice e coleções dentro das procs (S4);
-  - autenticação (S5);
-  - operação como serviço (S6).
+  - operação como serviço (S5).
