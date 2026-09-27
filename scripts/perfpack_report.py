@@ -279,7 +279,8 @@ h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:32px 0 4px}
 .key{display:inline-block;width:18px;height:3px;border-radius:2px}
 .swatch{display:inline-block;width:12px;height:12px;border-radius:3px}
 .card{background:var(--surface-1);border-radius:10px;padding:10px 12px 6px;margin:0 0 10px}
-.card h3{font-size:13.5px;font-weight:600;margin:0;flex:1}
+.card h3{font-size:13.5px;font-weight:600;margin:0}
+.bar .grow{flex:1}
 .bar{display:flex;align-items:center;gap:4px}
 .grip{cursor:grab;color:var(--text-muted);user-select:none;padding:0 4px;font-size:15px;line-height:1}
 .ib{background:none;border:1px solid transparent;border-radius:6px;color:var(--text-secondary);cursor:pointer;
@@ -411,6 +412,7 @@ function makeCard(root, id, title, note, info){
   const h = document.createElement("h3"); h.textContent = title; bar.appendChild(h);
   let infoBtn = null;
   if (info) { infoBtn = iconButton(bar, "i", "O que este teste faz"); infoBtn.className = "ib info"; infoBtn.setAttribute("aria-expanded", "false"); }
+  const grow = document.createElement("span"); grow.className = "grow"; bar.appendChild(grow);
   const up = iconButton(bar, "↑", "Mover " + title + " para cima");
   const down = iconButton(bar, "↓", "Mover " + title + " para baixo");
   const body = document.createElement("div"); body.className = "body"; card.appendChild(body);
