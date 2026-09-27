@@ -48,6 +48,8 @@ regerada a cada `perfpack.py machine` e a cada `fetch`.
 |---|---|---|---|---|---|---|
 | `20260927T114607Z-do-cpuopt-4-nyc3-c132af550024` | `c132af550024` | smoke × 1 | 3 | 0 | 2026-09-27T11:46:07Z | prebuilt |
 | `20260927T114808Z-do-cpuopt-4-nyc3-c132af550024` | `c132af550024` | standard × 5 | 50 | 0 | 2026-09-27T11:48:08Z | prebuilt |
+| `20260927T121051Z-do-cpuopt-4-nyc3-fe8106e65cab` | `fe8106e65cab` | standard × 5 | 50 | 0 | 2026-09-27T12:10:51Z | prebuilt |
+| `20260927T121601Z-do-cpuopt-4-nyc3-fe8106e65cab` | `fe8106e65cab` | large × 1 | 10 | 1 | 2026-09-27T12:16:01Z | prebuilt |
 
 ## Saída crua
 

@@ -64,6 +64,10 @@ SOURCE_EXCLUDES = ("docs-process", "*.mp3", "*.mp4", "*.wav")
 # nomes de função). A compilação de reserva no destino não passa por isso.
 STRIP = "--strip-debug"
 SAFE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+# Um caso longo fica minutos sem imprimir nada; sem keepalive, NAT e firewalls no
+# caminho derrubam a conexão ociosa e o `run` local trava sem saber que o remoto
+# terminou (aconteceu com snapshot_hold 1M).
+SSH_OPTS = ("-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=6")
 
 
 def die(message: str) -> "NoReturn":  # type: ignore[name-defined]
@@ -375,7 +379,7 @@ class SshTransport(Transport):
         return "bash -c " + shlex.quote(script)
 
     def run(self, script: str, capture: bool = False) -> subprocess.CompletedProcess:
-        return subprocess.run(["ssh", "-p", self.port, self.target, self.remote_command(script)],
+        return subprocess.run(["ssh", *SSH_OPTS, "-p", self.port, self.target, self.remote_command(script)],
                               capture_output=capture, text=True, encoding="utf-8", errors="replace")
 
     def scp_path(self, rel: str) -> str:
@@ -383,10 +387,10 @@ class SshTransport(Transport):
         return f"{self.target}:{self.remote_dir.rstrip('/')}/{rel}"
 
     def put(self, local: Path, remote: str) -> None:
-        subprocess.run(["scp", "-q", "-P", self.port, str(local), self.scp_path(remote)], check=True)
+        subprocess.run(["scp", "-q", *SSH_OPTS, "-P", self.port, str(local), self.scp_path(remote)], check=True)
 
     def get_dir(self, remote: str, local_parent: Path) -> None:
-        subprocess.run(["scp", "-q", "-r", "-P", self.port, self.scp_path(remote), str(local_parent)], check=True)
+        subprocess.run(["scp", "-q", "-r", *SSH_OPTS, "-P", self.port, self.scp_path(remote), str(local_parent)], check=True)
 
 
 class WslTransport(Transport):
@@ -574,7 +578,7 @@ def cmd_run(args: argparse.Namespace) -> str | None:
 def transport_command(transport: Transport, script: str) -> tuple[list[str], str | None]:
     """Comando para executar `script` no destino e o que mandar no stdin dele."""
     if isinstance(transport, SshTransport):
-        return ["ssh", "-p", transport.port, transport.target, transport.remote_command(script)], None
+        return ["ssh", *SSH_OPTS, "-p", transport.port, transport.target, transport.remote_command(script)], None
     if isinstance(transport, WslTransport):
         return wsl_command(transport.distro), script
     return transport.ps(script), None

@@ -322,6 +322,20 @@ páginas e é a causa dos misses de `update_shrink`/`delete`.
 - [x] 33.3 *(feito: duas listas no BufferPool; GC a 100k 30–64 s → 1,1–1,4 s)* `BufferPool::evict_until` é O(páginas sujas) por operação: transação que suja mais páginas que o cache fica O(n²) (GC 10k: 70 ms; 100k: 30–64 s)
 - [x] 33.4 *(feito, ADR-024: o `update` libera na hora a `previous` que sobrescreve; sem GC, o arquivo para em 107,0 MiB em vez de 159,6; updates −13% a −18%; no `remove` foi medido e descartado — delete 2,1× mais lento)* Só depois: desenho de recuperação automática de versões (ADR — MVCC e réplicas), com predição e antes/depois
 
+#### T34 — `read_hotspot` retém ~8,5 KB por objeto lido e estoura a memória em 1M *(P1, médio)*
+
+Achado do pacote de performance no ambiente de referência `do-cpuopt-4-nyc3`
+(8 GB, 2026-09-27): `load.read_hotspot.embedded.1M` foi morto pelo OOM killer
+aos ~117 s, com 7,8 GB de RSS anônimo (dmesg; o monitor de hardware registrou
+a subida até a memória disponível zerar). Em 100k o mesmo caso já chega a
+852 MiB de RSS (monitor) para um banco de 42 MiB — ~8,5 KB por objeto, perto de
+uma página (8 KiB) por objeto lido. A fase `create` do mesmo caso fica em 109
+MiB: é a leitura que acumula.
+
+- [ ] 34.1 Localizar o que retém: o harness (handles/objetos guardados pelo workload), o `IdentityMap`/cache de objetos, ou vistas de página (`PageFile::view`, T30) que não soltam a página
+- [ ] 34.2 Predição escrita e antes/depois no droplet (RSS de `read_hotspot` 100k e 1M; ops/s sem regressão)
+- [ ] 34.3 Se for o motor: limite explícito (cache com teto) e teste que falha com o vazamento
+
 ### P2
 
 #### T11 — Isolar a causa de M5 *(pequeno + máquina)* ✅

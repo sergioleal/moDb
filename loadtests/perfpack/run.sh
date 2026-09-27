@@ -237,7 +237,7 @@ hw_digest() {
         }' "$1"
 }
 
-printf 'repetition\tindex\tcase\texit_code\tstatus\tfile\tproc_cpu_avg_pct\tproc_cpu_max_pct\tsteal_max_pct\tiowait_avg_pct\tdisk_read_avg_MBps\tdisk_write_avg_MBps\trss_max_MiB\tmem_avail_min_MiB\n' > "$RUN_DIR/executions.tsv"
+printf 'repetition\tindex\tcase\texit_code\tstatus\tfile\tproc_cpu_avg_pct\tproc_cpu_max_pct\tsteal_max_pct\tiowait_avg_pct\tdisk_read_avg_MBps\tdisk_write_avg_MBps\trss_max_MiB\tmem_avail_min_MiB\tstart_epoch\tend_epoch\n' > "$RUN_DIR/executions.tsv"
 STEAL_MAX="0"
 
 FAILURES=0
@@ -262,6 +262,7 @@ for (( rep = 1; rep <= REPEAT; rep++ )); do
         mkdir -p "$work"
         printf '[%d/%d] rep %d  %s ... ' "$N" "$TOTAL" "$rep" "$case_id"
         raw_hw="$MON_TMP/perfpack-hw-$$-r$rep-c$i"
+        t_start="$EPOCHREALTIME"
         set +e
         "$BIN" run --profile load-local --case "$case_id" \
             --output-dir "$RUN_DIR/raw" --work-dir "$work" \
@@ -273,6 +274,7 @@ for (( rep = 1; rep <= REPEAT; rep++ )); do
         wait "$pid"
         code=$?
         wait "$mon"
+        t_end="$EPOCHREALTIME"
         set -e
         rm -rf "$work"
         hw="$(hw_digest "$raw_hw" "$RUN_DIR/logs/hw-r$rep-c$i-$case_id.tsv")"
@@ -292,7 +294,8 @@ for (( rep = 1; rep <= REPEAT; rep++ )); do
         fi
         rel=""
         [[ -n "$file" && -f "$file" ]] && rel="raw/$(basename "$file")"
-        printf '%d\t%d\t%s\t%d\t%s\t%s\t%s\n' "$rep" "$i" "$case_id" "$code" "$status" "$rel" "$hw" >> "$RUN_DIR/executions.tsv"
+        printf '%d\t%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n' "$rep" "$i" "$case_id" "$code" "$status" "$rel" "$hw" \
+            "$t_start" "$t_end" >> "$RUN_DIR/executions.tsv"
         if [[ "$status" == "completed" ]]; then
             IFS=$'\t' read -r h_cpu _ h_steal h_iow _ h_wr _ <<< "$hw"
             echo "ok  (cpu ${h_cpu}%, steal máx ${h_steal}%, iowait ${h_iow}%, disco ${h_wr} MB/s escritos)"

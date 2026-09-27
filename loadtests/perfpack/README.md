@@ -180,6 +180,31 @@ Uma execução que falha não interrompe a suíte: fica em `executions.tsv` com 
 status (`exit_N`, `no_result`, `case_error`, `incomplete`), a rodada termina
 `failed`, e as execuções que completaram entram na série normalmente.
 
+## Relatório visual de rodadas
+
+```bash
+python scripts/perfpack_report.py -e do-cpuopt-4-nyc3 --last 2
+python scripts/perfpack_report.py -e do-cpuopt-4-nyc3 <rodada-A> <rodada-B> --out relatorio.html
+```
+
+Página HTML autocontida (sem dependências; abre offline), gerada das rodadas já
+trazidas. O padrão é `load-results/remote/<ambiente>/report-<A>-vs-<B>.html`, e um
+relatório nunca sobrescreve rodadas: é derivado delas. Traz:
+
+- **Leituras**: conclusões calculadas — gargalo de cada caso (CPU, disco/fsync ou
+  misto, pelo uso de hardware), fases que perdem ou ganham com a escala, memória,
+  ruído entre repetições, steal, execuções que falharam (com a causa, ex. OOM) e a
+  conferência do estado final;
+- **Hardware no tempo**: faixa com o caso em execução e CPU, iowait, escrita em
+  disco e RSS, as rodadas sobrepostas a partir de t=0 ou em tempo real;
+- **Cada caso ao longo da execução**: degraus por fase na métrica escolhida
+  (ops/s, latências, WAL/op, banco, RSS…), com CPU e memória embaixo; mostra uma
+  suíte, a outra ou as duas, em segundos ou em % da execução;
+- **Tabela** com todas as métricas.
+
+Menu fixo leva a cada seção e a cada caso; os gráficos podem ser recolhidos e
+reordenados (botões ou arrastando), e o layout fica salvo no navegador.
+
 ## Análise histórica
 
 A série é a de sempre: um ponto por caso e execução, com commit, ambiente,
