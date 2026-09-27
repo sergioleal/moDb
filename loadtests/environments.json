@@ -49,6 +49,25 @@
         "remote_dir": "modb-perfpack"
       },
       "notes": "Host dedicado a benchmark/carga. Senha do SSH nunca fica neste arquivo nem em nenhum resultado — é solicitada interativamente pelo OpenSSH."
+    },
+    {
+      "id": "do-cpuopt-4-nyc3",
+      "label": "Digital Ocean CPU-Optimized Premium Intel 4 vCPU / 8 GB (NYC3)",
+      "kind": "ssh",
+      "host_class": "do-cpuopt-premium-4",
+      "device_class": "nvme",
+      "os_hint": "linux",
+      "machine_doc": "load-history/machines/do-cpuopt-4-nyc3.md",
+      "connection": {
+        "host": "159.65.40.144",
+        "default_user": "root"
+      },
+      "perfpack": {
+        "transport": "ssh",
+        "os": "linux",
+        "remote_dir": "modb-perfpack"
+      },
+      "notes": "Droplet dedicado ao pacote de performance (Ubuntu 24.04, Xeon Platinum 8358, disco local ext4). Chave SSH ~/.ssh/modb_perfpack (entrada em ~/.ssh/config); nenhuma credencial neste arquivo. Mesmo droplet sempre: recriado é outro hardware e outro ambiente."
     }
   ]
 }

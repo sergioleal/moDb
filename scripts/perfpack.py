@@ -714,11 +714,204 @@ def cmd_fetch(args: argparse.Namespace) -> None:
         with tempfile.TemporaryDirectory(prefix="perfpack-") as tmp:
             transport.get_dir(f"results/{name}", Path(tmp))
             store_and_index(Path(tmp) / name, args.environment, args)
+    # A descrição da máquina lista as rodadas: atualiza sem tocar na máquina.
+    if write_machine_doc(entry):
+        print(f"perfpack: {MACHINES.relative_to(ROOT)}/{args.environment}.md atualizado com as rodadas")
 
 
 def cmd_import(args: argparse.Namespace) -> None:
     for directory in args.dirs:
         store_and_index(Path(directory).resolve(), None, args)
+
+
+MACHINES = ROOT / "load-history" / "machines"
+
+
+def parse_sections(text: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    current = None
+    for line in text.splitlines():
+        if line.startswith("### "):
+            current = line[4:].strip()
+            sections[current] = ""
+        elif current is not None:
+            sections[current] += line + "\n"
+    return {k: v.strip() for k, v in sections.items()}
+
+
+def kv(text: str, sep: str = ":") -> dict[str, str]:
+    out = {}
+    for line in text.splitlines():
+        if sep in line:
+            key, value = line.split(sep, 1)
+            out[key.strip()] = value.strip().strip('"')
+    return out
+
+
+def machine_summary(sec: dict[str, str]) -> dict:
+    os_rel = kv(sec.get("os_release", ""), "=")
+    cpu = kv(sec.get("lscpu", ""))
+    dmi = kv(sec.get("dmi", ""))
+    cloud = kv(sec.get("cloud_metadata", ""))
+    mem = kv(sec.get("meminfo", ""))
+    steal = kv(sec.get("cpu_steal", ""))
+    freq = kv(sec.get("cpufreq", ""))
+    mount = sec.get("work_filesystem", "").splitlines()
+    vulns = kv(sec.get("cpu_vulnerabilities", ""))
+    mitigated = sorted(k for k, v in vulns.items() if v.lower().startswith("mitigation"))
+    vulnerable = sorted(k for k, v in vulns.items() if v.lower().startswith("vulnerable"))
+    return {
+        "os": os_rel.get("PRETTY_NAME", ""),
+        "kernel": (sec.get("uname", "").split() + ["", "", ""])[2],
+        "glibc": sec.get("glibc", ""),
+        "virtualization": sec.get("virtualization", ""),
+        "hypervisor_vendor": cpu.get("Hypervisor vendor", ""),
+        "platform": f"{dmi.get('sys_vendor', '')} {dmi.get('product_name', '')}".strip(),
+        "cloud_region": cloud.get("region", ""),
+        "cloud_droplet_id": cloud.get("id", ""),
+        "cpu_model": cpu.get("Model name", ""),
+        "vcpus": cpu.get("CPU(s)", ""),
+        "threads_per_core": cpu.get("Thread(s) per core", ""),
+        "cores_per_socket": cpu.get("Core(s) per socket", ""),
+        "sockets": cpu.get("Socket(s)", ""),
+        "numa_nodes": cpu.get("NUMA node(s)", ""),
+        "cpu_mhz": cpu.get("CPU MHz", "") or cpu.get("BogoMIPS", "") and f"BogoMIPS {cpu.get('BogoMIPS')}",
+        "l1d": cpu.get("L1d cache", ""), "l2": cpu.get("L2 cache", ""),
+        "l3": cpu.get("L3 cache", "") or "não exposto pela VM",
+        "cpu_flags": sec.get("cpu_flags", ""),
+        "governor": freq.get("governor", ""),
+        "clocksource": sec.get("clocksource", ""),
+        "steal_pct_5s": steal.get("steal_pct_5s", ""),
+        "ram": mem.get("MemTotal", ""),
+        "swap": mem.get("SwapTotal", ""),
+        "transparent_hugepage": sec.get("transparent_hugepage", ""),
+        "block_queue": sec.get("block_queue", ""),
+        "work_mount": mount[-1] if mount else "",
+        "work_df": mount[1] if len(mount) > 1 else "",
+        "mitigations": mitigated,
+        "vulnerable": vulnerable,
+    }
+
+
+def kib_to_gib(text: str) -> str:
+    match = re.match(r"(\d+)\s*kB", text or "")
+    return f"{int(match.group(1)) / 2**20:.1f} GiB" if match else (text or "—")
+
+
+def environment_runs(env_id: str) -> list[dict]:
+    """Rodadas deste ambiente já trazidas, pelos manifestos em load-results/remote/<ambiente>/."""
+    runs = []
+    for manifest in sorted((FETCHED / env_id).glob("*/manifest.json")):
+        try:
+            m = json.loads(manifest.read_text(encoding="utf-8-sig"))
+        except ValueError:
+            continue
+        runs.append(m)
+    return runs
+
+
+def machine_markdown(env: dict, summary: dict, collected_at: str, sections: dict[str, str]) -> str:
+    s = summary
+    rows = [
+        ("Ambiente", f"`{env['id']}` — {env.get('label', '')}"),
+        ("host_class / device_class", f"`{env.get('host_class', '')}` / `{env.get('device_class', '')}`"),
+        ("Coletado em", collected_at),
+        ("Plataforma", f"{s['platform']} ({s['virtualization']}; hipervisor {s['hypervisor_vendor'] or '?'})"),
+        ("Região / droplet", f"{s['cloud_region'] or '—'} / {s['cloud_droplet_id'] or '—'}"),
+        ("SO", f"{s['os']}, kernel {s['kernel']}, {s['glibc']}"),
+        ("CPU", f"{s['cpu_model']}"),
+        ("vCPUs", f"{s['vcpus']} ({s['sockets']} socket × {s['cores_per_socket']} núcleos × "
+                  f"{s['threads_per_core']} thread/núcleo; {s['numa_nodes']} nó NUMA)"),
+        ("Caches", f"L1d {s['l1d']} · L2 {s['l2']} · L3 {s['l3']}"),
+        ("Extensões", s["cpu_flags"]),
+        ("Frequência", f"governor {s['governor']}; clocksource {s['clocksource']}"),
+        ("CPU steal (5 s ocioso)", f"{s['steal_pct_5s']}%"),
+        ("Memória", f"{kib_to_gib(s['ram'])} (swap {kib_to_gib(s['swap'])}; THP {s['transparent_hugepage']})"),
+        ("Disco (fila)", s["block_queue"].replace("\n", "<br>")),
+        ("FS do diretório de trabalho", f"{s['work_df']}<br>{s['work_mount']}"),
+        ("Mitigações ativas", ", ".join(s["mitigations"]) or "—"),
+        ("Vulnerável (sem mitigação)", ", ".join(s["vulnerable"]) or "—"),
+    ]
+    lines = [
+        f"# Máquina `{env['id']}`",
+        "",
+        "Descrição da máquina em que os resultados deste ambiente foram medidos",
+        f"(`environment = {env['id']}` em [`series.jsonl`](../series.jsonl) e em",
+        f"`load-results/remote/{env['id']}/`). Gerado por `scripts/perfpack.py machine`",
+        "a partir de `loadtests/perfpack/machine-info.sh`; a saída crua de cada comando",
+        f"está em [`{env['id']}.json`]({env['id']}.json). Se a máquina mudar (kernel, plano, droplet",
+        "recriado), gere de novo: o histórico do git guarda as versões anteriores.",
+        "",
+        "| | |",
+        "|---|---|",
+        *[f"| {k} | {v} |" for k, v in rows],
+        "",
+        "## Como ler os números deste ambiente",
+        "",
+        "- O disco (fila, cache de escrita, sistema de arquivos) limita os casos de",
+        "  commit pequeno (`mixed_oltp`, `snapshot_hold`), um `fsync` por commit; os com",
+        "  lote de 1000 objetos (`create_*`, `crud_full`) quase não o sentem.",
+        "- A coleta só lê o sistema: nada aqui foi medido com carga.",
+        "- `steal` perto de zero confirma CPU dedicada; se subir numa coleta futura, os",
+        "  resultados do período ficam suspeitos de vizinhos barulhentos.",
+        "- Compare commits **dentro** deste ambiente; entre ambientes, só a forma das",
+        "  curvas, nunca o valor absoluto.",
+        "",
+        "## Rodadas medidas nesta máquina",
+        "",
+        "Cada rodada está em `load-results/remote/" + env["id"] + "/<rodada>/` (brutos, fora do git)",
+        "e seus pontos em `series.jsonl` (`run_id` de cada arquivo em `raw/`). Esta lista é",
+        "regerada a cada `perfpack.py machine` e a cada `fetch`.",
+        "",
+        "| rodada | commit | suíte | execuções | falhas | início (UTC) | binário |",
+        "|---|---|---|---|---|---|---|",
+        *[f"| `{r['run_name']}` | `{r['git_commit'][:12]}`{' (dirty)' if r.get('git_dirty') else ''} | "
+          f"{r['suite']} × {r['repeat']} | {r['executions']} | {r['failures']} | {r['started_at']} | "
+          f"{r['binary_origin']} |" for r in environment_runs(env["id"])],
+        "",
+        "## Saída crua",
+        "",
+    ]
+    for name, body in sections.items():
+        lines += [f"<details><summary><code>{name}</code></summary>", "", "```", body, "```", "", "</details>", ""]
+    return "\n".join(lines)
+
+
+def write_machine_doc(entry: dict) -> bool:
+    """(Re)gera <ambiente>.md a partir do .json coletado; False se nunca foi coletado."""
+    source = MACHINES / f"{entry['id']}.json"
+    if not source.exists():
+        return False
+    data = json.loads(source.read_text(encoding="utf-8"))
+    summary = machine_summary(data["sections"])  # recalculado: o resumo pode ter melhorado
+    (MACHINES / f"{entry['id']}.md").write_text(
+        machine_markdown(entry, summary, data.get("collected_at", ""), data["sections"]), encoding="utf-8")
+    return True
+
+
+def cmd_machine(args: argparse.Namespace) -> None:
+    entry = load_environment(args.environment, args.environments_file)
+    transport = make_transport(entry)
+    if transport.os_name != "linux":
+        die("o coletor de máquina ainda só existe para Linux (machine-info.sh)")
+    collector = (ROOT / PACK_SOURCE / "machine-info.sh").read_text(encoding="utf-8").replace("\r\n", "\n")
+    script = f'set -- "{transport.home_path("")}"\n' + collector.split("\n", 1)[1]
+    print(f"perfpack: coletando a descrição de {args.environment} (só leitura; ~5 s de amostra de steal)...")
+    result = transport.run(script, capture=True)
+    if result.returncode != 0 or "### lscpu" not in result.stdout:
+        die(f"coleta falhou (código {result.returncode}):\n{result.stdout[-2000:]}{result.stderr[-2000:]}")
+    sections = parse_sections(result.stdout)
+    summary = machine_summary(sections)
+    collected_at = sections.get("collected_at", "")
+    MACHINES.mkdir(parents=True, exist_ok=True)
+    data = {"schema": "modb.perfpack.machine", "schema_version": 1, "environment": args.environment,
+            "collected_at": collected_at, "summary": summary, "sections": sections}
+    (MACHINES / f"{args.environment}.json").write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                                                        encoding="utf-8")
+    write_machine_doc(entry)
+    print(f"perfpack: {MACHINES.relative_to(ROOT)}/{args.environment}.md e .json")
+    print(f"  {summary['cpu_model']} · {summary['vcpus']} vCPUs · {summary['ram']} · "
+          f"steal {summary['steal_pct_5s']}%")
 
 
 def cmd_all(args: argparse.Namespace) -> None:
@@ -784,6 +977,10 @@ def main() -> None:
     run_args(p)
     p.add_argument("--no-index", action="store_true")
     p.set_defaults(func=cmd_all)
+
+    p = sub.add_parser("machine", help="descreve a máquina (load-history/machines/<ambiente>.md/.json)")
+    env_arg(p)
+    p.set_defaults(func=cmd_machine)
 
     p = sub.add_parser("import", help="confere e indexa resultados copiados à mão")
     p.add_argument("dirs", nargs="+")

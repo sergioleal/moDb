@@ -126,6 +126,22 @@ scp à mão), entra na série com:
 python scripts/perfpack.py import caminho/para/<rodada>
 ```
 
+## Descrição da máquina
+
+```bash
+python scripts/perfpack.py machine -e do-cpuopt-4-nyc3
+```
+
+Gera `load-history/machines/<ambiente>.md` (resumo legível) e `.json` (saída
+crua de cada comando) com o que muda os números: plataforma e hipervisor, região,
+SO/kernel/glibc, CPU (modelo, vCPUs, caches, extensões, mitigações), `steal` da
+CPU, memória, fila e cache de escrita do disco, sistema de arquivos e opções de
+montagem. O coletor (`machine-info.sh`) **só lê** `/proc` e `/sys`: nenhuma carga
+nem escrita na máquina — mesmo assim, rode fora de uma medição. O `.md` lista as
+rodadas desse ambiente e é regerado a cada `fetch`; o campo `machine_doc` do
+catálogo aponta para ele. Se a máquina mudar (kernel, plano), rode de novo: o git
+guarda as versões anteriores. Por ora só para Linux.
+
 ## O que uma rodada produz
 
 ```
