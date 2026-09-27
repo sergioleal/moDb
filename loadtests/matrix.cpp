@@ -78,6 +78,7 @@ const std::vector<ScaleInfo>& known_scales() {
     static const std::vector<ScaleInfo> scales = {
         {"1k", 1'000},     {"10k", 10'000},   {"100k", 100'000},
         {"250k", 250'000}, {"500k", 500'000}, {"1M", 1'000'000},
+        {"5M", 5'000'000},
     };
     return scales;
 }

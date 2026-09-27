@@ -1,0 +1,27 @@
+# Suíte de 5 milhões de objetos (5x a large, 50x a standard): o banco passa de
+# alguns GiB e o buffer pool cobre só uma fração dele. Roda à parte, numa
+# máquina dedicada com memória de sobra (Hetzner CCX43, 64 GB, ou maior).
+#
+# Memória: `read_hotspot` ainda retém ~8,5 KB por objeto lido (T34); em 5M isso
+# dá ~40 GB de RSS. Com menos de 64 GB ele é morto pelo OOM killer -- o que
+# também é um resultado, e fica registrado pelo monitor de hardware.
+#
+# mixed_oltp fica em 100k pelo mesmo motivo da large: é limitado pelo fsync de
+# cada commit e cresce mais que linearmente.
+#
+# Tempo: sem medição ainda; a 1M a large leva dezenas de minutos por
+# repetição, então conte algumas horas para as 3.
+
+repeat 3
+seed 123456
+
+case load.create_only.embedded.5M
+case load.crud_full.embedded.5M
+case load.create_delete_interleaved.embedded.5M
+case load.read_hotspot.embedded.5M
+case load.range_scan_sweep.embedded.5M
+case load.oversubscribed_churn.embedded.5M
+case load.cascade_delete.embedded.5M
+case load.blob_lifecycle.embedded.5M
+case load.snapshot_hold.embedded.5M
+case load.mixed_oltp.embedded.100k

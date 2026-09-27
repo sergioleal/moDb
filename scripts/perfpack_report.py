@@ -128,7 +128,7 @@ def load_run(run_dir: Path) -> dict:
     # nome da suíte: é o que o leitor compara.
     scales = [e["case"].split(".")[-1] for e in executions]
     label = max(set(scales), key=scales.count) if scales else manifest["suite"]
-    label = {"1M": "1Mi"}.get(label, label)
+    label = {"1M": "1Mi", "5M": "5Mi"}.get(label, label)
     return {"name": manifest["run_name"], "suite": label, "suite_name": manifest["suite"], "repeat": manifest["repeat"],
             "commit": manifest["git_commit"][:12], "environment": manifest["environment"],
             "started_at": manifest["started_at"], "finished_at": manifest["finished_at"],

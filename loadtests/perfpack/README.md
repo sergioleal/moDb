@@ -26,6 +26,8 @@ perfpack.py fetch   ◀── scp + sha256 ─────────  ~/modb-p
 | `src/modb-src.tar.gz` | o fonte do **mesmo commit** (sem `docs-process` e sem mídia) |
 | `run.sh`, `run.ps1` | runners equivalentes: mesma suíte, mesma ordem, mesmos argumentos |
 | `suites/standard.txt` | suíte padrão: 10 casos `embedded`, 5 repetições, ~5 min |
+| `suites/large.txt` | escala de 1M objetos (1Mi), 3 repetições |
+| `suites/xlarge.txt` | escala de 5M objetos (5Mi), 3 repetições; pede ≥ 64 GB de RAM (T34) |
 | `suites/smoke.txt` | confere que roda (< 30 s); não serve para comparar |
 | `environments.json` | o catálogo de ambientes do commit (o `deploy`/`run` reenviam o atual) |
 | `PACKAGE.env`, `PACKAGE.json` | commit, branch, árvore, opções do CMake, sha256 de cada arquivo |
