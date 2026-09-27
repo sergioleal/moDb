@@ -163,6 +163,8 @@ enum class ErrorCode {
     conflict,
     // Falha interna de uma stored procedure (exceção): a transação foi desfeita.
     internal_error,
+    // A stored procedure passou do tempo máximo configurado: a transação foi desfeita.
+    operation_timeout,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

@@ -93,18 +93,18 @@ O que falta:
 
 ### P1 — pronto para operar
 
-#### S5 — Operação *(médio)*
+#### S5 — Operação *(médio)* ✅
 
-- [ ] 5.1 Arquivo de configuração (banco, host, porta, limites de conexões e de tempo de proc)
-- [ ] 5.2 Log estruturado por chamada (proc, duração, resultado, código de erro)
-- [ ] 5.3 Rodar como serviço: unidade systemd e Windows Service (ou NSSM) documentados em `docs/OPERACAO.md`; teste de reinício depois de matar o processo (o WAL recupera)
-- [ ] 5.4 Tempo máximo por proc (cooperativo: o `Contexto` checa o prazo a cada acesso ao banco) e desfaz a transação ao estourar
-- [ ] 5.5 Desligamento ativo: `request_stop` fecha as sessões abertas; hoje `serve_forever` espera cada cliente ocioso até o idle timeout (30 s) — achado na S2
+- [x] 5.1 *(`--config ARQUIVO`, `chave = valor`; flags valem mais; caminhos relativos à pasta do arquivo; `max_streams`, `idle_timeout_ms`, `proc_timeout_ms`, `log`)* Arquivo de configuração (banco, host, porta, limites de conexões e de tempo de proc)
+- [x] 5.2 *(`OperationRegistry::set_call_observer`; uma linha por chamada: instante UTC, proc, modo, ms, `ok`/`error <código> <mensagem>`; stderr, arquivo ou `off`)* Log estruturado por chamada (proc, duração, resultado, código de erro)
+- [x] 5.3 *(`docs/OPERACAO.md` § Servidor de aplicação; `examples/server_procs/deploy/notas-server.{service,conf}`; NSSM no Windows; o teste já mata o processo à força e reabre — agora pelo arquivo de configuração)* Rodar como serviço: unidade systemd e Windows Service (ou NSSM) documentados em `docs/OPERACAO.md`; teste de reinício depois de matar o processo (o WAL recupera)
+- [x] 5.4 *(`OperationRegistry::set_time_limit`; prazo no `ExecutionContext`; `Context::in_time()` antes de cada acesso; passou do prazo → `ErrorCode::operation_timeout` e rollback, mesmo que a proc não tenha notado)* Tempo máximo por proc (cooperativo: o `Contexto` checa o prazo a cada acesso ao banco) e desfaz a transação ao estourar
+- [x] 5.5 *(sessões registradas em `net::Server`; `request_stop` faz `NativeSocket::shutdown` nelas — no Windows também `CancelIoEx`, porque `shutdown` não acorda um `recv` bloqueado; parada com cliente ocioso: 30 s → imediata)* Desligamento ativo: `request_stop` fecha as sessões abertas; hoje `serve_forever` espera cada cliente ocioso até o idle timeout (30 s) — achado na S2
 
-#### S6 — Descoberta de procs *(pequeno)*
+#### S6 — Descoberta de procs *(pequeno)* ✅
 
-- [ ] 6.1 `sys.procs` devolve nome, modo, descrição e argumentos esperados de cada proc
-- [ ] 6.2 `modb procs <host> <porta>` no CLI
+- [x] 6.1 *(módulo de sistema `sys` carregado pelo `server_host` em todo servidor; `[{name, mode, module, description}]`; argumentos por convenção na descrição — não há esquema formal)* `sys.procs` devolve nome, modo, descrição e argumentos esperados de cada proc
+- [x] 6.2 *(agrupado por módulo)* `modb procs <host> <porta>` no CLI
 
 ### P2 — biblioteca no novo modelo
 
@@ -150,3 +150,4 @@ do desenho; a operação (S5) vem antes de usar o servidor fora da máquina loca
 | 2026-09-27 | S2 | (este commit) | `ops::Value` (binário versionado com limites contra entrada hostil, JSON), `ops::Args`; `notas` passa a usar `{texto}`/`{id}`. Achado: parar o servidor com cliente ocioso conectado leva até 30 s → S5.5 |
 | 2026-09-27 | — | — | Mecanismos de segurança (autenticação, tokens, TLS) retirados do plano a pedido; tarefas renumeradas (S6→S5 … S12→S11) |
 | 2026-09-27 | S3–S4 (P0 concluído) | (este commit) | `ModuleBuilder` (procs como função, tipos, índices), `Context` (leitura, consulta, índice, escrita, `set`, coleções), erros `conflict`/`internal_error`, exceção vira `internal_error` com rollback, `modb call`. `notas` reescrito: 6 procs, testadas pela rede e pelo CLI |
+| 2026-09-27 | S5–S6 (P1 concluído) | (este commit) | Arquivo de configuração, log por chamada, tempo limite cooperativo com rollback (`operation_timeout`), parada ativa (no Windows `shutdown` não acorda `recv` bloqueado: `CancelIoEx`), `sys.procs` + `modb procs`, operação como serviço documentada. `modb.server_host`: 31 s → 2,4 s |

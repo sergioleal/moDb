@@ -63,4 +63,11 @@ Cada um vira uma decisão própria, se aparecer necessidade.
   consulta, índice, escrita, coleções) e `ops::Args`, e devolvem `ops::Value`.
   Erros de regra têm código (`invalid_argument`, `record_not_found`, `conflict`);
   uma exceção vira `internal_error` com a transação desfeita.
-- Pendente, no plano: operação como serviço (S5) e descoberta de procs (S6).
+- Operação (S5): arquivo de configuração, log de uma linha por chamada,
+  tempo limite por proc (cooperativo — o `Context` confere o prazo a cada acesso
+  ao banco — e com rollback garantido pelo `OperationRegistry`, código
+  `operation_timeout`) e parada ativa (`request_stop` fecha as sessões abertas).
+  Como serviço: `docs/OPERACAO.md` § Servidor de aplicação.
+- Descoberta (S6): todo servidor carrega o módulo de sistema `sys` com
+  `sys.procs`; o CLI tem `modb procs`. Não há esquema formal de argumentos: a
+  descrição da proc os cita, e `ops::Args` explica o que falta ou está errado.

@@ -14,6 +14,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #else
 #include <arpa/inet.h>
 #include <errno.h>
@@ -170,6 +171,22 @@ Result<void> NativeSocket::close() {
     socket_ = static_cast<std::uintptr_t>(-1);
     if (::closesocket(handle) == SOCKET_ERROR) {
         return std::unexpected(make_io("closesocket failed", last_error()));
+    }
+    return {};
+}
+
+Result<void> NativeSocket::shutdown() noexcept {
+    if (!is_open()) {
+        return {};
+    }
+    const auto handle = static_cast<SocketHandle>(socket_);
+    const bool shut = ::shutdown(handle, SD_BOTH) != SOCKET_ERROR;
+    const int error = shut ? 0 : last_error();
+    // No Winsock, shutdown não acorda um recv bloqueado em outra thread;
+    // cancelar a E/S pendente acorda (o recv falha com WSAEINTR/aborted).
+    ::CancelIoEx(reinterpret_cast<HANDLE>(handle), nullptr);
+    if (!shut) {
+        return std::unexpected(make_io("shutdown failed", error));
     }
     return {};
 }
@@ -379,6 +396,16 @@ Result<void> NativeSocket::close() {
     fd_ = -1;
     if (::close(handle) != 0) {
         return std::unexpected(make_io("close failed", last_error()));
+    }
+    return {};
+}
+
+Result<void> NativeSocket::shutdown() noexcept {
+    if (!is_open()) {
+        return {};
+    }
+    if (::shutdown(fd_, SHUT_RDWR) != 0) {
+        return std::unexpected(make_io("shutdown failed", last_error()));
     }
     return {};
 }

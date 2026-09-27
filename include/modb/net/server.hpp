@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <atomic>
 
 namespace modb::net {
@@ -93,7 +94,7 @@ private:
            NativeSocket listener, std::uint16_t port, std::string database_name,
            object::BaselineId baseline);
 
-    [[nodiscard]] Result<void> handle_connection(NativeSocket peer);
+    [[nodiscard]] Result<void> handle_connection(NativeSocket& peer);
 
     std::shared_ptr<object::Database> database_;
     object::DatabaseId database_id_{};
@@ -119,6 +120,14 @@ private:
     // movível e `Server` precisa continuar movível — mesma solução que
     // `Database::snapshot_registry_mutex_`.
     std::unique_ptr<std::mutex> engine_mutex_{std::make_unique<std::mutex>()};
+    // Sessões abertas em serve_forever: request_stop dá shutdown em cada uma,
+    // acordando a leitura bloqueada, em vez de esperar o idle timeout (S5.5).
+    struct ActiveSessions {
+        std::mutex mu;
+        std::uint64_t next_id{0};
+        std::unordered_map<std::uint64_t, NativeSocket*> sockets;
+    };
+    std::unique_ptr<ActiveSessions> active_{std::make_unique<ActiveSessions>()};
 };
 
 } // namespace modb::net

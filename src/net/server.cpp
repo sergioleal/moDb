@@ -149,7 +149,8 @@ Server::Server(Server&& other) noexcept
       selected_codec_{other.selected_codec_.load(std::memory_order_relaxed)},
       last_stats_{other.last_stream_stats()}, operations_{std::move(other.operations_)},
       facades_{std::move(other.facades_)},
-      stop_requested_{other.stop_requested_.load(std::memory_order_relaxed)} {
+      stop_requested_{other.stop_requested_.load(std::memory_order_relaxed)},
+      active_{std::move(other.active_)} {
     other.database_id_ = object::DatabaseId{};
     other.fail_after_.reset();
     other.small_buffers_ = false;
@@ -361,7 +362,7 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
 
 } // namespace
 
-Result<void> Server::handle_connection(NativeSocket peer) {
+Result<void> Server::handle_connection(NativeSocket& peer) {
     if (small_buffers_) {
         (void)peer.set_send_buffer_bytes(k_small_socket_buffer);
     }
@@ -578,12 +579,20 @@ Result<void> Server::serve_one() {
     if (!peer) {
         return std::unexpected(peer.error());
     }
-    return handle_connection(std::move(*peer));
+    return handle_connection(*peer);
 }
 
 void Server::request_stop() noexcept {
     stop_requested_.store(true);
     static_cast<void>(listener_.close());
+    // Desligamento ativo: sessões ociosas estão bloqueadas lendo o socket e só
+    // perceberiam a parada no idle timeout; shutdown as acorda agora.
+    if (active_) {
+        const std::scoped_lock lock{active_->mu};
+        for (auto& [id, socket] : active_->sockets) {
+            static_cast<void>(socket->shutdown());
+        }
+    }
 }
 
 Result<void> Server::serve_forever() {
@@ -620,7 +629,19 @@ Result<void> Server::serve_forever() {
         }
 
         std::thread session_thread([this, peer = std::move(*peer)]() mutable {
-            (void)handle_connection(std::move(peer));
+            std::uint64_t id = 0;
+            {
+                const std::scoped_lock lock{active_->mu};
+                id = ++active_->next_id;
+                active_->sockets.emplace(id, &peer);
+                // Parada pedida entre o accept e o registro: não espera o timeout.
+                if (stop_requested_.load()) {
+                    static_cast<void>(peer.shutdown());
+                }
+            }
+            (void)handle_connection(peer);
+            const std::scoped_lock lock{active_->mu};
+            active_->sockets.erase(id);
         });
         {
             const std::scoped_lock lock{sessions_mu};

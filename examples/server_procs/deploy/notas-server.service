@@ -1,0 +1,23 @@
+# Unidade systemd do notas-server (docs/OPERACAO.md, "Servidor de aplicação").
+#   sudo cp notas-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now notas-server
+#   journalctl -u notas-server -f
+[Unit]
+Description=moDb notas-server (servidor de aplicação com stored procedures)
+After=network.target
+
+[Service]
+Type=simple
+User=modb
+Group=modb
+WorkingDirectory=/var/lib/notas-server
+ExecStart=/opt/notas-server/bin/notas-server --config /etc/notas-server/notas-server.conf
+# SIGTERM → request_stop: fecha as sessões, termina a chamada em curso e sai com 0.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+# Crash (ou kill -9): o systemd sobe de novo e o WAL recupera o que foi confirmado.
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

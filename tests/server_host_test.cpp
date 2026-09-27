@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <iostream>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -193,6 +195,58 @@ int main() {
         suite.check(help, "--help pede a ajuda");
         suite.check(server::usage("srv", modulos).find("notas.criar") != std::string::npos,
                     "a ajuda lista as procs dos módulos");
+        const char* novas[] = {"srv", "--db", "x.modb", "--proc-timeout-ms", "250", "--idle-timeout-ms", "5000",
+                               "--max-streams", "8", "--log", "off"};
+        auto todas = server::parse_options(std::span<char* const>{const_cast<char**>(novas), 11}, help);
+        suite.check(todas && todas->proc_timeout_ms == 250 && todas->idle_timeout_ms == 5000 &&
+                        todas->max_streams == 8 && todas->log == "off",
+                    "lê --proc-timeout-ms, --idle-timeout-ms, --max-streams e --log");
+        const char* desconhecida[] = {"srv", "--db", "x.modb", "--cor", "azul"};
+        auto recusada = server::parse_options(std::span<char* const>{const_cast<char**>(desconhecida), 5}, help);
+        suite.check(!recusada && recusada.error().message == "unknown argument: --cor", "flag desconhecida é recusada");
+    }
+
+    // --- S5.1: arquivo de configuração ---
+    {
+        const auto pasta = std::filesystem::temp_directory_path() /
+                           ("modb-server-host-cfg-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(pasta);
+        const auto cfg = pasta / "notas.conf";
+        {
+            std::ofstream out{cfg};
+            out << "# servidor de notas\n"
+                   "db = dados/notas.modb\n"
+                   "  host=0.0.0.0  \n"
+                   "port = 7500   # comentário no fim\n"
+                   "proc_timeout_ms = 1000\n"
+                   "log = notas.log\n";
+        }
+        const std::string cfg_str = cfg.string();
+        bool help = false;
+        const char* so_arquivo[] = {"srv", "--config", cfg_str.c_str()};
+        auto lido = server::parse_options(std::span<char* const>{const_cast<char**>(so_arquivo), 3}, help);
+        suite.check(lido && lido->host == "0.0.0.0" && lido->port == 7500 && lido->proc_timeout_ms == 1000,
+                    "--config lê chave = valor, com espaços e comentários");
+        suite.check(lido && lido->database == pasta / "dados/notas.modb" &&
+                        lido->log == (pasta / "notas.log").string(),
+                    "caminhos relativos do arquivo são relativos à pasta dele");
+        const char* com_flag[] = {"srv", "--port", "7600", "--config", cfg_str.c_str()};
+        auto sobreposto = server::parse_options(std::span<char* const>{const_cast<char**>(com_flag), 5}, help);
+        suite.check(sobreposto && sobreposto->port == 7600 && sobreposto->host == "0.0.0.0",
+                    "as flags valem mais que o arquivo, em qualquer ordem");
+        {
+            std::ofstream out{cfg};
+            out << "db = x.modb\nporta = 1\n";
+        }
+        auto ruim = server::parse_options(std::span<char* const>{const_cast<char**>(so_arquivo), 3}, help);
+        suite.check(!ruim && ruim.error().message.find("notas.conf:2: unknown setting: porta") != std::string::npos,
+                    "chave desconhecida é recusada com arquivo e linha");
+        const char* sem_arquivo[] = {"srv", "--config", "nao-existe.conf"};
+        suite.check(!server::parse_options(std::span<char* const>{const_cast<char**>(sem_arquivo), 3}, help),
+                    "arquivo de configuração ausente é erro");
+        std::error_code ignored;
+        std::filesystem::remove_all(pasta, ignored);
     }
 
     // --- no mesmo processo: start() + cliente real ---
@@ -202,8 +256,6 @@ int main() {
         suite.check(srv.has_value(), "start abre o banco e carrega o módulo");
         if (srv) {
             std::thread laco{[&] { (void)srv->serve_forever(); }};
-            // O cliente fecha antes de parar o servidor: serve_forever espera as
-            // sessões abertas terminarem (ou o idle timeout de 30 s).
             if (auto conn = conectar(srv->port(), db); !conn) {
                 suite.check(false, "cliente conecta");
             } else {
@@ -271,6 +323,90 @@ int main() {
         apagar(db);
     }
 
+    // --- S5.2 log por chamada, S5.4 tempo limite, S5.5 parada ativa, S6.1 sys.procs ---
+    {
+        const auto db = temp_db("operacao");
+        const auto log = std::filesystem::path{db.string() + ".log"};
+        auto srv = server::start(server::Options{.database = db,
+                                                 .host = "127.0.0.1",
+                                                 .port = 0,
+                                                 .proc_timeout_ms = 200,
+                                                 .log = log.string()},
+                                 modulos);
+        suite.check(srv.has_value(), "start com tempo limite e log em arquivo");
+        if (srv) {
+            std::thread laco{[&] { (void)srv->serve_forever(); }};
+            auto conn = conectar(srv->port(), db);
+            suite.check(conn.has_value(), "cliente conecta");
+            if (conn) {
+                auto procs = chamar(*conn, "sys.procs", ops::Value::object({}));
+                bool tem_criar = false;
+                bool tem_sys = false;
+                if (procs && procs->list()) {
+                    for (const auto& p : *procs->list()) {
+                        const auto* nome = p.field("name") ? p.field("name")->text() : nullptr;
+                        const auto* modo = p.field("mode") ? p.field("mode")->text() : nullptr;
+                        const auto* mod = p.field("module") ? p.field("module")->text() : nullptr;
+                        const auto* desc = p.field("description") ? p.field("description")->text() : nullptr;
+                        if (nome && modo && mod && desc && *nome == "notas.criar") {
+                            tem_criar = *modo == "write" && *mod == "notas" && desc->find("único") != std::string::npos;
+                        }
+                        tem_sys = tem_sys || (nome && *nome == "sys.procs");
+                    }
+                }
+                suite.check(tem_criar, "sys.procs lista as procs com modo, módulo e descrição");
+                suite.check(tem_sys, "sys.procs lista a si mesma");
+
+                auto rapida = chamar(*conn, "notas.lenta", ops::Value::object({{"texto", "rápida"}, {"ms", 0}}));
+                suite.check(rapida.has_value(), "proc dentro do prazo termina normalmente");
+                const auto antes = std::chrono::steady_clock::now();
+                auto lenta = chamar(*conn, "notas.lenta", ops::Value::object({{"texto", "lenta"}, {"ms", 400}}));
+                suite.check(!lenta && lenta.error().code == ErrorCode::operation_timeout,
+                            "proc que passa do prazo falha com operation_timeout");
+                suite.check(std::chrono::steady_clock::now() - antes < std::chrono::seconds(3),
+                            "a chamada que estourou o prazo volta logo");
+                auto depois = chamar(*conn, "notas.listar", ops::Value::object({{"contem", "lenta"}}));
+                suite.check(depois && depois->list() && depois->list()->empty(),
+                            "o que a proc escreveu antes do prazo foi desfeito");
+
+                // Cliente conectado e ocioso: request_stop fecha a sessão em vez
+                // de esperar o idle timeout (30 s).
+                const auto parada = std::chrono::steady_clock::now();
+                srv->request_stop();
+                laco.join();
+                const auto levou = std::chrono::steady_clock::now() - parada;
+                suite.check(levou < std::chrono::seconds(5), "parada com cliente conectado é imediata");
+                if (levou >= std::chrono::seconds(5)) {
+                    std::cerr << "  parada levou "
+                              << std::chrono::duration_cast<std::chrono::milliseconds>(levou).count() << " ms\n";
+                }
+                auto morta = chamar(*conn, "notas.listar", ops::Value::object({}));
+                suite.check(!morta, "a sessão do cliente foi encerrada");
+            } else {
+                srv->request_stop();
+                laco.join();
+            }
+        }
+        std::string linhas;
+        {
+            std::ifstream in{log};
+            linhas.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+        }
+        suite.check(linhas.find(" call sys.procs read ") != std::string::npos &&
+                        linhas.find("ms ok") != std::string::npos,
+                    "o log tem uma linha por chamada, com proc, modo, tempo e resultado");
+        suite.check(linhas.find("call notas.lenta write ") != std::string::npos &&
+                        linhas.find("error " + std::to_string(static_cast<unsigned>(ErrorCode::operation_timeout))) !=
+                            std::string::npos,
+                    "chamada com erro aparece no log com o código");
+        suite.check(linhas.size() > 24 && linhas[4] == '-' && linhas[10] == 'T' && linhas.find("Z call") != std::string::npos,
+                    "cada linha começa com o instante UTC");
+        srv = std::unexpected(Error{ErrorCode::invalid_argument, "fechado"});  // fecha o banco antes de apagar
+        apagar(db);
+        std::error_code ignored;
+        std::filesystem::remove(log, ignored);
+    }
+
     // --- executável gerado por modb_add_server, em outro processo ---
     {
         const auto db = temp_db("processo");
@@ -292,9 +428,16 @@ int main() {
             }
             servidor.matar();  // sem desligamento limpo
         }
+        // A segunda subida lê tudo de um arquivo de configuração (S5.1).
+        const auto cfg = std::filesystem::path{db.string() + ".conf"};
+        {
+            std::ofstream out{cfg};
+            out << "db = " << db.filename().string() << "\nport = " << porta << "\nlog = off\n";
+        }
         {
             Filho servidor;
-            suite.check(servidor.iniciar(args), "sobe o notas-server de novo sobre o mesmo arquivo");
+            suite.check(servidor.iniciar({MODB_NOTAS_SERVER_EXE, "--config", cfg.string()}),
+                        "sobe o notas-server de novo, pelo arquivo de configuração, sobre o mesmo banco");
             auto conn = conectar(porta, db);
             suite.check(conn.has_value(), "reconecta depois do crash");
             if (conn && id_nota != 0) {
@@ -311,10 +454,20 @@ int main() {
                 const auto sem_id = executar(base + " notas.ler");
                 suite.check(sem_id.codigo != 0 && sem_id.saida.find("argument 'id' is required") != std::string::npos,
                             "modb call com erro de proc sai com código e explica o erro");
+                const auto procs = executar(std::string{"\""} + MODB_CLI_EXE + "\" procs 127.0.0.1 " + std::to_string(porta));
+                suite.check(procs.codigo == 0 && procs.saida.find("notas.criar") != std::string::npos &&
+                                procs.saida.find("sys.procs") != std::string::npos &&
+                                procs.saida.find("write") != std::string::npos,
+                            "modb procs lista as procs do servidor (S6.2)");
+                if (procs.codigo != 0) {
+                    std::cerr << procs.saida;
+                }
             }
             servidor.matar();
         }
         apagar(db);
+        std::error_code ignored;
+        std::filesystem::remove(cfg, ignored);
     }
 
     return suite.finish();

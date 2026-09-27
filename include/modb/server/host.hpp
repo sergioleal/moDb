@@ -50,13 +50,32 @@ struct Options {
     std::filesystem::path database{};
     std::string host{"127.0.0.1"};
     std::uint16_t port{7474};
+    // 0 = padrão do net::Server.
+    std::uint16_t max_streams{0};
+    std::uint32_t idle_timeout_ms{0};
+    // Tempo máximo de uma chamada de proc; 0 = sem limite (S5.4).
+    std::uint32_t proc_timeout_ms{0};
+    // Log de chamadas e mensagens das procs: vazio = stderr, "off" = nenhum,
+    // senão um arquivo (acrescenta ao fim) (S5.2).
+    std::string log{};
 };
 
-// Lê `--db ARQUIVO [--host HOST] [--port N]`. `help` vira true com -h/--help.
+// Uma configuração `chave = valor` (as mesmas chaves das flags, com '_' no
+// lugar de '-': db, host, port, max_streams, idle_timeout_ms, proc_timeout_ms,
+// log). Caminhos relativos em `db` e `log` são relativos a `base`
+// (a pasta do arquivo de configuração).
+[[nodiscard]] Result<void> apply_setting(Options& options, std::string_view key, std::string_view value,
+                                         const std::filesystem::path& base = {});
+// Lê um arquivo de configuração: linhas `chave = valor`, `#` comenta (S5.1).
+[[nodiscard]] Result<void> load_config(const std::filesystem::path& file, Options& options);
+
+// Lê `[--config ARQUIVO] --db ARQUIVO [--host HOST] [--port N] ...`: primeiro o
+// arquivo, depois as flags, que têm precedência. `help` vira true com -h/--help.
 [[nodiscard]] Result<Options> parse_options(std::span<char* const> args, bool& help);
 [[nodiscard]] std::string usage(std::string_view program, std::span<const Module> modules);
 
-// Abre (ou cria) o banco, prepara e carrega os módulos e devolve o servidor
+// Abre (ou cria) o banco, prepara e carrega os módulos (mais o módulo de
+// sistema "sys", com `sys.procs`: a lista das procs, S6) e devolve o servidor
 // escutando, pronto para `serve_forever`.
 [[nodiscard]] Result<net::Server> start(const Options& options, std::span<const Module> modules);
 

@@ -1,6 +1,8 @@
 #include "notas_procs.hpp"
 
+#include <chrono>
 #include <stdexcept>
+#include <thread>
 
 using modb::Result;
 using modb::object::ObjectId;
@@ -142,6 +144,28 @@ modb::server::Module modb_module_notas_procs() {
                   }
                   (void)c.create(Nota{*texto});
                   throw std::runtime_error("falha simulada depois de escrever");
+              })
+        .proc("notas.lenta", Mode::read_write, "Cria uma nota, espera {ms} e relê (teste do tempo limite)",
+              [](Context& c, const Args& a) -> Result<Value> {
+                  auto texto = a.text("texto");
+                  if (!texto) {
+                      return std::unexpected(texto.error());
+                  }
+                  auto ms = a.integer_or("ms", 0);
+                  if (!ms) {
+                      return std::unexpected(ms.error());
+                  }
+                  auto id = c.create(Nota{*texto});
+                  if (!id) {
+                      return std::unexpected(id.error());
+                  }
+                  std::this_thread::sleep_for(std::chrono::milliseconds{*ms});
+                  // Passou do prazo: o próximo acesso ao banco já falha com operation_timeout.
+                  auto nota = c.read<Nota>(*id);
+                  if (!nota) {
+                      return std::unexpected(nota.error());
+                  }
+                  return Value::object({{"id", *id}});
               })
         .build();
 }

@@ -78,17 +78,26 @@ public:
     // --- leitura ---
     template <typename T>
     [[nodiscard]] Result<T> read(object::ObjectId id) {
+        if (auto ok = in_time(); !ok) {
+            return std::unexpected(ok.error());
+        }
         return context_->objects().read<T>(id);
     }
 
     // Todos os objetos do tipo que satisfazem `predicate` (todos, se vazio), com os ids.
     template <typename T>
     [[nodiscard]] Result<std::vector<std::pair<object::ObjectId, T>>> where(std::function<bool(const T&)> predicate = {}) {
+        if (auto ok = in_time(); !ok) {
+            return std::unexpected(ok.error());
+        }
         auto query = database().query<T>();
         std::vector<object::ObjectId> ids;
         auto rows = predicate ? std::move(query).where(std::move(predicate)).select({object::FieldId{0}}).stream()
                               : std::move(query).select({object::FieldId{0}}).stream();
         for (auto& row : rows) {
+            if (auto ok = in_time(); !ok) {
+                return std::unexpected(ok.error());
+            }
             if (!row) {
                 return std::unexpected(row.error());
             }
@@ -121,12 +130,18 @@ public:
     // Ids com `field == value`, pelo índice (o campo precisa de índice: ModuleBuilder::index).
     template <typename T>
     [[nodiscard]] Result<std::vector<object::ObjectId>> find(object::FieldId field, object::AttributeValue value) {
+        if (auto ok = in_time(); !ok) {
+            return std::unexpected(ok.error());
+        }
         return database().indexed_object_ids<T>(field, std::move(value));
     }
 
     // --- escrita (só em procs Mode::read_write) ---
     template <typename T>
     [[nodiscard]] Result<object::ObjectId> create(const T& value) {
+        if (auto ok = in_time(); !ok) {
+            return std::unexpected(ok.error());
+        }
         auto handle = context_->objects().create(value);
         if (!handle) {
             return std::unexpected(handle.error());
@@ -135,6 +150,9 @@ public:
     }
     template <typename T>
     [[nodiscard]] Result<void> update(object::ObjectId id, const T& value) {
+        if (auto ok = in_time(); !ok) {
+            return ok;
+        }
         auto handle = context_->objects().get<T>(id);
         if (!handle) {
             return std::unexpected(handle.error());
@@ -148,13 +166,31 @@ public:
         if (!writable()) {
             return std::unexpected(Error{ErrorCode::transaction_required, "set requires a read_write proc"});
         }
+        if (auto ok = in_time(); !ok) {
+            return ok;
+        }
         auto handle = context_->objects().get<T>(id);
         if (!handle) {
             return std::unexpected(handle.error());
         }
         return handle->template set<Member>(context_->transaction(), std::forward<V>(value));
     }
-    [[nodiscard]] Result<void> remove(object::ObjectId id) { return context_->objects().remove(id); }
+    [[nodiscard]] Result<void> remove(object::ObjectId id) {
+        if (auto ok = in_time(); !ok) {
+            return ok;
+        }
+        return context_->objects().remove(id);
+    }
+
+    // Erro operation_timeout se a chamada passou do tempo limite do servidor
+    // (--proc-timeout-ms). Todo acesso ao banco confere; uma proc que calcula
+    // muito sem tocar no banco pode conferir por conta própria.
+    [[nodiscard]] Result<void> in_time() const {
+        if (context_->past_deadline()) {
+            return std::unexpected(Error{ErrorCode::operation_timeout, "proc exceeded the server time limit"});
+        }
+        return {};
+    }
 
     // Coleções persistentes (PersistentVector/Set/Map) e blobs: passe
     // `blobs()` e `transaction()` às APIs de collection.hpp.

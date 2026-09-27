@@ -167,6 +167,7 @@ int command_serve_loop(const std::filesystem::path& path, std::string_view host,
 int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name);
 int command_call(std::string_view host, std::uint16_t port, std::string_view proc,
                  std::string_view json_args);
+int command_procs(std::string_view host, std::uint16_t port);
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
 int run_baseline_command(int argc, char* argv[]);
@@ -254,6 +255,7 @@ void print_help() {
            "  serve    Host a database and complete Hello/HelloOk (ODB++ Fase 8B).\n"
            "  ping     Connect and negotiate Hello with a running server (Fase 8B).\n"
            "  call     Call a stored procedure: modb call <host> <port> <proc> [<json-args>].\n"
+           "  procs    List the stored procedures of a server: modb procs <host> <port>.\n"
            "  types    Exercise the in-memory object model (ODB++).\n"
            "  type     Define and list persistent object types (ODB++).\n"
            "  baseline Inspect immutable catalog baselines (ODB++).\n"
@@ -2396,6 +2398,50 @@ int command_call(std::string_view host, std::uint16_t port, std::string_view pro
         return print_error(value.error());
     }
     std::cout << modb::ops::to_json(*value) << '\n';
+    return 0;
+}
+
+// Lista as procs de um servidor de aplicação (sys.procs, PLANO_SERVIDOR_PROCS S6.2).
+int command_procs(std::string_view host, std::uint16_t port) {
+    auto client = modb::net::Client::connect(host, port, "");
+    if (!client) {
+        return print_error(client.error());
+    }
+    auto reply = client->call("sys.procs", {});
+    if (!reply) {
+        return print_error(reply.error());
+    }
+    auto value = modb::ops::decode(*reply);
+    if (!value) {
+        return print_error(value.error());
+    }
+    const auto* list = value->list();
+    if (list == nullptr) {
+        return print_error(
+            modb::Error{modb::ErrorCode::invalid_encoding, "sys.procs did not return a list"});
+    }
+    auto text = [](const modb::ops::Value& item, std::string_view key) {
+        const auto* field = item.field(key);
+        const auto* s = field != nullptr ? field->text() : nullptr;
+        return s != nullptr ? *s : std::string{};
+    };
+    std::size_t width = 0;
+    for (const auto& item : *list) {
+        width = std::max(width, text(item, "name").size());
+    }
+    // Agrupadas por módulo, na ordem em que o servidor as carregou.
+    std::string module;
+    for (const auto& item : *list) {
+        if (text(item, "module") != module) {
+            module = text(item, "module");
+            std::cout << module << '\n';
+        }
+        const auto name = text(item, "name");
+        auto mode = text(item, "mode");
+        mode.resize(6, ' ');
+        std::cout << "  " << name << std::string(width - name.size() + 2, ' ') << mode
+                  << text(item, "description") << '\n';
+    }
     return 0;
 }
 
@@ -6098,6 +6144,16 @@ int run(int argc, char* argv[]) {
         }
         return command_call(argv[2], *port, argv[4],
                             argc == 6 ? std::string_view{argv[5]} : std::string_view{});
+    }
+    if (command == "procs") {
+        if (argc != 4) {
+            return print_usage_error("modb procs <host> <port>");
+        }
+        auto port = parse_generation(argv[3]);
+        if (!port) {
+            return print_error(port.error());
+        }
+        return command_procs(argv[2], *port);
     }
     if (command == "types") {
         if (argc == 3 && is_help_argument(argv[2])) {

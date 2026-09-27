@@ -37,6 +37,10 @@ public:
 
     [[nodiscard]] Result<std::uint16_t> local_port() const;
     [[nodiscard]] Result<void> close();
+    // Encerra envio e recebimento sem fechar o descritor: uma recv/send
+    // bloqueada em OUTRA thread acorda com connection_closed. É o que o
+    // servidor usa para desligar sessões ociosas na parada (S5.5).
+    [[nodiscard]] Result<void> shutdown() noexcept;
     [[nodiscard]] bool is_open() const noexcept;
 
 private:
