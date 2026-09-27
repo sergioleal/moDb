@@ -108,17 +108,17 @@ O que falta:
 
 ### P2 — biblioteca no novo modelo
 
-#### S7 — `biblioteca-server`: módulo de procs *(médio)*
+#### S7 — `biblioteca-server`: módulo de procs *(médio)* ✅
 
-- [ ] 7.1 Reorganizar o repositório `biblioteca`: `modulo/` (modelo + procs), `servidor/` (o `main` via `modb_add_server`), `web/` (cliente)
-- [ ] 7.2 Portar as regras de `src/biblioteca.cpp` para procs: `autores.listar/obter/criar/atualizar/remover` (e o mesmo para editoras, livros, exemplares e leitores), `emprestimos.listar/emprestar/devolver`, `resumo`, `exemplo.carregar`
-- [ ] 7.3 Testes das procs contra o servidor de verdade (processo filho, banco em arquivo temporário): as 55 verificações de hoje, agora pela rede
+- [x] 7.1 *(repositório `biblioteca`, commit 18cf90c; `tests/` à parte; saíram `src/biblioteca.*`, `api.*`, `json.*`)* Reorganizar o repositório `biblioteca`: `modulo/` (modelo + procs), `servidor/` (o `main` via `modb_add_server`), `web/` (cliente)
+- [x] 7.2 *(`modulo/biblioteca_procs.cpp`: 31 procs; as regras numa classe `Acervo` sobre o `Context`; cada escrita numa transação — antes a validação e a escrita eram passos separados; `exemplo.carregar` numa transação só; relógio do servidor, ou `BIBLIOTECA_HOJE` para testes)* Portar as regras de `src/biblioteca.cpp` para procs: `autores.listar/obter/criar/atualizar/remover` (e o mesmo para editoras, livros, exemplares e leitores), `emprestimos.listar/emprestar/devolver`, `resumo`, `exemplo.carregar`
+- [x] 7.3 *(`tests/procs_test.cpp`: 60 verificações; o "passar 20 dias" mata o servidor e o sobe com outra data, o que também confere a recuperação pelo WAL e os índices depois de reabrir)* Testes das procs contra o servidor de verdade (processo filho, banco em arquivo temporário): as 55 verificações de hoje, agora pela rede
 
-#### S8 — `biblioteca-web`: só cliente *(pequeno)*
+#### S8 — `biblioteca-web`: só cliente *(pequeno)* ✅
 
-- [ ] 8.1 A web deixa de linkar o motor: só `modb::app_client` + cpp-httplib; cada rota HTTP vira uma chamada de proc (`Valor` ↔ JSON da S2.2), códigos de erro → 400/404/409
-- [ ] 8.2 Configuração do endereço do servidor; reconexão se o servidor reiniciar
-- [ ] 8.3 Teste: web + servidor em processos separados, derrubar o servidor no meio e ver a web se recuperar
+- [x] 8.1 *(`web/gateway.cpp`: tabela rota → proc, JSON ↔ `Value` pelo `ops::from_json/to_json`; o frontend não mudou. A web linka só `modb::app_client` — que hoje depende da biblioteca `modb` inteira; o processo não abre banco)* A web deixa de linkar o motor: só `modb::app_client` + cpp-httplib; cada rota HTTP vira uma chamada de proc (`Valor` ↔ JSON da S2.2), códigos de erro → 400/404/409
+- [x] 8.2 *(`--servidor HOST:PORTA`; leitura repetida numa conexão nova se o servidor reiniciou; escrita nunca repetida, e só reaproveita conexão usada há menos de 1 s; conexão perto do idle timeout do servidor é trocada antes de usar)* Configuração do endereço do servidor; reconexão se o servidor reiniciar
+- [x] 8.3 *(`tests/web_test.cpp`: 20 verificações, com idle timeout curto no servidor, queda (503) e volta)* Teste: web + servidor em processos separados, derrubar o servidor no meio e ver a web se recuperar
 
 ### P3 — depois
 
@@ -151,3 +151,4 @@ do desenho; a operação (S5) vem antes de usar o servidor fora da máquina loca
 | 2026-09-27 | — | — | Mecanismos de segurança (autenticação, tokens, TLS) retirados do plano a pedido; tarefas renumeradas (S6→S5 … S12→S11) |
 | 2026-09-27 | S3–S4 (P0 concluído) | (este commit) | `ModuleBuilder` (procs como função, tipos, índices), `Context` (leitura, consulta, índice, escrita, `set`, coleções), erros `conflict`/`internal_error`, exceção vira `internal_error` com rollback, `modb call`. `notas` reescrito: 6 procs, testadas pela rede e pelo CLI |
 | 2026-09-27 | S5–S6 (P1 concluído) | (este commit) | Arquivo de configuração, log por chamada, tempo limite cooperativo com rollback (`operation_timeout`), parada ativa (no Windows `shutdown` não acorda `recv` bloqueado: `CancelIoEx`), `sys.procs` + `modb procs`, operação como serviço documentada. `modb.server_host`: 31 s → 2,4 s |
+| 2026-09-27 | S7–S8 (P2 concluído) | biblioteca 18cf90c | Biblioteca em dois processos: `biblioteca-server` (31 procs) e `biblioteca-web` (gateway HTTP → procs). Regras testadas pela rede (60) e web + servidor com queda e volta do servidor (20). Achado: `modb::app_client` puxa a biblioteca `modb` inteira; separar o cliente do motor fica para quando houver cliente fora do repositório |
