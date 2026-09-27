@@ -18,6 +18,7 @@
 #include "modb/query/generator.hpp"
 
 // Disponibiliza std::size_t no resultado do GC.
+#include <unordered_map>
 #include <cstddef>
 // Disponibiliza std::function para o callback de scan.
 #include <functional>
@@ -108,6 +109,10 @@ public:
         return current_baseline_;
     }
     [[nodiscard]] std::uint64_t epoch() const noexcept { return root_.epoch(); }
+    // Época que a transação em andamento vai publicar: o carimbo das versões
+    // que ela escreve. Vale enquanto o commit não chamou advance_epoch (as
+    // escritas acontecem antes dele; há um escritor só).
+    [[nodiscard]] std::uint64_t transaction_epoch() const noexcept { return root_.epoch() + 1; }
     [[nodiscard]] DatabaseUuid database_uuid() const noexcept { return root_.database_uuid(); }
     [[nodiscard]] TimelineId timeline_id() const noexcept { return root_.timeline_id(); }
     [[nodiscard]] std::uint64_t next_lsn() const noexcept { return root_.next_lsn(); }
@@ -214,6 +219,19 @@ private:
                                                             std::uint16_t field_id,
                                                             const AttributeValue& lo,
                                                             const AttributeValue& hi) const;
+    // Candidatos para uma consulta por índice sob `snapshot_epoch` (C2): a faixa
+    // da B+ tree quando o índice serve para essa época; senão -- alguma chave
+    // foi retirada do índice depois dela, e o objeto que a tinha sumiria --,
+    // uma varredura dos objetos visíveis na época com o campo na faixa, na
+    // mesma ordem do índice (valor, depois id). Os candidatos ainda passam
+    // por `index_candidate_at`.
+    [[nodiscard]] Result<std::vector<ObjectId>> index_range_at(std::string_view type_name, std::uint16_t field_id,
+                                                               const AttributeValue& lo, const AttributeValue& hi,
+                                                               std::uint64_t snapshot_epoch);
+    // O índice (tipo, campo) ainda tem todas as chaves que um snapshot desta
+    // época enxerga?
+    [[nodiscard]] bool index_serves_epoch(std::string_view type_name, std::uint16_t field_id,
+                                          std::uint64_t snapshot_epoch) const noexcept;
     // Revalida um candidato do índice contra a versão visível no snapshot (Fase
     // 7B): devolve o objeto na época `snapshot_epoch` só se o valor do campo
     // `field_id` estiver em [lo, hi] nessa versão; nullopt se não visível
@@ -241,7 +259,8 @@ private:
           type_ids_{std::move(type_ids)},
           baselines_{std::move(baselines)},
           current_baseline_{std::move(baseline)},
-          indexes_{std::move(indexes)} {}
+          indexes_{std::move(indexes)},
+          opened_epoch_{root_.epoch()} {}
 
     // Aloca o próximo ObjectId, persistindo o contador antes de devolvê-lo.
     [[nodiscard]] Result<ObjectId> allocate_object_id();
@@ -260,6 +279,12 @@ private:
     std::optional<Baseline> current_baseline_;
     // Diretório de índices (Fase 7B); nullopt até o primeiro índice ser criado.
     std::optional<IndexCatalog> indexes_;
+    // C2: época da última retirada de chave de cada índice (por slot do
+    // catálogo). Retiradas de antes da abertura não são conhecidas: valem como
+    // `opened_epoch_` (snapshots anteriores à abertura -- só existem depois de
+    // um rollback, que relê o store -- usam a varredura).
+    std::unordered_map<std::size_t, std::uint64_t> index_removed_epoch_;
+    std::uint64_t opened_epoch_{0};
 
     // Último registro lido por `peek_type`, para `get` do MESMO id não repetir a
     // resolução de identidade e a leitura do heap.

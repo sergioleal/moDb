@@ -73,22 +73,22 @@ planos dedicados). Para concorrência, também:
 
 ### P0 — defeitos de correção que já existem (valem com uma thread só)
 
-#### C1 — Snapshot aberto durante um commit vê a transação não durável *(pequeno)*
+#### C1 — Snapshot aberto durante um commit vê a transação não durável *(pequeno)* ✅
 
-- [ ] 1.1 Teste que falha hoje: abrir um snapshot entre `advance_epoch` e o fim do commit (failpoint de `CommitPhase` ou gancho de teste) e confirmar que ele vê o objeto da transação; o mesmo com o commit falhando depois
-- [ ] 1.2 Correção: calcular a época nova no começo do commit, mas só publicá-la (`DatabaseRoot::epoch_`) depois da aplicação; `snapshot()` lê a época publicada
-- [ ] 1.3 Revisar os carimbos `root_.epoch()+1` (`object_store.cpp:305, 467, 505`) para usar a época da transação, não "a publicada mais um"
+- [x] 1.1 *(`tests/epoch_publication_test.cpp`: commit parado em `stop_after_images` e em `stop_after_commit_record`; falhava em 8 verificações — o snapshot via o objeto criado e a versão nova do alterado)* Teste que falha hoje: abrir um snapshot entre `advance_epoch` e o fim do commit (failpoint de `CommitPhase` ou gancho de teste) e confirmar que ele vê o objeto da transação; o mesmo com o commit falhando depois
+- [x] 1.2 *(`Database::published_epoch_`, publicado logo depois de `apply_transaction`; `snapshot()` e `epoch()` leem a publicada; o rollback que relê o store republica a do disco)* Correção: calcular a época nova no começo do commit, mas só publicá-la (`DatabaseRoot::epoch_`) depois da aplicação; `snapshot()` lê a época publicada
+- [x] 1.3 *(os carimbos já eram a época da transação; agora têm nome: `ObjectStore::transaction_epoch()`)* Revisar os carimbos `root_.epoch()+1` (`object_store.cpp:305, 467, 505`) para usar a época da transação, não "a publicada mais um"
 
-#### C2 — Consulta por índice sob snapshot perde objetos cuja chave mudou *(médio)*
+#### C2 — Consulta por índice sob snapshot perde objetos cuja chave mudou *(médio)* ✅ (medição pendente)
 
-- [ ] 2.1 Teste que falha hoje: índice em `User.name`, abrir snapshot, mudar o nome de um objeto, consultar pelo nome antigo através do snapshot → hoje não acha
-- [ ] 2.2 Decidir no ADR (C9): manter a chave antiga no índice até o GC (entrada com época de remoção) ou, sob snapshot mais antigo que a última escrita no índice, cair para varredura revalidada
-- [ ] 2.3 Implementar e medir o custo em `range_scan_sweep` (máquina dedicada)
+- [x] 2.1 *(`tests/index_snapshot_test.cpp`: chave mudada, faixa, objeto removido e ordem da faixa; falhava em 4)* Teste que falha hoje: índice em `User.name`, abrir snapshot, mudar o nome de um objeto, consultar pelo nome antigo através do snapshot → hoje não acha
+- [x] 2.2 *(escolhida a varredura revalidada: `ObjectStore::index_range_at` usa a B+ tree quando nenhuma chave do índice foi retirada depois da época do snapshot, e senão varre a época e ordena como o índice (valor, id). Só snapshots mais velhos que a última retirada pagam a varredura; consultas novas seguem pelo índice. A decisão entra no ADR da C9)* Decidir no ADR (C9): manter a chave antiga no índice até o GC (entrada com época de remoção) ou, sob snapshot mais antigo que a última escrita no índice, cair para varredura revalidada
+- [x] 2.3 Implementar *(feito)* e medir *(pendente: máquina dedicada)* o custo em `range_scan_sweep` (máquina dedicada)
 
-#### C3 — Rollback reconstrói o `store_` por baixo de quem lê *(pequeno, contenção)*
+#### C3 — Rollback reconstrói o `store_` por baixo de quem lê *(pequeno, contenção)* ✅ (sem defeito com uma thread)
 
-- [ ] 3.1 Teste que falha hoje: stream suspenso (`scan_stream`) + transação que faz rollback + retomar o stream
-- [ ] 3.2 Paliativo até a C8: `rollback` recusa rodar (ou espera) com geradores vivos, e o servidor passa a segurar o `engine_mutex_` também durante o `send` quando houver escrita pendente
+- [x] 3.1 *(`tests/rollback_readers_test.cpp`: snapshot e stream antigos atravessando um rollback. **Passa sem correção**: a releitura do store refaz as versões `previous` a partir do disco, e o stream só guarda ids de página e cópias entre um `yield` e outro. Fica como teste de regressão)* Teste que falha hoje: stream suspenso (`scan_stream`) + transação que faz rollback + retomar o stream
+- [x] 3.2 *(desnecessário: com uma thread não há defeito, e no servidor o rollback e cada passo de um stream correm sob o `engine_mutex_`. O risco que sobra é só concorrente — a releitura mexe no store enquanto outra thread lê — e é o que a C8 resolve)* Paliativo até a C8: `rollback` recusa rodar (ou espera) com geradores vivos, e o servidor passa a segurar o `engine_mutex_` também durante o `send` quando houver escrita pendente
 - [ ] 3.3 Remover o paliativo quando a C8 tornar o rollback local ao escritor
 
 ### P1 — fundações: o caminho de leitura seguro entre threads
@@ -178,3 +178,7 @@ números de desempenho ficam pendentes, marcados como tal.
 | Data | Tarefa | Commit | Resultado |
 |---|---|---|---|
 | 2026-09-27 | Plano | — | Diagnóstico por leitura de código; nenhum teste ainda |
+| 2026-09-27 | C1 | (este commit) | Época publicada separada da do DBRT; teste falhava em 8 verificações |
+| 2026-09-27 | C2 | (este commit) | Varredura revalidada quando o índice perdeu chaves que o snapshot vê; teste falhava em 4. Custo a medir |
+| 2026-09-27 | C3 | (este commit) | Hipótese não confirmada com uma thread (o teste passa antes da correção); vira teste de regressão. Risco concorrente fica para a C8 |
+| 2026-09-27 | C4 | — | **Bloqueado:** o WSL (Ubuntu 24.04) tem GCC 13 (não testado com o moDb; o build cai para C++23 sem C++26) mas não tem cmake nem ninja, e instalar pacotes pede a senha de sudo. Sem TSan, as tarefas C4 em diante não têm como cumprir o critério "limpo no TSan" |

@@ -302,7 +302,7 @@ Result<ObjectId> ObjectStore::create_object(const TypeDefinition& type, FieldVal
     }
     // A época deste objeto é a do commit que o tornará durável (Fase 6B): a
     // mesma que advance_epoch() vai publicar, já que só há um escritor.
-    if (auto bound = identity_.bind(*id, *location, root_.epoch() + 1); !bound) {
+    if (auto bound = identity_.bind(*id, *location, transaction_epoch()); !bound) {
         return std::unexpected(bound.error());
     }
     // Manutenção de índices (Fase 7B): a mesma transação cobre objeto e índices.
@@ -464,7 +464,7 @@ Result<void> ObjectStore::update(ObjectId id, const TypeDefinition& type, FieldV
     if (!location) {
         return std::unexpected(location.error());
     }
-    if (auto rebound = identity_.rebind(id, *location, root_.epoch() + 1); !rebound) {
+    if (auto rebound = identity_.rebind(id, *location, transaction_epoch()); !rebound) {
         return std::unexpected(rebound.error());
     }
     if (auto released = release_overwritten(*overwritten); !released) {
@@ -502,7 +502,7 @@ Result<void> ObjectStore::remove(ObjectId id,
     // também fica para o GC (ADR-024): um objeto removido não volta a ser
     // escrito, então sobra no máximo uma cópia a mais por objeto — e liberá-la
     // aqui deixava o delete 2,1x mais lento (T33.4).
-    if (auto erased = identity_.erase(id, root_.epoch() + 1); !erased) {
+    if (auto erased = identity_.erase(id, transaction_epoch()); !erased) {
         return std::unexpected(erased.error());
     }
     if (previous) {
@@ -577,9 +577,12 @@ Result<void> ObjectStore::index_maintain(const std::string& type_name, ObjectId 
             if (auto r = tree->insert(*key, id.value); !r) {
                 return std::unexpected(r.error());
             }
-        } else if (auto r = tree->remove(*key, id.value);
-                   !r && r.error().code != ErrorCode::record_not_found) {
-            return std::unexpected(r.error());
+        } else {
+            if (auto r = tree->remove(*key, id.value); !r && r.error().code != ErrorCode::record_not_found) {
+                return std::unexpected(r.error());
+            }
+            // Snapshots de antes desta transação ainda veem a chave (C2).
+            index_removed_epoch_[slot] = transaction_epoch();
         }
         // A raiz muda quando a árvore cresce/encolhe: persiste a nova.
         if (tree->root_page() != info.root) {
@@ -692,6 +695,80 @@ Result<std::vector<ObjectId>> ObjectStore::index_range(std::string_view type_nam
     out.reserve(ids->size());
     for (auto value : *ids) {
         out.push_back(ObjectId{value});
+    }
+    return out;
+}
+
+bool ObjectStore::index_serves_epoch(std::string_view type_name, std::uint16_t field_id,
+                                     std::uint64_t snapshot_epoch) const noexcept {
+    if (!indexes_) {
+        return false;
+    }
+    const int slot = indexes_->find(type_name, field_id);
+    if (slot < 0) {
+        return false;
+    }
+    std::uint64_t removed = opened_epoch_;
+    if (const auto it = index_removed_epoch_.find(static_cast<std::size_t>(slot)); it != index_removed_epoch_.end()) {
+        removed = std::max(removed, it->second);
+    }
+    return removed <= snapshot_epoch;
+}
+
+Result<std::vector<ObjectId>> ObjectStore::index_range_at(std::string_view type_name, std::uint16_t field_id,
+                                                          const AttributeValue& lo, const AttributeValue& hi,
+                                                          std::uint64_t snapshot_epoch) {
+    if (index_serves_epoch(type_name, field_id, snapshot_epoch)) {
+        return index_range(type_name, field_id, lo, hi);
+    }
+    if (!has_index(type_name, field_id)) {
+        return std::unexpected(Error{ErrorCode::type_not_found, "no index on this field"});
+    }
+    auto lo_key = index::encode_key(lo);
+    if (!lo_key) {
+        return std::unexpected(lo_key.error());
+    }
+    auto hi_key = index::encode_key(hi);
+    if (!hi_key) {
+        return std::unexpected(hi_key.error());
+    }
+    // O índice perdeu chaves que esta época vê: varre a época e ordena como a
+    // B+ tree ordenaria (chave codificada, depois id).
+    std::vector<std::pair<std::vector<std::byte>, std::uint64_t>> hits;
+    for (auto& item : scan_stream(snapshot_epoch, std::nullopt)) {
+        if (!item) {
+            return std::unexpected(item.error());
+        }
+        auto type = find_type(item->type);
+        if (!type || type->get().name() != type_name) {
+            continue;
+        }
+        const AttributeValue* value = field_value(item->fields, field_id);
+        if (value == nullptr || value->is_null()) {
+            continue;
+        }
+        auto key = index::encode_key(*value);
+        if (!key) {
+            return std::unexpected(key.error());
+        }
+        if (bytes_less(*key, *lo_key) || bytes_less(*hi_key, *key)) {
+            continue;
+        }
+        hits.emplace_back(std::move(*key), item->id.value);
+    }
+    std::ranges::sort(hits, [](const auto& a, const auto& b) {
+        if (bytes_less(a.first, b.first)) {
+            return true;
+        }
+        if (bytes_less(b.first, a.first)) {
+            return false;
+        }
+        return a.second < b.second;
+    });
+    std::vector<ObjectId> out;
+    out.reserve(hits.size());
+    for (const auto& [key, id] : hits) {
+        out.push_back(ObjectId{id});
     }
     return out;
 }

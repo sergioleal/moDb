@@ -536,6 +536,9 @@ Result<void> Database::commit_transaction(CommitPhase phase) {
         if (auto applied = file_->apply_transaction(); !applied) {
             return std::unexpected(applied.error());
         }
+        // Durável e aplicada: agora um snapshot novo pode vê-la (C1). Antes
+        // disto, snapshots continuam na época anterior.
+        publish_epoch();
         // BARREIRA, não conveniência: as páginas de dados precisam estar
         // duráveis ANTES de o checkpoint LSN ficar durável. Um checkpoint que
         // afirma "tudo até o LSN N está no arquivo de dados" sem que as páginas
@@ -699,6 +702,7 @@ Result<void> Database::resync_store_after_rollback() {
         return std::unexpected(reopened.error());
     }
     store_ = std::move(*reopened);
+    publish_epoch();
     return {};
 }
 

@@ -30,6 +30,7 @@
 #include "modb/tx/wal.hpp"
 
 // Disponibiliza std::size_t no resultado do GC.
+#include <atomic>
 #include <cstddef>
 // Disponibiliza caminhos.
 #include <filesystem>
@@ -771,7 +772,10 @@ public:
             return std::unexpected(
                 Error{ErrorCode::invalid_argument, "database must be attached before use"});
         }
-        const auto current_epoch = store_.epoch();
+        // A época publicada, não a do DBRT: o commit avança a do DBRT no
+        // começo (ela vai no WAL), e a transação só pode ficar visível depois
+        // de durável e aplicada (PLANO_CONCORRENCIA C1).
+        const auto current_epoch = published_epoch();
         register_snapshot_epoch(current_epoch);
         return Snapshot{database_id_, current_epoch};
     }
@@ -872,7 +876,9 @@ public:
     [[nodiscard]] const std::optional<Baseline>& current_baseline() const noexcept {
         return store_.current_baseline();
     }
-    [[nodiscard]] std::uint64_t epoch() const noexcept { return store_.epoch(); }
+    // Época do último commit publicado (durável e aplicado): a que um snapshot
+    // novo recebe. Durante um commit em andamento, a do DBRT já está uma à frente.
+    [[nodiscard]] std::uint64_t epoch() const noexcept { return published_epoch(); }
     [[nodiscard]] DatabaseUuid database_uuid() const noexcept { return store_.database_uuid(); }
     [[nodiscard]] TimelineId timeline_id() const noexcept { return store_.timeline_id(); }
     [[nodiscard]] std::uint64_t next_lsn() const noexcept { return store_.next_lsn(); }
@@ -1025,7 +1031,18 @@ private:
           primary_storage_{primary_storage},
           commit_ack_policy_{commit_ack},
           commit_ack_timeout_{commit_ack_timeout},
-          wal_io_{wal_io} {}
+          wal_io_{wal_io},
+          published_epoch_{store_.epoch()} {}
+
+    [[nodiscard]] std::uint64_t published_epoch() const noexcept {
+        return std::atomic_ref<std::uint64_t>{const_cast<std::uint64_t&>(published_epoch_)}.load(
+            std::memory_order_acquire);
+    }
+    // Chamado quando as páginas da transação já estão no arquivo (ou quando o
+    // estado em memória é relido do disco): leitores novos passam a vê-la.
+    void publish_epoch() noexcept {
+        std::atomic_ref<std::uint64_t>{published_epoch_}.store(store_.epoch(), std::memory_order_release);
+    }
 
     [[nodiscard]] Result<void> check_durable_data() const {
         if (primary_storage_ == PrimaryStorage::wal_only) {
@@ -1224,7 +1241,9 @@ private:
                                                      "type is not bound"})};
             co_return;
         }
-        auto ids = store_.index_range(bound->binding.type_name(), field, lo, hi);
+        // `index_range_at`: com o índice, ou por varredura quando o índice já
+        // perdeu chaves que este snapshot enxerga (C2).
+        auto ids = store_.index_range_at(bound->binding.type_name(), field, lo, hi, snapshot.epoch());
         if (!ids) {
             co_yield Result<T>{std::unexpected(ids.error())};
             co_return;
@@ -1525,6 +1544,8 @@ private:
     // Ativado após o sync do registro commit no WAL. A partir daí rollback não
     // pode apagar o log: qualquer falha posterior exige reabertura e redo.
     bool commit_durable_{false};
+    // Ver published_epoch(). Declarado depois de store_ (inicializado a partir dele).
+    alignas(8) std::uint64_t published_epoch_{0};
     bool recovery_required_{false};
     // Épocas dos snapshots atualmente abertos (multiset: dois snapshots podem
     // capturar a mesma época). O mínimo é a época mais antiga ainda visível,
