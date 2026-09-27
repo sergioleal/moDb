@@ -153,6 +153,27 @@ results/<AAAAMMDDTHHMMSSZ>-<ambiente>-<commit12>/
     DONE              última coisa escrita: "completed" ou "failed"
 ```
 
+### Monitor de hardware (Linux)
+
+Enquanto cada execução roda, o `run.sh` lê `/proc` duas vezes por segundo, só
+com builtins do bash (o único processo por amostra é o `sleep`), e guarda as
+amostras em `/dev/shm` — RAM, não o disco medido. Depois da execução:
+
+- `logs/hw-r<rep>-c<caso>-<id>.tsv`: uma linha por amostra — CPU da máquina e do
+  processo, steal, iowait, MB/s lidos e escritos no disco do work dir, RSS,
+  memória disponível, page cache, páginas sujas;
+- `executions.tsv` ganha o resumo: CPU média e máxima do processo (100% = um
+  núcleo), steal máximo, iowait médio, MB/s médios de leitura e escrita, RSS
+  máximo, memória disponível mínima;
+- `manifest.json` → `hardware_monitor.steal_max_pct`: o pior steal da rodada.
+  Acima de poucos por cento, a rodada é suspeita de vizinho barulhento.
+
+CPU do processo perto de 100% e iowait perto de zero: o caso é limitado pelo
+código. CPU baixa com iowait: está esperando o `fsync`, como o `mixed_oltp`.
+Execuções mais curtas que um intervalo (0,5 s) ficam sem resumo (`-`). No
+Windows o monitor ainda não existe (os contadores de desempenho têm nomes
+traduzidos por idioma e pedem outro caminho).
+
 Cada execução é um processo novo com work dir limpo, e a ordem dos casos
 alterna entre repetições (ida, volta, ...), como em `scripts/measure_load.py`.
 Uma execução que falha não interrompe a suíte: fica em `executions.tsv` com o

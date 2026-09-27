@@ -161,7 +161,84 @@ fi
 mkdir -p "$RUN_DIR/raw" "$RUN_DIR/logs" "$RUN_DIR/work"
 RUN_DIR="$(cd "$RUN_DIR" && pwd)"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-printf 'repetition\tindex\tcase\texit_code\tstatus\tfile\n' > "$RUN_DIR/executions.tsv"
+
+# --- monitor de hardware ------------------------------------------------------
+# Duas amostras por segundo enquanto cada execução roda, só lendo /proc com
+# builtins do bash (o único processo por amostra é o `sleep`): CPU do processo
+# e da máquina, steal, iowait, bytes lidos/escritos no disco do work dir,
+# memória. As amostras cruas ficam em /dev/shm (RAM, não o disco medido) e só
+# depois da execução viram logs/hw-*.tsv e o resumo em executions.tsv.
+# Execução mais curta que um intervalo (0,5 s) fica sem resumo ("-").
+CLK_TCK="$(getconf CLK_TCK 2>/dev/null || echo 100)"
+PAGE_KB=$(( $(getconf PAGESIZE 2>/dev/null || echo 4096) / 1024 ))
+MON_DEV="$(basename "$(findmnt -no SOURCE -T "$RUN_DIR/work" 2>/dev/null || echo none)")"
+MON_TMP="/dev/shm"
+[[ -d "$MON_TMP" && -w "$MON_TMP" ]] || MON_TMP="$RUN_DIR/logs"
+
+hw_sample() {
+    local pid=$1 line u n s idle w q sq st rd=0 wr=0 avail=0 cached=0 dirty=0 key val _unit
+    read -r _ u n s idle w q sq st _ < /proc/stat
+    read -r line < "/proc/$pid/stat" 2>/dev/null || return 1
+    line="${line##*) }"          # tira "pid (nome) ": o nome pode ter espaços
+    local -a f
+    read -r -a f <<< "$line"      # f[11]=utime f[12]=stime f[21]=rss (páginas)
+    local -a d
+    while read -r -a d; do
+        if [[ "${d[2]}" == "$MON_DEV" ]]; then rd=${d[5]}; wr=${d[9]}; break; fi
+    done < /proc/diskstats
+    while read -r key val _unit; do
+        case "$key" in
+            MemAvailable:) avail=$val ;;
+            Cached:) cached=$val ;;
+            Dirty:) dirty=$val ;;
+        esac
+    done < /proc/meminfo
+    printf '%s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n' "$EPOCHREALTIME" \
+        "$u" "$n" "$s" "$idle" "$w" "$q" "$sq" "$st" "${f[11]}" "${f[12]}" "$rd" "$wr" \
+        "$(( f[21] * PAGE_KB ))" "$avail" "$cached" "$dirty"
+}
+
+hw_monitor() {
+    local pid=$1 out=$2
+    : > "$out"
+    while kill -0 "$pid" 2>/dev/null; do
+        hw_sample "$pid" >> "$out" || break
+        sleep 0.5
+    done
+}
+
+# Amostras cruas -> TSV por amostra ($2) e uma linha de resumo (stdout).
+hw_digest() {
+    awk -v hz="$CLK_TCK" -v tsv="$2" '
+        BEGIN { OFS = "\t"
+                print "t_s", "cpu_all_pct", "proc_cpu_pct", "steal_pct", "iowait_pct", "disk_read_MBps",
+                      "disk_write_MBps", "rss_MiB", "mem_avail_MiB", "page_cache_MiB", "dirty_MiB" > tsv }
+        {
+            t = $1; tot = $2 + $3 + $4 + $5 + $6 + $7 + $8 + $9
+            if (NR > 1 && t > pt && tot > ptot) {
+                dt = t - pt; dtot = tot - ptot
+                cpu = 100 * (dtot - ($5 - pidle) - ($6 - pw)) / dtot
+                steal = 100 * ($9 - pst) / dtot; iow = 100 * ($6 - pw) / dtot
+                proc = 100 * (($10 + $11) - pproc) / (hz * dt)
+                rmb = ($12 - prd) * 512 / 1e6 / dt; wmb = ($13 - pwr) * 512 / 1e6 / dt
+                printf "%.1f\t%.1f\t%.1f\t%.2f\t%.2f\t%.2f\t%.2f\t%.1f\t%.0f\t%.0f\t%.1f\n", t - t0, cpu, proc, steal, iow,
+                       rmb, wmb, $14 / 1024, $15 / 1024, $16 / 1024, $17 / 1024 > tsv
+                n++; sp += proc; if (proc > mp) mp = proc; if (steal > ms) ms = steal; si += iow
+                sr += rmb; sw += wmb
+            }
+            if (NR == 1) { t0 = t; mavail = $15 }
+            if ($14 > mrss) mrss = $14; if ($15 < mavail) mavail = $15
+            pt = t; ptot = tot; pidle = $5; pw = $6; pst = $9; pproc = $10 + $11; prd = $12; pwr = $13
+        }
+        END {
+            if (n == 0) { print "-", "-", "-", "-", "-", "-", "-", "-"; exit }
+            printf "%.1f\t%.1f\t%.2f\t%.2f\t%.2f\t%.2f\t%.1f\t%.0f\n", sp / n, mp, ms, si / n, sr / n, sw / n,
+                   mrss / 1024, mavail / 1024
+        }' "$1"
+}
+
+printf 'repetition\tindex\tcase\texit_code\tstatus\tfile\tproc_cpu_avg_pct\tproc_cpu_max_pct\tsteal_max_pct\tiowait_avg_pct\tdisk_read_avg_MBps\tdisk_write_avg_MBps\trss_max_MiB\tmem_avail_min_MiB\n' > "$RUN_DIR/executions.tsv"
+STEAL_MAX="0"
 
 FAILURES=0
 N=0
@@ -184,14 +261,24 @@ for (( rep = 1; rep <= REPEAT; rep++ )); do
         log="$RUN_DIR/logs/r$rep-c$i-$case_id.log"
         mkdir -p "$work"
         printf '[%d/%d] rep %d  %s ... ' "$N" "$TOTAL" "$rep" "$case_id"
+        raw_hw="$MON_TMP/perfpack-hw-$$-r$rep-c$i"
         set +e
         "$BIN" run --profile load-local --case "$case_id" \
             --output-dir "$RUN_DIR/raw" --work-dir "$work" \
             --environment "$ENVIRONMENT" --environments-file "$ENVIRONMENTS_FILE" \
-            --seed "$SEED" --no-index --accept-unknown-budget "${extra[@]}" > "$log" 2>&1
+            --seed "$SEED" --no-index --accept-unknown-budget "${extra[@]}" > "$log" 2>&1 &
+        pid=$!
+        hw_monitor "$pid" "$raw_hw" &
+        mon=$!
+        wait "$pid"
         code=$?
+        wait "$mon"
         set -e
         rm -rf "$work"
+        hw="$(hw_digest "$raw_hw" "$RUN_DIR/logs/hw-r$rep-c$i-$case_id.tsv")"
+        rm -f "$raw_hw"
+        steal="$(cut -f3 <<< "$hw")"
+        if [[ "$steal" != "-" ]] && awk -v a="$steal" -v b="$STEAL_MAX" 'BEGIN{exit !(a > b)}'; then STEAL_MAX="$steal"; fi
         file="$(sed -n 's/^Resultado:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$log" | tail -n 1)"
         status="completed"
         if [[ $code -ne 0 ]]; then
@@ -205,9 +292,10 @@ for (( rep = 1; rep <= REPEAT; rep++ )); do
         fi
         rel=""
         [[ -n "$file" && -f "$file" ]] && rel="raw/$(basename "$file")"
-        printf '%d\t%d\t%s\t%d\t%s\t%s\n' "$rep" "$i" "$case_id" "$code" "$status" "$rel" >> "$RUN_DIR/executions.tsv"
+        printf '%d\t%d\t%s\t%d\t%s\t%s\t%s\n' "$rep" "$i" "$case_id" "$code" "$status" "$rel" "$hw" >> "$RUN_DIR/executions.tsv"
         if [[ "$status" == "completed" ]]; then
-            echo "ok"
+            IFS=$'\t' read -r h_cpu _ h_steal h_iow _ h_wr _ <<< "$hw"
+            echo "ok  (cpu ${h_cpu}%, steal máx ${h_steal}%, iowait ${h_iow}%, disco ${h_wr} MB/s escritos)"
         else
             FAILURES=$((FAILURES + 1))
             echo "FALHOU ($status; ver logs/$(basename "$log"))"
@@ -243,6 +331,9 @@ governor="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/nul
     printf '  "repeat": %d,\n  "seed": "%s",\n' "$REPEAT" "$(json_escape "$SEED")"
     printf '  "started_at": "%s",\n  "finished_at": "%s",\n' "$STARTED_AT" "$FINISHED_AT"
     printf '  "status": "%s",\n  "executions": %d,\n  "failures": %d,\n' "$RUN_STATUS" "$TOTAL" "$FAILURES"
+    # Resumo por execução em executions.tsv; série por segundo em logs/hw-*.tsv.
+    printf '  "hardware_monitor": {"source": "/proc", "interval_s": 0.5, "disk": "%s", "steal_max_pct": %s},\n' \
+        "$(json_escape "$MON_DEV")" "$STEAL_MAX"
     printf '  "files": ['
     first=1
     while IFS= read -r -d '' f; do
