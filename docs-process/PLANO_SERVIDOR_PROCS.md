@@ -68,12 +68,12 @@ O que falta:
 
 ### P0 — servidor com procs utilizável
 
-#### S1 — `modb::server_host` e `modb_add_server` *(médio)*
+#### S1 — `modb::server_host` e `modb_add_server` *(médio)* ✅
 
-- [ ] 1.1 Biblioteca `modb_server_host`: `run(argc, argv, modulos)` com `--db`, `--host`, `--porta`, `--config ARQ`, sinais (SIGINT/SIGTERM → `request_stop`), log em stderr, `READY <porta>`
-- [ ] 1.2 Função CMake `modb_add_server(<alvo> MODULES <libs>)` que gera o `main`
-- [ ] 1.3 `examples/server_procs/`: servidor mínimo com um módulo de exemplo e um cliente que chama uma proc; teste de ponta a ponta (servidor em processo filho, cliente real)
-- [ ] 1.4 ADR "Servidor de aplicação com procedures compiladas" (este desenho, isolamento sem sandbox, um banco por servidor)
+- [x] 1.1 Biblioteca `modb_server_host`: `run(argc, argv, modulos)` com `--db`, `--host`, `--porta`, `--config ARQ`, sinais (SIGINT/SIGTERM → `request_stop`), log em stderr, `READY <porta>`
+- [x] 1.2 Função CMake `modb_add_server(<alvo> MODULES <libs>)` que gera o `main`
+- [x] 1.3 `examples/server_procs/`: servidor mínimo com um módulo de exemplo e um cliente que chama uma proc; teste de ponta a ponta (servidor em processo filho, cliente real)
+- [x] 1.4 ADR "Servidor de aplicação com procedures compiladas" (este desenho, isolamento sem sandbox, um banco por servidor)
 
 #### S2 — Valores autodescritos para argumentos e resultados *(médio)*
 
@@ -154,3 +154,4 @@ máquina local.
 | Data | Tarefa | Commit | Resultado |
 |---|---|---|---|
 | 2026-09-27 | Plano | — | Levantamento do servidor, do protocolo e dos módulos por leitura de código |
+| 2026-09-27 | S1 | (este commit) | `modb::server_host` + `modb_add_server`; exemplo `notas-server`; teste ponta a ponta com o servidor em outro processo, morto à força e reaberto (nota confirmada sobrevive). ADR-025. Achado: o move de `net::Server` perdia o registro de procs e os limites — corrigido |

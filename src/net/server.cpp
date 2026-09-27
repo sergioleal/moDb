@@ -141,8 +141,14 @@ Server::Server(Server&& other) noexcept
       listener_{std::move(other.listener_)}, port_{other.port_},
       database_name_{std::move(other.database_name_)}, baseline_{other.baseline_},
       fail_after_{other.fail_after_}, small_buffers_{other.small_buffers_},
+      // A configuração também acompanha o servidor movido: sem isto, um Server
+      // configurado e depois devolvido por valor perdia o registro de procs
+      // (OpCall → "server has no operation registry") e os limites negociados.
+      max_concurrent_streams_{other.max_concurrent_streams_}, idle_timeout_ms_{other.idle_timeout_ms_},
+      preferred_codec_{other.preferred_codec_},
       selected_codec_{other.selected_codec_.load(std::memory_order_relaxed)},
-      last_stats_{other.last_stream_stats()},
+      last_stats_{other.last_stream_stats()}, operations_{std::move(other.operations_)},
+      facades_{std::move(other.facades_)},
       stop_requested_{other.stop_requested_.load(std::memory_order_relaxed)} {
     other.database_id_ = object::DatabaseId{};
     other.fail_after_.reset();

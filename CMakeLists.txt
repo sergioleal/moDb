@@ -131,11 +131,22 @@ add_library(modb::app_client ALIAS modb_app_client)
 set_target_properties(modb_app_client PROPERTIES EXPORT_NAME app_client)
 target_link_libraries(modb_app_client PUBLIC modb::modb)
 
+# Servidor de aplicação: o banco como processo, com as procs da aplicação
+# compiladas dentro dele (docs-process/PLANO_SERVIDOR_PROCS.md, ADR-025).
+add_library(modb_server_host
+    src/server/host.cpp
+)
+add_library(modb::server_host ALIAS modb_server_host)
+set_target_properties(modb_server_host PROPERTIES EXPORT_NAME server_host)
+target_link_libraries(modb_server_host PUBLIC modb::modb)
+# modb_add_server(<alvo> MODULES <lib>...): gera o executável do servidor.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ModbServer.cmake")
+
 # --- Fase 10E: instalação da API pública + pacote CMake ---
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-install(TARGETS modb modb_app_client
+install(TARGETS modb modb_app_client modb_server_host
     EXPORT moDbTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -171,6 +182,7 @@ install(EXPORT moDbTargets
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/moDbConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/moDbConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ModbServer.cmake"
     DESTINATION ${MODB_INSTALL_CMAKEDIR}
 )
 target_compile_definitions(modb PUBLIC MODB_PAGE_SIZE=${MODB_PAGE_SIZE})
@@ -364,6 +376,12 @@ if(MODB_BUILD_EXAMPLES)
             endif()
         endif()
     endfunction()
+
+    # Servidor de aplicação com um módulo de procs (PLANO_SERVIDOR_PROCS S1.3).
+    add_library(notas_procs STATIC examples/server_procs/notas_procs.cpp)
+    target_include_directories(notas_procs PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(notas_procs PUBLIC modb::server_host)
+    modb_add_server(notas-server MODULES notas_procs)
 
     modb_add_server_example(ring0_server_phase_00_version_compatibility
         examples/server/by_phase/phase_00/version_compatibility.cpp)
@@ -591,6 +609,15 @@ if(BUILD_TESTING)
     endfunction()
 
     modb_add_test(modb_tests tests/version_test.cpp)
+    if(MODB_BUILD_EXAMPLES)
+        # Servidor de aplicação ponta a ponta: sobe o notas-server em outro processo.
+        modb_add_test(modb_server_host_tests tests/server_host_test.cpp)
+        target_link_libraries(modb_server_host_tests PRIVATE modb::app_client notas_procs)
+        target_compile_definitions(modb_server_host_tests PRIVATE
+            MODB_NOTAS_SERVER_EXE="$<TARGET_FILE:notas-server>")
+        add_dependencies(modb_server_host_tests notas-server)
+        add_test(NAME modb.server_host COMMAND modb_server_host_tests)
+    endif()
     modb_add_test(modb_model_tests tests/model_test.cpp)
 
     add_executable(modb_object_model_tests tests/object_model_test.cpp)
