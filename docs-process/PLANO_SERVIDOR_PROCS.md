@@ -139,6 +139,7 @@ possível, na linha do RDMA (ADR-026).
 - [ ] 10.6 Medir na máquina dedicada (sem máquina hoje). Predição: o anel tira as 4 trocas de thread e as 4 syscalls de cada chamada; payload pequeno deve ficar uma ordem de grandeza abaixo do TCP em latência
 - [ ] 10.7 RDMA de verdade (verbs, `rdma-core`) sobre o mesmo layout de anel — condicional a uma máquina com placa RDMA; antes, teste funcional com Soft-RoCE num Linux
 - [ ] 10.8 *(opcional)* Gateway HTTP/JSON genérico, para navegador e `curl` (a `biblioteca-web` já é um, específico)
+- [ ] 10.9 *(adiado a pedido: por ora só a mesma máquina, pelo anel)* Clientes remotos mais rápidos sem RDMA, em ordem de custo: várias chamadas em voo por conexão (o `call_id` já permite), pedidos pequenos juntos num `send`, `SO_BUSY_POLL` e io_uring no Linux. Decidir com números da máquina dedicada
 
 #### S11 — Fora do escopo (registrar no ADR da S1.4)
 

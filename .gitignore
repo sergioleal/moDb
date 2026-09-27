@@ -29,4 +29,4 @@ Testing/
 
 # Coverage report outputs (gcovr/gcov)
 /coverage-results/
-
+__pycache__/

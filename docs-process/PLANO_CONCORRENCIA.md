@@ -93,10 +93,24 @@ planos dedicados). Para concorrência, também:
 
 ### P1 — fundações: o caminho de leitura seguro entre threads
 
-#### C4 — Infra de teste: TSan no WSL e um teste de fumaça multithread *(pequeno)*
+#### C4 — Infra de teste: TSan no WSL e um teste de fumaça multithread *(pequeno)* ✅
 
-- [ ] 4.1 Preset `tsan` (Linux/WSL: `-fsanitize=thread`, RelWithDebInfo) e roteiro em `docs/` para rodá-lo
-- [ ] 4.2 Teste `concurrency_smoke`: 8 threads fazendo `get`/`query` num banco só de leitura. Deve **falhar no TSan hoje** (LRU, `peeked_`, planos): é a linha de base
+- [x] 4.1 *(`MODB_ENABLE_TSAN` + preset `tsan`; `docs/CONCORRENCIA_TSAN.md`: GCC 14 do Ubuntu, CMake ≥ 3.30 num venv do usuário, e `setarch -R` obrigatório — o kernel do WSL randomiza endereços com mais bits do que o TSan aceita e todo teste morria na partida)* Preset `tsan` (Linux/WSL: `-fsanitize=thread`, RelWithDebInfo) e roteiro em `docs/` para rodá-lo
+- [x] 4.2 *(`tests/concurrency_smoke_test.cpp`, só no preset `tsan` até a C6. Linha de base, abaixo)* Teste `concurrency_smoke`: 8 threads fazendo `get`/`query` num banco só de leitura. Deve **falhar no TSan hoje** (LRU, `peeked_`, planos): é a linha de base
+
+**Linha de base no TSan (2026-09-27):** 132 de 146 testes limpos. Falham o
+`concurrency_smoke` e todos os que sobem o servidor de rede (`server_host`,
+`server_streaming`, `operation_server`, `facade_server`, `app_server_connection`,
+`load_workload` e os `cli.serve_*`/`cli.ops_*`). Locais mais frequentes:
+
+| Local | Onde entra |
+|---|---|
+| `BufferPool::get` (LRU e métricas) — 234 avisos | C6.1 |
+| *heap-use-after-free* lendo página (`load_le`, `BinaryReader::read_u8`, `memcpy`) sobre ponteiro de `view` já despejado | C6.2 |
+| `ObjectStore::PeekedRecord` (`peeked_`) | C6.3 |
+| `BoundType::plans` (`materialize_decoded`, `ProjectionPlan`) | C6.4 |
+| `TableHeap::read_page_records` (contador) | C6.4 |
+| `NativeSocket::close` (fd lido por uma thread enquanto outra fecha) | **novo**: não estava no diagnóstico. Servidor e cliente de rede fecham o socket em uma thread enquanto outra ainda o usa (inclui o desligamento ativo da S5.5). Entra na C11 |
 
 #### C5 — Teste de estresse com invariantes *(médio)*
 
@@ -181,4 +195,5 @@ números de desempenho ficam pendentes, marcados como tal.
 | 2026-09-27 | C1 | (este commit) | Época publicada separada da do DBRT; teste falhava em 8 verificações |
 | 2026-09-27 | C2 | (este commit) | Varredura revalidada quando o índice perdeu chaves que o snapshot vê; teste falhava em 4. Custo a medir |
 | 2026-09-27 | C3 | (este commit) | Hipótese não confirmada com uma thread (o teste passa antes da correção); vira teste de regressão. Risco concorrente fica para a C8 |
-| 2026-09-27 | C4 | — | **Bloqueado:** o WSL (Ubuntu 24.04) tem GCC 13 (não testado com o moDb; o build cai para C++23 sem C++26) mas não tem cmake nem ninja, e instalar pacotes pede a senha de sudo. Sem TSan, as tarefas C4 em diante não têm como cumprir o critério "limpo no TSan" |
+| 2026-09-27 | C4 | — | ~~Bloqueado~~ (resolvido no mesmo dia: ferramentas instaladas): o WSL (Ubuntu 24.04) tem GCC 13 (não testado com o moDb; o build cai para C++23 sem C++26) mas não tem cmake nem ninja, e instalar pacotes pede a senha de sudo. Sem TSan, as tarefas C4 em diante não têm como cumprir o critério "limpo no TSan" |
+| 2026-09-27 | C4 | (este commit) | TSan no WSL (GCC 14, CMake do venv, `setarch -R`). Linha de base: 132/146 limpos; o `concurrency_smoke` confirma o diagnóstico (LRU, views despejadas, `peeked_`, planos) e o servidor de rede mostra uma corrida nova em `NativeSocket::close` |

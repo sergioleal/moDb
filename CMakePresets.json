@@ -117,6 +117,15 @@
         "MODB_ENABLE_SANITIZERS": "ON",
         "BUILD_TESTING": "ON"
       }
+    },
+    {
+      "name": "tsan",
+      "displayName": "RelWithDebInfo with ThreadSanitizer (Linux/WSL)",
+      "inherits": "relwithdebinfo",
+      "cacheVariables": {
+        "MODB_ENABLE_TSAN": "ON",
+        "MODB_ALLOW_CXX23_FALLBACK": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -167,6 +176,10 @@
     {
       "name": "fuzz",
       "configurePreset": "fuzz"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
     }
   ],
   "testPresets": [
@@ -243,6 +256,16 @@
         "include": {
           "label": "fuzz"
         }
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "TSAN_OPTIONS": "halt_on_error=1 second_deadlock_stack=1"
       }
     }
   ]

@@ -11,6 +11,7 @@ include(CTest)
 
 option(MODB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(MODB_ENABLE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
+option(MODB_ENABLE_TSAN "Enable ThreadSanitizer (Linux/macOS; PLANO_CONCORRENCIA C4)" OFF)
 option(MODB_ENABLE_COVERAGE "Instrument modb with --coverage for gcov/gcovr reports (requires GCC or Clang)" OFF)
 option(MODB_ENABLE_LIBFUZZER "Build fuzz targets with Clang libFuzzer (requires Clang)" OFF)
 option(MODB_ENABLE_PROFILING "Keep frame pointers and full debug info so profilers can walk stacks" OFF)
@@ -206,6 +207,9 @@ endif()
 if(MODB_ENABLE_SANITIZERS)
     list(APPEND MODB_INSTRUMENTATION_LIST "sanitizers")
 endif()
+if(MODB_ENABLE_TSAN)
+    list(APPEND MODB_INSTRUMENTATION_LIST "tsan")
+endif()
 if(MODB_ENABLE_COVERAGE)
     list(APPEND MODB_INSTRUMENTATION_LIST "coverage")
 endif()
@@ -303,6 +307,22 @@ if(MODB_ENABLE_SANITIZERS)
         message(WARNING
             "moDb: MODB_ENABLE_SANITIZERS ignorado — nenhum sanitizer conhecido para "
             "o toolchain '${CMAKE_CXX_COMPILER_ID}'.")
+    endif()
+endif()
+
+if(MODB_ENABLE_TSAN)
+    # ThreadSanitizer: o critério das tarefas de concorrência (PLANO_CONCORRENCIA
+    # C4 em diante). Não convive com ASan, e o MinGW não tem: roda no WSL/Linux
+    # (docs/CONCORRENCIA_TSAN.md).
+    if(MODB_ENABLE_SANITIZERS)
+        message(FATAL_ERROR "moDb: MODB_ENABLE_TSAN e MODB_ENABLE_SANITIZERS não convivem — escolha um preset.")
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU" AND NOT WIN32)
+        target_compile_options(modb PUBLIC -fsanitize=thread -fno-omit-frame-pointer)
+        target_link_options(modb PUBLIC -fsanitize=thread)
+        message(STATUS "moDb: ThreadSanitizer ativado.")
+    else()
+        message(FATAL_ERROR "moDb: ThreadSanitizer exige GCC ou Clang fora do Windows (use o WSL).")
     endif()
 endif()
 
@@ -627,6 +647,13 @@ if(BUILD_TESTING)
     add_test(NAME modb.rollback_readers COMMAND modb_rollback_readers_tests)
     modb_add_test(modb_index_snapshot_tests tests/index_snapshot_test.cpp)
     add_test(NAME modb.index_snapshot COMMAND modb_index_snapshot_tests)
+    # C4.2: várias threads só lendo. Fica só no preset tsan até a C6 deixar o
+    # caminho de leitura seguro entre threads (hoje o TSan acusa, e fora dele
+    # pode quebrar ao acaso).
+    if(MODB_ENABLE_TSAN)
+        modb_add_test(modb_concurrency_smoke_tests tests/concurrency_smoke_test.cpp)
+        add_test(NAME modb.concurrency_smoke COMMAND modb_concurrency_smoke_tests 8 300)
+    endif()
     modb_add_test(modb_shm_ring_tests tests/shm_ring_test.cpp)
     add_test(NAME modb.shm_ring COMMAND modb_shm_ring_tests)
     if(MODB_BUILD_EXAMPLES)
