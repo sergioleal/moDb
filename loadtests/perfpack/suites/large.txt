@@ -1,0 +1,25 @@
+# Suíte de escala: os casos em 1M objetos (10x a standard), para ver como o
+# motor se comporta quando o banco passa de ~40 MiB para ~0,4-1,6 GiB e o
+# buffer pool deixa de conter tudo. Roda à parte da standard (que é a do dia a
+# dia): leva bem mais tempo e responde a outra pergunta.
+#
+# Os tempos por caso são os medidos no ambiente de referência,
+# do-cpuopt-4-nyc3 (load-history/machines/do-cpuopt-4-nyc3.md).
+#
+# mixed_oltp fica em 100k: ele é limitado pelo fsync de cada commit e cresce
+# mais que linearmente (10k: 2,5 s; 100k: ~46 s), então 1M levaria vários
+# minutos por execução sem dizer nada que o de 100k não diga.
+
+repeat 3
+seed 123456
+
+case load.create_only.embedded.1M
+case load.crud_full.embedded.1M
+case load.create_delete_interleaved.embedded.1M
+case load.read_hotspot.embedded.1M
+case load.range_scan_sweep.embedded.1M
+case load.oversubscribed_churn.embedded.1M
+case load.cascade_delete.embedded.1M
+case load.blob_lifecycle.embedded.1M
+case load.snapshot_hold.embedded.1M
+case load.mixed_oltp.embedded.100k
