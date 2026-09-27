@@ -58,6 +58,7 @@
       "device_class": "nvme",
       "os_hint": "linux",
       "machine_doc": "load-history/machines/do-cpuopt-4-nyc3.md",
+      "deprecated": true,
       "connection": {
         "host": "159.65.40.144",
         "default_user": "root"
@@ -67,7 +68,7 @@
         "os": "linux",
         "remote_dir": "modb-perfpack"
       },
-      "notes": "Droplet dedicado ao pacote de performance (Ubuntu 24.04, Xeon Platinum 8358, disco local ext4). Chave SSH ~/.ssh/modb_perfpack (entrada em ~/.ssh/config); nenhuma credencial neste arquivo. Mesmo droplet sempre: recriado é outro hardware e outro ambiente."
+      "notes": "Droplet dedicado ao pacote de performance (Ubuntu 24.04, Xeon Platinum 8358, disco local ext4). Chave SSH ~/.ssh/modb_perfpack (entrada em ~/.ssh/config); nenhuma credencial neste arquivo. Mesmo droplet sempre: recriado é outro hardware e outro ambiente. Destruído em 2026-09-27 (série encerrada; rodadas em load-history/series.jsonl)."
     }
   ]
 }
