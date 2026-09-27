@@ -5,6 +5,7 @@
 
 #include "modb/error.hpp"
 #include "modb/net/native_socket.hpp"
+#include "modb/net/shm_ring.hpp"
 #include "modb/net/protocol.hpp"
 #include "modb/ops/facade_catalog.hpp"
 #include "modb/ops/operation_registry.hpp"
@@ -95,6 +96,11 @@ private:
            object::BaselineId baseline);
 
     [[nodiscard]] Result<void> handle_connection(NativeSocket& peer);
+    // Atende o anel de memória compartilhada de uma sessão (ADR-026) até a
+    // sessão acabar, o cliente sair ou o servidor parar.
+    void serve_shm(shm::Region& region, const std::atomic<bool>& session_stop);
+    // Executa um OpCall (com o lock do motor) e monta a resposta.
+    [[nodiscard]] OpResult execute_call(const OpCall& call);
 
     std::shared_ptr<object::Database> database_;
     object::DatabaseId database_id_{};

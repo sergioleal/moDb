@@ -430,6 +430,9 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
     std::atomic<int> live_workers{0};
 
     Result<void> session_status{};
+    // Anel de memória compartilhada da sessão, se o cliente pedir (ADR-026).
+    std::unique_ptr<shm::Region> shm_region;
+    std::thread shm_thread;
     while (!session.stop.load(std::memory_order_relaxed)) {
         auto inbound = wait_inbound(session);
         if (!inbound) {
@@ -514,6 +517,29 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
             continue;
         }
 
+        if (const auto* attach = std::get_if<ShmAttach>(&*inbound); attach != nullptr) {
+            ShmAttachOk reply{.request_id = attach->request_id};
+            auto region = shm_region ? Result<shm::Region>{std::unexpected(Error{ErrorCode::invalid_argument,
+                                                                                 "session already has a ring"})}
+                                     : shm::Region::create(attach->ring_bytes);
+            if (!region) {
+                reply.ok = false;
+                reply.code = region.error().code;
+                reply.message = region.error().message;
+            } else {
+                shm_region = std::make_unique<shm::Region>(std::move(*region));
+                reply.kind = shm_region->kind();
+                reply.name = shm_region->name();
+                reply.ring_bytes = shm_region->ring_bytes();
+                shm_thread = std::thread{[this, &session, r = shm_region.get()] { serve_shm(*r, session.stop); }};
+            }
+            if (auto status = send_locked(session, reply); !status) {
+                session_status = std::unexpected(status.error());
+                break;
+            }
+            continue;
+        }
+
         const auto* call = std::get_if<OpCall>(&*inbound);
         if (call == nullptr) {
             session_status =
@@ -521,27 +547,7 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
             break;
         }
 
-        OpResult reply{.call_id = call->call_id};
-        if (!operations_) {
-            reply.ok = false;
-            reply.code = ErrorCode::operation_not_found;
-            reply.message = "server has no operation registry";
-        } else {
-            // `dispatch` executa a operação de domínio no mesmo `Database` que os
-            // workers de consulta percorrem, então também precisa do lock do
-            // motor (ADR-011) — sem ele um OpCall concorrente com um stream
-            // ativo corrompe as mesmas estruturas do BufferPool.
-            const std::scoped_lock engine_lock{*engine_mutex_};
-            auto outcome = operations_->dispatch(call->operation_id, call->args, *database_);
-            if (outcome) {
-                reply.ok = true;
-                reply.payload = std::move(outcome->payload);
-            } else {
-                reply.ok = false;
-                reply.code = outcome.error().code;
-                reply.message = outcome.error().message;
-            }
-        }
+        const OpResult reply = execute_call(*call);
         if (auto status = send_locked(session, reply); !status) {
             session_status = std::unexpected(status.error());
             break;
@@ -549,6 +555,9 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
     }
 
     session.stop.store(true, std::memory_order_relaxed);
+    if (shm_thread.joinable()) {
+        shm_thread.join();
+    }
     // Cancela consultas ativas para os workers saírem do generator.
     {
         const std::scoped_lock lock{session.tokens_mu};
@@ -572,6 +581,88 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
         reader.join();
     }
     return session_status;
+}
+
+OpResult Server::execute_call(const OpCall& call) {
+    OpResult reply{.call_id = call.call_id};
+    if (!operations_) {
+        reply.ok = false;
+        reply.code = ErrorCode::operation_not_found;
+        reply.message = "server has no operation registry";
+        return reply;
+    }
+    // `dispatch` executa a operação de domínio no mesmo `Database` que os
+    // workers de consulta percorrem, então também precisa do lock do
+    // motor (ADR-011) — sem ele um OpCall concorrente com um stream
+    // ativo corrompe as mesmas estruturas do BufferPool.
+    const std::scoped_lock engine_lock{*engine_mutex_};
+    auto outcome = operations_->dispatch(call.operation_id, call.args, *database_);
+    if (outcome) {
+        reply.ok = true;
+        reply.payload = std::move(outcome->payload);
+    } else {
+        reply.ok = false;
+        reply.code = outcome.error().code;
+        reply.message = outcome.error().message;
+    }
+    return reply;
+}
+
+void Server::serve_shm(shm::Region& region, const std::atomic<bool>& session_stop) {
+    auto requests = shm::Ring::requests(region);
+    auto responses = shm::Ring::responses(region);
+    shm::Backoff idle;
+    const auto stopping = [&] {
+        return session_stop.load(std::memory_order_relaxed) || stop_requested_.load(std::memory_order_relaxed) ||
+               region.load_state(shm::k_off_client_state) == static_cast<std::uint32_t>(shm::ClientState::leaving);
+    };
+    while (!stopping()) {
+        // O cliente já mapeou: o nome pode sair do sistema de arquivos.
+        if (region.load_state(shm::k_off_client_state) == static_cast<std::uint32_t>(shm::ClientState::attached)) {
+            region.unlink();
+        }
+        auto next = requests.peek();
+        if (!next) {
+            break;  // anel corrompido: encerra o anel (a sessão TCP segue)
+        }
+        if (!next->has_value()) {
+            idle.wait();
+            continue;
+        }
+        idle.reset();
+        auto message = decode_message(**next);
+        OpResult reply;
+        if (!message) {
+            reply = OpResult{.ok = false, .code = message.error().code, .message = message.error().message};
+        } else if (const auto* call = std::get_if<OpCall>(&*message); call != nullptr) {
+            reply = execute_call(*call);
+        } else {
+            reply = OpResult{.ok = false,
+                             .code = ErrorCode::protocol_error,
+                             .message = "only OpCall travels over the shared-memory ring"};
+        }
+        requests.pop();
+        auto bytes = encode_message(reply);
+        if (bytes && bytes->size() + 7 > responses.capacity()) {
+            bytes = encode_message(OpResult{.call_id = reply.call_id,
+                                            .ok = false,
+                                            .code = ErrorCode::value_too_large,
+                                            .message = "result does not fit the shared-memory ring; call over TCP "
+                                                       "or attach a larger ring"});
+        }
+        if (!bytes) {
+            break;
+        }
+        shm::Backoff full;
+        for (;;) {
+            auto written = responses.try_write(*bytes);
+            if (!written || *written || stopping()) {
+                break;
+            }
+            full.wait();  // cliente atrasado em consumir as respostas
+        }
+    }
+    region.store_state(shm::k_off_server_state, static_cast<std::uint32_t>(shm::ServerState::closed));
 }
 
 Result<void> Server::serve_one() {

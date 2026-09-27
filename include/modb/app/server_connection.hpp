@@ -59,6 +59,11 @@ public:
 
     [[nodiscard]] Result<std::vector<std::byte>> call(std::string_view operation_id,
                                                       std::span<const std::byte> args);
+    // ADR-026: chamadas pelo anel de memória compartilhada (mesma máquina).
+    [[nodiscard]] Result<void> attach_shared_memory(std::uint32_t ring_bytes = 0) {
+        return client_.attach_shared_memory(ring_bytes);
+    }
+    [[nodiscard]] bool shared_memory_attached() const noexcept { return client_.shared_memory_attached(); }
     [[nodiscard]] Result<std::vector<ops::FacadeDescriptor>> list_facades();
     [[nodiscard]] Result<net::FacadeOpenOk> open_facade(std::string_view facade_id,
                                                         std::uint32_t version);

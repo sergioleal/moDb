@@ -3,6 +3,7 @@
 #include "modb/compatibility.hpp"
 #include "modb/net/server.hpp"
 #include "modb/object/object_codec.hpp"
+#include "modb/net/shm_ring.hpp"
 
 #include <utility>
 #include <variant>
@@ -35,6 +36,9 @@ Error make_protocol(std::string message) {
     }
     if (const auto* opened = std::get_if<FacadeOpenOk>(&message)) {
         return opened->request_id;
+    }
+    if (const auto* attached = std::get_if<ShmAttachOk>(&message)) {
+        return attached->request_id;
     }
     return std::nullopt;
 }
@@ -225,14 +229,120 @@ Result<std::optional<object::DecodedObject>> ObjectStream::next() {
     return object;
 }
 
+// O anel de um cliente (ADR-026). Sair avisa o servidor, que encerra a thread do anel.
+struct Client::ShmChannel {
+    shm::Region region;
+    shm::Ring requests;
+    shm::Ring responses;
+
+    explicit ShmChannel(shm::Region r)
+        : region{std::move(r)}, requests{shm::Ring::requests(region)}, responses{shm::Ring::responses(region)} {
+        region.store_state(shm::k_off_client_state, static_cast<std::uint32_t>(shm::ClientState::attached));
+    }
+    ShmChannel(const ShmChannel&) = delete;
+    ShmChannel& operator=(const ShmChannel&) = delete;
+    ~ShmChannel() {
+        region.store_state(shm::k_off_client_state, static_cast<std::uint32_t>(shm::ClientState::leaving));
+    }
+};
+
 Client::Client(std::shared_ptr<ClientConn> conn, HelloOk hello_ok)
     : conn_{std::move(conn)}, hello_ok_{std::move(hello_ok)} {}
 
 Client::Client(Client&& other) noexcept
     : conn_{std::move(other.conn_)}, hello_ok_{std::move(other.hello_ok_)},
-      next_query_id_{other.next_query_id_} {}
+      next_query_id_{other.next_query_id_}, shm_{std::move(other.shm_)} {}
 
 Client::~Client() = default;
+
+Result<void> Client::attach_shared_memory(std::uint32_t ring_bytes) {
+    if (!conn_) {
+        return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
+    }
+    if (shm_) {
+        return {};
+    }
+    if (hello_ok_.minor < 1) {
+        return std::unexpected(Error{ErrorCode::incompatible_protocol_version,
+                                     "server does not support shared-memory rings (protocol minor < 1)"});
+    }
+    const auto request_id = next_query_id_++;
+    if (auto status = conn_->send(ShmAttach{.request_id = request_id, .ring_bytes = ring_bytes}); !status) {
+        return std::unexpected(status.error());
+    }
+    auto reply = conn_->recv_for(request_id);
+    if (!reply) {
+        return std::unexpected(reply.error());
+    }
+    const auto* ok = std::get_if<ShmAttachOk>(&*reply);
+    if (ok == nullptr) {
+        return std::unexpected(make_protocol("expected ShmAttachOk from server"));
+    }
+    if (!ok->ok) {
+        return std::unexpected(Error{ok->code, ok->message});
+    }
+    auto region = shm::Region::open(ok->kind, ok->name, ok->ring_bytes);
+    if (!region) {
+        return std::unexpected(region.error());
+    }
+    shm_ = std::make_unique<ShmChannel>(std::move(*region));
+    return {};
+}
+
+Result<std::vector<std::byte>> Client::call_over_shm(std::uint32_t call_id, std::string_view operation_id,
+                                                     std::span<const std::byte> args) {
+    auto frame = encode_message(
+        OpCall{.call_id = call_id, .operation_id = std::string{operation_id}, .args = {args.begin(), args.end()}});
+    if (!frame) {
+        return std::unexpected(frame.error());
+    }
+    // O servidor sumiu: a linha de vida (TCP) caiu ou ele fechou o anel.
+    const auto gone = [this] {
+        return conn_->stop.load(std::memory_order_relaxed) ||
+               shm_->region.load_state(shm::k_off_server_state) ==
+                   static_cast<std::uint32_t>(shm::ServerState::closed);
+    };
+    shm::Backoff backoff;
+    for (;;) {
+        auto written = shm_->requests.try_write(*frame);
+        if (!written) {
+            return std::unexpected(written.error());
+        }
+        if (*written) {
+            break;
+        }
+        if (gone()) {
+            return std::unexpected(Error{ErrorCode::connection_closed, "server closed the shared-memory ring"});
+        }
+        backoff.wait();
+    }
+    backoff.reset();
+    for (;;) {
+        auto next = shm_->responses.peek();
+        if (!next) {
+            return std::unexpected(next.error());
+        }
+        if (next->has_value()) {
+            auto message = decode_message(**next);
+            shm_->responses.pop();
+            if (!message) {
+                return std::unexpected(message.error());
+            }
+            const auto* result = std::get_if<OpResult>(&*message);
+            if (result == nullptr || result->call_id != call_id) {
+                return std::unexpected(make_protocol("unexpected message on the shared-memory ring"));
+            }
+            if (!result->ok) {
+                return std::unexpected(Error{result->code, result->message});
+            }
+            return std::move(const_cast<OpResult*>(result)->payload);
+        }
+        if (gone()) {
+            return std::unexpected(Error{ErrorCode::connection_closed, "server closed the shared-memory ring"});
+        }
+        backoff.wait();
+    }
+}
 
 Result<Client> Client::connect(std::string_view host, std::uint16_t port,
                                std::string_view database_name) {
@@ -315,6 +425,9 @@ Result<std::vector<std::byte>> Client::call(std::string_view operation_id,
         return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
     }
     const auto call_id = next_query_id_++;
+    if (shm_) {
+        return call_over_shm(call_id, operation_id, args);
+    }
     OpCall message{.call_id = call_id,
                    .operation_id = std::string{operation_id},
                    .args = {args.begin(), args.end()}};

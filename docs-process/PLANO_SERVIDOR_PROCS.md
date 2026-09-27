@@ -126,9 +126,19 @@ O que falta:
 
 - [ ] 9.1 Hoje o servidor serializa tudo (`engine_mutex_`), igual ao mutex da biblioteca: correto, mas uma proc por vez. Procs `read_only` concorrentes dependem das C6–C8; as de escrita seguem uma por vez (C10.2: fila de escritores)
 
-#### S10 — Clientes em outras linguagens *(opcional)*
+#### S10 — Clientes em outras linguagens, por um protocolo rápido *(médio)*
 
-- [ ] 10.1 Gateway HTTP/JSON genérico (`/proc/<nome>` → `OpCall`) como executável à parte, reaproveitando a S2.2; ou cliente do protocolo em outra linguagem, se aparecer a necessidade
+Revisto a pedido: em vez de um gateway HTTP/JSON, o protocolo mais performático
+possível, na linha do RDMA (ADR-026).
+
+- [x] 10.1 *(ADR-026: gRPC, Cap'n Proto, MessagePack-RPC, Arrow Flight, HTTP e RDMA avaliados)* Decisão: o protocolo nativo publicado para qualquer linguagem, mais um transporte por memória compartilhada na mesma máquina
+- [x] 10.2 *(`docs/PROTOCOLO_CLIENTES.md`)* Especificação byte a byte: frame, `Hello`, `OpCall`/`OpResult`, `Value` v1, anel
+- [x] 10.3 *(`ShmAttach`/`ShmAttachOk`, protocolo minor 1; `net::shm::Region`/`Ring`/`Backoff`; `Client::attach_shared_memory`)* Anel de memória compartilhada: dois anéis SPSC por cliente, frames do TCP no lugar, polling adaptativo, TCP como linha de vida
+- [x] 10.4 *(`clients/python/modb_client.py`, `modb.python_client`: 35 verificações, TCP e anel entre processos)* Cliente de referência em Python, só biblioteca padrão
+- [x] 10.5 *(`modb_rpc_bench`: CSV com ops/s e p50/p99/p99,9 por transporte e tamanho)* Medidor TCP × anel
+- [ ] 10.6 Medir na máquina dedicada (sem máquina hoje). Predição: o anel tira as 4 trocas de thread e as 4 syscalls de cada chamada; payload pequeno deve ficar uma ordem de grandeza abaixo do TCP em latência
+- [ ] 10.7 RDMA de verdade (verbs, `rdma-core`) sobre o mesmo layout de anel — condicional a uma máquina com placa RDMA; antes, teste funcional com Soft-RoCE num Linux
+- [ ] 10.8 *(opcional)* Gateway HTTP/JSON genérico, para navegador e `curl` (a `biblioteca-web` já é um, específico)
 
 #### S11 — Fora do escopo (registrar no ADR da S1.4)
 
@@ -152,3 +162,4 @@ do desenho; a operação (S5) vem antes de usar o servidor fora da máquina loca
 | 2026-09-27 | S3–S4 (P0 concluído) | (este commit) | `ModuleBuilder` (procs como função, tipos, índices), `Context` (leitura, consulta, índice, escrita, `set`, coleções), erros `conflict`/`internal_error`, exceção vira `internal_error` com rollback, `modb call`. `notas` reescrito: 6 procs, testadas pela rede e pelo CLI |
 | 2026-09-27 | S5–S6 (P1 concluído) | (este commit) | Arquivo de configuração, log por chamada, tempo limite cooperativo com rollback (`operation_timeout`), parada ativa (no Windows `shutdown` não acorda `recv` bloqueado: `CancelIoEx`), `sys.procs` + `modb procs`, operação como serviço documentada. `modb.server_host`: 31 s → 2,4 s |
 | 2026-09-27 | S7–S8 (P2 concluído) | biblioteca 18cf90c | Biblioteca em dois processos: `biblioteca-server` (31 procs) e `biblioteca-web` (gateway HTTP → procs). Regras testadas pela rede (60) e web + servidor com queda e volta do servidor (20). Achado: `modb::app_client` puxa a biblioteca `modb` inteira; separar o cliente do motor fica para quando houver cliente fora do repositório |
+| 2026-09-27 | S10 (10.1–10.5) | (este commit) | Protocolo nativo publicado + anel de memória compartilhada (ADR-026), cliente Python de referência, `modb_rpc_bench`. Achados: o `Hello`/`HelloOk` sem `minor` decodificava com o minor do próprio build (virou 1 com esta mudança; o teste de compatibilidade pegou): peer antigo agora é minor 0. No desktop (não vale como número), janelas curtas de espera derrubavam payloads de 64 KiB de ~29 mil para ~3 mil chamadas/s: espera ajustada para girar 100 µs e ceder a CPU até 5 ms antes de dormir |

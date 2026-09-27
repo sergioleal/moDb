@@ -94,6 +94,7 @@ add_library(modb
     src/net/protocol.cpp
     src/net/replication_protocol.cpp
     src/net/native_socket.cpp
+    src/net/shm_ring.cpp
     src/net/server.cpp
     src/net/client.cpp
     src/ops/operation_registry.cpp
@@ -574,6 +575,13 @@ add_library(modb_load_core STATIC
 target_include_directories(modb_load_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/loadtests)
 target_link_libraries(modb_load_core PUBLIC modb_bench_core modb::app_client)
 
+# Custo de uma chamada de proc por transporte, TCP x anel (ADR-026).
+add_executable(modb_rpc_bench apps/modb_rpc_bench/main.cpp)
+target_link_libraries(modb_rpc_bench PRIVATE modb::server_host modb::app_client)
+if(MINGW)
+    target_link_options(modb_rpc_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
+endif()
+
 add_executable(modb_load loadtests/modb_load.cpp)
 target_link_libraries(modb_load PRIVATE modb_load_core)
 
@@ -613,6 +621,8 @@ if(BUILD_TESTING)
     modb_add_test(modb_tests tests/version_test.cpp)
     modb_add_test(modb_ops_value_tests tests/ops_value_test.cpp)
     add_test(NAME modb.ops_value COMMAND modb_ops_value_tests)
+    modb_add_test(modb_shm_ring_tests tests/shm_ring_test.cpp)
+    add_test(NAME modb.shm_ring COMMAND modb_shm_ring_tests)
     if(MODB_BUILD_EXAMPLES)
         # Servidor de aplicação ponta a ponta: sobe o notas-server em outro processo.
         modb_add_test(modb_server_host_tests tests/server_host_test.cpp)
@@ -622,6 +632,14 @@ if(BUILD_TESTING)
             MODB_CLI_EXE="$<TARGET_FILE:modb_cli>")
         add_dependencies(modb_server_host_tests notas-server modb_cli)
         add_test(NAME modb.server_host COMMAND modb_server_host_tests)
+        # Cliente de referência em Python (ADR-026): TCP e anel, contra o notas-server.
+        find_package(Python3 COMPONENTS Interpreter)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME modb.python_client
+                     COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tests/python_client_test.py"
+                             "$<TARGET_FILE:notas-server>" "${CMAKE_CURRENT_SOURCE_DIR}/clients/python")
+            set_tests_properties(modb.python_client PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8" TIMEOUT 120)
+        endif()
     endif()
     modb_add_test(modb_model_tests tests/model_test.cpp)
 

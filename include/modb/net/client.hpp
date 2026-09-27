@@ -126,6 +126,14 @@ public:
     [[nodiscard]] Result<std::vector<std::byte>> call(std::string_view operation_id,
                                                       std::span<const std::byte> args);
 
+    // ADR-026: passa os OpCall a um anel de memória compartilhada (cliente na
+    // mesma máquina do servidor). Depois disto, `call` escreve o pedido e faz
+    // polling da resposta na própria thread, sem syscall; consultas seguem no
+    // TCP, que continua aberto como linha de vida. `ring_bytes` 0 = padrão do
+    // servidor (1 MiB por sentido).
+    [[nodiscard]] Result<void> attach_shared_memory(std::uint32_t ring_bytes = 0);
+    [[nodiscard]] bool shared_memory_attached() const noexcept { return shm_ != nullptr; }
+
     // Fase 11C: descoberta e negociação de facades.
     [[nodiscard]] Result<std::vector<ops::FacadeDescriptor>> list_facades();
     [[nodiscard]] Result<FacadeOpenOk> open_facade(std::string_view facade_id,
@@ -177,9 +185,14 @@ public:
 private:
     Client(std::shared_ptr<ClientConn> conn, HelloOk hello_ok);
 
+    [[nodiscard]] Result<std::vector<std::byte>> call_over_shm(std::uint32_t call_id, std::string_view operation_id,
+                                                               std::span<const std::byte> args);
+
+    struct ShmChannel;
     std::shared_ptr<ClientConn> conn_;
     HelloOk hello_ok_{};
     std::uint32_t next_query_id_{1};
+    std::unique_ptr<ShmChannel> shm_;
 };
 
 } // namespace modb::net

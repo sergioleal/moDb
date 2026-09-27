@@ -407,6 +407,75 @@ int main() {
         std::filesystem::remove(log, ignored);
     }
 
+    // --- ADR-026: procs pelo anel de memória compartilhada ---
+    {
+        const auto db = temp_db("anel");
+        auto srv = server::start(server::Options{.database = db, .host = "127.0.0.1", .port = 0, .log = "off"}, modulos);
+        suite.check(srv.has_value(), "start para o teste do anel");
+        if (srv) {
+            std::thread laco{[&] { (void)srv->serve_forever(); }};
+            auto conn = conectar(srv->port(), db);
+            auto tcp = conectar(srv->port(), db);
+            suite.check(conn && tcp, "dois clientes conectam");
+            if (conn && tcp) {
+                suite.check(!conn->shared_memory_attached(), "começa pelo TCP");
+                auto anexado = conn->attach_shared_memory(4096);
+                suite.check(anexado.has_value(), "attach_shared_memory abre o anel");
+                if (!anexado) {
+                    std::cerr << "  attach: " << anexado.error().message << '\n';
+                }
+                suite.check(conn->shared_memory_attached() && conn->attach_shared_memory().has_value(),
+                            "o anel fica anexado (e pedir de novo não faz mal)");
+                auto criada = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "pelo anel"}}));
+                suite.check(criada && criada->field("id") && criada->field("id")->id(), "notas.criar pelo anel");
+                if (criada && criada->field("id")) {
+                    auto lida = chamar(*tcp, "notas.ler", ops::Value::object({{"id", *criada->field("id")}}));
+                    suite.check(lida && *lida->field("texto")->text() == "pelo anel",
+                                "o que foi escrito pelo anel aparece para outro cliente, pelo TCP");
+                }
+                auto vazia = chamar(*conn, "notas.criar", ops::Value::object({{"texto", ""}}));
+                suite.check(!vazia && vazia.error().code == ErrorCode::invalid_argument,
+                            "erro de regra chega pelo anel com o código");
+                auto repetida = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "pelo anel"}}));
+                suite.check(!repetida && repetida.error().code == ErrorCode::conflict, "conflict pelo anel");
+                auto sem_proc = conn->call("nao.existe", {});
+                suite.check(!sem_proc && sem_proc.error().code == ErrorCode::operation_not_found,
+                            "proc desconhecida pelo anel");
+                // Resultado maior que o anel de 4 KiB: erro claro, e o anel segue funcionando.
+                for (int i = 0; i < 80; ++i) {
+                    (void)chamar(*tcp, "notas.criar",
+                                 ops::Value::object({{"texto", "nota de enchimento número " + std::to_string(i)}}));
+                }
+                auto grande = chamar(*conn, "notas.listar", ops::Value::object({}));
+                suite.check(!grande && grande.error().code == ErrorCode::value_too_large,
+                            "resultado maior que o anel é value_too_large");
+                auto pequeno = chamar(*conn, "notas.listar", ops::Value::object({{"contem", "pelo anel"}}));
+                suite.check(pequeno && pequeno->list() && pequeno->list()->size() == 1,
+                            "o anel segue funcionando depois do erro");
+                int certas = 0;
+                for (int i = 0; i < 500; ++i) {
+                    auto r = chamar(*conn, "notas.listar", ops::Value::object({{"contem", "pelo anel"}}));
+                    certas += r && r->list() && r->list()->size() == 1 ? 1 : 0;
+                }
+                suite.check(certas == 500, "500 chamadas seguidas pelo anel, todas certas");
+
+                const auto parada = std::chrono::steady_clock::now();
+                srv->request_stop();
+                laco.join();
+                suite.check(std::chrono::steady_clock::now() - parada < std::chrono::seconds(5),
+                            "parada com cliente no anel é imediata");
+                auto depois = chamar(*conn, "notas.listar", ops::Value::object({}));
+                suite.check(!depois && depois.error().code == ErrorCode::connection_closed,
+                            "com o servidor parado, a chamada pelo anel falha em vez de esperar para sempre");
+            } else {
+                srv->request_stop();
+                laco.join();
+            }
+        }
+        srv = std::unexpected(Error{ErrorCode::invalid_argument, "fechado"});
+        apagar(db);
+    }
+
     // --- executável gerado por modb_add_server, em outro processo ---
     {
         const auto db = temp_db("processo");

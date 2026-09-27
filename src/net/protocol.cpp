@@ -100,6 +100,8 @@ Result<void> encode_hello(storage::BinaryWriter& writer, const Hello& message) {
 
 Result<Hello> decode_hello(storage::BinaryReader& reader) {
     Hello message;
+    // Peer antigo não manda `minor`: é minor 0, não o nosso.
+    message.minor = 0;
     const auto version = reader.read_u16();
     if (!version) {
         return std::unexpected(version.error());
@@ -145,6 +147,8 @@ Result<void> encode_hello_ok(storage::BinaryWriter& writer, const HelloOk& messa
 
 Result<HelloOk> decode_hello_ok(storage::BinaryReader& reader) {
     HelloOk message;
+    // Peer antigo não manda `minor`: é minor 0, não o nosso.
+    message.minor = 0;
     const auto version = reader.read_u16();
     if (!version) {
         return std::unexpected(version.error());
@@ -854,6 +858,89 @@ Result<ObjectFrame> decode_object_frame_payload(storage::BinaryReader& reader,
     return frame;
 }
 
+Result<void> encode_shm_attach(storage::BinaryWriter& writer, const ShmAttach& message) {
+    writer.write_u32(message.request_id);
+    writer.write_u32(message.ring_bytes);
+    return {};
+}
+
+Result<ShmAttach> decode_shm_attach(storage::BinaryReader& reader) {
+    const auto request_id = reader.read_u32();
+    if (!request_id) {
+        return std::unexpected(request_id.error());
+    }
+    const auto ring_bytes = reader.read_u32();
+    if (!ring_bytes) {
+        return std::unexpected(ring_bytes.error());
+    }
+    return ShmAttach{.request_id = *request_id, .ring_bytes = *ring_bytes};
+}
+
+Result<void> encode_shm_attach_ok(storage::BinaryWriter& writer, const ShmAttachOk& message) {
+    writer.write_u32(message.request_id);
+    writer.write_u8(message.ok ? 1U : 0U);
+    if (!message.ok) {
+        writer.write_u16(static_cast<std::uint16_t>(message.code));
+        return write_string(writer, message.message);
+    }
+    writer.write_u8(static_cast<std::uint8_t>(message.kind));
+    if (auto status = write_string(writer, message.name); !status) {
+        return status;
+    }
+    writer.write_u32(message.ring_bytes);
+    return {};
+}
+
+Result<ShmAttachOk> decode_shm_attach_ok(storage::BinaryReader& reader) {
+    ShmAttachOk message;
+    const auto request_id = reader.read_u32();
+    if (!request_id) {
+        return std::unexpected(request_id.error());
+    }
+    message.request_id = *request_id;
+    const auto ok = reader.read_u8();
+    if (!ok) {
+        return std::unexpected(ok.error());
+    }
+    if (*ok > 1) {
+        return std::unexpected(make_error(ErrorCode::protocol_error, "ShmAttachOk ok must be 0 or 1"));
+    }
+    message.ok = (*ok == 1);
+    if (!message.ok) {
+        const auto code = reader.read_u16();
+        if (!code) {
+            return std::unexpected(code.error());
+        }
+        message.code = static_cast<ErrorCode>(*code);
+        auto text = read_string(reader);
+        if (!text) {
+            return std::unexpected(text.error());
+        }
+        message.message = std::move(*text);
+        return message;
+    }
+    const auto kind = reader.read_u8();
+    if (!kind) {
+        return std::unexpected(kind.error());
+    }
+    if (*kind != static_cast<std::uint8_t>(ShmRegionKind::windows_named_mapping) &&
+        *kind != static_cast<std::uint8_t>(ShmRegionKind::file_path)) {
+        return std::unexpected(make_error(ErrorCode::protocol_error, "ShmAttachOk has unknown region kind"));
+    }
+    message.kind = static_cast<ShmRegionKind>(*kind);
+    auto name = read_string(reader);
+    if (!name) {
+        return std::unexpected(name.error());
+    }
+    message.name = std::move(*name);
+    const auto ring_bytes = reader.read_u32();
+    if (!ring_bytes) {
+        return std::unexpected(ring_bytes.error());
+    }
+    message.ring_bytes = *ring_bytes;
+    return message;
+}
+
 Result<void> encode_payload(storage::BinaryWriter& writer, const Message& message) {
     return std::visit(
         [&writer](const auto& body) -> Result<void> {
@@ -886,6 +973,10 @@ Result<void> encode_payload(storage::BinaryWriter& writer, const Message& messag
                 return encode_facade_open(writer, body);
             } else if constexpr (std::is_same_v<T, FacadeOpenOk>) {
                 return encode_facade_open_ok(writer, body);
+            } else if constexpr (std::is_same_v<T, ShmAttach>) {
+                return encode_shm_attach(writer, body);
+            } else if constexpr (std::is_same_v<T, ShmAttachOk>) {
+                return encode_shm_attach_ok(writer, body);
             }
         },
         message);
@@ -989,6 +1080,20 @@ Result<Message> decode_payload(MessageType type, storage::BinaryReader& reader,
     }
     case MessageType::facade_open_ok: {
         auto body = decode_facade_open_ok(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{std::move(*body)};
+    }
+    case MessageType::shm_attach: {
+        auto body = decode_shm_attach(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{*body};
+    }
+    case MessageType::shm_attach_ok: {
+        auto body = decode_shm_attach_ok(reader);
         if (!body) {
             return std::unexpected(body.error());
         }
@@ -1107,6 +1212,10 @@ MessageType message_type(const Message& message) noexcept {
                 return MessageType::facade_open;
             } else if constexpr (std::is_same_v<T, FacadeOpenOk>) {
                 return MessageType::facade_open_ok;
+            } else if constexpr (std::is_same_v<T, ShmAttach>) {
+                return MessageType::shm_attach;
+            } else if constexpr (std::is_same_v<T, ShmAttachOk>) {
+                return MessageType::shm_attach_ok;
             }
         },
         message);

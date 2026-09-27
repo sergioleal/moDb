@@ -22,7 +22,7 @@ namespace modb::net {
 // Major do protocolo no fio (`Hello.version` / `HelloOk.version`).
 inline constexpr std::uint16_t protocol_major = 1;
 // Minor aditivo (Fase 10E); extensões desconhecidas no Hello/HelloOk são ignoráveis.
-inline constexpr std::uint16_t protocol_minor = 0;
+inline constexpr std::uint16_t protocol_minor = 1;  // 1: ShmAttach (ADR-026)
 // Alias legado (= major).
 inline constexpr std::uint16_t protocol_version = protocol_major;
 // length cobre type+payload; frames maiores → frame_too_large.
@@ -52,6 +52,9 @@ enum class MessageType : std::uint8_t {
     facade_list_ok = 12,
     facade_open = 13,
     facade_open_ok = 14,
+    // Minor 1 (ADR-026): anel de memória compartilhada para OpCall/OpResult.
+    shm_attach = 15,
+    shm_attach_ok = 16,
 };
 
 enum class Compression : std::uint8_t {
@@ -192,9 +195,35 @@ struct FacadeOpenOk {
     friend bool operator==(const FacadeOpenOk&, const FacadeOpenOk&) = default;
 };
 
+// Pede um anel de memória compartilhada (ADR-026). `ring_bytes` = tamanho de
+// cada anel (pedidos e respostas); 0 = padrão do servidor.
+struct ShmAttach {
+    std::uint32_t request_id{0};
+    std::uint32_t ring_bytes{0};
+
+    friend bool operator==(const ShmAttach&, const ShmAttach&) = default;
+};
+
+enum class ShmRegionKind : std::uint8_t {
+    windows_named_mapping = 1,  // CreateFileMapping/OpenFileMapping pelo nome
+    file_path = 2,              // arquivo (em /dev/shm no Linux) para mmap
+};
+
+struct ShmAttachOk {
+    std::uint32_t request_id{0};
+    bool ok{true};
+    ErrorCode code{ErrorCode::invalid_argument};
+    std::string message{};
+    ShmRegionKind kind{ShmRegionKind::file_path};
+    std::string name{};
+    std::uint32_t ring_bytes{0};
+
+    friend bool operator==(const ShmAttachOk&, const ShmAttachOk&) = default;
+};
+
 using Message = std::variant<Hello, HelloOk, Query, StreamBegin, ObjectFrame, StreamEnd,
                              StreamError, Cancel, OpCall, OpResult, FacadeList, FacadeListOk,
-                             FacadeOpen, FacadeOpenOk>;
+                             FacadeOpen, FacadeOpenOk, ShmAttach, ShmAttachOk>;
 
 [[nodiscard]] MessageType message_type(const Message& message) noexcept;
 
