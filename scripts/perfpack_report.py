@@ -112,14 +112,24 @@ def load_run(run_dir: Path) -> dict:
         samples = read_hw(run_dir / "logs" / hw_name)
         for s in samples:
             s["t"] = start + s.pop("t_s")
+        # O processo continua depois das fases medidas (conferência do estado final,
+        # fechamento): a execução vai até o fim dele, não até o fim da última fase.
+        phases_end = end or cursor
+        proc_end = fnum(row.get("end_epoch")) or (samples[-1]["t"] if samples else phases_end)
         executions.append({"case": case_id, "rep": int(row["repetition"]), "start": start,
-                           "end": end or cursor, "phases": phases, "hw": samples, "case_info": case_info,
+                           "end": max(phases_end, proc_end), "phases_end": cursor,
+                           "phases": phases, "hw": samples, "case_info": case_info,
                            "summary": {k: row.get(k, "-") for k in (
                                "proc_cpu_avg_pct", "proc_cpu_max_pct", "steal_max_pct", "iowait_avg_pct",
                                "disk_read_avg_MBps", "disk_write_avg_MBps", "rss_max_MiB")}})
         prev_end = end or cursor
     executions.sort(key=lambda e: e["start"])
-    return {"name": manifest["run_name"], "suite": manifest["suite"], "repeat": manifest["repeat"],
+    # A rodada é chamada pela escala que domina seus casos (100k, 1Mi), não pelo
+    # nome da suíte: é o que o leitor compara.
+    scales = [e["case"].split(".")[-1] for e in executions]
+    label = max(set(scales), key=scales.count) if scales else manifest["suite"]
+    label = {"1M": "1Mi"}.get(label, label)
+    return {"name": manifest["run_name"], "suite": label, "suite_name": manifest["suite"], "repeat": manifest["repeat"],
             "commit": manifest["git_commit"][:12], "environment": manifest["environment"],
             "started_at": manifest["started_at"], "finished_at": manifest["finished_at"],
             "steal_max": (manifest.get("hardware_monitor") or {}).get("steal_max_pct"),
@@ -136,6 +146,64 @@ def mean_cv(values: list[float]) -> tuple[float, float]:
 
 PHASE_METRICS = ("engine", "ops", "duration", "p50_us", "p95_us", "p99_us", "p999_us", "wal_per_op", "db_mib",
                  "bytes_per_object", "rss_mib", "overhead_pct", "pages_written")
+
+
+# O que cada teste faz, para o ícone (i) de cada caso (docs/PLANO_TESTES_DE_CARGA.md §4.2).
+WORKLOAD_INFO = {
+    "create_only": ("Ingestão pura: cria N usuários em lotes de 1000 por commit.",
+                    "create", "Crescimento do arquivo e do WAL e o custo de cada commit.",
+                    "ops/s = objetos criados por segundo. Conferência: contagem e hash do conjunto."),
+    "crud_full": ("Ciclo completo sobre os N objetos, uma fase de cada vez.",
+                  "create → read → update_inplace (mesmo tamanho) → update_grow (registro maior) → "
+                  "update_shrink (menor) → delete",
+                  "Leitura, reescrita de registros, movimentação entre páginas e remoção.",
+                  "ops/s por fase = objetos processados por segundo. Conferência: valores lidos e contagem final zero."),
+    "create_delete_forward": ("Cria N e apaga na ordem de criação (FIFO).", "create → delete",
+                              "Remoção com localidade perfeita.", "Conferência: nenhum id restante."),
+    "create_delete_reverse": ("Cria N e apaga na ordem inversa (LIFO).", "create → delete",
+                              "Compactação da última página.", "Conferência: nenhum id restante."),
+    "create_delete_interleaved": ("Cria N e apaga em ordem espalhada (passo/Zipf com semente).", "create → delete",
+                                  "Fragmentação real, lista de páginas livres e reuso parcial.",
+                                  "Conferência: nenhum objeto restante (não há hash: tudo é apagado)."),
+    "read_hotspot": ("Cria N e lê repetidamente um conjunto quente (distribuição Zipf).", "create → read_hotspot",
+                     "Buffer pool e cache de páginas sob leituras concentradas.",
+                     "ops/s = leituras por segundo (3 leituras por objeto). Conferência: hash na ordem lida."),
+    "range_scan_sweep": ("Cria N com índice em User.id e faz buscas por faixa de seletividade crescente.",
+                         "create → scan 0,01% → 0,1% → 1% → 10% → 100%",
+                         "Índice contra varredura: o nome da fase traz o plano escolhido (index_scan).",
+                         "ops/s = objetos devolvidos por segundo em cada seletividade."),
+    "mixed_oltp": ("Operações misturadas numa fase só: 10 leituras por escrita; escritas divididas "
+                   "25% create / 50% update / 25% delete, cada uma na sua transação.",
+                   "create (carga inicial) → mixed_oltp",
+                   "Commit pequeno e frequente: um fsync do WAL por operação de escrita; latência de cauda.",
+                   "ops/s = operações da mistura por segundo. É limitado pelo disco, não pela CPU."),
+    "snapshot_hold": ("Abre um snapshot, relê tudo por ele, altera o estado vivo (update/delete/create) e relê "
+                      "pelo mesmo snapshot, que precisa continuar idêntico; depois fecha e roda o GC.",
+                      "create → snapshot_read_fresh → hold (churn com o snapshot aberto) → snapshot_read_retained",
+                      "Retenção de versões do MVCC com volume real e o GC ao fechar.",
+                      "hold é churn com commit por operação (limitado pelo fsync); as leituras pelo snapshot "
+                      "medem o custo de resolver versões retidas."),
+    "blob_lifecycle": ("Ciclo de blobs grandes no BlobStore (64 KiB, 1 MiB e 16 MiB), conferidos byte a byte.",
+                       "create → read → update_grow → update_shrink → delete",
+                       "Cadeia de páginas de blob, leitura por streaming.",
+                       "ops/s = blobs por segundo (por isso números pequenos). O BlobStore não recupera espaço "
+                       "ao apagar (sem lista livre) — achado conhecido."),
+    "cascade_delete": ("Cria uma árvore de posse (profundidade 4, largura ≈ N^¼) e remove a raiz: o motor apaga "
+                       "a árvore inteira em cascata, numa única transação.",
+                       "create_hierarchy → cascade_delete",
+                       "Integridade referencial e custo da remoção em cascata com o número de descendentes.",
+                       "ops/s = nós removidos por segundo. A remoção é UMA transação com todos os nós."),
+    "oversubscribed_churn": ("Igual a create_delete_interleaved, mas com o cache do banco em ~10% das páginas "
+                             "do conjunto: força despejo e releitura.", "create → delete",
+                             "Degradação quando o volume passa do cache.",
+                             "Compare com create_delete_interleaved: a diferença é o custo de não caber no cache."),
+    "restart_recovery": ("Churn normal, depois um commit interrompido de propósito (durável no WAL, páginas não "
+                         "aplicadas); fecha e reabre o banco, forçando o replay do WAL.",
+                         "create → restart_recovery (reabertura com replay)",
+                         "Custo e correção da recuperação conforme o volume.",
+                         "A fase de recuperação é uma operação só: olhe a duração, não ops/s. "
+                         "Conferência: hash após recuperar == hash do último commit durável."),
+}
 
 
 def split_case(case: str) -> tuple[str, str]:
@@ -219,6 +287,11 @@ padding:1px 7px;font:inherit;line-height:1.3}
 .ib:hover,.ib:focus-visible{border-color:var(--axis)}
 .card.dragging{opacity:.45}
 .body{margin-top:2px}
+.ib.info{font-weight:700;font-style:italic;font-family:Georgia,serif;width:22px;height:22px;padding:0;border-radius:50%;
+border-color:var(--axis);color:var(--text-secondary);font-size:12px}
+.ib.info[aria-expanded="true"]{background:var(--text-primary);color:var(--surface-1)}
+.infobox{background:var(--surface-0);border-radius:8px;padding:8px 12px;margin:6px 0 8px;font-size:12.5px}
+.infobox div{margin:2px 0}.infobox b{color:var(--text-secondary);font-weight:600;margin-right:4px}
 .reset{background:var(--surface-1);color:var(--text-secondary);border:1px solid var(--axis);border-radius:8px;
 padding:5px 10px;font:inherit;cursor:pointer}
 .card p{font-size:12px;color:var(--text-muted);margin:0 0 4px}
@@ -291,6 +364,7 @@ const DATA = __DATA__;
 const COLORS = ["var(--series-1)", "var(--series-2)"];
 const HW = [
   {field:"proc_cpu_pct", title:"CPU do processo", unit:"%", note:"100% = um núcleo inteiro. Perto de 100%: o limite é o código.", floor:100},
+  {field:"cpu_all_pct", title:"CPU da máquina", unit:"%", note:"% de todas as vCPUs juntas — a mesma medida do painel da Digital Ocean (lá em médias por minuto e hora local). Um núcleo cheio numa máquina de 4 vCPUs = 25%.", floor:100},
   {field:"iowait_pct", title:"iowait", unit:"%", note:"CPU parada esperando o disco. Subindo: o caso está esperando o fsync.", floor:5},
   {field:"disk_write_MBps", title:"Escrita em disco", unit:"MB/s", note:"No dispositivo do diretório de trabalho.", floor:1},
   {field:"rss_MiB", title:"Memória do processo (RSS)", unit:"MiB", floor:1},
@@ -328,16 +402,26 @@ function iconButton(bar, text, label){
   const b = document.createElement("button"); b.className = "ib"; b.textContent = text; b.setAttribute("aria-label", label); b.title = label;
   bar.appendChild(b); return b;
 }
-function makeCard(root, id, title, note){
+function makeCard(root, id, title, note, info){
   const card = document.createElement("div"); card.className = "card"; card.dataset.id = id; card.id = "card-" + id; root.appendChild(card);
   const bar = document.createElement("div"); bar.className = "bar"; card.appendChild(bar);
   const grip = document.createElement("span"); grip.className = "grip"; grip.textContent = "⠿"; grip.title = "Arraste para reordenar";
   grip.draggable = true; bar.appendChild(grip);
   const tog = iconButton(bar, "▾", "Recolher " + title);
   const h = document.createElement("h3"); h.textContent = title; bar.appendChild(h);
+  let infoBtn = null;
+  if (info) { infoBtn = iconButton(bar, "i", "O que este teste faz"); infoBtn.className = "ib info"; infoBtn.setAttribute("aria-expanded", "false"); }
   const up = iconButton(bar, "↑", "Mover " + title + " para cima");
   const down = iconButton(bar, "↓", "Mover " + title + " para baixo");
   const body = document.createElement("div"); body.className = "body"; card.appendChild(body);
+  if (info) {
+    const box = document.createElement("div"); box.className = "infobox"; box.hidden = true;
+    [["O que faz", info.what], ["Fases", info.phases], ["O que exercita", info.stresses], ["Como ler", info.read]].forEach(([k, v]) => {
+      const d = document.createElement("div"); const b = document.createElement("b"); b.textContent = k + ":"; d.appendChild(b); d.appendChild(document.createTextNode(" " + v)); box.appendChild(d);
+    });
+    body.appendChild(box);
+    infoBtn.onclick = () => { box.hidden = !box.hidden; infoBtn.setAttribute("aria-expanded", String(!box.hidden)); if (!box.hidden && body.hidden) tog.onclick(); };
+  }
   if (note) { const p = document.createElement("p"); p.textContent = note; body.appendChild(p); }
   const setCollapsed = c => {
     body.hidden = c; tog.textContent = c ? "▸" : "▾";
@@ -373,6 +457,15 @@ const mmss = t => { const s = Math.max(0, Math.round(t)); return Math.floor(s/60
 const base = r => mode === "zero" && r.executions.length ? r.executions[0].start : 0;
 const NS = "http://www.w3.org/2000/svg";
 function el(tag, attrs, parent){ const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; }
+let clipSeq = 0;
+// Grupo recortado na área de plotagem [ML, W-MR] x [top, bottom]: nenhuma linha sai do quadro.
+function plotArea(svg, top, bottom){
+  const id = "clip" + (++clipSeq);
+  const defs = el("defs", {}, svg);
+  const cp = el("clipPath", {id}, defs);
+  el("rect", {x:ML, y:top - 2, width:W - ML - MR, height:bottom - top + 4}, cp);
+  return el("g", {"clip-path":`url(#${id})`}, svg);
+}
 function txt(parent, attrs, s){ const t = el("text", attrs, parent); t.textContent = s; return t; }
 const W = 1100, ML = 64, MR = 12;
 const views = [];
@@ -432,12 +525,13 @@ function renderTimeline(){
       el("line", {x1:ML, x2:W - MR, y1:y, y2:y, stroke:"var(--grid)"}, svg);
       txt(svg, {x:ML - 8, y:y + 4, "text-anchor":"end", class:"tick"}, fmt(f * hi));
     });
+    const g = plotArea(svg, MT, H - MB);
     DATA.runs.forEach((r, ri) => {
       const b = base(r);
       r.executions.forEach(e => {
         if (e.hw.length < 2) return;
         const d = e.hw.map((s, i) => (i ? "L" : "M") + sx(s.t - b).toFixed(1) + " " + sy(s[c.field] || 0).toFixed(1)).join(" ");
-        el("path", {d, fill:"none", stroke:COLORS[ri], "stroke-width":2, "stroke-linejoin":"round", opacity:.95}, svg);
+        el("path", {d, fill:"none", stroke:COLORS[ri], "stroke-width":2, "stroke-linejoin":"round", opacity:.95}, g);
       });
     });
     axisX(svg, sx, x0, x1, H - MB);
@@ -499,7 +593,7 @@ function renderCompare(){
     const series = shown.map(({r, ri}) => ({r, ri, execs: r.executions.filter(e => e.case.split(".")[1] === workload)}))
                         .filter(x => x.execs.length);
     const scales = DATA.runs.map(r => { const e = r.executions.find(e => e.case.split(".")[1] === workload); return r.suite + ": " + (e ? e.case.split(".").pop() : "—"); });
-    const body = makeCard(root, "c-" + workload, workload + " (" + scales.join(" · ") + ")");
+    const body = makeCard(root, "c-" + workload, workload + " (" + scales.join(" · ") + ")", null, (DATA.info || {})[workload]);
     if (!series.length) { const d = document.createElement("div"); d.className = "empty"; d.textContent = "Caso não medido na suíte escolhida."; body.appendChild(d); return; }
     // eixo x: segundos desde o início da execução, ou % dela
     const rel = (e, t) => caseX === "pct" ? (t - e.start) / ((e.end - e.start) || 1) * 100 : t - e.start;
@@ -530,6 +624,13 @@ function renderCompare(){
       [0, .5, 1].forEach(f => { const y = sy(f * hi); el("line", {x1:ML, x2:W - MR, y1:y, y2:y, stroke:"var(--grid)"}, svg); txt(svg, {x:ML - 8, y:y + 4, "text-anchor":"end", class:"tick"}, fmt(f * hi)); });
       el("line", {x1:ML, x2:W - MR, y1:H - MB, y2:H - MB, stroke:"var(--axis)"}, svg);
       for (let i = 0; i <= 8; i++) { const v = i / 8 * xmax; txt(svg, {x:sx(v), y:H - 5, "text-anchor": i === 0 ? "start" : i === 8 ? "end" : "middle", class:"tick"}, tickX(v)); }
+      const g = plotArea(svg, MT, H - MB);
+      // depois da última fase o processo ainda trabalha (conferência, fechamento)
+      if (pn.kind === "phase") series.forEach(x => x.execs.slice(0, 1).forEach(e => {
+        const a = sx(rel(e, e.phases_end || e.end)), b2 = sx(rel(e, e.end));
+        if (b2 - a > 40) { el("rect", {x:a, y:MT, width:b2 - a, height:H - MT - MB, fill:"var(--band-b)"}, g);
+          txt(g, {x:(a + b2) / 2, y:MT + 12, "text-anchor":"middle", class:"tick"}, "pós-fases (verificação)"); }
+      }));
       series.forEach(x => {
         const color = COLORS[x.ri];
         x.execs.forEach((e, ei) => {
@@ -541,13 +642,13 @@ function renderCompare(){
               const x1 = sx(rel(e, p.start)), x2 = sx(rel(e, p.end)), y = sy(p[k]);
               d += (d ? "L" : "M") + x1.toFixed(1) + " " + y.toFixed(1) + "L" + x2.toFixed(1) + " " + y.toFixed(1);
               // nome da fase sobre o degrau, uma vez por suíte
-              if (e === labelExec && x2 - x1 > p.phase.length * 6 + 6) txt(svg, {x:(x1 + x2) / 2, y:y - 4, "text-anchor":"middle", class:"tick"}, p.phase);
+              if (e === labelExec && x2 - x1 > p.phase.length * 6 + 6) txt(g, {x:(x1 + x2) / 2, y:y - 4, "text-anchor":"middle", class:"tick"}, p.phase);
             });
-            if (d) el("path", {d, fill:"none", stroke:color, "stroke-width":2.5, "stroke-linejoin":"round", opacity:op}, svg);
+            if (d) el("path", {d, fill:"none", stroke:color, "stroke-width":2.5, "stroke-linejoin":"round", opacity:op}, g);
           } else if (e.hw.length > 1) {
             // o monitor segue alguns instantes após o fim do caso: corta no fim da execução
-            const d = e.hw.filter(sm => sm.t <= e.end).map((sm, i) => (i ? "L" : "M") + sx(rel(e, sm.t)).toFixed(1) + " " + sy(sm[pn.field] || 0).toFixed(1)).join(" ");
-            el("path", {d, fill:"none", stroke:color, "stroke-width":1.8, opacity:op, "stroke-dasharray": e.failed ? "4 3" : "none"}, svg);
+            const d = e.hw.map((sm, i) => (i ? "L" : "M") + sx(rel(e, sm.t)).toFixed(1) + " " + sy(sm[pn.field] || 0).toFixed(1)).join(" ");
+            el("path", {d, fill:"none", stroke:color, "stroke-width":1.8, opacity:op, "stroke-dasharray": e.failed ? "4 3" : "none"}, g);
           }
         });
       });
@@ -799,7 +900,8 @@ def main() -> None:
     label = next((e.get("label", "") for e in catalog["environments"] if e["id"] == args.environment), "")
     tables = [{"suite": r["suite"], "rows": phase_table(r)} for r in runs]
     data = {"environment": args.environment, "label": label, "runs": runs, "tables": tables,
-            "insights": insights(runs, tables)}
+            "insights": insights(runs, tables),
+            "info": {k: {"what": v[0], "phases": v[1], "stresses": v[2], "read": v[3]} for k, v in WORKLOAD_INFO.items()}}
     out = args.out or base / f"report-{'-vs-'.join(r['name'][:16] for r in runs)}.html"
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     out.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")
