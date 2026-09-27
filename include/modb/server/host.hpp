@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -41,6 +42,8 @@ struct Module {
     std::function<Result<void>(ops::OperationRegistry&)> register_procs{};
     // Procs exportadas (id + modo), conferidas contra o registro pelo ModuleLoader.
     std::vector<ops::ExportedMethod> methods{};
+    // Descrição de cada proc (id -> texto), para a ajuda e a descoberta.
+    std::map<std::string, std::string> descriptions{};
 };
 
 struct Options {

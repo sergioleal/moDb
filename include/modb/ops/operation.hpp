@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -40,7 +41,9 @@ public:
     [[nodiscard]] virtual Result<OperationResult> execute(ExecutionContext& context) = 0;
 };
 
+// std::function (não ponteiro de função): procs declaradas como lambda
+// (modb::server::ModuleBuilder::proc) capturam a função da proc.
 using OperationFactory =
-    Result<std::unique_ptr<Operation>> (*)(std::span<const std::byte> args);
+    std::function<Result<std::unique_ptr<Operation>>(std::span<const std::byte> args)>;
 
 } // namespace modb::ops

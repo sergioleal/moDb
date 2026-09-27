@@ -85,9 +85,12 @@ std::string usage(std::string_view program, std::span<const Module> modules) {
                        "  --port  TCP port (default 7474; 0 = any free port)\n"
                        "modules:";
     for (const auto& m : modules) {
-        text += "\n  " + m.id + " v" + std::to_string(m.version) + ":";
+        text += "\n  " + m.id + " v" + std::to_string(m.version);
         for (const auto& method : m.methods) {
-            text += " " + method.id;
+            text += "\n    " + method.id + (method.mode == ops::OperationMode::read_only ? " (read)" : " (write)");
+            if (const auto d = m.descriptions.find(method.id); d != m.descriptions.end() && !d->second.empty()) {
+                text += "  " + d->second;
+            }
         }
     }
     return text + '\n';

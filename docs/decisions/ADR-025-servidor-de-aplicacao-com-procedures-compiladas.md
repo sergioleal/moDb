@@ -58,8 +58,9 @@ Cada um vira uma decisão própria, se aparecer necessidade.
 - Uma aplicação servidor é um `main` gerado mais os módulos; o exemplo `examples/server_procs` (`notas-server`) é o modelo, e `tests/server_host_test.cpp` o sobe como processo à parte.
 - Atualizar uma regra é recompilar e trocar o executável do servidor. O arquivo do banco continua o mesmo; mudanças de esquema seguem o catálogo e a baseline.
 - Encontrado ao implementar: o construtor de movimento de `net::Server` não levava o registro de procs, o catálogo de facades nem os limites configurados. Um servidor configurado e devolvido por valor respondia "server has no operation registry". Corrigido no mesmo commit.
-- Pendente, no plano:
-  - argumentos e resultados autodescritos (S2);
-  - procs declaradas como função, com códigos de erro de regra (S3);
-  - consulta, índice e coleções dentro das procs (S4);
-  - operação como serviço (S5).
+- Um módulo se declara com `modb::server::ModuleBuilder` (`include/modb/server/module.hpp`):
+  tipos, índices e procs como funções que recebem um `Context` (leitura,
+  consulta, índice, escrita, coleções) e `ops::Args`, e devolvem `ops::Value`.
+  Erros de regra têm código (`invalid_argument`, `record_not_found`, `conflict`);
+  uma exceção vira `internal_error` com a transação desfeita.
+- Pendente, no plano: operação como serviço (S5) e descoberta de procs (S6).

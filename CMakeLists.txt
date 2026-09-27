@@ -136,6 +136,7 @@ target_link_libraries(modb_app_client PUBLIC modb::modb)
 # compiladas dentro dele (docs-process/PLANO_SERVIDOR_PROCS.md, ADR-025).
 add_library(modb_server_host
     src/server/host.cpp
+    src/server/module.cpp
 )
 add_library(modb::server_host ALIAS modb_server_host)
 set_target_properties(modb_server_host PROPERTIES EXPORT_NAME server_host)
@@ -617,8 +618,9 @@ if(BUILD_TESTING)
         modb_add_test(modb_server_host_tests tests/server_host_test.cpp)
         target_link_libraries(modb_server_host_tests PRIVATE modb::app_client notas_procs)
         target_compile_definitions(modb_server_host_tests PRIVATE
-            MODB_NOTAS_SERVER_EXE="$<TARGET_FILE:notas-server>")
-        add_dependencies(modb_server_host_tests notas-server)
+            MODB_NOTAS_SERVER_EXE="$<TARGET_FILE:notas-server>"
+            MODB_CLI_EXE="$<TARGET_FILE:modb_cli>")
+        add_dependencies(modb_server_host_tests notas-server modb_cli)
         add_test(NAME modb.server_host COMMAND modb_server_host_tests)
     endif()
     modb_add_test(modb_model_tests tests/model_test.cpp)

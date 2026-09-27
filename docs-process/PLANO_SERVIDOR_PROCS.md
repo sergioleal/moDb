@@ -79,17 +79,17 @@ O que falta:
 - [x] 2.2 *(`to_json`/`from_json`; id vira número e `Args::id` aceita inteiro ≥ 1)* Conversão `Valor` ↔ JSON (para gateways web e para o CLI)
 - [x] 2.3 *(`ops::Args`: `id`, `text`, `integer`, `boolean`, `ids`, `*_or`)* `Args` com leitura tipada e erro claro (`a.id("exemplar")`, `a.texto_ou("nome", "")`)
 
-#### S3 — Procs declaradas como função, com erros de regra *(médio)*
+#### S3 — Procs declaradas como função, com erros de regra *(médio)* ✅
 
-- [ ] 3.1 `Modulo::proc(nome, modo, descricao, fn)` sobre o `OperationRegistry` existente (sem mudar o protocolo)
-- [ ] 3.2 Códigos de erro de regra (`invalido`, `nao_encontrado`, `conflito`, `interno`) no `OpResult`; exceção vira `interno` com rollback
-- [ ] 3.3 `modb call <host> <porta> <proc> '<json>'` no CLI, para testar procs à mão
+- [x] 3.1 *(`modb::server::ModuleBuilder::proc`, `include/modb/server/module.hpp`; a fábrica do registro virou `std::function`)* `Modulo::proc(nome, modo, descricao, fn)` sobre o `OperationRegistry` existente (sem mudar o protocolo)
+- [x] 3.2 *(`invalid`/`not_found`/`conflict`; `ErrorCode::conflict` e `internal_error` novos, no fim do enum — compatível no fio)* Códigos de erro de regra (`invalido`, `nao_encontrado`, `conflito`, `interno`) no `OpResult`; exceção vira `interno` com rollback
+- [x] 3.3 `modb call <host> <porta> <proc> '<json>'` no CLI, para testar procs à mão
 
-#### S4 — API de dados das procs *(médio)*
+#### S4 — API de dados das procs *(médio)* ✅
 
-- [ ] 4.1 `Contexto` expõe, dentro da transação da chamada: `ler/criar/atualizar/set/remover`, `consulta<T>()` (com `where`/`equals`/`between`), `por_indice<T>(campo, valor)`, coleções (`PersistentVector`/`BlobStore`) e o relógio do servidor
-- [ ] 4.2 Procs `read_only` rodam sob snapshot, sem abrir transação de escrita
-- [ ] 4.3 Tipos e índices declarados pelo módulo (`modulo.tipo(binding)`, `modulo.indice<T>(campo)`) e aplicados na abertura pelo `server_host`
+- [x] 4.1 *(`modb::server::Context`: `read`, `where`/`all`, `find` pelo índice, `create`/`update`/`set<&T::campo>`/`remove`, `blobs()`+`transaction()` para coleções, `today()`, `log()`)* `Contexto` expõe, dentro da transação da chamada: `ler/criar/atualizar/set/remover`, `consulta<T>()` (com `where`/`equals`/`between`), `por_indice<T>(campo, valor)`, coleções (`PersistentVector`/`BlobStore`) e o relógio do servidor
+- [x] 4.2 *(já era assim no `OperationRegistry::dispatch`; escrita numa proc de leitura dá `transaction_required`)* Procs `read_only` rodam sob snapshot, sem abrir transação de escrita
+- [x] 4.3 *(`ModuleBuilder::type(binding)` e `::index<T>(campo)`, aplicados no `prepare`)* Tipos e índices declarados pelo módulo (`modulo.tipo(binding)`, `modulo.indice<T>(campo)`) e aplicados na abertura pelo `server_host`
 
 ### P1 — pronto para operar
 
@@ -149,3 +149,4 @@ do desenho; a operação (S5) vem antes de usar o servidor fora da máquina loca
 | 2026-09-27 | S1 | (este commit) | `modb::server_host` + `modb_add_server`; exemplo `notas-server`; teste ponta a ponta com o servidor em outro processo, morto à força e reaberto (nota confirmada sobrevive). ADR-025. Achado: o move de `net::Server` perdia o registro de procs e os limites — corrigido |
 | 2026-09-27 | S2 | (este commit) | `ops::Value` (binário versionado com limites contra entrada hostil, JSON), `ops::Args`; `notas` passa a usar `{texto}`/`{id}`. Achado: parar o servidor com cliente ocioso conectado leva até 30 s → S5.5 |
 | 2026-09-27 | — | — | Mecanismos de segurança (autenticação, tokens, TLS) retirados do plano a pedido; tarefas renumeradas (S6→S5 … S12→S11) |
+| 2026-09-27 | S3–S4 (P0 concluído) | (este commit) | `ModuleBuilder` (procs como função, tipos, índices), `Context` (leitura, consulta, índice, escrita, `set`, coleções), erros `conflict`/`internal_error`, exceção vira `internal_error` com rollback, `modb call`. `notas` reescrito: 6 procs, testadas pela rede e pelo CLI |

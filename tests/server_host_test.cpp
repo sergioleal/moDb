@@ -10,6 +10,7 @@
 #include "test_support.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <iostream>
 #include <filesystem>
 #include <string>
@@ -70,6 +71,37 @@ Result<ops::Value> chamar(app::ServerConnection& conn, std::string_view proc, co
         return std::unexpected(bytes.error());
     }
     return ops::decode(*bytes);
+}
+
+// Roda um comando e junta stdout+stderr (para o `modb call`).
+struct Saida {
+    int codigo{-1};
+    std::string saida;
+};
+Saida executar(std::string comando) {
+    comando += " 2>&1";
+#ifdef _WIN32
+    // cmd /c tira as aspas das pontas quando a linha começa com aspas: embrulha.
+    comando = "\"" + comando + "\"";
+    FILE* pipe = _popen(comando.c_str(), "r");
+#else
+    FILE* pipe = popen(comando.c_str(), "r");
+#endif
+    Saida s;
+    if (pipe == nullptr) {
+        return s;
+    }
+    char buf[512];
+    while (std::fgets(buf, sizeof buf, pipe) != nullptr) {
+        s.saida += buf;
+    }
+#ifdef _WIN32
+    s.codigo = _pclose(pipe);
+#else
+    const int status = pclose(pipe);
+    s.codigo = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+    return s;
 }
 
 // Processo filho mínimo (Windows / POSIX): sobe, mata à força, espera.
@@ -175,28 +207,63 @@ int main() {
             if (auto conn = conectar(srv->port(), db); !conn) {
                 suite.check(false, "cliente conecta");
             } else {
-                auto criada = chamar(*conn, k_criar, ops::Value::object({{"texto", "comprar café"}}));
+                auto criada = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "comprar café"}}));
                 suite.check(criada && criada->field("id") && criada->field("id")->id(), "notas.criar devolve {id}");
                 if (!criada) {
                     std::cerr << "  notas.criar: " << criada.error().message << '\n';
                 }
                 if (criada && criada->field("id")) {
-                    auto lida = chamar(*conn, k_ler, ops::Value::object({{"id", *criada->field("id")}}));
+                    auto lida = chamar(*conn, "notas.ler", ops::Value::object({{"id", *criada->field("id")}}));
                     suite.check(lida && lida->field("texto") && *lida->field("texto")->text() == "comprar café",
                                 "notas.ler devolve {id, texto}");
                 }
-                auto vazia = chamar(*conn, k_criar, ops::Value::object({{"texto", ""}}));
+                auto vazia = chamar(*conn, "notas.criar", ops::Value::object({{"texto", ""}}));
                 suite.check(!vazia && vazia.error().code == ErrorCode::invalid_argument,
                             "erro de regra chega ao cliente com o código");
-                auto sem_texto = chamar(*conn, k_criar, ops::Value::object({}));
+                auto sem_texto = chamar(*conn, "notas.criar", ops::Value::object({}));
                 suite.check(!sem_texto && sem_texto.error().message.find("'texto' is required") != std::string::npos,
                             "argumento obrigatório ausente é explicado");
-                auto tipo_errado = chamar(*conn, k_ler, ops::Value::object({{"id", "abc"}}));
+                auto tipo_errado = chamar(*conn, "notas.ler", ops::Value::object({{"id", "abc"}}));
                 suite.check(!tipo_errado && tipo_errado.error().message.find("must be an object id") != std::string::npos,
                             "argumento com tipo errado é explicado");
                 auto sem_proc = conn->call("nao.existe", {});
                 suite.check(!sem_proc && sem_proc.error().code == ErrorCode::operation_not_found,
                             "proc desconhecida é operation_not_found");
+
+                // --- S3/S4: erros de regra, índice, consulta, set, remove, rollback ---
+                auto repetida = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "comprar café"}}));
+                suite.check(!repetida && repetida.error().code == ErrorCode::conflict,
+                            "texto repetido é conflict (pelo índice)");
+                auto segunda = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "ligar para a Ana"}}));
+                auto terceira = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "comprar pão"}}));
+                suite.check(segunda && terceira, "cria mais duas notas");
+                auto todas = chamar(*conn, "notas.listar", ops::Value::object({}));
+                suite.check(todas && todas->list() && todas->list()->size() == 3, "listar devolve as três");
+                auto filtradas = chamar(*conn, "notas.listar", ops::Value::object({{"contem", "comprar"}}));
+                suite.check(filtradas && filtradas->list() && filtradas->list()->size() == 2, "listar filtra por {contem}");
+                if (segunda && segunda->field("id")) {
+                    const ops::Value id = *segunda->field("id");
+                    auto editada = chamar(*conn, "notas.editar", ops::Value::object({{"id", id}, {"texto", "ligar para o Bruno"}}));
+                    suite.check(editada && *editada->field("texto")->text() == "ligar para o Bruno", "editar troca o texto (set)");
+                    auto relida = chamar(*conn, "notas.ler", ops::Value::object({{"id", id}}));
+                    suite.check(relida && *relida->field("texto")->text() == "ligar para o Bruno", "a edição persiste");
+                    auto conflito = chamar(*conn, "notas.editar", ops::Value::object({{"id", id}, {"texto", "comprar pão"}}));
+                    suite.check(!conflito && conflito.error().code == ErrorCode::conflict,
+                                "editar para um texto que já existe é conflict");
+                    suite.check(chamar(*conn, "notas.apagar", ops::Value::object({{"id", id}})).has_value(), "apagar");
+                    auto apagada = chamar(*conn, "notas.ler", ops::Value::object({{"id", id}}));
+                    suite.check(!apagada && apagada.error().code == ErrorCode::record_not_found &&
+                                    apagada.error().message.find("não existe") != std::string::npos,
+                                "nota apagada é not_found, com mensagem do módulo");
+                }
+                auto excecao = chamar(*conn, "notas.excecao", ops::Value::object({{"texto", "não deve ficar"}}));
+                suite.check(!excecao && excecao.error().code == ErrorCode::internal_error,
+                            "exceção na proc chega como internal_error");
+                auto depois = chamar(*conn, "notas.listar", ops::Value::object({{"contem", "não deve ficar"}}));
+                suite.check(depois && depois->list() && depois->list()->empty(),
+                            "o que a proc escreveu antes da exceção foi desfeito");
+                auto de_novo = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "servidor segue no ar"}}));
+                suite.check(de_novo.has_value(), "o servidor segue atendendo depois da exceção");
             }
             srv->request_stop();
             laco.join();
@@ -217,7 +284,7 @@ int main() {
             auto conn = conectar(porta, db);
             suite.check(conn.has_value(), "conecta no servidor em outro processo");
             if (conn) {
-                auto criada = chamar(*conn, k_criar, ops::Value::object({{"texto", "sobrevive ao crash"}}));
+                auto criada = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "sobrevive ao crash"}}));
                 suite.check(criada && criada->field("id") && criada->field("id")->id(), "cria a nota");
                 if (criada && criada->field("id") && criada->field("id")->id()) {
                     id_nota = criada->field("id")->id()->value;
@@ -231,9 +298,19 @@ int main() {
             auto conn = conectar(porta, db);
             suite.check(conn.has_value(), "reconecta depois do crash");
             if (conn && id_nota != 0) {
-                auto lida = chamar(*conn, k_ler, ops::Value::object({{"id", object::ObjectId{id_nota}}}));
+                auto lida = chamar(*conn, "notas.ler", ops::Value::object({{"id", object::ObjectId{id_nota}}}));
                 suite.check(lida && lida->field("texto") && *lida->field("texto")->text() == "sobrevive ao crash",
                             "a nota confirmada sobreviveu à morte do processo (WAL)");
+            }
+            // `modb call` (S3.3): o CLI chama procs com JSON e imprime JSON.
+            {
+                const std::string base = std::string{"\""} + MODB_CLI_EXE + "\" call 127.0.0.1 " + std::to_string(porta);
+                const auto listar = executar(base + " notas.listar");
+                suite.check(listar.codigo == 0 && listar.saida.find("\"texto\":\"sobrevive ao crash\"") != std::string::npos,
+                            "modb call notas.listar imprime o resultado em JSON");
+                const auto sem_id = executar(base + " notas.ler");
+                suite.check(sem_id.codigo != 0 && sem_id.saida.find("argument 'id' is required") != std::string::npos,
+                            "modb call com erro de proc sai com código e explica o erro");
             }
             servidor.matar();
         }

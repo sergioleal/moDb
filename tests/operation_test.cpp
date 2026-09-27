@@ -122,6 +122,8 @@ int main() {
         {
             auto result = registry.dispatch("test.throw", {}, *database);
             suite.check(!result, "throwing operation fails");
+            suite.check(!result && result.error().code == ErrorCode::internal_error,
+                        "an exception in an operation is an internal_error, not a caller error");
             auto alice_v = database->materialize(*database->get<Account>(alice));
             suite.check(alice_v && alice_v->balance == 70, "balances intact after throw");
             // Motor continua utilizável.

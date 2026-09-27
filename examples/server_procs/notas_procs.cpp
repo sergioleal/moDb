@@ -1,94 +1,147 @@
 #include "notas_procs.hpp"
 
-#include "modb/ops/operation.hpp"
+#include <stdexcept>
 
-#include <memory>
-
-namespace modb::examples::notas {
+using modb::Result;
+using modb::object::ObjectId;
+using modb::ops::Args;
+using modb::ops::Value;
+using modb::ops::ValueList;
+using modb::server::conflict;
+using modb::server::Context;
+using modb::server::invalid;
+using modb::server::Mode;
+using modb::server::not_found;
+using namespace modb::examples::notas;
 
 namespace {
 
-object::BindingBuilder<Nota> nota_binding() {
-    object::BindingBuilder<Nota> b{"Nota"};
+modb::object::BindingBuilder<Nota> nota_binding() {
+    modb::object::BindingBuilder<Nota> b{"Nota"};
     b.field<1>("texto", &Nota::texto);
     return b;
 }
 
-ops::OperationResult resultado(const ops::Value& v) { return ops::OperationResult{.payload = ops::encode(v)}; }
+Value nota_json(ObjectId id, const Nota& n) { return Value::object({{"id", id}, {"texto", n.texto}}); }
 
-class Criar final : public ops::Operation {
-public:
-    static constexpr ops::OperationMode k_mode = ops::OperationMode::read_write;
-    explicit Criar(std::string texto) : texto_{std::move(texto)} {}
-    [[nodiscard]] std::string_view id() const noexcept override { return k_criar; }
-    [[nodiscard]] ops::OperationMode mode() const noexcept override { return k_mode; }
-    static Result<std::unique_ptr<ops::Operation>> decode(std::span<const std::byte> bytes) {
-        auto args = ops::Args::decode(bytes);
-        auto texto = args ? args->text("texto") : Result<std::string>{std::unexpected(args.error())};
-        if (!texto) {
-            return std::unexpected(texto.error());
-        }
-        return std::unique_ptr<ops::Operation>{new Criar{std::move(*texto)}};
+// Texto obrigatório, não vazio e único (pelo índice). `proprio` é a nota sendo editada.
+Result<std::string> texto_valido(Context& c, const Args& a, ObjectId proprio = {}) {
+    auto texto = a.text("texto");
+    if (!texto) {
+        return texto;
     }
-    Result<ops::OperationResult> execute(ops::ExecutionContext& context) override {
-        if (texto_.empty()) {
-            return std::unexpected(Error{ErrorCode::invalid_argument, "a nota não pode ser vazia"});
-        }
-        auto nota = context.objects().create(Nota{texto_});
-        if (!nota) {
-            return std::unexpected(nota.error());
-        }
-        return resultado(ops::Value::object({{"id", nota->id()}}));
+    if (texto->empty()) {
+        return std::unexpected(invalid("a nota não pode ser vazia"));
     }
+    auto iguais = c.find<Nota>(k_texto, modb::object::AttributeValue{*texto});
+    if (!iguais) {
+        return std::unexpected(iguais.error());
+    }
+    for (const auto id : *iguais) {
+        if (id != proprio) {
+            return std::unexpected(conflict("já existe uma nota com esse texto"));
+        }
+    }
+    return texto;
+}
 
-private:
-    std::string texto_;
-};
-
-class Ler final : public ops::Operation {
-public:
-    static constexpr ops::OperationMode k_mode = ops::OperationMode::read_only;
-    explicit Ler(object::ObjectId id) : id_{id} {}
-    [[nodiscard]] std::string_view id() const noexcept override { return k_ler; }
-    [[nodiscard]] ops::OperationMode mode() const noexcept override { return k_mode; }
-    static Result<std::unique_ptr<ops::Operation>> decode(std::span<const std::byte> bytes) {
-        auto args = ops::Args::decode(bytes);
-        auto id = args ? args->id("id") : Result<object::ObjectId>{std::unexpected(args.error())};
-        if (!id) {
-            return std::unexpected(id.error());
-        }
-        return std::unique_ptr<ops::Operation>{new Ler{*id}};
+// Lê a nota ou explica que ela não existe.
+Result<Nota> nota_existente(Context& c, ObjectId id) {
+    auto n = c.read<Nota>(id);
+    if (!n && n.error().code == modb::ErrorCode::record_not_found) {
+        return std::unexpected(not_found("nota " + std::to_string(id.value) + " não existe"));
     }
-    Result<ops::OperationResult> execute(ops::ExecutionContext& context) override {
-        auto nota = context.objects().read<Nota>(id_);
-        if (!nota) {
-            return std::unexpected(nota.error());
-        }
-        return resultado(ops::Value::object({{"id", id_}, {"texto", nota->texto}}));
-    }
-
-private:
-    object::ObjectId id_;
-};
+    return n;
+}
 
 } // namespace
 
-} // namespace modb::examples::notas
-
 modb::server::Module modb_module_notas_procs() {
-    using namespace modb::examples::notas;
-    return modb::server::Module{
-        .id = "notas",
-        .version = 1,
-        .prepare = [](modb::object::Database& db) { return db.bind(nota_binding()); },
-        .register_procs =
-            [](modb::ops::OperationRegistry& registry) -> modb::Result<void> {
-            if (auto ok = registry.register_operation<Criar>(std::string{k_criar}); !ok) {
-                return ok;
-            }
-            return registry.register_operation<Ler>(std::string{k_ler});
-        },
-        .methods = {{.id = std::string{k_criar}, .mode = Criar::k_mode},
-                    {.id = std::string{k_ler}, .mode = Ler::k_mode}},
-    };
+    return modb::server::ModuleBuilder{"notas"}
+        .type(nota_binding())
+        .index<Nota>(k_texto)
+        .proc("notas.criar", Mode::read_write, "Cria uma nota; o texto é único",
+              [](Context& c, const Args& a) -> Result<Value> {
+                  auto texto = texto_valido(c, a);
+                  if (!texto) {
+                      return std::unexpected(texto.error());
+                  }
+                  auto id = c.create(Nota{*texto});
+                  if (!id) {
+                      return std::unexpected(id.error());
+                  }
+                  return Value::object({{"id", *id}});
+              })
+        .proc("notas.ler", Mode::read_only, "Uma nota pelo id",
+              [](Context& c, const Args& a) -> Result<Value> {
+                  auto id = a.id("id");
+                  if (!id) {
+                      return std::unexpected(id.error());
+                  }
+                  auto n = nota_existente(c, *id);
+                  if (!n) {
+                      return std::unexpected(n.error());
+                  }
+                  return nota_json(*id, *n);
+              })
+        .proc("notas.listar", Mode::read_only, "Todas as notas, ou as que contêm {contem}",
+              [](Context& c, const Args& a) -> Result<Value> {
+                  auto contem = a.text_or("contem", "");
+                  if (!contem) {
+                      return std::unexpected(contem.error());
+                  }
+                  auto notas = contem->empty()
+                                   ? c.all<Nota>()
+                                   : c.where<Nota>([t = *contem](const Nota& n) { return n.texto.find(t) != std::string::npos; });
+                  if (!notas) {
+                      return std::unexpected(notas.error());
+                  }
+                  ValueList itens;
+                  for (const auto& [id, n] : *notas) {
+                      itens.push_back(nota_json(id, n));
+                  }
+                  return Value{std::move(itens)};
+              })
+        .proc("notas.editar", Mode::read_write, "Troca o texto de uma nota",
+              [](Context& c, const Args& a) -> Result<Value> {
+                  auto id = a.id("id");
+                  if (!id) {
+                      return std::unexpected(id.error());
+                  }
+                  if (auto n = nota_existente(c, *id); !n) {
+                      return std::unexpected(n.error());
+                  }
+                  auto texto = texto_valido(c, a, *id);
+                  if (!texto) {
+                      return std::unexpected(texto.error());
+                  }
+                  if (auto ok = c.set<&Nota::texto>(*id, *texto); !ok) {
+                      return std::unexpected(ok.error());
+                  }
+                  return nota_json(*id, Nota{*texto});
+              })
+        .proc("notas.apagar", Mode::read_write, "Apaga uma nota",
+              [](Context& c, const Args& a) -> Result<Value> {
+                  auto id = a.id("id");
+                  if (!id) {
+                      return std::unexpected(id.error());
+                  }
+                  if (auto n = nota_existente(c, *id); !n) {
+                      return std::unexpected(n.error());
+                  }
+                  if (auto ok = c.remove(*id); !ok) {
+                      return std::unexpected(ok.error());
+                  }
+                  return Value::object({});
+              })
+        .proc("notas.excecao", Mode::read_write, "Cria uma nota e lança exceção (teste de rollback)",
+              [](Context& c, const Args& a) -> Result<Value> {
+                  auto texto = a.text("texto");
+                  if (!texto) {
+                      return std::unexpected(texto.error());
+                  }
+                  (void)c.create(Nota{*texto});
+                  throw std::runtime_error("falha simulada depois de escrever");
+              })
+        .build();
 }

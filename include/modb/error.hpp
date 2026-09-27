@@ -158,6 +158,11 @@ enum class ErrorCode {
     replica_download_failed,
     // Manifesto ou segmento WAL não bate com o hash/tamanho declarado (Fase 16).
     manifest_hash_mismatch,
+    // A operação é válida, mas conflita com o estado atual (regra de negócio de
+    // uma stored procedure: ex. exemplar já emprestado). Servidor de aplicação, S3.
+    conflict,
+    // Falha interna de uma stored procedure (exceção): a transação foi desfeita.
+    internal_error,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

@@ -73,6 +73,10 @@ public:
     [[nodiscard]] object::Transaction& transaction() {
         return *transaction_;
     }
+    // Para o que a API tipada acima não cobre (consultas, índices, coleções):
+    // o banco da chamada e, em procs de leitura, o snapshot dela.
+    [[nodiscard]] object::Database& database() noexcept { return *database_; }
+    [[nodiscard]] object::Snapshot* snapshot() noexcept { return snapshot_; }
 
 private:
     object::Database* database_{nullptr};

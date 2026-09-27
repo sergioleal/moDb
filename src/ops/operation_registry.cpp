@@ -62,11 +62,11 @@ Result<OperationResult> OperationRegistry::dispatch(std::string_view id,
     } catch (const std::exception& ex) {
         logger.error(ex.what());
         return std::unexpected(
-            Error{ErrorCode::invalid_argument, std::string{"operation threw: "} + ex.what()});
+            Error{ErrorCode::internal_error, std::string{"operation threw: "} + ex.what()});
     } catch (...) {
         logger.error("operation threw unknown exception");
         return std::unexpected(
-            Error{ErrorCode::invalid_argument, "operation threw unknown exception"});
+            Error{ErrorCode::internal_error, "operation threw unknown exception"});
     }
 }
 

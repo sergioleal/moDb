@@ -1,29 +1,29 @@
 #pragma once
 
-// Módulo de exemplo do servidor de aplicação (PLANO_SERVIDOR_PROCS S1.3/S2): um
-// tipo (Nota) e duas procs. Compilado dentro de `notas-server` por
-// modb_add_server; o cliente só chama as procs pelo nome.
+// Módulo de exemplo do servidor de aplicação (PLANO_SERVIDOR_PROCS S1–S4): um
+// tipo (Nota), um índice e procs declaradas como funções. Compilado dentro de
+// `notas-server` por modb_add_server; o cliente só chama as procs pelo nome.
 //
-//   notas.criar  (escrita)  {"texto": "..."}  -> {"id": <id>}
-//   notas.ler    (leitura)  {"id": <id>}      -> {"id": <id>, "texto": "..."}
+//   notas.criar     (escrita)  {texto}            -> {id}     conflito se o texto já existe
+//   notas.ler       (leitura)  {id}               -> {id, texto}
+//   notas.listar    (leitura)  {contem?}          -> [{id, texto}...]
+//   notas.editar    (escrita)  {id, texto}        -> {id, texto}
+//   notas.apagar    (escrita)  {id}               -> {}
+//   notas.excecao   (escrita)  {texto}            -> cria e lança exceção: prova o rollback
 //
-// Argumentos e resultados são ops::Value (codificação binária no fio; JSON em
-// gateways e no CLI).
+// Argumentos e resultados são ops::Value (binário no fio; JSON no `modb call`).
 
-#include "modb/ops/value.hpp"
-#include "modb/server/host.hpp"
+#include "modb/server/module.hpp"
 
 #include <string>
-#include <string_view>
 
 namespace modb::examples::notas {
-
-inline constexpr std::string_view k_criar = "notas.criar";
-inline constexpr std::string_view k_ler = "notas.ler";
 
 struct Nota {
     std::string texto;
 };
+
+inline constexpr object::FieldId k_texto{1};
 
 } // namespace modb::examples::notas
 

@@ -1,0 +1,212 @@
+#pragma once
+
+// Módulos de aplicação com procs declaradas como funções (PLANO_SERVIDOR_PROCS
+// S3/S4, ADR-025).
+//
+//   modb::server::Module modb_module_biblioteca() {
+//       return modb::server::ModuleBuilder{"biblioteca"}
+//           .type(livro_binding())
+//           .index<Livro>(kLivroIsbn)
+//           .proc("livros.obter", Mode::read_only, "Um livro pelo id",
+//                 [](Context& c, const ops::Args& a) -> Result<ops::Value> {
+//                     auto id = a.id("id");
+//                     if (!id) return std::unexpected(id.error());
+//                     auto livro = c.read<Livro>(*id);
+//                     ...
+//                     return ops::Value::object({{"id", *id}, {"titulo", livro->titulo}});
+//                 })
+//           .build();
+//   }
+//
+// Cada proc roda numa transação (escrita) ou num snapshot (leitura) aberto pelo
+// OperationRegistry: devolver erro ou lançar exceção desfaz tudo que ela fez.
+// Erros de regra com código: invalid(...), not_found(...), conflict(...).
+
+#include "modb/error.hpp"
+#include "modb/object/attribute_value.hpp"
+#include "modb/object/blob_store.hpp"
+#include "modb/object/database.hpp"
+#include "modb/ops/execution_context.hpp"
+#include "modb/ops/operation.hpp"
+#include "modb/ops/value.hpp"
+#include "modb/server/host.hpp"
+
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace modb::server {
+
+using Mode = ops::OperationMode;
+
+// --- erros de regra (S3.2) -------------------------------------------------------
+
+[[nodiscard]] inline Error invalid(std::string message) { return Error{ErrorCode::invalid_argument, std::move(message)}; }
+[[nodiscard]] inline Error not_found(std::string message) { return Error{ErrorCode::record_not_found, std::move(message)}; }
+[[nodiscard]] inline Error conflict(std::string message) { return Error{ErrorCode::conflict, std::move(message)}; }
+
+namespace detail {
+template <typename>
+struct member_of;
+template <typename C, typename F>
+struct member_of<F C::*> {
+    using type = C;
+};
+} // namespace detail
+
+// --- o que uma proc enxerga do banco (S4) -------------------------------------------
+//
+// Numa proc de escrita, tudo acontece na transação da chamada. Numa proc de
+// leitura, `read` usa o snapshot da chamada; as consultas abrem o próprio
+// snapshot, e como o servidor executa uma chamada por vez (engine_mutex_), o
+// estado que elas veem é o mesmo.
+class Context {
+public:
+    explicit Context(ops::ExecutionContext& context) noexcept : context_{&context} {}
+
+    [[nodiscard]] bool writable() const noexcept { return context_->writable(); }
+    [[nodiscard]] object::Database& database() noexcept { return context_->objects().database(); }
+    [[nodiscard]] ops::Logger& log() noexcept { return context_->logger(); }
+    // Data de hoje (UTC) no relógio do servidor.
+    [[nodiscard]] static std::chrono::sys_days today() {
+        return std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now());
+    }
+
+    // --- leitura ---
+    template <typename T>
+    [[nodiscard]] Result<T> read(object::ObjectId id) {
+        return context_->objects().read<T>(id);
+    }
+
+    // Todos os objetos do tipo que satisfazem `predicate` (todos, se vazio), com os ids.
+    template <typename T>
+    [[nodiscard]] Result<std::vector<std::pair<object::ObjectId, T>>> where(std::function<bool(const T&)> predicate = {}) {
+        auto query = database().query<T>();
+        std::vector<object::ObjectId> ids;
+        auto rows = predicate ? std::move(query).where(std::move(predicate)).select({object::FieldId{0}}).stream()
+                              : std::move(query).select({object::FieldId{0}}).stream();
+        for (auto& row : rows) {
+            if (!row) {
+                return std::unexpected(row.error());
+            }
+            const auto field = row->get(object::FieldId{0});
+            if (!field) {
+                return std::unexpected(Error{ErrorCode::field_not_found, "query row without id"});
+            }
+            auto id = field->as_ref();
+            if (!id) {
+                return std::unexpected(id.error());
+            }
+            ids.push_back(*id);
+        }
+        std::vector<std::pair<object::ObjectId, T>> out;
+        out.reserve(ids.size());
+        for (const auto id : ids) {
+            auto value = read<T>(id);
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            out.emplace_back(id, std::move(*value));
+        }
+        return out;
+    }
+    template <typename T>
+    [[nodiscard]] Result<std::vector<std::pair<object::ObjectId, T>>> all() {
+        return where<T>();
+    }
+
+    // Ids com `field == value`, pelo índice (o campo precisa de índice: ModuleBuilder::index).
+    template <typename T>
+    [[nodiscard]] Result<std::vector<object::ObjectId>> find(object::FieldId field, object::AttributeValue value) {
+        return database().indexed_object_ids<T>(field, std::move(value));
+    }
+
+    // --- escrita (só em procs Mode::read_write) ---
+    template <typename T>
+    [[nodiscard]] Result<object::ObjectId> create(const T& value) {
+        auto handle = context_->objects().create(value);
+        if (!handle) {
+            return std::unexpected(handle.error());
+        }
+        return handle->id();
+    }
+    template <typename T>
+    [[nodiscard]] Result<void> update(object::ObjectId id, const T& value) {
+        auto handle = context_->objects().get<T>(id);
+        if (!handle) {
+            return std::unexpected(handle.error());
+        }
+        return context_->objects().update(*handle, value);
+    }
+    // Muda um campo: c.set<&Exemplar::estado>(id, std::string{"emprestado"}).
+    template <auto Member, typename V>
+    [[nodiscard]] Result<void> set(object::ObjectId id, V&& value) {
+        using T = typename detail::member_of<decltype(Member)>::type;
+        if (!writable()) {
+            return std::unexpected(Error{ErrorCode::transaction_required, "set requires a read_write proc"});
+        }
+        auto handle = context_->objects().get<T>(id);
+        if (!handle) {
+            return std::unexpected(handle.error());
+        }
+        return handle->template set<Member>(context_->transaction(), std::forward<V>(value));
+    }
+    [[nodiscard]] Result<void> remove(object::ObjectId id) { return context_->objects().remove(id); }
+
+    // Coleções persistentes (PersistentVector/Set/Map) e blobs: passe
+    // `blobs()` e `transaction()` às APIs de collection.hpp.
+    [[nodiscard]] object::BlobStore blobs() { return database().blobs(); }
+    [[nodiscard]] object::Transaction& transaction() { return context_->transaction(); }
+
+private:
+    ops::ExecutionContext* context_;
+};
+
+using ProcFn = std::function<Result<ops::Value>(Context&, const ops::Args&)>;
+
+// --- montagem de um módulo (S3.1, S4.3) ---------------------------------------------------
+
+class ModuleBuilder {
+public:
+    explicit ModuleBuilder(std::string id, std::uint32_t version = 1) : id_{std::move(id)}, version_{version} {}
+
+    // Tipo persistido pelo módulo: bind na abertura do servidor.
+    template <typename T>
+    ModuleBuilder& type(object::BindingBuilder<T> binding) {
+        auto shared = std::make_shared<object::BindingBuilder<T>>(std::move(binding));
+        preparers_.push_back([shared](object::Database& db) { return db.bind(*shared); });
+        return *this;
+    }
+    // Índice B+ tree num campo do tipo (criado na primeira abertura; já existir não é erro).
+    template <typename T>
+    ModuleBuilder& index(object::FieldId field) {
+        preparers_.push_back([field](object::Database& db) -> Result<void> {
+            auto created = db.create_index<T>(field);
+            if (!created && created.error().message.find("index already exists") == std::string::npos) {
+                return created;
+            }
+            return {};
+        });
+        return *this;
+    }
+    ModuleBuilder& proc(std::string name, Mode mode, std::string description, ProcFn fn);
+
+    [[nodiscard]] Module build() const;
+
+private:
+    struct Proc {
+        std::string name;
+        Mode mode;
+        std::string description;
+        std::shared_ptr<ProcFn> fn;
+    };
+    std::string id_;
+    std::uint32_t version_;
+    std::vector<std::function<Result<void>(object::Database&)>> preparers_;
+    std::vector<Proc> procs_;
+};
+
+} // namespace modb::server

@@ -25,6 +25,7 @@
 #include "modb/ops/facade_catalog.hpp"
 #include "modb/ops/module_manifest.hpp"
 #include "modb/ops/operation_registry.hpp"
+#include "modb/ops/value.hpp"
 #include "modb/storage/page.hpp"
 #include "modb/storage/page_file.hpp"
 #include "modb/storage/slotted_page.hpp"
@@ -164,6 +165,8 @@ int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
 int command_serve_loop(const std::filesystem::path& path, std::string_view host,
                        std::uint16_t port);
 int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name);
+int command_call(std::string_view host, std::uint16_t port, std::string_view proc,
+                 std::string_view json_args);
 int command_types_run();
 int run_type_command(int argc, char* argv[]);
 int run_baseline_command(int argc, char* argv[]);
@@ -250,6 +253,7 @@ void print_help() {
            "  codec    Encode and decode a row in memory.\n"
            "  serve    Host a database and complete Hello/HelloOk (ODB++ Fase 8B).\n"
            "  ping     Connect and negotiate Hello with a running server (Fase 8B).\n"
+           "  call     Call a stored procedure: modb call <host> <port> <proc> [<json-args>].\n"
            "  types    Exercise the in-memory object model (ODB++).\n"
            "  type     Define and list persistent object types (ODB++).\n"
            "  baseline Inspect immutable catalog baselines (ODB++).\n"
@@ -2361,6 +2365,37 @@ int command_ping(std::string_view host, std::uint16_t port, std::string_view dat
               << (hello_ok->selected_codec == modb::net::Compression::rle ? "rle" : "none")
               << " max_frame=" << hello_ok->max_frame_bytes
               << " max_streams=" << hello_ok->max_concurrent_streams << '\n';
+    return 0;
+}
+
+// Chama uma stored procedure de um servidor de aplicação (PLANO_SERVIDOR_PROCS
+// S3.3): argumentos em JSON (um objeto), resultado em JSON no stdout. Erro da
+// proc: mensagem e código no stderr, saída 1.
+int command_call(std::string_view host, std::uint16_t port, std::string_view proc,
+                 std::string_view json_args) {
+    auto args = modb::ops::from_json(json_args.empty() ? std::string_view{"{}"} : json_args);
+    if (!args) {
+        return print_error(args.error());
+    }
+    if (args->map() == nullptr) {
+        return print_error(
+            modb::Error{modb::ErrorCode::invalid_argument, "arguments must be a JSON object"});
+    }
+    auto client = modb::net::Client::connect(host, port, "");
+    if (!client) {
+        return print_error(client.error());
+    }
+    auto reply = client->call(proc, modb::ops::encode(*args));
+    if (!reply) {
+        std::cerr << "Error: " << reply.error().message << " (code "
+                  << static_cast<int>(reply.error().code) << ")\n";
+        return 1;
+    }
+    auto value = modb::ops::decode(*reply);
+    if (!value) {
+        return print_error(value.error());
+    }
+    std::cout << modb::ops::to_json(*value) << '\n';
     return 0;
 }
 
@@ -6052,6 +6087,17 @@ int run(int argc, char* argv[]) {
             return print_error(port.error());
         }
         return command_ping(argv[2], *port, argv[4]);
+    }
+    if (command == "call") {
+        if (argc < 5 || argc > 6) {
+            return print_usage_error("modb call <host> <port> <proc> [<json-args>]");
+        }
+        auto port = parse_generation(argv[3]);
+        if (!port) {
+            return print_error(port.error());
+        }
+        return command_call(argv[2], *port, argv[4],
+                            argc == 6 ? std::string_view{argv[5]} : std::string_view{});
     }
     if (command == "types") {
         if (argc == 3 && is_help_argument(argv[2])) {
