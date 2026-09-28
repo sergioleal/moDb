@@ -8,7 +8,8 @@
 // cada vez por cliente: latência; com `--clients` > 1, vários clientes ao
 // mesmo tempo dão a vazão). `proxy` (ADR-028) põe um `modb::proxy::Proxy`, no
 // mesmo processo, na frente do engine, ligado a ele pelo link local: a
-// diferença para `tcp` é o custo do salto a mais. Uma linha por combinação, em
+// diferença para `tcp` é o custo do salto a mais; `proxy_shm`, o anel servido
+// pelo proxy (X11) contra o `shm` direto. Uma linha por combinação, em
 // CSV:
 //
 //   transport,clients,payload_bytes,calls,ops_per_s,p50_us,p99_us,p999_us,max_us
@@ -111,7 +112,7 @@ int main(int argc, char** argv) {
     const auto sock = std::filesystem::current_path() /
                       ("modb-rpc-bench-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
                        ".sock");
-    const bool com_proxy = std::ranges::find(transports, std::string{"proxy"}) != transports.end();
+    const bool com_proxy = std::ranges::any_of(transports, [](const std::string& t) { return t.starts_with("proxy"); });
     auto srv = server::start(server::Options{.database = db,
                                              .host = "127.0.0.1",
                                              .port = 0,
@@ -143,7 +144,7 @@ int main(int argc, char** argv) {
     int status = 0;
     std::cout << "transport,clients,payload_bytes,calls,ops_per_s,p50_us,p99_us,p999_us,max_us\n";
     for (const auto& transport : transports) {
-        const auto porta = transport == "proxy" ? px->port() : srv->port();
+        const auto porta = transport.starts_with("proxy") ? px->port() : srv->port();
         for (const auto clientes : clients_list) {
             const auto n = std::max<std::uint32_t>(1, clientes);
             std::vector<app::ServerConnection> conns;
@@ -155,7 +156,7 @@ int main(int argc, char** argv) {
                     status = 1;
                     break;
                 }
-                if (transport == "shm") {
+                if (transport == "shm" || transport == "proxy_shm") {
                     // Anel com folga para o maior payload.
                     const auto maior = *std::ranges::max_element(sizes);
                     if (auto ok = conn->attach_shared_memory(std::max<std::uint32_t>(1u << 20, maior * 2 + 4096)); !ok) {

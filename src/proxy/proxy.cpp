@@ -3,6 +3,7 @@
 #include "modb/net/link_protocol.hpp"
 #include "modb/net/native_socket.hpp"
 #include "modb/net/server.hpp"
+#include "modb/net/shm_ring.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -119,6 +120,17 @@ struct ClientSession {
     std::optional<net::SessionOpenOk> open_reply;
 
     std::atomic<bool> engine_closed{false};
+
+    // Anel de memória compartilhada (ADR-026, X11). O anel de um cliente tem
+    // uma sessão própria no engine, com o mesmo chamador: `ring` aponta para a
+    // região nela, e as respostas saem pelo anel, não pelo socket.
+    net::shm::Region* ring{nullptr};
+    std::atomic<bool> ring_stop{false};
+    // Na sessão do cliente: a sessão do anel, a região e as threads dele.
+    std::shared_ptr<ClientSession> shm_session;
+    std::unique_ptr<net::shm::Region> shm_region;
+    std::thread shm_reader;
+    std::thread shm_writer;
 
     // Pedidos a caminho, por tipo e id (ids são escopados pelo cliente).
     std::mutex pending_mu;
@@ -411,6 +423,12 @@ struct Proxy::Impl {
                 complete(session, "facade_open", open->request_id, open->ok, open->code, open->message);
             }
 
+            if (session.ring != nullptr) {
+                if (!write_ring(session, message)) {
+                    return;
+                }
+                continue;
+            }
             if (auto sent = net::send_message(*session.socket, message); !sent) {
                 // O cliente sumiu: a leitora acorda e encerra a sessão.
                 static_cast<void>(session.socket->shutdown());
@@ -420,6 +438,167 @@ struct Proxy::Impl {
             if (credit_for) {
                 static_cast<void>(send_engine(session.id, net::LinkControl{net::StreamCredit{.query_id = *credit_for, .frames = 1}}));
             }
+        }
+    }
+
+    [[nodiscard]] static bool ring_stopping(const ClientSession& ring_session) {
+        return ring_session.ring_stop.load(std::memory_order_relaxed) ||
+               ring_session.ring->load_state(net::shm::k_off_client_state) ==
+                   static_cast<std::uint32_t>(net::shm::ClientState::leaving);
+    }
+
+    // Uma resposta no anel de respostas; espera o cliente abrir espaço.
+    // false = o anel acabou (cliente saiu ou a sessão fechou).
+    [[nodiscard]] bool write_ring(ClientSession& ring_session, const net::Message& message) {
+        auto responses = net::shm::Ring::responses(*ring_session.ring);
+        auto bytes = net::encode_message(message);
+        if (bytes && bytes->size() + 7 > responses.capacity()) {
+            const auto* result = std::get_if<net::OpResult>(&message);
+            bytes = net::encode_message(net::OpResult{
+                .call_id = result != nullptr ? result->call_id : 0,
+                .ok = false,
+                .code = ErrorCode::value_too_large,
+                .message = "result does not fit the shared-memory ring; call over TCP or attach a larger ring"});
+        }
+        if (!bytes) {
+            return false;
+        }
+        net::shm::Backoff full;
+        for (;;) {
+            auto written = responses.try_write(*bytes);
+            if (!written) {
+                return false;
+            }
+            if (*written) {
+                return true;
+            }
+            if (ring_stopping(ring_session) || stop.load()) {
+                return false;
+            }
+            full.wait();  // cliente atrasado em consumir as respostas
+        }
+    }
+
+    // Lê os pedidos do anel, passa cada um pela política e manda os
+    // permitidos ao engine pela sessão do anel.
+    void ring_loop(ClientSession& owner) {
+        auto& ring_session = *owner.shm_session;
+        auto& region = *owner.shm_region;
+        auto requests = net::shm::Ring::requests(region);
+        net::shm::Backoff idle;
+        while (!ring_stopping(ring_session) && !stop.load() && !ring_session.engine_closed.load()) {
+            // O cliente já mapeou: o nome pode sair do sistema de arquivos.
+            if (region.load_state(net::shm::k_off_client_state) ==
+                static_cast<std::uint32_t>(net::shm::ClientState::attached)) {
+                region.unlink();
+            }
+            auto next = requests.peek();
+            if (!next) {
+                break;  // anel corrompido: encerra o anel (a sessão TCP segue)
+            }
+            if (!next->has_value()) {
+                idle.wait();
+                continue;
+            }
+            idle.reset();
+            auto message = net::decode_message(**next);
+            requests.pop();
+            auto* call = message ? std::get_if<net::OpCall>(&*message) : nullptr;
+            if (call == nullptr) {
+                ring_session.push(net::OpResult{.ok = false,
+                                                .code = ErrorCode::protocol_error,
+                                                .message = "only OpCall travels over the shared-memory ring"});
+                continue;
+            }
+            const auto started = Clock::now();
+            const auto decision = policy->authorize(ring_session.caller, *message);
+            call = std::get_if<net::OpCall>(&*message);
+            if (!decision.allowed || call == nullptr) {
+                audit(ring_session, "call", call != nullptr ? call->operation_id : std::string{}, started, false,
+                      decision.code, decision.message, 0, true);
+                ring_session.push(net::OpResult{.call_id = call != nullptr ? call->call_id : 0,
+                                                .ok = false,
+                                                .code = decision.code,
+                                                .message = decision.message});
+                continue;
+            }
+            {
+                const std::scoped_lock lock{ring_session.pending_mu};
+                ring_session.calls[call->call_id] =
+                    Pending{.kind = "call", .target = call->operation_id, .start = started};
+            }
+            if (!send_engine(ring_session.id, *message)) {
+                ring_session.push(net::OpResult{.call_id = call->call_id,
+                                                .ok = false,
+                                                .code = ErrorCode::connection_closed,
+                                                .message = "link to the engine is down"});
+                break;
+            }
+        }
+        region.store_state(net::shm::k_off_server_state, static_cast<std::uint32_t>(net::shm::ServerState::closed));
+    }
+
+    // ShmAttach do cliente: cria a região e a sessão do anel no engine.
+    void attach_ring(const std::shared_ptr<ClientSession>& owner, const net::ShmAttach& attach,
+                     std::uint16_t client_minor) {
+        net::ShmAttachOk reply{.request_id = attach.request_id};
+        const auto refuse = [&](ErrorCode code, std::string message) {
+            reply.ok = false;
+            reply.code = code;
+            reply.message = std::move(message);
+            owner->push(reply);
+        };
+        if (owner->shm_session) {
+            refuse(ErrorCode::invalid_argument, "session already has a ring");
+            return;
+        }
+        auto region = net::shm::Region::create(attach.ring_bytes);
+        if (!region) {
+            refuse(region.error().code, region.error().message);
+            return;
+        }
+        auto ring_session = std::make_shared<ClientSession>();
+        ring_session->socket = owner->socket;
+        ring_session->caller = owner->caller;
+        ring_session->address = owner->address;
+        owner->shm_region = std::make_unique<net::shm::Region>(std::move(*region));
+        ring_session->ring = owner->shm_region.get();
+        if (!open_session(ring_session, client_minor)) {
+            owner->shm_region.reset();
+            refuse(ErrorCode::connection_closed, "engine did not open the ring session");
+            return;
+        }
+        owner->shm_session = ring_session;
+        owner->shm_writer = std::thread{[this, ring_session] { writer_loop(*ring_session); }};
+        owner->shm_reader = std::thread{[this, owner] { ring_loop(*owner); }};
+        reply.kind = owner->shm_region->kind();
+        reply.name = owner->shm_region->name();
+        reply.ring_bytes = owner->shm_region->ring_bytes();
+        owner->push(reply);
+    }
+
+    // Fecha uma sessão no engine e audita o que ficou sem resposta.
+    void close_session(ClientSession& session) {
+        unregister_session(session.id);
+        if (!session.engine_closed.load()) {
+            static_cast<void>(send_engine(session.id, net::LinkControl{net::SessionClose{}}));
+        }
+        std::vector<Pending> abandoned;
+        {
+            const std::scoped_lock lock{session.pending_mu};
+            for (auto* pending : {&session.calls, &session.queries, &session.facades}) {
+                for (auto& [request_id, entry] : *pending) {
+                    (void)request_id;
+                    abandoned.push_back(std::move(entry));
+                }
+                pending->clear();
+            }
+        }
+        // A auditoria fecha a conta de cada pedido (e os limites por
+        // principal dependem disso).
+        for (const auto& entry : abandoned) {
+            audit(session, entry.kind, entry.target, entry.start, false, ErrorCode::connection_closed,
+                  "client left before the answer", entry.objects, false);
         }
     }
 
@@ -604,10 +783,7 @@ struct Proxy::Impl {
                 continue;
             }
             if (const auto* attach = std::get_if<net::ShmAttach>(&*message)) {
-                session->push(net::ShmAttachOk{.request_id = attach->request_id,
-                                               .ok = false,
-                                               .code = ErrorCode::invalid_argument,
-                                               .message = "shared-memory ring is not served by this proxy"});
+                attach_ring(session, *attach, negotiated->minor);
                 continue;
             }
             const auto started = Clock::now();
@@ -638,29 +814,18 @@ struct Proxy::Impl {
             }
         }
 
-        unregister_session(id);
-        if (!session->engine_closed.load()) {
-            static_cast<void>(send_engine(id, net::LinkControl{net::SessionClose{}}));
+        // O anel primeiro: a leitora dele usa a região da sessão.
+        if (session->shm_session) {
+            auto& ring_session = *session->shm_session;
+            ring_session.ring_stop.store(true);
+            session->shm_reader.join();
+            close_session(ring_session);
+            ring_session.close_out();
+            session->shm_writer.join();
         }
+        close_session(*session);
         session->close_out();
         writer.join();
-        // O que ficou sem resposta também é auditado: a auditoria fecha a
-        // conta de cada pedido (e os limites por principal dependem disso).
-        std::vector<Pending> abandoned;
-        {
-            const std::scoped_lock lock{session->pending_mu};
-            for (auto* pending : {&session->calls, &session->queries, &session->facades}) {
-                for (auto& [request_id, entry] : *pending) {
-                    (void)request_id;
-                    abandoned.push_back(std::move(entry));
-                }
-                pending->clear();
-            }
-        }
-        for (const auto& entry : abandoned) {
-            audit(*session, entry.kind, entry.target, entry.start, false, ErrorCode::connection_closed,
-                  "client left before the answer", entry.objects, false);
-        }
     }
 
     void request_stop() noexcept {

@@ -335,12 +335,37 @@ int main() {
                         "erro do engine chega ao cliente");
             auto facades = client->list_facades();
             suite.check(facades && facades->empty(), "FacadeList passa pelo proxy");
-            auto shm = client->attach_shared_memory();
-            suite.check(!shm, "ShmAttach não é atendido por este proxy");
             auto after = client->call("t.echo", {});
             suite.check(after.has_value(), "a sessão segue depois das recusas");
+
+            // Anel de memória compartilhada (ADR-026) servido pelo proxy (X11):
+            // as chamadas pelo anel passam pela mesma política.
+            auto shm = client->attach_shared_memory();
+            suite.check(shm.has_value() && client->shared_memory_attached(), "o proxy atende o ShmAttach");
+            if (shm) {
+                auto ring_who = client->call("t.whoami", {});
+                suite.check(ring_who && text_of(*ring_who).starts_with("cliente|") &&
+                                text_of(*ring_who).ends_with("|visto"),
+                            "pelo anel a proc vê o mesmo chamador, e a resposta passa pela política");
+                auto ring_echo = client->call("t.echo", bytes_of("original"));
+                suite.check(ring_echo && text_of(*ring_echo) == "reescrito", "pelo anel a política reescreve");
+                auto ring_secret = client->call("t.secret", {});
+                suite.check(!ring_secret && ring_secret.error().code == ErrorCode::permission_denied,
+                            "pelo anel a política recusa");
+                bool all = true;
+                for (int i = 0; i < 200 && all; ++i) {
+                    auto r = client->call("t.echo", {});
+                    all = r.has_value() && text_of(*r) == "reescrito";
+                }
+                suite.check(all, "200 chamadas seguidas pelo anel");
+                suite.check(!client->attach_shared_memory() || client->shared_memory_attached(),
+                            "segundo ShmAttach não quebra a sessão");
+                suite.check(eventually([&] { return px.session_count() == 2; }),
+                            "o anel tem a própria sessão no engine");
+            }
         }
     }
+    suite.check(eventually([&] { return px.session_count() == 0; }), "cliente com anel saiu, as duas sessões fecham");
     {
         const auto records = policy->records();
         const auto has = [&](std::string_view line) {

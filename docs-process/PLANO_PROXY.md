@@ -145,9 +145,9 @@ Escolhas (2026-09-28):
 - [ ] 10.2 Relatório: ops/s e p50/p99 por fase, direto vs proxy, 1 e N clientes.
   Se o salto pesar, avaliar o link sobre o anel shm (ADR-026).
 
-#### X11 — shm no proxy *(pequeno)*
+#### X11 — shm no proxy *(pequeno)* ✅
 
-- [ ] 11.1 `ShmAttach` passa a ser atendido pelo proxy (cliente ↔ proxy); o
+- [x] 11.1 *(o anel tem uma sessão própria no engine, com o mesmo chamador; as respostas dela saem pelo anel; cada OpCall do anel passa pela política e pela auditoria; `modb_rpc_bench --transports proxy_shm`)* `ShmAttach` passa a ser atendido pelo proxy (cliente ↔ proxy); o
   proxy repassa as OpCalls pelo link, aplicando a política como no TCP.
 
 ### P4 — fim da transição

@@ -236,6 +236,10 @@ audit call notas.criar error 74 0.004ms denied by leitor from 10.0.0.7:51544
 audit query 3 ok 12.803ms objects 1200 by leitor from 10.0.0.7:51544
 ```
 
+Um cliente na mesma máquina do proxy pode pedir o anel de memória compartilhada
+(`attach_shared_memory`, ADR-026): quem atende é o proxy, e as chamadas pelo
+anel passam pela mesma política e auditoria das que vêm pelo TCP.
+
 **Sonda de vida/prontidão:** `modb ping HOST PORTA` responde enquanto o proxy
 tem link com o engine. Sem link, o proxy fecha a conexão logo depois do `Hello`
 e o `ping` falha. O proxy reabre o link sozinho quando o engine volta, e os
