@@ -132,6 +132,7 @@ const std::vector<std::string>& known_targets() {
     static const std::vector<std::string> targets = {
         "embedded",
         "loopback",
+        "loopback_proxy",
         "remote_colocated",
         "remote_client_local",
     };
@@ -149,7 +150,8 @@ bool is_target_implemented(std::string_view target_id) {
     // não aqui (esta função não sabe de workload, só de alvo).
     // `remote_client_local` segue sem dispatch (falta host remoto de
     // verdade para verificar, Subfase I).
-    return target_id == "embedded" || target_id == "loopback" || target_id == "remote_colocated";
+    return target_id == "embedded" || target_id == "loopback" || target_id == "loopback_proxy" ||
+           target_id == "remote_colocated";
 }
 
 std::string Case::case_id() const {

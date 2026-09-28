@@ -8,17 +8,20 @@
 #include "user_type.hpp"
 
 #include "modb/app/server_connection.hpp"
+#include "modb/net/native_socket.hpp"
 #include "modb/net/query_description.hpp"
 #include "modb/net/server.hpp"
 #include "modb/object/object_codec.hpp"
 #include "modb/ops/facade_catalog.hpp"
 #include "modb/ops/module_manifest.hpp"
 #include "modb/ops/operation_registry.hpp"
+#include "modb/proxy/proxy.hpp"
 #include "modb/storage/page.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <thread>
 
@@ -51,17 +54,32 @@ std::filesystem::path make_client_db_path(const WorkloadParams& params,
 } // namespace
 
 CaseRunResult run_create_only_client(const WorkloadParams& params,
-                                     std::filesystem::path& out_db_path) {
+                                     std::filesystem::path& out_db_path, bool via_proxy) {
     CaseRunResult result;
-    const auto db_path = make_client_db_path(params, "create_only_loopback");
+    const auto db_path = make_client_db_path(params, via_proxy ? "create_only_proxy" : "create_only_loopback");
     out_db_path = db_path;
     const std::filesystem::path wal_path{db_path.string() + ".wal"};
+    // O caminho de um AF_UNIX tem limite (~108 bytes): nome curto, e o
+    // diretório atual se o de trabalho for fundo demais.
+    const auto link_name = "link-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count() %
+                                                    1'000'000'000) +
+                           ".sock";
+    const std::filesystem::path link_path = (std::filesystem::path{params.work_dir} / link_name).string().size() < 100
+                                                ? std::filesystem::path{params.work_dir} / link_name
+                                                : std::filesystem::current_path() / link_name;
 
-    auto server = net::Server::listen(db_path, "127.0.0.1", 0);
+    auto server = via_proxy ? net::Server::open(db_path) : net::Server::listen(db_path, "127.0.0.1", 0);
     if (!server) {
         result.status = "failed";
         result.error = "Server::listen: " + server.error().message;
         return result;
+    }
+    if (via_proxy) {
+        if (auto listening = server->listen_local(link_path); !listening) {
+            result.status = "failed";
+            result.error = "Server::listen_local: " + listening.error().message;
+            return result;
+        }
     }
     if (auto bound = server->database().bind(user_binding()); !bound) {
         result.status = "failed";
@@ -103,7 +121,15 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
     // aceita a conexão; `request_stop()` fecha o listener para destravar o
     // `accept()` nesse caso específico (única situação em que o par
     // conecta/aceita não completa por conta própria).
-    std::thread acceptor([&server] { (void)server->serve_one(); });
+    // Via proxy: o engine atende um link (o do proxy), que fica aberto até o
+    // proxy parar -- a sessão do cliente fecha antes, dentro do link.
+    std::thread acceptor([&server, via_proxy] {
+        if (via_proxy) {
+            (void)server->serve_one_link();
+        } else {
+            (void)server->serve_one();
+        }
+    });
     // Rede de segurança: se uma exceção escapar do bloco abaixo (ex.:
     // `bad_alloc` construindo `actual_stream`/`expected_stream` para um
     // object_count grande) antes do `acceptor.join()` explícito mais abaixo,
@@ -121,8 +147,33 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
         }
     } join_guard{acceptor};
 
-    bool ok = false;
+    std::optional<proxy::Proxy> px;
+    std::thread proxy_loop;
+    std::uint16_t port = server->port();
     std::string error_message;
+    if (via_proxy) {
+        auto started = proxy::Proxy::start(proxy::Options{.engine = link_path, .name = "modb_load", .port = 0},
+                                           std::make_shared<proxy::PassThroughPolicy>());
+        if (!started) {
+            error_message = "Proxy::start: " + started.error().message;
+            server->request_stop();
+        } else {
+            px.emplace(std::move(*started));
+            port = px->port();
+            proxy_loop = std::thread{[&px] { (void)px->serve_forever(); }};
+        }
+    }
+    const auto stop_proxy = [&] {
+        if (px) {
+            px->request_stop();
+            if (proxy_loop.joinable()) {
+                proxy_loop.join();
+            }
+            px.reset();
+        }
+    };
+
+    bool ok = false;
     std::vector<double> batch_latencies_ns;
     RssTracker rss;
     std::uint64_t total_create_ns = 0;
@@ -130,11 +181,11 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
     bool hash_match = false;
     std::uint64_t logical_bytes = 0;
 
-    {
+    if (error_message.empty()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
         auto connection = app::ServerConnection::connect({
             .host = "127.0.0.1",
-            .port = server->port(),
+            .port = port,
             .database_name = std::string{server->database_name()},
         });
         if (!connection) {
@@ -233,7 +284,12 @@ CaseRunResult run_create_only_client(const WorkloadParams& params,
         }
     } // `connection` sai de escopo aqui -- fecha a sessão e libera `serve_one()`.
 
+    // Via proxy, o link só fecha quando o proxy para.
+    stop_proxy();
     acceptor.join();
+    if (via_proxy) {
+        net::NativeSocket::remove_local(link_path);
+    }
     join_guard.done = true;
 
     if (!ok) {

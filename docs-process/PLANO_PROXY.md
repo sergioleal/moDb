@@ -138,9 +138,9 @@ Escolhas (2026-09-28):
   compartilhado; atualizar a imagem OCI e `serve --from-env`.
 - [x] 9.3 *(sem endpoint novo: sem link, o proxy fecha a conexão depois do `Hello`, e o `modb ping` serve de sonda; documentado)* Probes: o proxy responde vivo/pronto conforme o estado do link.
 
-#### X10 — Medição *(médio, máquina dedicada)*
+#### X10 — Medição *(médio, máquina dedicada)* 🔄 (ferramentas prontas; medição pendente no droplet)
 
-- [ ] 10.1 `modb_rpc_bench` e o caso de consulta do `modb_load` com o alvo
+- [x] 10.1 *(`modb_rpc_bench --transports tcp,shm,proxy --clients 1,8`; alvo `loopback_proxy` no `modb_load` — só `create_only`, como o `loopback` —, nos perfis `load-local` e `load-standard`; suíte `loadtests/perfpack/suites/proxy.txt`)* `modb_rpc_bench` e o caso de consulta do `modb_load` com o alvo
   "direto" ou "via proxy".
 - [ ] 10.2 Relatório: ops/s e p50/p99 por fase, direto vs proxy, 1 e N clientes.
   Se o salto pesar, avaliar o link sobre o anel shm (ADR-026).

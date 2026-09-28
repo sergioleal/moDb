@@ -1,0 +1,17 @@
+# Custo do proxy (ADR-028, PLANO_PROXY X10): o mesmo create_only direto no
+# engine (loopback) e através de um modb-proxy de passagem (loopback_proxy),
+# cliente, proxy e engine no mesmo host. A diferença entre os pares é o salto a
+# mais: um link local AF_UNIX, a decodificação no proxy e o crédito por stream
+# (a releitura que valida o hash passa pelo mesmo caminho).
+#
+# A latência de uma chamada curta sai do modb_rpc_bench, que não entra no
+# pacote: no droplet,
+#   modb_rpc_bench --calls 50000 --sizes 16,1024,65536 --transports tcp,proxy --clients 1,8
+
+repeat 5
+seed 123456
+
+case load.create_only.loopback.10k
+case load.create_only.loopback_proxy.10k
+case load.create_only.loopback.100k
+case load.create_only.loopback_proxy.100k

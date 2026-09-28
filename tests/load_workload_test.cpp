@@ -72,6 +72,28 @@ void test_create_only_loopback(TestSuite& suite) {
     suite.check(!result.expected_hash.empty(), "expected_hash não deve ficar vazio");
 }
 
+// O mesmo create_only através de um proxy de passagem (ADR-028, X10). O
+// diretório de trabalho fica no diretório do teste: AF_UNIX sob
+// %LOCALAPPDATA% (onde fica o temp) falha em algumas máquinas Windows.
+void test_create_only_proxy(TestSuite& suite) {
+    const auto work_dir = std::filesystem::current_path() /
+                          ("modb-load-proxy-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(work_dir);
+    auto params = small_params(work_dir);
+    std::filesystem::path db_path;
+    auto result = run_create_only_client(params, db_path, true);
+    suite.check(result.ok && result.status == "completed", "create_only via proxy deve completar: " + result.error);
+    suite.check(result.hash_match && result.expected_hash == result.actual_hash,
+                "create_only via proxy valida o hash lógico relendo pelo proxy");
+    bool sockets_left = false;
+    for (const auto& entry : std::filesystem::directory_iterator{work_dir}) {
+        sockets_left = sockets_left || entry.path().extension() == ".sock";
+    }
+    suite.check(!sockets_left, "o socket do link sai no fim");
+    std::error_code ignored;
+    std::filesystem::remove_all(work_dir, ignored);
+}
+
 void test_create_delete_forward(TestSuite& suite) {
     auto work_dir = make_temp_work_dir();
     std::filesystem::path db_path;
@@ -607,6 +629,7 @@ int main() {
     TestSuite suite;
     test_create_only(suite);
     test_create_only_loopback(suite);
+    test_create_only_proxy(suite);
     test_create_delete_forward(suite);
     test_create_delete_reverse(suite);
     test_create_delete_interleaved(suite);

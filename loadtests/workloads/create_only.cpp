@@ -36,6 +36,11 @@ CaseRunResult run_create_only(const Case& c, const std::filesystem::path& work_d
         // exatamente o que `run_create_only_client` já faz.
         return run_create_only_client(params, out_db_path);
     }
+    if (c.target == "loopback_proxy") {
+        // O mesmo `loopback`, com um proxy de passagem entre cliente e engine
+        // (ADR-028, PLANO_PROXY X10): mede o custo do salto a mais.
+        return run_create_only_client(params, out_db_path, true);
+    }
     if (c.target == "remote_client_local") {
         // Genuinamente diferente de loopback (cliente precisa alcançar um
         // servidor JÁ rodando num host remoto de verdade, não um que este
@@ -54,7 +59,7 @@ CaseRunResult run_create_only(const Case& c, const std::filesystem::path& work_d
     CaseRunResult result;
     result.status = "unimplemented";
     result.error = "create_only: alvo '" + c.target +
-                   "' ainda não tem target implementado (embedded, loopback, remote_colocated)";
+                   "' ainda não tem target implementado (embedded, loopback, loopback_proxy, remote_colocated)";
     return result;
 }
 

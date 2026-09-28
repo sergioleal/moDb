@@ -44,13 +44,21 @@ std::vector<Case> make_cases(const std::vector<std::string>& workloads,
 std::vector<Case> load_smoke_cases() { return make_cases(kEscadaBasica, {"embedded"}, {"1k"}); }
 
 std::vector<Case> load_local_cases() {
-    return make_cases(kEscadaBasica, {"embedded", "loopback"}, {"10k", "100k"});
+    auto cases = make_cases(kEscadaBasica, {"embedded", "loopback"}, {"10k", "100k"});
+    // O mesmo create_only através de um proxy (ADR-028, PLANO_PROXY X10): só
+    // create_only tem alvo de rede, e o par loopback/loopback_proxy dá o custo
+    // do salto a mais.
+    auto proxied = make_cases({"create_only"}, {"loopback_proxy"}, {"10k", "100k"});
+    cases.insert(cases.end(), proxied.begin(), proxied.end());
+    return cases;
 }
 
 std::vector<Case> load_standard_cases() {
     auto cases = make_cases(kEscadaBasica, {"embedded", "loopback", "remote_colocated"}, {"100k"});
     auto extra = make_cases({"create_only", "crud_full"}, {"embedded"}, {"1M"});
     cases.insert(cases.end(), extra.begin(), extra.end());
+    auto proxied = make_cases({"create_only"}, {"loopback_proxy"}, {"100k"});
+    cases.insert(cases.end(), proxied.begin(), proxied.end());
     return cases;
 }
 

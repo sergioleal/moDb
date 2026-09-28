@@ -612,11 +612,11 @@ add_library(modb_load_core STATIC
     loadtests/history/retention.cpp
 )
 target_include_directories(modb_load_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/loadtests)
-target_link_libraries(modb_load_core PUBLIC modb_bench_core modb::app_client)
+target_link_libraries(modb_load_core PUBLIC modb_bench_core modb::app_client modb::proxy)
 
 # Custo de uma chamada de proc por transporte, TCP x anel (ADR-026).
 add_executable(modb_rpc_bench apps/modb_rpc_bench/main.cpp)
-target_link_libraries(modb_rpc_bench PRIVATE modb::server_host modb::app_client)
+target_link_libraries(modb_rpc_bench PRIVATE modb::server_host modb::app_client modb::proxy)
 if(MINGW)
     target_link_options(modb_rpc_bench PRIVATE ${MODB_MINGW_LINK_OPTS})
 endif()
