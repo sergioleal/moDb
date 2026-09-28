@@ -40,7 +40,8 @@ struct Pending {
 [[nodiscard]] bool is_client_request(const net::Message& message) noexcept {
     return std::holds_alternative<net::Query>(message) || std::holds_alternative<net::Cancel>(message) ||
            std::holds_alternative<net::OpCall>(message) || std::holds_alternative<net::FacadeList>(message) ||
-           std::holds_alternative<net::FacadeOpen>(message) || std::holds_alternative<net::ShmAttach>(message);
+           std::holds_alternative<net::FacadeOpen>(message) || std::holds_alternative<net::ShmAttach>(message) ||
+           std::holds_alternative<net::Authenticate>(message);
 }
 
 // Resposta que o proxy dá sozinho a um pedido que a política recusou.
@@ -62,6 +63,12 @@ struct Pending {
                                  .message = decision.message,
                                  .facade_id = open->facade_id,
                                  .facade_version = open->facade_version};
+    }
+    if (const auto* attach = std::get_if<net::ShmAttach>(&request)) {
+        return net::ShmAttachOk{.request_id = attach->request_id,
+                                .ok = false,
+                                .code = decision.code,
+                                .message = decision.message};
     }
     return std::nullopt;
 }
@@ -423,6 +430,92 @@ struct Proxy::Impl {
         sessions.erase(id);
     }
 
+    // Registra a sessão e a abre no engine com o chamador já conhecido.
+    [[nodiscard]] bool open_session(const std::shared_ptr<ClientSession>& session, std::uint16_t client_minor) {
+        const auto id = register_session(session);
+        const auto opened = [&]() -> bool {
+            if (!send_engine(id, net::LinkControl{net::SessionOpen{.client_minor = client_minor,
+                                                                   .principal = session->caller.principal,
+                                                                   .roles = session->caller.roles,
+                                                                   .attributes = session->caller.attributes}})) {
+                return false;
+            }
+            std::unique_lock lock{session->open_mu};
+            session->open_cv.wait_for(lock, k_open_timeout, [&] { return session->open_reply.has_value() || stop.load(); });
+            return session->open_reply && session->open_reply->ok;
+        }();
+        if (!opened) {
+            unregister_session(id);
+        }
+        return opened;
+    }
+
+    // Antes do Authenticate, os pedidos voltam com `unauthenticated` (um
+    // cliente antigo, sem Authenticate, recebe erros claros em vez de uma
+    // conexão fechada). Três credenciais recusadas fecham a conexão.
+    [[nodiscard]] bool authenticate_client(const std::shared_ptr<ClientSession>& session, const ClientInfo& info,
+                                           std::uint16_t client_minor, std::uint32_t frame_limit,
+                                           std::uint16_t expansion) {
+        constexpr int k_attempts = 3;
+        auto& socket = *session->socket;
+        std::string mechanisms;
+        for (const auto& mechanism : policy->mechanisms()) {
+            mechanisms += (mechanisms.empty() ? "" : ", ") + mechanism;
+        }
+        for (int refused = 0; refused < k_attempts;) {
+            auto message = net::recv_message(socket, frame_limit, expansion);
+            if (!message) {
+                return false;
+            }
+            if (std::holds_alternative<net::Cancel>(*message)) {
+                continue;
+            }
+            if (!is_client_request(*message)) {
+                return false;
+            }
+            const auto* auth = std::get_if<net::Authenticate>(&*message);
+            if (auth == nullptr) {
+                const auto decision = Decision::deny("authenticate first (mechanisms: " + mechanisms + ")",
+                                                     ErrorCode::unauthenticated);
+                if (auto reply = denial(*message, decision); reply && !net::send_message(socket, *reply)) {
+                    return false;
+                }
+                continue;
+            }
+            const auto started = Clock::now();
+            auto caller = policy->authenticate(info, Credentials{.mechanism = auth->mechanism, .payload = auth->payload});
+            if (!caller) {
+                ++refused;
+                audit(*session, "authenticate", auth->mechanism, started, false, caller.error().code,
+                      caller.error().message, 0, true);
+                if (!net::send_message(socket, net::AuthenticateOk{.request_id = auth->request_id,
+                                                                   .ok = false,
+                                                                   .code = caller.error().code,
+                                                                   .message = caller.error().message})) {
+                    return false;
+                }
+                continue;
+            }
+            session->caller = std::move(*caller);
+            if (!open_session(session, client_minor)) {
+                static_cast<void>(net::send_message(socket, net::AuthenticateOk{.request_id = auth->request_id,
+                                                                                .ok = false,
+                                                                                .code = ErrorCode::connection_closed,
+                                                                                .message = "engine unavailable"}));
+                return false;
+            }
+            audit(*session, "authenticate", auth->mechanism, started, true, ErrorCode::invalid_argument, {}, 0, false);
+            if (!net::send_message(socket, net::AuthenticateOk{.request_id = auth->request_id,
+                                                               .principal = session->caller.principal})) {
+                unregister_session(session->id);
+                static_cast<void>(send_engine(session->id, net::LinkControl{net::SessionClose{}}));
+                return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
     void handle_client(const std::shared_ptr<net::NativeSocket>& socket) {
         if (small_buffers.load()) {
             static_cast<void>(socket->set_send_buffer_bytes(k_small_socket_buffer));
@@ -447,6 +540,9 @@ struct Proxy::Impl {
                                                             .max_expansion_ratio = net::default_max_expansion_ratio,
                                                             .idle_timeout_ms = options.idle_timeout_ms},
                                                options.preferred_codec);
+        if (negotiated) {
+            negotiated->auth_mechanisms = policy->mechanisms();
+        }
         if (!negotiated || !net::send_message(*socket, *negotiated)) {
             return;
         }
@@ -455,37 +551,30 @@ struct Proxy::Impl {
         }
 
         const ClientInfo info{.address = socket->peer_address().value_or("?")};
-        auto caller = policy->authenticate(info, Credentials{});
-        if (!caller) {
-            return;
-        }
-
         auto session = std::make_shared<ClientSession>();
         session->socket = socket;
         session->codec = negotiated->selected_codec;
-        session->caller = std::move(*caller);
         session->address = info.address;
-        const auto id = register_session(session);
+        const auto frame_limit = negotiated->max_frame_bytes;
+        const auto expansion = negotiated->max_expansion_ratio;
 
-        const auto opened = [&]() -> bool {
-            if (!send_engine(id, net::LinkControl{net::SessionOpen{.client_minor = negotiated->minor,
-                                                                   .principal = session->caller.principal,
-                                                                   .roles = session->caller.roles,
-                                                                   .attributes = session->caller.attributes}})) {
-                return false;
+        if (negotiated->auth_mechanisms.empty()) {
+            auto caller = policy->authenticate(info, Credentials{});
+            if (!caller) {
+                return;
             }
-            std::unique_lock lock{session->open_mu};
-            session->open_cv.wait_for(lock, k_open_timeout, [&] { return session->open_reply.has_value() || stop.load(); });
-            return session->open_reply && session->open_reply->ok;
-        }();
-        if (!opened) {
-            unregister_session(id);
+            session->caller = std::move(*caller);
+            if (!open_session(session, negotiated->minor)) {
+                return;
+            }
+        } else if (!authenticate_client(session, info, negotiated->minor, frame_limit, expansion)) {
             return;
         }
+        const auto id = session->id;
 
         std::thread writer{[this, &session] { writer_loop(*session); }};
         for (;;) {
-            auto message = net::recv_message(*socket, negotiated->max_frame_bytes, negotiated->max_expansion_ratio);
+            auto message = net::recv_message(*socket, frame_limit, expansion);
             if (!message) {
                 break;
             }
@@ -498,6 +587,13 @@ struct Proxy::Impl {
             }
             if (!is_client_request(*message)) {
                 break;  // Hello repetido ou resposta vinda do cliente: fim da conversa
+            }
+            if (const auto* auth = std::get_if<net::Authenticate>(&*message)) {
+                session->push(net::AuthenticateOk{.request_id = auth->request_id,
+                                                  .ok = false,
+                                                  .code = ErrorCode::invalid_argument,
+                                                  .message = "already authenticated"});
+                continue;
             }
             if (const auto* attach = std::get_if<net::ShmAttach>(&*message)) {
                 session->push(net::ShmAttachOk{.request_id = attach->request_id,

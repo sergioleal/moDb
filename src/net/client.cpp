@@ -40,6 +40,9 @@ Error make_protocol(std::string message) {
     if (const auto* attached = std::get_if<ShmAttachOk>(&message)) {
         return attached->request_id;
     }
+    if (const auto* authenticated = std::get_if<AuthenticateOk>(&message)) {
+        return authenticated->request_id;
+    }
     return std::nullopt;
 }
 
@@ -289,6 +292,39 @@ Result<void> Client::attach_shared_memory(std::uint32_t ring_bytes) {
     }
     shm_ = std::make_unique<ShmChannel>(std::move(*region));
     return {};
+}
+
+Result<std::string> Client::authenticate(std::string_view mechanism, std::span<const std::byte> payload) {
+    if (!conn_) {
+        return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
+    }
+    if (hello_ok_.minor < 2) {
+        return std::unexpected(Error{ErrorCode::incompatible_protocol_version,
+                                     "server does not support authentication (protocol minor < 2)"});
+    }
+    const auto request_id = next_query_id_++;
+    if (auto status = conn_->send(Authenticate{.request_id = request_id,
+                                               .mechanism = std::string{mechanism},
+                                               .payload = {payload.begin(), payload.end()}});
+        !status) {
+        return std::unexpected(status.error());
+    }
+    auto reply = conn_->recv_for(request_id);
+    if (!reply) {
+        return std::unexpected(reply.error());
+    }
+    const auto* ok = std::get_if<AuthenticateOk>(&*reply);
+    if (ok == nullptr) {
+        return std::unexpected(make_protocol("expected AuthenticateOk from server"));
+    }
+    if (!ok->ok) {
+        return std::unexpected(Error{ok->code, ok->message});
+    }
+    return ok->principal;
+}
+
+Result<std::string> Client::authenticate_token(std::string_view token) {
+    return authenticate("token", std::span<const std::byte>{reinterpret_cast<const std::byte*>(token.data()), token.size()});
 }
 
 Result<std::vector<std::byte>> Client::call_over_shm(std::uint32_t call_id, std::string_view operation_id,

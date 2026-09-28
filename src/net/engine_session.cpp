@@ -115,6 +115,15 @@ Result<void> EngineSession::handle(const Message& message) {
         return sink_->send(execute_op_call(services_, *call));
     }
 
+    // Quem autentica é o proxy (ADR-028); o engine responde para o cliente
+    // saber que falou direto com ele.
+    if (const auto* auth = std::get_if<Authenticate>(&message); auth != nullptr) {
+        return sink_->send(AuthenticateOk{.request_id = auth->request_id,
+                                          .ok = false,
+                                          .code = ErrorCode::invalid_argument,
+                                          .message = "the engine does not authenticate; connect through a proxy"});
+    }
+
     return std::unexpected(make_protocol("expected Query, OpCall, or Facade* in session"));
 }
 

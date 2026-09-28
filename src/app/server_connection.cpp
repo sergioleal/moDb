@@ -13,6 +13,7 @@ ServerInfo server_info_from_hello(const net::HelloOk& hello) noexcept {
         .max_frame_bytes = hello.max_frame_bytes,
         .max_concurrent_streams = hello.max_concurrent_streams,
         .idle_timeout_ms = hello.idle_timeout_ms,
+        .auth_mechanisms = hello.auth_mechanisms,
     };
 }
 
@@ -41,8 +42,15 @@ Result<ServerConnection> ServerConnection::connect(ConnectionOptions options) {
         }
     }
 
-    const auto info = server_info_from_hello(client->hello_ok());
-    return ServerConnection{std::move(*client), info};
+    auto info = server_info_from_hello(client->hello_ok());
+    if (options.token) {
+        auto principal = client->authenticate_token(*options.token);
+        if (!principal) {
+            return std::unexpected(principal.error());
+        }
+        info.principal = std::move(*principal);
+    }
+    return ServerConnection{std::move(*client), std::move(info)};
 }
 
 Result<ServerInfo> ServerConnection::handshake(const ConnectionOptions& options) {

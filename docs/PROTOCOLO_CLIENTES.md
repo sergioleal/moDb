@@ -28,20 +28,39 @@ protocolo. Tipos usados por um cliente de procs:
 | 10 | `OpResult` | servidor → cliente |
 | 15 | `ShmAttach` | cliente → servidor (minor ≥ 1) |
 | 16 | `ShmAttachOk` | servidor → cliente |
+| 17 | `Authenticate` | cliente → proxy (minor ≥ 2) |
+| 18 | `AuthenticateOk` | proxy → cliente |
 
 Os demais (consultas em *stream*, facades) estão na ADR-010.
 
 ## 2. Abertura
 
 ```text
-Hello    = version u16 (=1) | database string | codecs u8 n, u8[n] (use 1, [0]) | minor u16 (=1)
+Hello    = version u16 (=1) | database string | codecs u8 n, u8[n] (use 1, [0]) | minor u16 (=2)
 HelloOk  = version u16 | baseline u64 | codec u8 | max_frame_bytes u32 |
-           max_streams u16 | max_expansion u16 | idle_timeout_ms u32 | minor u16
+           max_streams u16 | max_expansion u16 | idle_timeout_ms u32 | minor u16 |
+           [minor ≥ 2 e o proxy exige autenticação: mechanisms u8 n, string[n]]
 ```
 
 `database` pode ser vazio (o servidor tem um banco só). O `minor` do `HelloOk` é
 o negociado: `≥ 1` significa que o servidor aceita `ShmAttach`. Um `HelloOk` sem
 o `minor` no fim é de um servidor antigo (minor 0).
+
+### 2.1 Autenticação (minor ≥ 2, atrás de um `modb-proxy`)
+
+Um proxy com autenticação (ADR-028) anuncia os mecanismos no fim do `HelloOk`.
+Até o cliente se autenticar, todo pedido volta recusado com `unauthenticated`
+(73); três credenciais recusadas fecham a conexão.
+
+```text
+Authenticate   = request_id u32 | mechanism string | payload_len u32 | payload
+AuthenticateOk = request_id u32 | ok u8 | code u16 | message string | principal string
+```
+
+Mecanismo `token`: o `payload` é o token em UTF-8. O proxy guarda só o SHA-256
+dos tokens (`modb-proxy hash-token`). O token viaja em claro: fora de uma rede
+confiável, use TLS entre cliente e proxy. Um servidor sem proxy responde
+`AuthenticateOk{ok = 0, code = 1}`.
 
 O servidor fecha conexões ociosas depois de `idle_timeout_ms`: um cliente que
 fica parado reconecta, e só deve repetir sozinho chamadas de leitura (uma

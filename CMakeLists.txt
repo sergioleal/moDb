@@ -142,6 +142,7 @@ target_link_libraries(modb_app_client PUBLIC modb::modb)
 add_library(modb_proxy
     src/proxy/policy.cpp
     src/proxy/proxy.cpp
+    src/proxy/token_policy.cpp
 )
 add_library(modb::proxy ALIAS modb_proxy)
 set_target_properties(modb_proxy PROPERTIES EXPORT_NAME proxy)
@@ -696,6 +697,10 @@ if(BUILD_TESTING)
     target_link_libraries(modb_proxy_tests PRIVATE modb::proxy)
     add_test(NAME modb.proxy COMMAND modb_proxy_tests)
     set_tests_properties(modb.proxy PROPERTIES TIMEOUT 120)
+    modb_add_test(modb_proxy_auth_tests tests/proxy_auth_test.cpp)
+    target_link_libraries(modb_proxy_auth_tests PRIVATE modb::proxy modb::app_client)
+    add_test(NAME modb.proxy_auth COMMAND modb_proxy_auth_tests)
+    set_tests_properties(modb.proxy_auth PROPERTIES TIMEOUT 120)
     if(MODB_BUILD_EXAMPLES)
         # Servidor de aplicação ponta a ponta: sobe o notas-server em outro processo.
         modb_add_test(modb_server_host_tests tests/server_host_test.cpp)

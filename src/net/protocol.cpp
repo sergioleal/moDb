@@ -142,6 +142,19 @@ Result<void> encode_hello_ok(storage::BinaryWriter& writer, const HelloOk& messa
     writer.write_u16(message.max_expansion_ratio);
     writer.write_u32(message.idle_timeout_ms);
     writer.write_u16(message.minor);
+    // Minor 2: só quando há mecanismos, para o HelloOk sem autenticação ficar
+    // idêntico ao de antes.
+    if (!message.auth_mechanisms.empty()) {
+        if (message.auth_mechanisms.size() > max_auth_mechanisms) {
+            return std::unexpected(make_error(ErrorCode::value_too_large, "too many auth mechanisms"));
+        }
+        writer.write_u8(static_cast<std::uint8_t>(message.auth_mechanisms.size()));
+        for (const auto& mechanism : message.auth_mechanisms) {
+            if (auto status = write_string(writer, mechanism); !status) {
+                return status;
+            }
+        }
+    }
     return {};
 }
 
@@ -198,6 +211,22 @@ Result<HelloOk> decode_hello_ok(storage::BinaryReader& reader) {
             return std::unexpected(minor.error());
         }
         message.minor = *minor;
+    }
+    if (message.minor >= 2 && reader.remaining() > 0) {
+        const auto count = reader.read_u8();
+        if (!count) {
+            return std::unexpected(count.error());
+        }
+        if (*count > max_auth_mechanisms) {
+            return std::unexpected(make_error(ErrorCode::protocol_error, "HelloOk has too many auth mechanisms"));
+        }
+        for (std::uint8_t i = 0; i < *count; ++i) {
+            auto mechanism = read_string(reader);
+            if (!mechanism) {
+                return std::unexpected(mechanism.error());
+            }
+            message.auth_mechanisms.push_back(std::move(*mechanism));
+        }
     }
     while (reader.remaining() > 0) {
         if (auto skipped = reader.read_u8(); !skipped) {
@@ -941,6 +970,89 @@ Result<ShmAttachOk> decode_shm_attach_ok(storage::BinaryReader& reader) {
     return message;
 }
 
+Result<void> encode_authenticate(storage::BinaryWriter& writer, const Authenticate& message) {
+    writer.write_u32(message.request_id);
+    if (auto status = write_string(writer, message.mechanism); !status) {
+        return status;
+    }
+    if (message.payload.size() > max_string_bytes) {
+        return std::unexpected(make_error(ErrorCode::value_too_large, "Authenticate payload too large"));
+    }
+    writer.write_u32(static_cast<std::uint32_t>(message.payload.size()));
+    writer.write_bytes(message.payload);
+    return {};
+}
+
+Result<Authenticate> decode_authenticate(storage::BinaryReader& reader) {
+    Authenticate message;
+    const auto request_id = reader.read_u32();
+    if (!request_id) {
+        return std::unexpected(request_id.error());
+    }
+    message.request_id = *request_id;
+    auto mechanism = read_string(reader);
+    if (!mechanism) {
+        return std::unexpected(mechanism.error());
+    }
+    message.mechanism = std::move(*mechanism);
+    const auto length = reader.read_u32();
+    if (!length) {
+        return std::unexpected(length.error());
+    }
+    if (*length > max_string_bytes) {
+        return std::unexpected(make_error(ErrorCode::protocol_error, "Authenticate payload length exceeds limit"));
+    }
+    auto bytes = reader.read_bytes(*length);
+    if (!bytes) {
+        return std::unexpected(bytes.error());
+    }
+    message.payload.assign(bytes->begin(), bytes->end());
+    return message;
+}
+
+Result<void> encode_authenticate_ok(storage::BinaryWriter& writer, const AuthenticateOk& message) {
+    writer.write_u32(message.request_id);
+    writer.write_u8(message.ok ? 1U : 0U);
+    writer.write_u16(static_cast<std::uint16_t>(message.code));
+    if (auto status = write_string(writer, message.message); !status) {
+        return status;
+    }
+    return write_string(writer, message.principal);
+}
+
+Result<AuthenticateOk> decode_authenticate_ok(storage::BinaryReader& reader) {
+    AuthenticateOk message;
+    const auto request_id = reader.read_u32();
+    if (!request_id) {
+        return std::unexpected(request_id.error());
+    }
+    message.request_id = *request_id;
+    const auto ok = reader.read_u8();
+    if (!ok) {
+        return std::unexpected(ok.error());
+    }
+    if (*ok > 1) {
+        return std::unexpected(make_error(ErrorCode::protocol_error, "AuthenticateOk ok must be 0 or 1"));
+    }
+    message.ok = *ok == 1;
+    const auto code = reader.read_u16();
+    if (!code) {
+        return std::unexpected(code.error());
+    }
+    message.code = static_cast<ErrorCode>(*code);
+    auto text = read_string(reader);
+    if (!text) {
+        return std::unexpected(text.error());
+    }
+    message.message = std::move(*text);
+    auto principal = read_string(reader);
+    if (!principal) {
+        return std::unexpected(principal.error());
+    }
+    message.principal = std::move(*principal);
+    return message;
+}
+
 Result<void> encode_payload(storage::BinaryWriter& writer, const Message& message) {
     return std::visit(
         [&writer](const auto& body) -> Result<void> {
@@ -977,6 +1089,10 @@ Result<void> encode_payload(storage::BinaryWriter& writer, const Message& messag
                 return encode_shm_attach(writer, body);
             } else if constexpr (std::is_same_v<T, ShmAttachOk>) {
                 return encode_shm_attach_ok(writer, body);
+            } else if constexpr (std::is_same_v<T, Authenticate>) {
+                return encode_authenticate(writer, body);
+            } else if constexpr (std::is_same_v<T, AuthenticateOk>) {
+                return encode_authenticate_ok(writer, body);
             }
         },
         message);
@@ -1099,6 +1215,20 @@ Result<Message> decode_payload(MessageType type, storage::BinaryReader& reader,
         }
         return Message{std::move(*body)};
     }
+    case MessageType::authenticate: {
+        auto body = decode_authenticate(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{std::move(*body)};
+    }
+    case MessageType::authenticate_ok: {
+        auto body = decode_authenticate_ok(reader);
+        if (!body) {
+            return std::unexpected(body.error());
+        }
+        return Message{std::move(*body)};
+    }
     }
     return std::unexpected(make_error(ErrorCode::protocol_error, "unknown message type"));
 }
@@ -1216,6 +1346,10 @@ MessageType message_type(const Message& message) noexcept {
                 return MessageType::shm_attach;
             } else if constexpr (std::is_same_v<T, ShmAttachOk>) {
                 return MessageType::shm_attach_ok;
+            } else if constexpr (std::is_same_v<T, Authenticate>) {
+                return MessageType::authenticate;
+            } else if constexpr (std::is_same_v<T, AuthenticateOk>) {
+                return MessageType::authenticate_ok;
             }
         },
         message);

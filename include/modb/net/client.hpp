@@ -134,6 +134,13 @@ public:
     [[nodiscard]] Result<void> attach_shared_memory(std::uint32_t ring_bytes = 0);
     [[nodiscard]] bool shared_memory_attached() const noexcept { return shm_ != nullptr; }
 
+    // Minor 2 (ADR-028): identifica o cliente a um proxy que exige
+    // autenticação (`hello_ok().auth_mechanisms`). Devolve o principal
+    // reconhecido. Antes disto, o proxy recusa os pedidos com `unauthenticated`.
+    [[nodiscard]] Result<std::string> authenticate(std::string_view mechanism, std::span<const std::byte> payload);
+    // Mecanismo "token": o payload é o próprio token.
+    [[nodiscard]] Result<std::string> authenticate_token(std::string_view token);
+
     // Fase 11C: descoberta e negociação de facades.
     [[nodiscard]] Result<std::vector<ops::FacadeDescriptor>> list_facades();
     [[nodiscard]] Result<FacadeOpenOk> open_facade(std::string_view facade_id,

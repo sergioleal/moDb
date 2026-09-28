@@ -27,6 +27,9 @@ struct ConnectionOptions {
     std::uint16_t port{0};
     std::string database_name{};
     std::optional<std::size_t> recv_buffer_bytes{};
+    // Token para um proxy que exige autenticação (ADR-028); `connect` se
+    // autentica logo depois do Hello.
+    std::optional<std::string> token{};
 };
 
 struct ServerInfo {
@@ -37,6 +40,9 @@ struct ServerInfo {
     std::uint32_t max_frame_bytes{net::max_frame_bytes};
     std::uint16_t max_concurrent_streams{net::default_max_concurrent_streams};
     std::uint32_t idle_timeout_ms{net::default_idle_timeout_ms};
+    // Mecanismos que o proxy exige (vazio = nenhum) e quem ele reconheceu.
+    std::vector<std::string> auth_mechanisms{};
+    std::string principal{};
 };
 
 class ServerConnection {

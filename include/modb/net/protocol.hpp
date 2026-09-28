@@ -22,7 +22,7 @@ namespace modb::net {
 // Major do protocolo no fio (`Hello.version` / `HelloOk.version`).
 inline constexpr std::uint16_t protocol_major = 1;
 // Minor aditivo (Fase 10E); extensões desconhecidas no Hello/HelloOk são ignoráveis.
-inline constexpr std::uint16_t protocol_minor = 1;  // 1: ShmAttach (ADR-026)
+inline constexpr std::uint16_t protocol_minor = 2;  // 1: ShmAttach (ADR-026); 2: Authenticate (ADR-028)
 // Alias legado (= major).
 inline constexpr std::uint16_t protocol_version = protocol_major;
 // length cobre type+payload; frames maiores → frame_too_large.
@@ -55,6 +55,9 @@ enum class MessageType : std::uint8_t {
     // Minor 1 (ADR-026): anel de memória compartilhada para OpCall/OpResult.
     shm_attach = 15,
     shm_attach_ok = 16,
+    // Minor 2 (ADR-028): autenticação no proxy, logo depois do HelloOk.
+    authenticate = 17,
+    authenticate_ok = 18,
 };
 
 enum class Compression : std::uint8_t {
@@ -87,6 +90,9 @@ struct HelloOk {
     std::uint16_t max_concurrent_streams{default_max_concurrent_streams};
     std::uint16_t max_expansion_ratio{default_max_expansion_ratio};
     std::uint32_t idle_timeout_ms{default_idle_timeout_ms};
+    // Minor 2: mecanismos de autenticação que o proxy exige (vazio = nenhum).
+    // Gravado depois do `minor`; peers antigos o ignoram.
+    std::vector<std::string> auth_mechanisms{};
 
     friend bool operator==(const HelloOk&, const HelloOk&) = default;
 };
@@ -221,9 +227,34 @@ struct ShmAttachOk {
     friend bool operator==(const ShmAttachOk&, const ShmAttachOk&) = default;
 };
 
+// Minor 2 (ADR-028): o cliente se identifica ao proxy. `mechanism` é um dos
+// `HelloOk::auth_mechanisms` ("token": `payload` = o token).
+struct Authenticate {
+    std::uint32_t request_id{0};
+    std::string mechanism{};
+    std::vector<std::byte> payload{};
+
+    friend bool operator==(const Authenticate&, const Authenticate&) = default;
+};
+
+struct AuthenticateOk {
+    std::uint32_t request_id{0};
+    bool ok{true};
+    ErrorCode code{ErrorCode::unauthenticated};
+    std::string message{};
+    // Quem o proxy reconheceu (ok = true).
+    std::string principal{};
+
+    friend bool operator==(const AuthenticateOk&, const AuthenticateOk&) = default;
+};
+
+// Limite de mecanismos anunciados no HelloOk.
+inline constexpr std::size_t max_auth_mechanisms = 16;
+
 using Message = std::variant<Hello, HelloOk, Query, StreamBegin, ObjectFrame, StreamEnd,
                              StreamError, Cancel, OpCall, OpResult, FacadeList, FacadeListOk,
-                             FacadeOpen, FacadeOpenOk, ShmAttach, ShmAttachOk>;
+                             FacadeOpen, FacadeOpenOk, ShmAttach, ShmAttachOk, Authenticate,
+                             AuthenticateOk>;
 
 [[nodiscard]] MessageType message_type(const Message& message) noexcept;
 

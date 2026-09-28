@@ -101,15 +101,15 @@ Escolhas (2026-09-28):
   `facade_server`, `app_server_connection`) roda também através do proxy (os
   testes ganham o modo "via proxy"), incluindo backpressure (8D) e Cancel (8E).
 
-#### X6 — Autenticação no protocolo do cliente *(médio)*
+#### X6 — Autenticação no protocolo do cliente *(médio)* ✅
 
-- [ ] 6.1 Protocolo minor 2: `Authenticate{mecanismo, payload}` →
+- [x] 6.1 *(tipos 17/18; os mecanismos vão depois do `minor` no `HelloOk` e só quando há algum; antes de autenticar, o proxy responde cada pedido com `unauthenticated` em vez de fechar; três recusas fecham; o engine direto responde `AuthenticateOk{ok = false}`)* Protocolo minor 2: `Authenticate{mecanismo, payload}` →
   `AuthenticateOk{principal}` / erro, logo depois do `HelloOk`; o `HelloOk`
   anuncia os mecanismos aceitos. Clientes minor ≤ 1 só entram em proxies com
   política anônima.
-- [ ] 6.2 Mecanismo `token` (bearer, comparado a um arquivo de tokens com hash) como
+- [x] 6.2 *(`include/modb/proxy/token_policy.hpp`: SHA-256 próprio, `TokenStore` com comparação sem saída antecipada, `TokenPolicy` que autentica e delega o resto a outra política; `modb-proxy --tokens FILE` e `modb-proxy hash-token`)* Mecanismo `token` (bearer, comparado a um arquivo de tokens com hash) como
   primeiro mecanismo; outros mecanismos entram como políticas.
-- [ ] 6.3 `Client`/`ServerConnection`: `authenticate(...)` opcional.
+- [x] 6.3 *(`Client::authenticate`/`authenticate_token`, `ConnectionOptions::token`; o cliente Python ganhou `token=` e `authenticate()`; `docs/PROTOCOLO_CLIENTES.md` §2.1; `tests/proxy_auth_test.cpp`)* `Client`/`ServerConnection`: `authenticate(...)` opcional.
 
 #### X7 — Políticas de referência *(médio)*
 

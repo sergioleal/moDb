@@ -6,6 +6,7 @@
 // Imprime "READY <porta>" quando já aceita clientes; SIGINT/SIGTERM param limpo.
 
 #include "modb/proxy/proxy.hpp"
+#include "modb/proxy/token_policy.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -18,6 +19,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -28,6 +30,8 @@ using modb::Result;
 struct Settings {
     modb::proxy::Options proxy{};
     std::string policy{"passthrough"};
+    // Arquivo de tokens (vazio = sem autenticação).
+    std::filesystem::path tokens{};
 };
 
 Error invalid(std::string message) { return Error{ErrorCode::invalid_argument, std::move(message)}; }
@@ -107,6 +111,8 @@ Result<void> apply_setting(Settings& settings, std::string_view key, std::string
         }
     } else if (key == "policy") {
         settings.policy = std::string{value};
+    } else if (key == "tokens") {
+        settings.tokens = resolve(base, value);
     } else {
         return std::unexpected(invalid("unknown setting: " + std::string{key}));
     }
@@ -180,11 +186,40 @@ Result<Settings> parse(std::span<char* const> args, bool& help) {
     return settings;
 }
 
-Result<std::shared_ptr<modb::proxy::Policy>> make_policy(std::string_view name) {
-    if (name == "passthrough") {
-        return std::make_shared<modb::proxy::PassThroughPolicy>();
+Result<std::shared_ptr<modb::proxy::Policy>> make_policy(const Settings& settings) {
+    std::shared_ptr<modb::proxy::Policy> policy;
+    if (settings.policy == "passthrough") {
+        policy = std::make_shared<modb::proxy::PassThroughPolicy>();
+    } else {
+        return std::unexpected(invalid("unknown policy: " + settings.policy));
     }
-    return std::unexpected(invalid("unknown policy: " + std::string{name}));
+    if (!settings.tokens.empty()) {
+        auto tokens = modb::proxy::TokenStore::load(settings.tokens);
+        if (!tokens) {
+            return std::unexpected(tokens.error());
+        }
+        policy = std::make_shared<modb::proxy::TokenPolicy>(std::move(*tokens), std::move(policy));
+    }
+    return policy;
+}
+
+// modb-proxy hash-token <token> <principal> [role,role]: a linha do arquivo de tokens.
+int hash_token(int argc, char** argv) {
+    if (argc < 4 || argc > 5) {
+        std::cerr << "usage: modb-proxy hash-token <token> <principal> [role1,role2]\n";
+        return 2;
+    }
+    std::vector<std::string> roles;
+    if (argc == 5) {
+        std::string_view list{argv[4]};
+        while (!list.empty()) {
+            const auto comma = list.find(',');
+            roles.emplace_back(list.substr(0, comma));
+            list = comma == std::string_view::npos ? std::string_view{} : list.substr(comma + 1);
+        }
+    }
+    std::cout << modb::proxy::token_line(argv[2], argv[3], roles) << '\n';
+    return 0;
 }
 
 constexpr std::string_view k_usage =
@@ -195,11 +230,15 @@ constexpr std::string_view k_usage =
     "  --host HOST            listen address (default 127.0.0.1)\n"
     "  --port N               TCP port for clients (default 7474; 0 = any free port)\n"
     "  --policy NAME          passthrough (default)\n"
+    "  --tokens FILE          require a token (lines 'sha256:<hex> principal [roles]')\n"
     "  --name NAME            proxy name in the engine logs (default modb-proxy)\n"
     "  --idle-timeout-ms N    close idle clients after N ms\n"
     "  --compression rle|none codec offered to clients (default rle)\n"
     "  --stream-credit N      frames in flight per stream (default 8)\n"
-    "  --reconnect-max-ms N   longest wait between link reconnection attempts (default 5000)\n";
+    "  --reconnect-max-ms N   longest wait between link reconnection attempts (default 5000)\n"
+    "\n"
+    "       modb-proxy hash-token <token> <principal> [role1,role2]\n"
+    "  prints the tokens-file line for a token\n";
 
 modb::proxy::Proxy* g_proxy = nullptr;
 
@@ -212,6 +251,9 @@ void on_stop_signal(int) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc >= 2 && std::string_view{argv[1]} == "hash-token") {
+        return hash_token(argc, argv);
+    }
     bool help = false;
     auto settings = parse(std::span<char* const>{argv, static_cast<std::size_t>(argc)}, help);
     if (help) {
@@ -222,7 +264,7 @@ int main(int argc, char** argv) {
         std::cerr << "error: " << settings.error().message << '\n' << k_usage;
         return 2;
     }
-    auto policy = make_policy(settings->policy);
+    auto policy = make_policy(*settings);
     if (!policy) {
         std::cerr << "error: " << policy.error().message << '\n';
         return 2;

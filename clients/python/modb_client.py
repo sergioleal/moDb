@@ -9,6 +9,7 @@ quem for escrever um cliente em outra linguagem.
     from modb_client import Client, Id
     with Client("127.0.0.1", 7474) as c:
         c.attach_shared_memory()            # opcional, mesma máquina
+        # atrás de um modb-proxy com --tokens: Client(..., token="...")
         nota = c.call("notas.criar", {"texto": "comprar café"})
         print(c.call("notas.ler", {"id": nota["id"]}))
 
@@ -30,12 +31,13 @@ import time
 __all__ = ["Client", "Id", "ModbError", "encode_value", "decode_value"]
 
 PROTOCOL_MAJOR = 1
-PROTOCOL_MINOR = 1
+PROTOCOL_MINOR = 2
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 
 T_OP_CALL, T_OP_RESULT = 9, 10
 T_HELLO, T_HELLO_OK = 1, 2
 T_SHM_ATTACH, T_SHM_ATTACH_OK = 15, 16
+T_AUTHENTICATE, T_AUTHENTICATE_OK = 17, 18
 
 class Id(int):
     """Id de objeto do moDb (tag 5 no Value); em JSON vira número."""
@@ -289,7 +291,8 @@ class _Shm:
 # --- cliente -----------------------------------------------------------------------
 
 class Client:
-    def __init__(self, host: str = "127.0.0.1", port: int = 7474, database: str = "", timeout: float = 30.0):
+    def __init__(self, host: str = "127.0.0.1", port: int = 7474, database: str = "", timeout: float = 30.0,
+                 token: str | None = None):
         self.sock = socket.create_connection((host, port), timeout=timeout)
         self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.next_id = 1
@@ -302,6 +305,17 @@ class Client:
         (self.server_major, _baseline, _codec, self.max_frame, _streams, _ratio,
          self.idle_timeout_ms) = struct.unpack_from("<HQBIHHI", body, 0)
         self.server_minor = struct.unpack_from("<H", body, 23)[0] if len(body) >= 25 else 0
+        # Minor 2: mecanismos de autenticação que o proxy exige (ADR-028).
+        self.auth_mechanisms = []
+        if self.server_minor >= 2 and len(body) > 25:
+            count, off = body[25], 26
+            for _ in range(count):
+                (n,) = struct.unpack_from("<I", body, off)
+                self.auth_mechanisms.append(bytes(body[off + 4:off + 4 + n]).decode("utf-8"))
+                off += 4 + n
+        self.principal = ""
+        if token is not None:
+            self.authenticate(token)
 
     def __enter__(self):
         return self
@@ -333,6 +347,25 @@ class Client:
             raise ModbError(0, f"bad frame length {length}")
         data = self._recv_exact(length)
         return data[0], memoryview(data)[1:]
+
+    def authenticate(self, token: str, mechanism: str = "token") -> str:
+        """Identifica o cliente a um modb-proxy que exige autenticação; devolve o principal."""
+        if self.server_minor < 2:
+            raise ModbError(0, "server does not support authentication (protocol minor < 2)")
+        rid = self._take_id()
+        payload = token.encode("utf-8")
+        self.sock.sendall(_frame(T_AUTHENTICATE, struct.pack("<I", rid) + _string(mechanism) +
+                                 struct.pack("<I", len(payload)) + payload))
+        mtype, body = self._recv_frame()
+        if mtype != T_AUTHENTICATE_OK:
+            raise ModbError(0, f"expected AuthenticateOk, got message type {mtype}")
+        _rid, ok, code, n = struct.unpack_from("<IBHI", body, 0)
+        message = bytes(body[11:11 + n]).decode("utf-8")
+        if not ok:
+            raise ModbError(code, message)
+        (m,) = struct.unpack_from("<I", body, 11 + n)
+        self.principal = bytes(body[15 + n:15 + n + m]).decode("utf-8")
+        return self.principal
 
     def attach_shared_memory(self, ring_bytes: int = 0) -> None:
         """Passa as chamadas ao anel de memória compartilhada (mesma máquina)."""
