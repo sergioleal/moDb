@@ -123,14 +123,15 @@ Result<Message> recv_message(NativeSocket& socket, std::uint32_t negotiated_max_
 }
 
 Server::Server(std::shared_ptr<object::Database> database, object::DatabaseId database_id,
-               NativeSocket listener, std::uint16_t port, std::string database_name,
-               object::BaselineId baseline)
-    : database_{std::move(database)}, database_id_{database_id}, listener_{std::move(listener)},
-      port_{port}, database_name_{std::move(database_name)}, baseline_{baseline} {}
+               std::string database_name, object::BaselineId baseline)
+    : database_{std::move(database)}, database_id_{database_id}, database_name_{std::move(database_name)},
+      baseline_{baseline} {}
 
 Server::Server(Server&& other) noexcept
     : database_{std::move(other.database_)}, database_id_{other.database_id_},
       listener_{std::move(other.listener_)}, port_{other.port_},
+      local_listener_{std::move(other.local_listener_)}, local_path_{std::move(other.local_path_)},
+      link_secret_{std::move(other.link_secret_)}, link_workers_{other.link_workers_},
       database_name_{std::move(other.database_name_)}, baseline_{other.baseline_},
       fail_after_{other.fail_after_}, small_buffers_{other.small_buffers_},
       // A configuração também acompanha o servidor movido: sem isto, um Server
@@ -144,6 +145,7 @@ Server::Server(Server&& other) noexcept
       stop_requested_{other.stop_requested_.load(std::memory_order_relaxed)},
       active_{std::move(other.active_)} {
     other.database_id_ = object::DatabaseId{};
+    other.local_path_.clear();
     other.fail_after_.reset();
     other.small_buffers_ = false;
     {
@@ -155,14 +157,17 @@ Server::Server(Server&& other) noexcept
 }
 
 Server::~Server() {
+    if (!local_path_.empty()) {
+        static_cast<void>(local_listener_.close());
+        NativeSocket::remove_local(local_path_);
+    }
     if (database_id_.value != 0) {
         object::DatabaseRegistry::instance().detach(database_id_);
         database_id_ = object::DatabaseId{};
     }
 }
 
-Result<Server> Server::listen(const std::filesystem::path& path, std::string_view host,
-                              std::uint16_t port) {
+Result<Server> Server::open(const std::filesystem::path& path) {
     Result<object::Database> opened = object::Database::open(path);
     if (!opened) {
         if (opened.error().code == ErrorCode::file_not_found) {
@@ -186,20 +191,49 @@ Result<Server> Server::listen(const std::filesystem::path& path, std::string_vie
     if (const auto& current = database->current_baseline()) {
         baseline = current->id();
     }
+    return Server{std::move(database), *database_id, path.filename().string(), baseline};
+}
 
+Result<Server> Server::listen(const std::filesystem::path& path, std::string_view host,
+                              std::uint16_t port) {
+    auto server = open(path);
+    if (!server) {
+        return std::unexpected(server.error());
+    }
+    if (auto status = server->listen_tcp(host, port); !status) {
+        return std::unexpected(status.error());
+    }
+    return server;
+}
+
+Result<void> Server::listen_tcp(std::string_view host, std::uint16_t port) {
+    if (listener_.is_open()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "server already listens on TCP"});
+    }
     auto listener = NativeSocket::listen(host, port);
     if (!listener) {
-        object::DatabaseRegistry::instance().detach(*database_id);
         return std::unexpected(listener.error());
     }
     auto bound_port = listener->local_port();
     if (!bound_port) {
-        object::DatabaseRegistry::instance().detach(*database_id);
         return std::unexpected(bound_port.error());
     }
+    listener_ = std::move(*listener);
+    port_ = *bound_port;
+    return {};
+}
 
-    return Server{std::move(database), *database_id, std::move(*listener), *bound_port,
-                  path.filename().string(), baseline};
+Result<void> Server::listen_local(const std::filesystem::path& socket_path) {
+    if (!local_path_.empty()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "server already listens locally"});
+    }
+    auto listener = NativeSocket::listen_local(socket_path);
+    if (!listener) {
+        return std::unexpected(listener.error());
+    }
+    local_listener_ = std::move(*listener);
+    local_path_ = socket_path;
+    return {};
 }
 
 StreamStats Server::last_stream_stats() const noexcept {
@@ -331,11 +365,20 @@ Result<void> Server::serve_one() {
     return handle_connection(*peer);
 }
 
+Result<void> Server::serve_one_link() {
+    auto peer = local_listener_.accept();
+    if (!peer) {
+        return std::unexpected(peer.error());
+    }
+    return handle_link(*peer);
+}
+
 void Server::request_stop() noexcept {
     stop_requested_.store(true);
     static_cast<void>(listener_.close());
-    // Desligamento ativo: sessões ociosas estão bloqueadas lendo o socket e só
-    // perceberiam a parada no idle timeout; shutdown as acorda agora.
+    static_cast<void>(local_listener_.close());
+    // Desligamento ativo: sessões e links ociosos estão bloqueados lendo o
+    // socket e só perceberiam a parada no idle timeout; shutdown os acorda agora.
     if (active_) {
         const std::scoped_lock lock{active_->mu};
         for (auto& [id, socket] : active_->sockets) {
@@ -344,23 +387,13 @@ void Server::request_stop() noexcept {
     }
 }
 
-Result<void> Server::serve_forever() {
+Result<void> Server::accept_loop(NativeSocket& listener, bool link) {
     std::mutex sessions_mu;
     std::vector<std::thread> sessions;
     Result<void> loop_status{};
 
-    const auto join_sessions = [&] {
-        const std::scoped_lock lock{sessions_mu};
-        for (auto& session : sessions) {
-            if (session.joinable()) {
-                session.join();
-            }
-        }
-        sessions.clear();
-    };
-
     while (!stop_requested_.load()) {
-        auto peer = listener_.accept();
+        auto peer = listener.accept();
         if (!peer) {
             if (stop_requested_.load()) {
                 break;
@@ -368,7 +401,7 @@ Result<void> Server::serve_forever() {
             // Listener fechado externamente conta como parada limpa.
             if (peer.error().code == ErrorCode::connection_closed ||
                 peer.error().code == ErrorCode::io_error) {
-                if (!listener_.is_open()) {
+                if (!listener.is_open()) {
                     stop_requested_.store(true);
                     break;
                 }
@@ -377,7 +410,7 @@ Result<void> Server::serve_forever() {
             break;
         }
 
-        std::thread session_thread([this, peer = std::move(*peer)]() mutable {
+        std::thread session_thread([this, link, peer = std::move(*peer)]() mutable {
             std::uint64_t id = 0;
             {
                 const std::scoped_lock lock{active_->mu};
@@ -388,7 +421,11 @@ Result<void> Server::serve_forever() {
                     static_cast<void>(peer.shutdown());
                 }
             }
-            (void)handle_connection(peer);
+            if (link) {
+                static_cast<void>(handle_link(peer));
+            } else {
+                static_cast<void>(handle_connection(peer));
+            }
             const std::scoped_lock lock{active_->mu};
             active_->sockets.erase(id);
         });
@@ -397,8 +434,34 @@ Result<void> Server::serve_forever() {
             sessions.push_back(std::move(session_thread));
         }
     }
-    join_sessions();
+    const std::scoped_lock lock{sessions_mu};
+    for (auto& session : sessions) {
+        if (session.joinable()) {
+            session.join();
+        }
+    }
     return loop_status;
+}
+
+Result<void> Server::serve_forever() {
+    const bool tcp = listener_.is_open();
+    const bool local = local_listener_.is_open();
+    if (!tcp && !local) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "server has no listener"});
+    }
+    if (tcp && local) {
+        // Um laço por listener; se um parar, o outro para junto.
+        Result<void> link_status{};
+        std::thread links{[&] {
+            link_status = accept_loop(local_listener_, true);
+            request_stop();
+        }};
+        auto tcp_status = accept_loop(listener_, false);
+        request_stop();
+        links.join();
+        return tcp_status ? link_status : tcp_status;
+    }
+    return tcp ? accept_loop(listener_, false) : accept_loop(local_listener_, true);
 }
 
 } // namespace modb::net

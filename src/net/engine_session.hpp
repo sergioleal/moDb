@@ -14,6 +14,7 @@
 #include "modb/net/server.hpp"
 #include "modb/net/shm_ring.hpp"
 #include "modb/object/database.hpp"
+#include "modb/ops/caller.hpp"
 #include "modb/ops/facade_catalog.hpp"
 #include "modb/ops/operation_registry.hpp"
 #include "modb/query/operators.hpp"
@@ -78,6 +79,8 @@ struct EngineServices {
     std::function<void(const StreamStats&)> on_stream_stats{};
     // Parada do servidor inteiro (o anel shm a observa).
     const std::atomic<bool>* server_stop{nullptr};
+    // Quem é o cliente da sessão (dado pelo proxy no SessionOpen); anônimo no modo direto.
+    ops::Caller caller{};
 };
 
 // Executa um OpCall no engine e monta a resposta.

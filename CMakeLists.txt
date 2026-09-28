@@ -96,6 +96,7 @@ add_library(modb
     src/net/replication_protocol.cpp
     src/net/native_socket.cpp
     src/net/shm_ring.cpp
+    src/net/engine_link.cpp
     src/net/engine_session.cpp
     src/net/link_protocol.cpp
     src/net/server.cpp
@@ -672,6 +673,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.local_socket COMMAND modb_local_socket_tests)
     modb_add_test(modb_link_protocol_tests tests/link_protocol_test.cpp)
     add_test(NAME modb.link_protocol COMMAND modb_link_protocol_tests)
+    modb_add_test(modb_engine_link_tests tests/engine_link_test.cpp)
+    add_test(NAME modb.engine_link COMMAND modb_engine_link_tests)
+    set_tests_properties(modb.engine_link PROPERTIES TIMEOUT 120)
     if(MODB_BUILD_EXAMPLES)
         # Servidor de aplicação ponta a ponta: sobe o notas-server em outro processo.
         modb_add_test(modb_server_host_tests tests/server_host_test.cpp)

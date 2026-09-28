@@ -33,15 +33,18 @@ bool OperationRegistry::contains(std::string_view id) const {
 
 Result<OperationResult> OperationRegistry::dispatch(std::string_view id,
                                                     std::span<const std::byte> args,
-                                                    object::Database& database) {
+                                                    object::Database& database,
+                                                    const Caller* caller) {
+    const Caller& who = caller != nullptr ? *caller : anonymous_caller();
     const auto start = std::chrono::steady_clock::now();
     std::optional<OperationMode> mode;
-    auto result = dispatch_unobserved(id, args, database, mode);
+    auto result = dispatch_unobserved(id, args, database, who, mode);
     if (observer_) {
         const CallRecord record{.id = id,
                                 .mode = mode,
                                 .duration = std::chrono::steady_clock::now() - start,
-                                .error = result ? nullptr : &result.error()};
+                                .error = result ? nullptr : &result.error(),
+                                .caller = &who};
         try {
             observer_(record);
         } catch (...) {
@@ -63,6 +66,7 @@ Error timeout_error(std::chrono::milliseconds limit) {
 Result<OperationResult> OperationRegistry::dispatch_unobserved(std::string_view id,
                                                                std::span<const std::byte> args,
                                                                object::Database& database,
+                                                               const Caller& caller,
                                                                std::optional<OperationMode>& mode) {
     const auto found = factories_.find(std::string{id});
     if (found == factories_.end()) {
@@ -95,7 +99,7 @@ Result<OperationResult> OperationRegistry::dispatch_unobserved(std::string_view 
                 return std::unexpected(snap.error());
             }
             ObjectAccess access{database, nullptr, &*snap};
-            ExecutionContext context{std::move(access), logger, deadline};
+            ExecutionContext context{std::move(access), logger, deadline, &caller};
             auto result = (*operation)->execute(context);
             if (context.past_deadline()) {
                 return std::unexpected(timeout_error(time_limit_));
@@ -105,7 +109,7 @@ Result<OperationResult> OperationRegistry::dispatch_unobserved(std::string_view 
 
         return database.transact([&](object::Transaction& tx) -> Result<OperationResult> {
             ObjectAccess access{database, &tx, nullptr};
-            ExecutionContext context{std::move(access), logger, deadline};
+            ExecutionContext context{std::move(access), logger, deadline, &caller};
             auto result = (*operation)->execute(context);
             // Passou do prazo mesmo tendo "dado certo": desfaz, para o
             // resultado não depender de onde a operação conferiu o relógio.

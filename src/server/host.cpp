@@ -66,10 +66,14 @@ std::string call_line(const ops::OperationRegistry::CallRecord& call) {
     const double ms = std::chrono::duration<double, std::milli>(call.duration).count();
     std::string line = std::format("call {} {} {:.3f}ms ", call.id,
                                    !call.mode ? "-" : *call.mode == ops::OperationMode::read_only ? "read" : "write", ms);
-    if (call.error == nullptr) {
-        return line + "ok";
+    line += call.error == nullptr
+                ? std::string{"ok"}
+                : std::format("error {} {}", static_cast<unsigned>(call.error->code), call.error->message);
+    // Chamada que veio por um proxy com cliente identificado (ADR-028).
+    if (call.caller != nullptr && !call.caller->anonymous()) {
+        line += " by " + call.caller->principal;
     }
-    return line + std::format("error {} {}", static_cast<unsigned>(call.error->code), call.error->message);
+    return line;
 }
 
 constexpr std::string_view k_sys_procs_description = "As procs deste servidor: nome, modo, módulo e descrição";

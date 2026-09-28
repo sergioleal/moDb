@@ -28,7 +28,7 @@ OpResult execute_op_call(const EngineServices& services, const OpCall& call) {
     }
     // Sem lock do servidor (C11): procs de leitura correm juntas; as de escrita
     // abrem transação, e `Database::begin` as põe uma de cada vez.
-    auto outcome = services.operations->dispatch(call.operation_id, call.args, *services.database);
+    auto outcome = services.operations->dispatch(call.operation_id, call.args, *services.database, &services.caller);
     if (outcome) {
         reply.ok = true;
         reply.payload = std::move(outcome->payload);

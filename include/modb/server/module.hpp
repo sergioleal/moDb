@@ -71,6 +71,9 @@ public:
     [[nodiscard]] bool writable() const noexcept { return context_->writable(); }
     [[nodiscard]] object::Database& database() noexcept { return context_->objects().database(); }
     [[nodiscard]] ops::Logger& log() noexcept { return context_->logger(); }
+    // Quem chamou: o principal, as roles e os atributos que o proxy deu na
+    // abertura da sessão (ADR-028); anônimo sem proxy.
+    [[nodiscard]] const ops::Caller& caller() const noexcept { return context_->caller(); }
     // Data de hoje (UTC) no relógio do servidor.
     [[nodiscard]] static std::chrono::sys_days today() {
         return std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now());

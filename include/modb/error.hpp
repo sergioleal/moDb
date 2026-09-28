@@ -165,6 +165,10 @@ enum class ErrorCode {
     internal_error,
     // A stored procedure passou do tempo máximo configurado: a transação foi desfeita.
     operation_timeout,
+    // O cliente não se autenticou, ou a credencial foi recusada (proxy, ADR-028).
+    unauthenticated,
+    // O cliente autenticado não pode fazer o que pediu (política do proxy, ADR-028).
+    permission_denied,
 };
 
 // Reúne o código estável do erro e uma mensagem explicativa.

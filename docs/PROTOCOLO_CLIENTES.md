@@ -67,6 +67,8 @@ ordem dos pedidos de uma conexão. `code` é o `modb::ErrorCode`
 | 70 | `conflict` | conflito com o estado atual |
 | 71 | `internal_error` | a proc falhou (exceção); a transação foi desfeita |
 | 72 | `operation_timeout` | passou do tempo limite do servidor; desfeita |
+| 73 | `unauthenticated` | o proxy exige autenticação, ou a credencial foi recusada |
+| 74 | `permission_denied` | a política do proxy não permite o pedido |
 
 Os valores numéricos seguem a ordem do enum; confira no `error.hpp` da versão do
 servidor (`sys.procs` e `modb procs` listam as procs e os argumentos esperados).

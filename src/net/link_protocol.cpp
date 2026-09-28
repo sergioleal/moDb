@@ -308,6 +308,24 @@ Result<void> send_link_frame(NativeSocket& socket, const LinkFrame& frame) {
     return socket.send_all(*encoded);
 }
 
+Result<void> send_link_message(NativeSocket& socket, std::uint32_t session, const Message& message) {
+    if (session == link_control_session) {
+        return std::unexpected(make_protocol("client message on the link control session"));
+    }
+    auto encoded = encode_message(message);
+    if (!encoded) {
+        return std::unexpected(encoded.error());
+    }
+    std::array<std::byte, 4> prefix{};
+    storage::store_le<std::uint32_t>(std::span<std::byte>{prefix}, session);
+    // Um send só: frames de sessões diferentes se intercalam por mensagem inteira.
+    std::vector<std::byte> out;
+    out.reserve(prefix.size() + encoded->size());
+    out.insert(out.end(), prefix.begin(), prefix.end());
+    out.insert(out.end(), encoded->begin(), encoded->end());
+    return socket.send_all(out);
+}
+
 Result<LinkFrame> recv_link_frame(NativeSocket& socket) {
     std::array<std::byte, k_header_bytes> header{};
     if (auto status = socket.recv_exact(header); !status) {

@@ -60,23 +60,23 @@ Escolhas (2026-09-28):
 - [x] 3.3 *(`tests/link_protocol_test.cpp`)* Testes de codec: ida e volta, entradas hostis, `session` desconhecida,
   frame grande demais.
 
-#### X4 — Engine atende o link *(grande)*
+#### X4 — Engine atende o link *(grande)* ✅
 
-- [ ] 4.1 `Engine` (ou um modo do `Server`): aceita links no endpoint local;
+- [x] 4.1 *(modo do `Server`: `Server::open` + `listen_tcp`/`listen_local`; `serve_forever` atende os dois; `src/net/engine_link.cpp`)* `Engine` (ou um modo do `Server`): aceita links no endpoint local;
   por link, uma thread leitora que despacha por `session` para a
   `EngineSession` certa; a escrita no link é serializada por link.
-- [ ] 4.2 `LinkSink`: envia com o `session` no frame; `ObjectFrame` só com
+- [x] 4.2 `LinkSink`: envia com o `session` no frame; `ObjectFrame` só com
   crédito do stream (`StreamCredit`); um stream sem crédito espera sem
   bloquear as outras sessões do link.
-- [ ] 4.3 OpCalls de sessões diferentes não se bloqueiam: execução num pool de
+- [x] 4.3 *(pool por link, `set_link_workers`; cada sessão é uma fila que um worker drena até 16 mensagens por vez)* OpCalls de sessões diferentes não se bloqueiam: execução num pool de
   workers do engine (o modo TCP de hoje executa na thread da sessão); por
   sessão, as respostas continuam na ordem das chamadas.
-- [ ] 4.4 `SessionClose` e queda do link: cancela streams, junta workers,
+- [x] 4.4 *(e o engine manda `SessionClose` quando encerra uma sessão, ou quando chega mensagem para sessão desconhecida)* `SessionClose` e queda do link: cancela streams, junta workers,
   descarta as sessões do link.
-- [ ] 4.5 Principal da sessão no `ExecutionContext` das procs (só leitura).
-- [ ] 4.6 Segredo compartilhado opcional no `LinkHello` (arquivo com o segredo,
+- [x] 4.5 *(`ops::Caller` em `ExecutionContext::caller()` e `server::Context::caller()`; o log de chamadas ganha `by <principal>`)* Principal da sessão no `ExecutionContext` das procs (só leitura).
+- [x] 4.6 *(`Server::set_link_secret`; erro novo `unauthenticated`, e `permission_denied` para a X7)* Segredo compartilhado opcional no `LinkHello` (arquivo com o segredo,
   comparado em tempo constante).
-- [ ] 4.7 Testes: duas sessões num link com um stream lento e um rápido (o
+- [x] 4.7 *(`tests/engine_link_test.cpp`, também no TSan)* Testes: duas sessões num link com um stream lento e um rápido (o
   rápido não espera o lento); Cancel via link; queda do link no meio de um
   stream; limite de streams por sessão.
 

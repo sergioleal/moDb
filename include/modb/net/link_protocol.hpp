@@ -130,6 +130,8 @@ inline constexpr std::size_t max_link_attributes = 256;
 [[nodiscard]] Result<LinkFrame> decode_link_frame(std::span<const std::byte> bytes);
 
 [[nodiscard]] Result<void> send_link_frame(NativeSocket& socket, const LinkFrame& frame);
+// Uma mensagem do cliente numa sessão, sem copiar a mensagem para um LinkFrame.
+[[nodiscard]] Result<void> send_link_message(NativeSocket& socket, std::uint32_t session, const Message& message);
 [[nodiscard]] Result<LinkFrame> recv_link_frame(NativeSocket& socket);
 
 } // namespace modb::net

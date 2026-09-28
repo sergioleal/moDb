@@ -49,11 +49,22 @@ public:
     Server& operator=(Server&&) = delete;
     ~Server();
 
+    // Abre (ou cria) o banco e escuta em TCP: o modo direto, sem proxy.
     [[nodiscard]] static Result<Server> listen(const std::filesystem::path& path,
                                                std::string_view host = "127.0.0.1",
                                                std::uint16_t port = 0);
+    // Abre (ou cria) o banco sem escutar nada; depois `listen_tcp` e/ou
+    // `listen_local` (ADR-028: o engine atrás de proxies escuta só local).
+    [[nodiscard]] static Result<Server> open(const std::filesystem::path& path);
 
+    [[nodiscard]] Result<void> listen_tcp(std::string_view host, std::uint16_t port);
+    // Link dos proxies num socket AF_UNIX (ADR-028). O arquivo sai no destrutor.
+    [[nodiscard]] Result<void> listen_local(const std::filesystem::path& socket_path);
+
+    // 0 = sem TCP.
     [[nodiscard]] std::uint16_t port() const noexcept { return port_; }
+    // Vazio = sem link local.
+    [[nodiscard]] const std::filesystem::path& local_path() const noexcept { return local_path_; }
     [[nodiscard]] std::string_view database_name() const noexcept { return database_name_; }
     [[nodiscard]] object::BaselineId baseline() const noexcept { return baseline_; }
     [[nodiscard]] StreamStats last_stream_stats() const noexcept;
@@ -81,11 +92,19 @@ public:
     void set_facade_catalog(std::shared_ptr<ops::FacadeCatalog> catalog) noexcept {
         facades_ = std::move(catalog);
     }
+    // Segredo que o proxy manda no LinkHello (vazio = nenhum, só a permissão
+    // do socket protege o link).
+    void set_link_secret(std::string secret) { link_secret_ = std::move(secret); }
+    // Threads que executam as mensagens das sessões de um link (0 = núcleos da máquina).
+    void set_link_workers(std::size_t workers) noexcept { link_workers_ = workers; }
 
     // Aceita uma conexão e mantém a sessão até o peer fechar (Hello + Queries/OpCalls).
     [[nodiscard]] Result<void> serve_one();
 
-    // Aceita sessões em loop até `request_stop()` ou falha do listener.
+    // Aceita um link de proxy e o atende até ele fechar.
+    [[nodiscard]] Result<void> serve_one_link();
+
+    // Aceita sessões TCP e links em loop até `request_stop()` ou falha de um listener.
     [[nodiscard]] Result<void> serve_forever();
 
     // Fecha o listener para despertar `accept` e encerrar o loop (SIGINT/SIGTERM).
@@ -94,10 +113,13 @@ public:
 
 private:
     Server(std::shared_ptr<object::Database> database, object::DatabaseId database_id,
-           NativeSocket listener, std::uint16_t port, std::string database_name,
-           object::BaselineId baseline);
+           std::string database_name, object::BaselineId baseline);
 
     [[nodiscard]] Result<void> handle_connection(NativeSocket& peer);
+    // Um link de proxy: muitas sessões multiplexadas (engine_link.cpp).
+    [[nodiscard]] Result<void> handle_link(NativeSocket& peer);
+    // Laço de accept de um listener; `link` escolhe o tratamento da conexão.
+    [[nodiscard]] Result<void> accept_loop(NativeSocket& listener, bool link);
     // O que uma sessão nova usa do engine (configuração corrente do servidor).
     [[nodiscard]] EngineServices session_services();
 
@@ -105,6 +127,10 @@ private:
     object::DatabaseId database_id_{};
     NativeSocket listener_;
     std::uint16_t port_{0};
+    NativeSocket local_listener_;
+    std::filesystem::path local_path_{};
+    std::string link_secret_{};
+    std::size_t link_workers_{0};
     std::string database_name_;
     object::BaselineId baseline_{};
     std::optional<std::size_t> fail_after_{};
