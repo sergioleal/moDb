@@ -156,7 +156,7 @@ Escolhas (2026-09-28):
 
 - [ ] 12.1 Remover `--listen-tcp` e o `SocketSink` externo do engine (o modo
   direto fica só para testes, se ainda servir).
-- [ ] 12.2 Atualizar `docs/reference/networking-protocol.md`, o DEVELOPER_GUIDE,
+- [ ] 12.2 *(parcial: `networking-protocol.md` §2.7, `OPERACAO.md` e `PROTOCOLO_CLIENTES.md` atualizados; faltam o DEVELOPER_GUIDE, o treinamento 08/09 e o RASTREADOR, junto com a 12.1)* Atualizar `docs/reference/networking-protocol.md`, o DEVELOPER_GUIDE,
   o treinamento (08, 09) e o RASTREADOR.
 
 ## Fora do escopo

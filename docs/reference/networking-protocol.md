@@ -137,6 +137,43 @@ a single background reader thread per connection
 *caller's* thread, per ADR-011 — there is no hidden thread-pool executor
 scheduling your continuations onto arbitrary threads.
 
+### 2.7 Remote access through proxies (ADR-028)
+
+A deployment can keep the engine off the network: the engine listens only on a
+local socket (`Server::open` + `listen_local`, or `local = ...` in a
+`modb_add_server` config) and one or more `modb-proxy` processes face the
+clients. The client protocol does not change — a client that talked to the
+server talks to a proxy the same way.
+
+```text
+client ──TCP──► modb-proxy ──link (AF_UNIX, multiplexed)──► engine
+```
+
+- **Link.** One connection carries every client session of a proxy. Each frame
+  is a client frame prefixed with its session number
+  (`| session u32 | length u32 | type u8 | payload |`,
+  `include/modb/net/link_protocol.hpp`). Control messages use types ≥ `0x80`:
+  `LinkHello`/`LinkHelloOk` (version, optional shared secret, and the engine's
+  operation catalog), `SessionOpen` (the principal the proxy authenticated),
+  `SessionClose`, `StreamCredit`.
+- **Flow control.** On a shared link the TCP window cannot be the
+  backpressure: the engine sends a query's `ObjectFrame`s only against
+  per-stream credit, which the proxy returns as it delivers frames to the
+  client. A client that stops reading stalls only its own streams.
+- **Policy.** The proxy decodes every client message and runs it through a
+  `modb::proxy::Policy` (`include/modb/proxy/policy.hpp`): `authenticate`,
+  `authorize` (allow, deny, or rewrite in place), `on_response`, `audit`, and
+  `on_engine` for the catalog. Reference policies: token authentication,
+  allowlist, read-only, per-principal limits, audit log, composed by
+  `PolicyChain` (`include/modb/proxy/policies.hpp`).
+- **Identity.** The engine does not check credentials; it trusts the link and
+  hands the session's principal, roles and attributes to procs as
+  `ops::ExecutionContext::caller()` (`modb::server::Context::caller()`).
+- **Authentication (protocol minor 2).** A proxy that requires it lists the
+  mechanisms at the end of `HelloOk`; the client sends `Authenticate`
+  (`Client::authenticate_token`, `ConnectionOptions::token`). Until then every
+  request is answered with `unauthenticated`.
+
 ## 3. API Reference
 
 ### 3.1 `Server`
@@ -287,13 +324,19 @@ acceptor.join();
 - [reference/domain-operations.md](domain-operations.md) — what
   `set_operation_registry`/`call` actually invoke
 - [ADR-010](../decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md),
-  [ADR-011](../decisions/ADR-011-concorrencia-do-servidor.md)
+  [ADR-011](../decisions/ADR-011-concorrencia-do-servidor.md),
+  [ADR-028](../decisions/ADR-028-proxy-de-acesso-remoto.md) (proxies)
+- [OPERACAO.md](../OPERACAO.md), "Proxy de acesso remoto" — running `modb-proxy`
 
 ## 8. Related Source
 
 - `include/modb/net/server.hpp`, `client.hpp`, `protocol.hpp`,
   `native_socket.hpp`, `query_description.hpp`
 - `include/modb/app/server_connection.hpp`
+- `include/modb/net/link_protocol.hpp`, `src/net/engine_link.cpp`,
+  `src/net/engine_session.hpp` (the engine side of the link)
+- `include/modb/proxy/` (`proxy.hpp`, `policy.hpp`, `policies.hpp`,
+  `token_policy.hpp`), `apps/modb_proxy/main.cpp`
 - `examples/server/by_phase/phase_08/connect_query.cpp`,
   `phase_10/handshake_capabilities.cpp`
 - `tests/server_streaming_tests.cpp`, `tests/protocol_tests.cpp`,

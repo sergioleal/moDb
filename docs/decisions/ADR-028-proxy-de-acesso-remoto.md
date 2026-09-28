@@ -1,6 +1,6 @@
 # ADR-028 — Acesso remoto por proxies: o engine só fala localmente
 
-- Estado: proposto
+- Estado: aceito (implementado em `feat/proxy`, PLANO_PROXY X1–X7, X9–X11)
 - Data: 2026-09-28
 - Relacionados: ADR-010 (protocolo binário), ADR-011 (concorrência do servidor),
   ADR-025 (servidor com procs compiladas), ADR-026 (memória compartilhada),
@@ -109,6 +109,28 @@ cópia nem outro codec. As mensagens de controle do link usam tipos a partir de
 | Uma conexão local por cliente | mais simples (sem crédito, sem `session`), mas um descritor e uma thread no engine por cliente, e um proxy com 10 mil clientes abriria 10 mil conexões locais |
 | Segurança dentro do engine | cada política nova exigiria recompilar o servidor de cada aplicação; um defeito na borda roda no processo que tem o arquivo |
 | Proxy dentro do processo do engine (plugin) | mesmo problema de isolamento; fica só como modo de transição (`--listen-tcp`) |
+
+## Notas da implementação
+
+- **Catálogo no link.** O `LinkHelloOk` leva as operações do engine e o modo de
+  cada uma (`OperationRegistry::list`); o proxy o entrega às políticas por
+  `Policy::on_engine` a cada abertura do link. É o que a política `read_only`
+  usa, sem depender de `sys.procs`.
+- **Autenticação no protocolo do cliente (minor 2).** `Authenticate` /
+  `AuthenticateOk` logo depois do `HelloOk`, que lista os mecanismos. Antes de
+  autenticar, o proxy responde cada pedido com `unauthenticated` (um cliente
+  antigo recebe erros claros, não uma conexão fechada); três recusas fecham.
+  O engine direto responde `AuthenticateOk{ok = false}`.
+- **Anel shm no proxy.** O anel de um cliente ganha uma sessão própria no
+  engine, com o mesmo chamador; as respostas dela saem pelo anel.
+- **Execução no engine.** Por link, um pool de workers; cada sessão é uma fila
+  que um worker drena (as respostas saem na ordem das chamadas), e sessões
+  diferentes rodam em paralelo. `Cancel` e crédito não entram na fila.
+- **Windows.** `connect` num AF_UNIX sob `%LOCALAPPDATA%` falhou com
+  `WSAEINVAL` na máquina de desenvolvimento; os testes põem o socket no
+  diretório do build.
+- **Pendente.** TLS no proxy (X8: escolha da biblioteca), a medição direto ×
+  proxy na máquina dedicada (X10.2) e o fim do TCP direto no engine (X12.1).
 
 ## Consequências
 
