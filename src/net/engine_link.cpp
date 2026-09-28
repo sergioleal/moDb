@@ -348,6 +348,11 @@ Result<void> Server::handle_link(NativeSocket& peer) {
     LinkHelloOk reply{.baseline = baseline_,
                       .database_name = database_name_,
                       .max_concurrent_streams = max_concurrent_streams_};
+    if (operations_) {
+        for (auto& [id, mode] : operations_->list()) {
+            reply.operations.emplace_back(std::move(id), mode == ops::OperationMode::read_only);
+        }
+    }
     if (hello->version != link_version) {
         reply.ok = false;
         reply.code = ErrorCode::incompatible_protocol_version;

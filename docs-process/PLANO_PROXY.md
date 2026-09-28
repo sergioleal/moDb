@@ -111,15 +111,15 @@ Escolhas (2026-09-28):
   primeiro mecanismo; outros mecanismos entram como políticas.
 - [x] 6.3 *(`Client::authenticate`/`authenticate_token`, `ConnectionOptions::token`; o cliente Python ganhou `token=` e `authenticate()`; `docs/PROTOCOLO_CLIENTES.md` §2.1; `tests/proxy_auth_test.cpp`)* `Client`/`ServerConnection`: `authenticate(...)` opcional.
 
-#### X7 — Políticas de referência *(médio)*
+#### X7 — Políticas de referência *(médio)* ✅
 
-- [ ] 7.1 `read_only`: recusa procs `read_write` (o modo vem do catálogo de
+- [x] 7.1 *(o modo vem no `LinkHelloOk` — `OperationRegistry::list()` — e chega às políticas por `Policy::on_engine` a cada abertura do link; proc desconhecida também é recusada)* `read_only`: recusa procs `read_write` (o modo vem do catálogo de
   procs do engine, `sys.procs`).
-- [ ] 7.2 `allowlist`: procs, facades e consultas permitidas por role, lidas de
+- [x] 7.2 *(`<role|user:NOME|*> <call|query|facade|*> <alvo>`; consulta pelo id numérico do tipo — o proxy não conhece os nomes dos tipos)* `allowlist`: procs, facades e consultas permitidas por role, lidas de
   um arquivo de configuração.
-- [ ] 7.3 Auditoria: uma linha por chamada (principal, operação, resultado,
+- [x] 7.3 *(`AuditLogPolicy`; o proxy também audita a autenticação e, quando o cliente sai, os pedidos que ficaram sem resposta)* Auditoria: uma linha por chamada (principal, operação, resultado,
   duração) no mesmo formato do log do `server_host`.
-- [ ] 7.4 Limites por principal: chamadas/s e streams abertos.
+- [x] 7.4 *(`RateLimitPolicy`: balde por principal, anônimos pela máquina; streams contados até a auditoria fechar cada um; `PolicyChain` compõe tudo na ordem token → allowlist → read_only → limites → auditoria; `tests/proxy_policies_test.cpp`)* Limites por principal: chamadas/s e streams abertos.
 
 #### X8 — TLS no proxy *(médio)*
 

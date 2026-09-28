@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,6 +48,21 @@ struct Decision {
     [[nodiscard]] static Decision deny(std::string message, ErrorCode code = ErrorCode::permission_denied) {
         return Decision{.allowed = false, .code = code, .message = std::move(message)};
     }
+};
+
+// O engine atrás do proxy, a cada abertura do link (inclusive reconexões).
+struct EngineInfo {
+    std::string database_name{};
+    std::uint64_t baseline{0};
+    struct Operation {
+        std::string id;
+        bool read_only{false};
+    };
+    // Em ordem de id.
+    std::vector<Operation> operations{};
+
+    // Modo da operação; vazio = o engine não a tem.
+    [[nodiscard]] std::optional<bool> read_only(std::string_view id) const;
 };
 
 // Um pedido concluído (ou recusado pela política).
@@ -89,6 +105,10 @@ public:
     virtual void on_response(const ops::Caller& caller, net::Message& response);
 
     virtual void audit(const AuditRecord& record);
+
+    // O link com o engine abriu (ou reabriu): o catálogo pode ter mudado.
+    // Chamado da thread do link, junto com as outras chamadas dos clientes.
+    virtual void on_engine(const EngineInfo& engine);
 };
 
 // Deixa tudo passar, sem autenticação.

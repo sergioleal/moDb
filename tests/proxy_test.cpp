@@ -347,7 +347,7 @@ int main() {
             return std::find(records.begin(), records.end(), line) != records.end();
         };
         suite.check(has("call t.whoami ok 0 cliente") && has("call t.secret fail denied 0 cliente") &&
-                        has("call t.nada fail 0 cliente") && has("query type " + std::to_string(type_id.value) + " ok " +
+                        has("call t.nada fail 0 cliente") && has("query " + std::to_string(type_id.value) + " ok " +
                                                                  std::to_string(total) + " cliente"),
                     "auditoria de chamadas, recusas e consultas");
     }

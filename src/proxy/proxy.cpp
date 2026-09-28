@@ -85,7 +85,7 @@ struct RequestKey {
         return RequestKey{"call", call->call_id, call->operation_id};
     }
     if (const auto* query = std::get_if<net::Query>(&request)) {
-        return RequestKey{"query", query->query_id, "type " + std::to_string(query->description.type.value)};
+        return RequestKey{"query", query->query_id, std::to_string(query->description.type.value)};
     }
     if (const auto* list = std::get_if<net::FacadeList>(&request)) {
         return RequestKey{"facade_list", list->request_id, {}};
@@ -225,6 +225,14 @@ struct Proxy::Impl {
     }
 
     void set_link(std::shared_ptr<net::NativeSocket> socket, const net::LinkHelloOk& hello) {
+        // A política vê o catálogo antes do primeiro cliente deste link.
+        EngineInfo info{.database_name = hello.database_name, .baseline = hello.baseline.value};
+        for (const auto& [id, read_only] : hello.operations) {
+            info.operations.push_back(EngineInfo::Operation{.id = id, .read_only = read_only});
+        }
+        std::sort(info.operations.begin(), info.operations.end(),
+                  [](const auto& a, const auto& b) { return a.id < b.id; });
+        policy->on_engine(info);
         const std::scoped_lock lock{link_mu};
         link = std::move(socket);
         engine = hello;
@@ -636,6 +644,23 @@ struct Proxy::Impl {
         }
         session->close_out();
         writer.join();
+        // O que ficou sem resposta também é auditado: a auditoria fecha a
+        // conta de cada pedido (e os limites por principal dependem disso).
+        std::vector<Pending> abandoned;
+        {
+            const std::scoped_lock lock{session->pending_mu};
+            for (auto* pending : {&session->calls, &session->queries, &session->facades}) {
+                for (auto& [request_id, entry] : *pending) {
+                    (void)request_id;
+                    abandoned.push_back(std::move(entry));
+                }
+                pending->clear();
+            }
+        }
+        for (const auto& entry : abandoned) {
+            audit(*session, entry.kind, entry.target, entry.start, false, ErrorCode::connection_closed,
+                  "client left before the answer", entry.objects, false);
+        }
     }
 
     void request_stop() noexcept {

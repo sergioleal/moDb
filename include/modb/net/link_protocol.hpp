@@ -69,6 +69,8 @@ struct LinkHelloOk {
     object::BaselineId baseline{};
     std::string database_name{};
     std::uint16_t max_concurrent_streams{default_max_concurrent_streams};
+    // As operações do engine e se cada uma só lê (políticas do proxy, X7).
+    std::vector<std::pair<std::string, bool>> operations{};
 
     friend bool operator==(const LinkHelloOk&, const LinkHelloOk&) = default;
 };
@@ -123,6 +125,7 @@ struct LinkFrame {
 // Limites do link: frames do protocolo do cliente (16 MiB) e strings.
 inline constexpr std::size_t max_link_roles = 256;
 inline constexpr std::size_t max_link_attributes = 256;
+inline constexpr std::size_t max_link_operations = 65'535;
 
 [[nodiscard]] Result<std::vector<std::byte>> encode_link_frame(const LinkFrame& frame);
 // `bytes` = um frame completo (session + length + type + payload). Entradas

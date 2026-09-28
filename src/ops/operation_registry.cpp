@@ -1,5 +1,7 @@
 #include "modb/ops/operation_registry.hpp"
 
+#include <algorithm>
+
 #include "modb/ops/execution_context.hpp"
 #include "modb/ops/object_access.hpp"
 
@@ -29,6 +31,16 @@ Result<void> OperationRegistry::register_factory(std::string id, OperationFactor
 
 bool OperationRegistry::contains(std::string_view id) const {
     return factories_.contains(std::string{id});
+}
+
+std::vector<std::pair<std::string, OperationMode>> OperationRegistry::list() const {
+    std::vector<std::pair<std::string, OperationMode>> out;
+    out.reserve(factories_.size());
+    for (const auto& [id, entry] : factories_) {
+        out.emplace_back(id, entry.mode);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 Result<OperationResult> OperationRegistry::dispatch(std::string_view id,

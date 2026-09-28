@@ -14,6 +14,8 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace modb::ops {
 
@@ -50,6 +52,9 @@ public:
     }
 
     [[nodiscard]] bool contains(std::string_view id) const;
+    // As operações registradas e o modo de cada uma, em ordem de id (o
+    // catálogo que o engine passa aos proxies, ADR-028).
+    [[nodiscard]] std::vector<std::pair<std::string, OperationMode>> list() const;
     [[nodiscard]] std::size_t size() const noexcept { return factories_.size(); }
 
     // begin → execute → commit; erro/exceção → rollback. `caller` = quem chama

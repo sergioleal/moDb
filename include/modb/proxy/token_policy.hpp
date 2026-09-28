@@ -67,6 +67,7 @@ public:
     [[nodiscard]] Decision authorize(const ops::Caller& caller, net::Message& request) override;
     void on_response(const ops::Caller& caller, net::Message& response) override;
     void audit(const AuditRecord& record) override;
+    void on_engine(const EngineInfo& engine) override;
 
 private:
     TokenStore tokens_;

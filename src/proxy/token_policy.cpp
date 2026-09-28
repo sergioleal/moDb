@@ -255,4 +255,6 @@ void TokenPolicy::on_response(const ops::Caller& caller, net::Message& response)
 
 void TokenPolicy::audit(const AuditRecord& record) { inner_->audit(record); }
 
+void TokenPolicy::on_engine(const EngineInfo& engine) { inner_->on_engine(engine); }
+
 } // namespace modb::proxy

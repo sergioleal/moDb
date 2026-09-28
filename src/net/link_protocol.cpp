@@ -100,6 +100,14 @@ Result<void> encode_control(storage::BinaryWriter& writer, const LinkControl& co
                 writer.write_u64(message.baseline.value);
                 MODB_LINK_TRY(write_string(writer, message.database_name));
                 writer.write_u16(message.max_concurrent_streams);
+                if (message.operations.size() > max_link_operations) {
+                    return std::unexpected(Error{ErrorCode::value_too_large, "too many operations in LinkHelloOk"});
+                }
+                writer.write_u32(static_cast<std::uint32_t>(message.operations.size()));
+                for (const auto& [id, read_only] : message.operations) {
+                    MODB_LINK_TRY(write_string(writer, id));
+                    writer.write_u8(read_only ? 1 : 0);
+                }
             } else if constexpr (std::is_same_v<T, SessionOpen>) {
                 if (message.roles.size() > max_link_roles || message.attributes.size() > max_link_attributes) {
                     return std::unexpected(Error{ErrorCode::value_too_large, "too many roles or attributes"});
@@ -156,6 +164,18 @@ Result<LinkControl> decode_control(LinkMessageType type, storage::BinaryReader& 
         MODB_LINK_READ(message.baseline.value, reader.read_u64());
         MODB_LINK_READ(message.database_name, read_string(reader));
         MODB_LINK_READ(message.max_concurrent_streams, reader.read_u16());
+        std::uint32_t operations = 0;
+        MODB_LINK_READ(operations, reader.read_u32());
+        if (operations > max_link_operations) {
+            return std::unexpected(make_protocol("LinkHelloOk has too many operations"));
+        }
+        for (std::uint32_t i = 0; i < operations; ++i) {
+            std::string id;
+            bool read_only = false;
+            MODB_LINK_READ(id, read_string(reader));
+            MODB_LINK_READ(read_only, read_bool(reader, "operation read_only"));
+            message.operations.emplace_back(std::move(id), read_only);
+        }
         return message;
     }
     case LinkMessageType::session_open: {

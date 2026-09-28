@@ -5,6 +5,7 @@
 //
 // Imprime "READY <porta>" quando já aceita clientes; SIGINT/SIGTERM param limpo.
 
+#include "modb/proxy/policies.hpp"
 #include "modb/proxy/proxy.hpp"
 #include "modb/proxy/token_policy.hpp"
 
@@ -32,6 +33,11 @@ struct Settings {
     std::string policy{"passthrough"};
     // Arquivo de tokens (vazio = sem autenticação).
     std::filesystem::path tokens{};
+    std::filesystem::path allowlist{};
+    // Destino da auditoria: vazio/off = nenhum, "stderr", ou um arquivo.
+    std::string audit{};
+    std::uint32_t max_calls_per_second{0};
+    std::uint32_t max_streams_per_principal{0};
 };
 
 Error invalid(std::string message) { return Error{ErrorCode::invalid_argument, std::move(message)}; }
@@ -113,6 +119,15 @@ Result<void> apply_setting(Settings& settings, std::string_view key, std::string
         settings.policy = std::string{value};
     } else if (key == "tokens") {
         settings.tokens = resolve(base, value);
+    } else if (key == "allowlist") {
+        settings.allowlist = resolve(base, value);
+    } else if (key == "audit") {
+        settings.audit = value.empty() || value == "off" || value == "stderr" ? std::string{value}
+                                                                             : resolve(base, value).string();
+    } else if (key == "max_calls_per_second") {
+        return set_number(settings.max_calls_per_second);
+    } else if (key == "max_streams_per_principal") {
+        return set_number(settings.max_streams_per_principal);
     } else {
         return std::unexpected(invalid("unknown setting: " + std::string{key}));
     }
@@ -186,21 +201,48 @@ Result<Settings> parse(std::span<char* const> args, bool& help) {
     return settings;
 }
 
+// Monta a cadeia na ordem da PolicyChain: autenticação, allowlist, só leitura,
+// limites (contam só o que vai ao engine) e auditoria.
 Result<std::shared_ptr<modb::proxy::Policy>> make_policy(const Settings& settings) {
-    std::shared_ptr<modb::proxy::Policy> policy;
-    if (settings.policy == "passthrough") {
-        policy = std::make_shared<modb::proxy::PassThroughPolicy>();
-    } else {
-        return std::unexpected(invalid("unknown policy: " + settings.policy));
-    }
+    using namespace modb::proxy;
+    std::vector<std::shared_ptr<Policy>> chain;
     if (!settings.tokens.empty()) {
-        auto tokens = modb::proxy::TokenStore::load(settings.tokens);
+        auto tokens = TokenStore::load(settings.tokens);
         if (!tokens) {
             return std::unexpected(tokens.error());
         }
-        policy = std::make_shared<modb::proxy::TokenPolicy>(std::move(*tokens), std::move(policy));
+        chain.push_back(std::make_shared<TokenPolicy>(std::move(*tokens), std::make_shared<PassThroughPolicy>()));
     }
-    return policy;
+    if (!settings.allowlist.empty()) {
+        auto allowlist = AllowlistPolicy::load(settings.allowlist);
+        if (!allowlist) {
+            return std::unexpected(allowlist.error());
+        }
+        chain.push_back(std::move(*allowlist));
+    }
+    if (settings.policy == "read_only") {
+        chain.push_back(std::make_shared<ReadOnlyPolicy>());
+    } else if (settings.policy != "passthrough") {
+        return std::unexpected(invalid("unknown policy: " + settings.policy + " (passthrough or read_only)"));
+    }
+    if (settings.max_calls_per_second != 0 || settings.max_streams_per_principal != 0) {
+        chain.push_back(
+            std::make_shared<RateLimitPolicy>(settings.max_calls_per_second, settings.max_streams_per_principal));
+    }
+    if (settings.audit == "stderr") {
+        chain.push_back(AuditLogPolicy::to_stream(std::cerr));
+    } else if (!settings.audit.empty() && settings.audit != "off") {
+        static std::ofstream audit_file;
+        audit_file.open(settings.audit, std::ios::app);
+        if (!audit_file) {
+            return std::unexpected(invalid("cannot open audit file: " + settings.audit));
+        }
+        chain.push_back(AuditLogPolicy::to_stream(audit_file));
+    }
+    if (chain.empty()) {
+        return std::shared_ptr<Policy>{std::make_shared<PassThroughPolicy>()};
+    }
+    return std::shared_ptr<Policy>{std::make_shared<PolicyChain>(std::move(chain))};
 }
 
 // modb-proxy hash-token <token> <principal> [role,role]: a linha do arquivo de tokens.
@@ -229,7 +271,11 @@ constexpr std::string_view k_usage =
     "  --secret-file FILE     link secret shared with the engine\n"
     "  --host HOST            listen address (default 127.0.0.1)\n"
     "  --port N               TCP port for clients (default 7474; 0 = any free port)\n"
-    "  --policy NAME          passthrough (default)\n"
+    "  --policy NAME          passthrough (default) or read_only (only read procs)\n"
+    "  --allowlist FILE       only what the rules allow ('<role|user:NAME|*> <call|query|facade|*> <target>')\n"
+    "  --audit FILE|stderr    one line per request (default off)\n"
+    "  --max-calls-per-second N      per principal (anonymous: per host); 0 = no limit\n"
+    "  --max-streams-per-principal N open streams per principal; 0 = no limit\n"
     "  --tokens FILE          require a token (lines 'sha256:<hex> principal [roles]')\n"
     "  --name NAME            proxy name in the engine logs (default modb-proxy)\n"
     "  --idle-timeout-ms N    close idle clients after N ms\n"
