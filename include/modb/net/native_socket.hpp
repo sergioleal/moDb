@@ -4,6 +4,7 @@
 
 #include "modb/error.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -46,10 +47,24 @@ public:
 private:
 #ifdef _WIN32
     explicit NativeSocket(std::uintptr_t socket) noexcept : socket_{socket} {}
-    std::uintptr_t socket_ = static_cast<std::uintptr_t>(-1);
+    // O descritor é lido por uma thread (recv, shutdown) enquanto outra pode
+    // fechá-lo: acesso atômico (C11; a corrida apareceu no TSan, C4).
+    [[nodiscard]] std::uintptr_t raw() const noexcept {
+        return std::atomic_ref<std::uintptr_t>{const_cast<std::uintptr_t&>(socket_)}.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] std::uintptr_t take() noexcept {
+        return std::atomic_ref<std::uintptr_t>{socket_}.exchange(static_cast<std::uintptr_t>(-1),
+                                                                 std::memory_order_acq_rel);
+    }
+    alignas(8) std::uintptr_t socket_ = static_cast<std::uintptr_t>(-1);
 #else
     explicit NativeSocket(int fd) noexcept : fd_{fd} {}
-    int fd_ = -1;
+    // Ver a versão Windows: acesso atômico ao descritor.
+    [[nodiscard]] int raw() const noexcept {
+        return std::atomic_ref<int>{const_cast<int&>(fd_)}.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] int take() noexcept { return std::atomic_ref<int>{fd_}.exchange(-1, std::memory_order_acq_rel); }
+    alignas(4) int fd_ = -1;
     // Só preenchido para o socket de ESCUTA (por `listen()`): truque do
     // "self-pipe" para `accept()` acordar de forma bem definida quando
     // `close()` é chamado de outra thread. Fechar o fd de escuta enquanto

@@ -51,10 +51,12 @@ ClientConn::ClientConn(NativeSocket sock) : socket{std::move(sock)} {
 
 ClientConn::~ClientConn() {
     stop.store(true, std::memory_order_relaxed);
-    (void)socket.close();
+    // Acorda a leitora, espera ela sair, e só então fecha (ver o servidor).
+    (void)socket.shutdown();
     if (reader.joinable()) {
         reader.join();
     }
+    (void)socket.close();
 }
 
 void ClientConn::reader_loop() {

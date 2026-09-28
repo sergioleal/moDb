@@ -2,10 +2,17 @@
 
 namespace modb::storage {
 
+namespace {
+
+std::shared_ptr<const Page> share(const Page& contents) { return std::make_shared<const Page>(contents); }
+
+} // namespace
+
 BufferPool::BufferPool(std::size_t capacity_pages)
     : capacity_{capacity_pages == 0 ? 1 : capacity_pages} {}
 
-const Page* BufferPool::get(std::uint64_t page) {
+std::shared_ptr<const Page> BufferPool::get(std::uint64_t page) {
+    const std::scoped_lock lock{mu_};
     const auto it = index_.find(page);
     if (it == index_.end()) {
         ++metrics_.misses;
@@ -13,12 +20,15 @@ const Page* BufferPool::get(std::uint64_t page) {
     }
     ++metrics_.hits;
     touch(it->second);
-    return &it->second->page;
+    return it->second->page;
 }
 
 void BufferPool::put(std::uint64_t page, const Page& contents) {
+    auto fresh = share(contents);  // cópia fora do lock
+    const std::scoped_lock lock{mu_};
     if (const auto it = index_.find(page); it != index_.end()) {
-        it->second->page = contents;
+        // Troca o ponteiro: quem já leu a versão anterior segue com ela.
+        it->second->page = std::move(fresh);
         // put limpo sobre dirty limpa o bit: o conteúdo agora bate com o disco
         // (write-through) ou substitui a versão suja pela limpa fornecida.
         it->second->dirty = false;
@@ -27,12 +37,13 @@ void BufferPool::put(std::uint64_t page, const Page& contents) {
         return;
     }
     evict_until(capacity_ - 1);
-    entries_.emplace_front(Frame{.page_id = page, .page = contents});
+    entries_.emplace_front(Frame{.page_id = page, .page = std::move(fresh)});
     index_.emplace(page, entries_.begin());
     // Se ainda exceder (só dirty/pinned no pool), aceita overflow temporário.
 }
 
 void BufferPool::invalidate(std::uint64_t page) {
+    const std::scoped_lock lock{mu_};
     const auto it = index_.find(page);
     if (it == index_.end()) {
         return;
@@ -46,6 +57,7 @@ void BufferPool::invalidate(std::uint64_t page) {
 }
 
 Result<void> BufferPool::pin(std::uint64_t page) {
+    const std::scoped_lock lock{mu_};
     const auto it = index_.find(page);
     if (it == index_.end()) {
         return std::unexpected(
@@ -58,6 +70,7 @@ Result<void> BufferPool::pin(std::uint64_t page) {
 }
 
 void BufferPool::unpin(std::uint64_t page) {
+    const std::scoped_lock lock{mu_};
     const auto it = index_.find(page);
     if (it == index_.end() || it->second->pin_count == 0) {
         return;
@@ -67,25 +80,29 @@ void BufferPool::unpin(std::uint64_t page) {
 }
 
 void BufferPool::put_dirty(std::uint64_t page, const Page& contents) {
+    auto fresh = share(contents);
+    const std::scoped_lock lock{mu_};
     if (const auto it = index_.find(page); it != index_.end()) {
-        it->second->page = contents;
+        it->second->page = std::move(fresh);
         it->second->dirty = true;
         place(it->second);
         touch(it->second);
         return;
     }
     // Dirty não é evictável; pode temporariamente exceder a capacidade.
-    held_.emplace_front(Frame{.page_id = page, .page = contents, .dirty = true, .held = true});
+    held_.emplace_front(Frame{.page_id = page, .page = std::move(fresh), .dirty = true, .held = true});
     index_.emplace(page, held_.begin());
 }
 
 bool BufferPool::is_dirty(std::uint64_t page) const noexcept {
+    const std::scoped_lock lock{mu_};
     const auto it = index_.find(page);
     return it != index_.end() && it->second->dirty;
 }
 
 Result<void> BufferPool::flush_dirty(
     const std::function<Result<void>(std::uint64_t, const Page&)>& writer) {
+    const std::scoped_lock lock{mu_};
     // Só `held_` pode ter frames sujos. `place` pode mover o frame para
     // `entries_`, então o próximo é guardado antes.
     for (auto it = held_.begin(); it != held_.end();) {
@@ -93,7 +110,7 @@ Result<void> BufferPool::flush_dirty(
         if (!current->dirty) {
             continue;
         }
-        if (auto written = writer(current->page_id, current->page); !written) {
+        if (auto written = writer(current->page_id, *current->page); !written) {
             return std::unexpected(written.error());
         }
         current->dirty = false;
@@ -106,6 +123,7 @@ Result<void> BufferPool::flush_dirty(
 }
 
 void BufferPool::discard_dirty() noexcept {
+    const std::scoped_lock lock{mu_};
     for (auto it = held_.begin(); it != held_.end();) {
         if (!it->dirty) {
             ++it;
@@ -123,6 +141,11 @@ void BufferPool::discard_dirty() noexcept {
 }
 
 std::size_t BufferPool::pinned_count() const noexcept {
+    const std::scoped_lock lock{mu_};
+    return pinned_count_locked();
+}
+
+std::size_t BufferPool::pinned_count_locked() const noexcept {
     std::size_t count = 0;
     for (const auto& frame : held_) {
         if (frame.pin_count > 0) {
@@ -133,6 +156,7 @@ std::size_t BufferPool::pinned_count() const noexcept {
 }
 
 std::size_t BufferPool::dirty_count() const noexcept {
+    const std::scoped_lock lock{mu_};
     std::size_t count = 0;
     for (const auto& frame : held_) {
         if (frame.dirty) {
@@ -143,12 +167,14 @@ std::size_t BufferPool::dirty_count() const noexcept {
 }
 
 void BufferPool::reset_metrics() noexcept {
+    const std::scoped_lock lock{mu_};
     metrics_ = Metrics{};
 }
 
 BufferPool::Metrics BufferPool::metrics() const noexcept {
+    const std::scoped_lock lock{mu_};
     Metrics copy = metrics_;
-    copy.pinned = pinned_count();
+    copy.pinned = pinned_count_locked();
     return copy;
 }
 

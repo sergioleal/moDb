@@ -51,6 +51,7 @@ Result<std::unique_ptr<ScratchPagePool>> ScratchPagePool::create(std::size_t cap
 }
 
 std::optional<ScratchPagePool::Handle> ScratchPagePool::try_acquire() {
+    const std::scoped_lock lock{mu_};
     if (free_indices_.empty()) {
         return std::nullopt;
     }
@@ -60,6 +61,7 @@ std::optional<ScratchPagePool::Handle> ScratchPagePool::try_acquire() {
 }
 
 void ScratchPagePool::release(std::size_t index) noexcept {
+    const std::scoped_lock lock{mu_};
     free_indices_.push_back(index);
 }
 

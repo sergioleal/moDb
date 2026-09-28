@@ -302,12 +302,13 @@ private:
     // qualquer commit avança a época (`advance_epoch`), então um registro
     // cacheado por uma época anterior nunca é servido. Leituras por snapshot
     // (`get_at`/`find_at`) não passam por aqui.
-    struct PeekedRecord {
-        std::uint64_t epoch{0};
-        ObjectId id{0};
-        std::vector<std::byte> record;
-    };
-    std::optional<PeekedRecord> peeked_;
+    //
+    // A entrada é por thread (`thread_local` em object_store.cpp, C6.3): era um
+    // membro, e duas threads lendo ao mesmo tempo gravavam nele. `cache_tag_`
+    // diz de qual store ela é -- único por instância, então um store reaberto
+    // (rollback) ou outro banco no mesmo endereço nunca aproveita a de outro.
+    std::uint64_t cache_tag_{next_cache_tag()};
+    [[nodiscard]] static std::uint64_t next_cache_tag() noexcept;
 };
 
 } // namespace modb::object

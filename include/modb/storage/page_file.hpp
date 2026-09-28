@@ -23,6 +23,31 @@
 
 namespace modb::storage {
 
+// Uma página vista por `PageFile::view`, sem cópia. Mantém a página viva
+// enquanto existir (C6.2): uma página do cache não some nem muda por baixo de
+// quem a lê, mesmo que outra thread a despeje ou a substitua. Uma página do
+// buffer da transação (read-your-writes) só é vista pela thread escritora.
+class PageRef {
+public:
+    PageRef() = default;
+    explicit PageRef(std::shared_ptr<const Page> shared) noexcept
+        : shared_{std::move(shared)}, page_{shared_.get()} {}
+    // Página cuja vida o dono garante (buffer da transação).
+    static PageRef borrowed(const Page& page) noexcept {
+        PageRef ref;
+        ref.page_ = &page;
+        return ref;
+    }
+
+    [[nodiscard]] const Page& operator*() const noexcept { return *page_; }
+    [[nodiscard]] const Page* operator->() const noexcept { return page_; }
+    [[nodiscard]] const Page* get() const noexcept { return page_; }
+
+private:
+    std::shared_ptr<const Page> shared_{};
+    const Page* page_{nullptr};
+};
+
 // Versão do superbloco MODB (Fase 10E: major.minor; fio legado = major quando minor=0).
 inline constexpr std::uint16_t current_format_major = 1;
 inline constexpr std::uint16_t current_format_minor = 0;
@@ -73,12 +98,13 @@ public:
     [[nodiscard]] Result<Page> read(PageId id);
     // Lê diretamente sobre um buffer Page fornecido pelo chamador.
     [[nodiscard]] Result<void> read(PageId id, Page& destination);
-    // Visão somente-leitura de uma página, SEM cópia: aponta para a página no
-    // buffer da transação ou no cache (ou, num miss, para um buffer interno).
-    // Vale só até a próxima chamada a este PageFile -- use e descarte na hora.
-    // Existe porque ler um registro de ~375 B copiava três páginas inteiras de
-    // 8 KiB (docs-process/PROFILING_2026-09.md, T3.3/T15.5).
-    [[nodiscard]] Result<const Page*> view(PageId id);
+    // Visão somente-leitura de uma página, SEM cópia: a página do buffer da
+    // transação ou do cache (num miss, uma lida do disco). Existe porque ler um
+    // registro de ~375 B copiava três páginas inteiras de 8 KiB
+    // (docs-process/PROFILING_2026-09.md, T3.3/T15.5). A `PageRef` mantém a
+    // página viva; antes era um ponteiro cru que valia "até a próxima chamada",
+    // o que outra thread invalidava (C6.2).
+    [[nodiscard]] Result<PageRef> view(PageId id);
     // Sobrescreve uma página de dados existente.
     [[nodiscard]] Result<void> write(PageId id, const Page& page);
     // Persiste no dispositivo todas as escritas já aceitas (durabilidade real).
@@ -153,8 +179,6 @@ private:
     // Cache/buffer pool de páginas (LRU + pin + dirty); unique_ptr mantém o
     // PageFile movível sem exigir que o pool seja movível.
     std::unique_ptr<BufferPool> cache_;
-    // Destino de `view` quando a página não fica residente (miss sem cache).
-    Page view_scratch_{};
     // Mantém em memória a quantidade validada de páginas.
     std::uint64_t page_count_{};
     // Espelha a raiz do catálogo persistida no superbloco.

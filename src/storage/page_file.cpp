@@ -349,7 +349,7 @@ Result<void> PageFile::read(PageId id, Page& destination) {
     }
 
     // Acerto de cache: copia a página já residente e evita a syscall.
-    if (const Page* cached = cache_->get(id.value)) {
+    if (const auto cached = cache_->get(id.value)) {
         diag::ScopedStage stage{diag::Stage::buffer_pool_hit};
         stage.add_units(page_size);
         std::copy(cached->bytes().begin(), cached->bytes().end(), destination.bytes().begin());
@@ -467,7 +467,7 @@ Result<void> PageFile::write_recovered_page(PageId id, const Page& page) {
     return write_at(id, page);
 }
 
-Result<const Page*> PageFile::view(PageId id) {
+Result<PageRef> PageFile::view(PageId id) {
     if (id.value >= page_count_) {
         return std::unexpected(
             Error{ErrorCode::page_not_found, "page does not exist: " + std::to_string(id.value)});
@@ -476,22 +476,20 @@ Result<const Page*> PageFile::view(PageId id) {
     if (in_transaction_) {
         if (const auto found = tx_pages_.find(id.value); found != tx_pages_.end()) {
             diag::ScopedStage stage{diag::Stage::buffer_pool_hit};
-            return &found->second;
+            return PageRef::borrowed(found->second);
         }
     }
-    if (const Page* cached = cache_->get(id.value)) {
+    if (auto cached = cache_->get(id.value)) {
         diag::ScopedStage stage{diag::Stage::buffer_pool_hit};
-        return cached;
+        return PageRef{std::move(cached)};
     }
-    // Miss: `read` traz a página (e o read-ahead) para o cache; se ela ficou
-    // residente, devolve a residente; senão, a cópia no buffer interno.
-    if (auto loaded = read(id, view_scratch_); !loaded) {
+    // Miss: `read` traz a página (e o read-ahead) para o cache e a copia para
+    // uma página própria desta visão -- nada compartilhado entre threads.
+    auto own = std::make_shared<Page>();
+    if (auto loaded = read(id, *own); !loaded) {
         return std::unexpected(loaded.error());
     }
-    if (const Page* cached = cache_->get(id.value)) {
-        return cached;
-    }
-    return &view_scratch_;
+    return PageRef{std::move(own)};
 }
 
 // Persiste no dispositivo todas as escritas já aceitas (durabilidade real).

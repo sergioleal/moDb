@@ -10,6 +10,7 @@
 #include "modb/diag/stage_profile.hpp"
 
 // Disponibiliza std::min no comparador de bytes.
+#include <atomic>
 #include <algorithm>
 // Disponibiliza o limite do espaço de ObjectIds.
 #include <limits>
@@ -313,6 +314,24 @@ Result<ObjectId> ObjectStore::create_object(const TypeDefinition& type, FieldVal
     return *id;
 }
 
+namespace {
+
+// O registro que `peek_type` acabou de ler nesta thread (ver `cache_tag_`).
+struct PeekedRecord {
+    std::uint64_t store{0};
+    std::uint64_t epoch{0};
+    ObjectId id{0};
+    std::vector<std::byte> record;
+};
+thread_local PeekedRecord t_peeked;
+
+} // namespace
+
+std::uint64_t ObjectStore::next_cache_tag() noexcept {
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
 Result<DecodedObject> ObjectStore::get(ObjectId id) {
     // Reaproveita o registro que `peek_type` acabou de ler para este mesmo id na
     // mesma época -- ver `peeked_`. Poupa uma resolução de identidade e uma
@@ -324,9 +343,9 @@ Result<DecodedObject> ObjectStore::get(ObjectId id) {
     // pode estar em voo (mutar exige transação), e o commit que a publicaria
     // avança a época. Leituras dentro de transação perdem a economia e
     // continuam corretas -- a troca certa.
-    if (peeked_ && peeked_->id == id && peeked_->epoch == root_.epoch() &&
+    if (t_peeked.store == cache_tag_ && t_peeked.id == id && t_peeked.epoch == root_.epoch() &&
         !file_->in_transaction()) {
-        return decode_object(peeked_->record);
+        return decode_object(t_peeked.record);
     }
     auto location = identity_.find(id);
     if (!location) {
@@ -354,7 +373,7 @@ Result<TypeDefinitionId> ObjectStore::peek_type(ObjectId id) {
     }
     // Só depois de o registro se provar íntegro: um registro que não decodifica
     // não vai para o cache.
-    peeked_ = PeekedRecord{root_.epoch(), id, std::move(*record)};
+    t_peeked = PeekedRecord{cache_tag_, root_.epoch(), id, std::move(*record)};
     return header->type;
 }
 

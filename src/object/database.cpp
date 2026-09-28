@@ -86,6 +86,9 @@ Result<void> truncate_wal_after_last_commit(const std::filesystem::path& wal_pat
 Database::Database(Database&& other) noexcept = default;
 
 Database::~Database() {
+    // Uma transação abandonada (queda simulada nos testes) ainda segura a vez
+    // de escrever: solta antes de destruir o lock.
+    leave_writer();
     // Fechamento limpo: checkpoint dos commits pendentes, para a próxima
     // abertura não precisar reaplicá-los. Melhor esforço -- se falhar, a
     // recuperação reaplica do WAL, que é a garantia de verdade.
@@ -368,11 +371,16 @@ Result<TypeDefinitionId> Database::register_or_adopt(const Binding& binding) {
 
 Result<TypeDefinitionId> Database::persist_binding(const Binding& binding) {
     // Se o chamador já abriu uma transação, participa dela (sem commit próprio).
-    if (file_->in_transaction()) {
+    if (is_writer_thread() && file_->in_transaction()) {
         return register_or_adopt(binding);
     }
     // Caso contrário, envolve as escritas de catálogo numa transação interna,
-    // para que registrar/evoluir um tipo seja atômico e passe pelo WAL.
+    // para que registrar/evoluir um tipo seja atômico e passe pelo WAL. Bind é
+    // DDL: roda sozinho, como uma escrita (C8.4).
+    if (auto entered = enter_writer(); !entered) {
+        return std::unexpected(entered.error());
+    }
+    const WriterScope writer_scope{this};
     current_tx_id_ = next_tx_id_++;
     commit_durable_ = false;
     file_->begin_transaction();
@@ -426,7 +434,14 @@ Result<Transaction> Database::begin() {
         return std::unexpected(
             Error{ErrorCode::invalid_argument, "database must be attached before begin"});
     }
+    // Um escritor por vez (C10.2): espera a vez em vez de recusar quando é
+    // outra thread; na mesma thread, é uma segunda transação.
+    if (auto entered = enter_writer(); !entered) {
+        return std::unexpected(entered.error());
+    }
     if (file_->in_transaction()) {
+        // Uma transação largada no meio (failpoint de teste) sem terminar.
+        leave_writer();
         return std::unexpected(
             Error{ErrorCode::transaction_active, "a transaction is already in progress"});
     }
@@ -434,6 +449,40 @@ Result<Transaction> Database::begin() {
     commit_durable_ = false;
     file_->begin_transaction();
     return Transaction{database_id_};
+}
+
+Result<void> Database::enter_writer() {
+    if (is_writer_thread()) {
+        return std::unexpected(
+            Error{ErrorCode::transaction_active, "a transaction is already in progress on this thread"});
+    }
+    // Esta thread está no meio de uma leitura deste banco (ex.: dentro do
+    // visitor de `scan`): esperar o lock exclusivo travaria nela mesma.
+    for (const auto* reading : ReadGuard::reading_now()) {
+        if (reading == conc_.get()) {
+            return std::unexpected(Error{ErrorCode::transaction_active,
+                                         "cannot start a write while this thread is reading the database"});
+        }
+    }
+    // Dreno pedido por um escritor em conflito: espera (sem lock) os snapshots
+    // antigos fecharem, para os leitores que os seguram passarem antes.
+    if (const auto drain = conc_->drain.load(std::memory_order_acquire); drain != 0) {
+        if (wait_snapshots_from(drain, std::chrono::milliseconds{50})) {
+            auto expected = drain;
+            (void)conc_->drain.compare_exchange_strong(expected, 0, std::memory_order_acq_rel);
+        }
+    }
+    conc_->rw.lock();
+    conc_->writer.store(std::this_thread::get_id(), std::memory_order_release);
+    return {};
+}
+
+void Database::leave_writer() noexcept {
+    if (!is_writer_thread()) {
+        return;
+    }
+    conc_->writer.store(std::thread::id{}, std::memory_order_release);
+    conc_->rw.unlock();
 }
 
 Result<tx::Wal*> Database::durable_wal() {
@@ -636,14 +685,20 @@ Result<void> Database::checkpoint() {
     if (primary_storage_ == PrimaryStorage::wal_only) {
         return {};
     }
-    if (file_->in_transaction()) {
+    if (is_writer_thread()) {
         return std::unexpected(Error{ErrorCode::transaction_active,
                                      "checkpoint requires no active transaction"});
     }
+    if (auto entered = enter_writer(); !entered) {
+        return std::unexpected(entered.error());
+    }
+    const WriterScope writer_scope{this};
     return advance_checkpoint();
 }
 
 Result<void> Database::rollback_transaction() {
+    // A transação acaba aqui, dê certo ou não o rollback: devolve a vez de escrever.
+    const WriterScope writer_scope{this};
     if (commit_durable_) {
         return std::unexpected(Error{ErrorCode::transaction_committed,
                                      "a durable commit cannot be rolled back"});
@@ -716,10 +771,14 @@ Result<std::size_t> Database::collect_garbage() {
     }
     // Single-writer: o GC escreve (libera páginas), então não pode correr junto
     // de outra transação — a mesma guarda de begin().
-    if (file_->in_transaction()) {
+    if (is_writer_thread()) {
         return std::unexpected(Error{ErrorCode::transaction_active,
                                      "cannot collect garbage while a transaction is in progress"});
     }
+    if (auto entered = enter_writer(); !entered) {
+        return std::unexpected(entered.error());
+    }
+    const WriterScope writer_scope{this};
     // Lê a época do snapshot mais antigo antes de abrir a transação: nenhuma
     // versão visível a ele será reciclada.
     const auto oldest = oldest_open_snapshot_epoch();
@@ -800,6 +859,8 @@ Result<void> Transaction::commit(CommitPhase phase) {
     if ((*database)->commit_is_durable()) {
         active_ = false;
         committed_ = true;
+        // Commit durável encerra a transação: a vez de escrever volta.
+        (*database)->leave_writer();
         if (!committed) {
             const auto code = committed.error().code;
             // ACK de réplica (Fase 15): o WAL já é durável; o cliente não recebeu
@@ -935,7 +996,7 @@ Result<DatabaseId> DatabaseRegistry::attach(std::shared_ptr<Database> database) 
     return id;
 }
 
-query::Generator<Result<DecodedObject>> Database::query_objects(ObjectQuerySpec query) {
+query::Generator<Result<DecodedObject>> Database::query_objects_source(ObjectQuerySpec query) {
     auto opened = snapshot();
     if (!opened) {
         co_yield Result<DecodedObject>{std::unexpected(opened.error())};

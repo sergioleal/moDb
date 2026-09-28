@@ -73,14 +73,22 @@ O cliente C++ expõe consumo incremental. Na Fase 8E,
 semântica de `next()` permanece: sucesso com objeto, `nullopt` em
 `StreamEnd`, ou `Error` em `StreamError`/falha de protocolo.
 
+> **Atualização (2026-09-27, ADR-027):** o motor deixou de ser single-thread.
+> O caminho de leitura é seguro entre threads e o próprio `Database` coordena
+> leitores e escritor (leituras em paralelo, um escritor exclusivo); o
+> `engine_mutex_` do servidor foi removido. A tabela abaixo fica como registro
+> do estado anterior; a coluna "Hoje" diz o que mudou.
+
 ### Componentes single-thread a revisar
 
-| Componente | Situação | Ação no servidor |
-|---|---|---|
-| `DatabaseRegistry` | Já usa `mutex_` | Manter; attach/find/detach sob o lock |
-| `ScratchPagePool` | Vetor sem sincronização; documentado single-thread | Não compartilhar entre conexões: pool por conexão/worker ou serializar o acesso |
-| Transações / WAL | Single-writer | Uma escrita de cada vez; leituras sob snapshot podem ser concorrentes |
-| Cursores / generators | Estado por fluxo | Um fluxo por consulta; cancelamento cooperativo já existente |
+| Componente | Situação | Ação no servidor | Hoje (ADR-027) |
+|---|---|---|---|
+| `DatabaseRegistry` | Já usa `mutex_` | Manter; attach/find/detach sob o lock | igual |
+| `ScratchPagePool` | Vetor sem sincronização; documentado single-thread | Não compartilhar entre conexões: pool por conexão/worker ou serializar o acesso | mutex (C6.4) |
+| `BufferPool` / `PageFile::view` | LRU sem lock; ponteiro cru "até a próxima chamada" | (era o `engine_mutex_`) | mutex + frames `shared_ptr<const Page>` imutáveis; `PageRef` (C6.1/6.2) |
+| Transações / WAL | Single-writer | Uma escrita de cada vez; leituras sob snapshot podem ser concorrentes | lock de leitores e escritor no `Database`; `begin` de outra thread espera a vez (C10) |
+| Cursores / generators | Estado por fluxo | Um fluxo por consulta; cancelamento cooperativo já existente | lock de leitura só enquanto produz cada item (`Database::guarded`) |
+| `NativeSocket` | fechado com a thread leitora ainda no `recv` | — | descritor atômico; `shutdown` → join da leitora → `close` (C11) |
 
 A escolha fina (pool por conexão vs. mutex global no scratch) fica na
 implementação das subfases 8B–8E, desde que duas conexões nunca mutem o mesmo

@@ -1718,7 +1718,10 @@ int command_serve_cancel_demo(const std::filesystem::path& path, bool force) {
         std::filesystem::remove(path.string() + ".wal", filesystem_error);
     }
 
-    constexpr int total = 200;
+    // Bem mais objetos do que cabem nos buffers do socket: sem o lock global do
+    // motor (C11), o servidor produz rápido, e com 200 o stream inteiro podia
+    // terminar antes de o Cancel chegar.
+    constexpr int total = 5000;
     modb::object::TypeDefinitionId type_id{};
     {
         auto created = modb::object::Database::create(path);
@@ -1782,6 +1785,9 @@ int command_serve_cancel_demo(const std::filesystem::path& path, bool force) {
             return print_error(client.error());
         }
 
+        // Buffer pequeno: o servidor esbarra no backpressure logo, e o Cancel
+        // sempre chega antes de o stream terminar.
+        (void)client->set_recv_buffer_bytes(4096);
         auto stream = client->query(modb::net::QueryDescription{.type = type_id});
         if (!stream) {
             acceptor.join();

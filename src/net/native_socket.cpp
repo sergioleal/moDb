@@ -160,15 +160,18 @@ NativeSocket::~NativeSocket() {
 }
 
 bool NativeSocket::is_open() const noexcept {
-    return socket_ != static_cast<std::uintptr_t>(-1);
+    return raw() != static_cast<std::uintptr_t>(-1);
 }
 
 Result<void> NativeSocket::close() {
     if (!is_open()) {
         return {};
     }
-    const SocketHandle handle = static_cast<SocketHandle>(socket_);
-    socket_ = static_cast<std::uintptr_t>(-1);
+    const auto taken = take();
+    if (taken == static_cast<std::uintptr_t>(-1)) {
+        return {};  // outra thread fechou entre o is_open e aqui
+    }
+    const SocketHandle handle = static_cast<SocketHandle>(taken);
     if (::closesocket(handle) == SOCKET_ERROR) {
         return std::unexpected(make_io("closesocket failed", last_error()));
     }
@@ -179,7 +182,7 @@ Result<void> NativeSocket::shutdown() noexcept {
     if (!is_open()) {
         return {};
     }
-    const auto handle = static_cast<SocketHandle>(socket_);
+    const auto handle = static_cast<SocketHandle>(raw());
     const bool shut = ::shutdown(handle, SD_BOTH) != SOCKET_ERROR;
     const int error = shut ? 0 : last_error();
     // No Winsock, shutdown não acorda um recv bloqueado em outra thread;
@@ -239,7 +242,7 @@ Result<NativeSocket> NativeSocket::accept() {
     if (!is_open()) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "accept on closed socket"});
     }
-    const SocketHandle listener = static_cast<SocketHandle>(socket_);
+    const SocketHandle listener = static_cast<SocketHandle>(raw());
     const SocketHandle client = ::accept(listener, nullptr, nullptr);
     if (client == kInvalid) {
         return std::unexpected(make_io("accept failed", last_error()));
@@ -251,7 +254,7 @@ Result<void> NativeSocket::send_all(std::span<const std::byte> bytes) {
     if (!is_open()) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "send on closed socket"});
     }
-    const SocketHandle handle = static_cast<SocketHandle>(socket_);
+    const SocketHandle handle = static_cast<SocketHandle>(raw());
     std::size_t sent = 0;
     while (sent < bytes.size()) {
         const int chunk = static_cast<int>((std::min)(bytes.size() - sent, std::size_t{1} << 20));
@@ -272,7 +275,7 @@ Result<void> NativeSocket::recv_exact(std::span<std::byte> destination) {
     if (!is_open()) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "recv on closed socket"});
     }
-    const SocketHandle handle = static_cast<SocketHandle>(socket_);
+    const SocketHandle handle = static_cast<SocketHandle>(raw());
     std::size_t got = 0;
     while (got < destination.size()) {
         const int chunk =
@@ -296,7 +299,7 @@ Result<std::uint16_t> NativeSocket::local_port() const {
     }
     sockaddr_in address{};
     int length = sizeof(address);
-    if (::getsockname(static_cast<SocketHandle>(socket_), reinterpret_cast<sockaddr*>(&address),
+    if (::getsockname(static_cast<SocketHandle>(raw()), reinterpret_cast<sockaddr*>(&address),
                       &length) == SOCKET_ERROR) {
         return std::unexpected(make_io("getsockname failed", last_error()));
     }
@@ -308,7 +311,7 @@ Result<void> NativeSocket::set_send_buffer_bytes(std::size_t bytes) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "set_send_buffer on closed socket"});
     }
     const int value = static_cast<int>(bytes);
-    if (::setsockopt(static_cast<SocketHandle>(socket_), SOL_SOCKET, SO_SNDBUF,
+    if (::setsockopt(static_cast<SocketHandle>(raw()), SOL_SOCKET, SO_SNDBUF,
                      reinterpret_cast<const char*>(&value), sizeof(value)) == SOCKET_ERROR) {
         return std::unexpected(make_io("setsockopt SO_SNDBUF failed", last_error()));
     }
@@ -320,7 +323,7 @@ Result<void> NativeSocket::set_recv_buffer_bytes(std::size_t bytes) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "set_recv_buffer on closed socket"});
     }
     const int value = static_cast<int>(bytes);
-    if (::setsockopt(static_cast<SocketHandle>(socket_), SOL_SOCKET, SO_RCVBUF,
+    if (::setsockopt(static_cast<SocketHandle>(raw()), SOL_SOCKET, SO_RCVBUF,
                      reinterpret_cast<const char*>(&value), sizeof(value)) == SOCKET_ERROR) {
         return std::unexpected(make_io("setsockopt SO_RCVBUF failed", last_error()));
     }
@@ -332,7 +335,7 @@ Result<void> NativeSocket::set_recv_timeout_ms(std::uint32_t milliseconds) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "set_recv_timeout on closed socket"});
     }
     DWORD value = milliseconds;
-    if (::setsockopt(static_cast<SocketHandle>(socket_), SOL_SOCKET, SO_RCVTIMEO,
+    if (::setsockopt(static_cast<SocketHandle>(raw()), SOL_SOCKET, SO_RCVTIMEO,
                      reinterpret_cast<const char*>(&value), sizeof(value)) == SOCKET_ERROR) {
         return std::unexpected(make_io("setsockopt SO_RCVTIMEO failed", last_error()));
     }
@@ -363,7 +366,7 @@ NativeSocket::~NativeSocket() {
 }
 
 bool NativeSocket::is_open() const noexcept {
-    return fd_ != -1;
+    return raw() != -1;
 }
 
 void NativeSocket::close_stop_pipe() noexcept {
@@ -392,8 +395,10 @@ Result<void> NativeSocket::close() {
     if (!is_open()) {
         return {};
     }
-    const int handle = fd_;
-    fd_ = -1;
+    const int handle = take();
+    if (handle == -1) {
+        return {};  // outra thread fechou entre o is_open e aqui
+    }
     if (::close(handle) != 0) {
         return std::unexpected(make_io("close failed", last_error()));
     }
@@ -404,7 +409,7 @@ Result<void> NativeSocket::shutdown() noexcept {
     if (!is_open()) {
         return {};
     }
-    if (::shutdown(fd_, SHUT_RDWR) != 0) {
+    if (::shutdown(raw(), SHUT_RDWR) != 0) {
         return std::unexpected(make_io("shutdown failed", last_error()));
     }
     return {};
@@ -468,7 +473,7 @@ Result<NativeSocket> NativeSocket::accept() {
     }
     if (stop_pipe_read_ != -1) {
         pollfd fds[2]{};
-        fds[0].fd = fd_;
+        fds[0].fd = raw();
         fds[0].events = POLLIN;
         fds[1].fd = stop_pipe_read_;
         fds[1].events = POLLIN;
@@ -479,12 +484,18 @@ Result<NativeSocket> NativeSocket::accept() {
             return std::unexpected(make_closed("accept interrompido por request_stop()"));
         }
     }
-    const SocketHandle client = ::accept(fd_, nullptr, nullptr);
+    const SocketHandle client = ::accept(raw(), nullptr, nullptr);
     if (client == kInvalid) {
         return std::unexpected(make_io("accept failed", last_error()));
     }
     return NativeSocket{client};
 }
+
+#ifdef MSG_NOSIGNAL
+constexpr int k_send_flags = MSG_NOSIGNAL;
+#else
+constexpr int k_send_flags = 0;  // macOS: SO_NOSIGPIPE no socket
+#endif
 
 Result<void> NativeSocket::send_all(std::span<const std::byte> bytes) {
     if (!is_open()) {
@@ -493,7 +504,10 @@ Result<void> NativeSocket::send_all(std::span<const std::byte> bytes) {
     std::size_t sent = 0;
     while (sent < bytes.size()) {
         const auto chunk = (std::min)(bytes.size() - sent, std::size_t{1} << 20);
-        const ssize_t rc = ::send(fd_, bytes.data() + sent, chunk, 0);
+        // MSG_NOSIGNAL: escrever num socket que o outro lado (ou um shutdown
+        // local) fechou devolve EPIPE em vez de matar o processo com SIGPIPE --
+        // um cliente que some no meio de um stream não pode derrubar o servidor.
+        const ssize_t rc = ::send(raw(), bytes.data() + sent, chunk, k_send_flags);
         if (rc < 0) {
             return std::unexpected(make_io("send failed", last_error()));
         }
@@ -512,7 +526,7 @@ Result<void> NativeSocket::recv_exact(std::span<std::byte> destination) {
     std::size_t got = 0;
     while (got < destination.size()) {
         const auto chunk = (std::min)(destination.size() - got, std::size_t{1} << 20);
-        const ssize_t rc = ::recv(fd_, destination.data() + got, chunk, 0);
+        const ssize_t rc = ::recv(raw(), destination.data() + got, chunk, 0);
         if (rc < 0) {
             return std::unexpected(make_io("recv failed", last_error()));
         }
@@ -530,7 +544,7 @@ Result<std::uint16_t> NativeSocket::local_port() const {
     }
     sockaddr_in address{};
     socklen_t length = sizeof(address);
-    if (::getsockname(fd_, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+    if (::getsockname(raw(), reinterpret_cast<sockaddr*>(&address), &length) != 0) {
         return std::unexpected(make_io("getsockname failed", last_error()));
     }
     return ntohs(address.sin_port);
@@ -541,7 +555,7 @@ Result<void> NativeSocket::set_send_buffer_bytes(std::size_t bytes) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "set_send_buffer on closed socket"});
     }
     const int value = static_cast<int>(bytes);
-    if (::setsockopt(fd_, SOL_SOCKET, SO_SNDBUF, &value, sizeof(value)) != 0) {
+    if (::setsockopt(raw(), SOL_SOCKET, SO_SNDBUF, &value, sizeof(value)) != 0) {
         return std::unexpected(make_io("setsockopt SO_SNDBUF failed", last_error()));
     }
     return {};
@@ -552,7 +566,7 @@ Result<void> NativeSocket::set_recv_buffer_bytes(std::size_t bytes) {
         return std::unexpected(Error{ErrorCode::invalid_argument, "set_recv_buffer on closed socket"});
     }
     const int value = static_cast<int>(bytes);
-    if (::setsockopt(fd_, SOL_SOCKET, SO_RCVBUF, &value, sizeof(value)) != 0) {
+    if (::setsockopt(raw(), SOL_SOCKET, SO_RCVBUF, &value, sizeof(value)) != 0) {
         return std::unexpected(make_io("setsockopt SO_RCVBUF failed", last_error()));
     }
     return {};
@@ -565,7 +579,7 @@ Result<void> NativeSocket::set_recv_timeout_ms(std::uint32_t milliseconds) {
     timeval value{};
     value.tv_sec = static_cast<long>(milliseconds / 1000u);
     value.tv_usec = static_cast<long>((milliseconds % 1000u) * 1000u);
-    if (::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) != 0) {
+    if (::setsockopt(raw(), SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) != 0) {
         return std::unexpected(make_io("setsockopt SO_RCVTIMEO failed", last_error()));
     }
     return {};

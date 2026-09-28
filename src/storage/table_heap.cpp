@@ -644,7 +644,7 @@ Result<std::vector<HeapRecord>> TableHeap::scan_records() {
 
 Result<HeapPageSlice> TableHeap::read_page_records(PageId id) {
     // Uma leitura de página de dados — a unidade que o critério TTFR conta.
-    ++data_pages_read_;
+    std::atomic_ref<std::uint64_t>{data_pages_read_}.fetch_add(1, std::memory_order_relaxed);
     auto current = load_trusted(id);
     if (!current) {
         return std::unexpected(current.error());

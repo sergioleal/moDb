@@ -122,9 +122,9 @@ O que falta:
 
 ### P3 — depois
 
-#### S9 — Concorrência *(ver PLANO_CONCORRENCIA.md)*
+#### S9 — Concorrência *(ver PLANO_CONCORRENCIA.md)* ✅ (etapa 1)
 
-- [ ] 9.1 *(em andamento: C1–C3 do PLANO_CONCORRENCIA feitos — os defeitos de correção que valiam com uma thread; C4 em diante bloqueados sem ThreadSanitizer, ver o registro de lá)* Hoje o servidor serializa tudo (`engine_mutex_`), igual ao mutex da biblioteca: correto, mas uma proc por vez. Procs `read_only` concorrentes dependem das C6–C8; as de escrita seguem uma por vez (C10.2: fila de escritores)
+- [x] 9.1 *(ADR-027: C1-C6, C9-C11, C13. Procs de leitura e consultas em paralelo, sem o `engine_mutex_`; procs de escrita uma por vez, com repetição automática em `snapshot_conflict`; cada proc de leitura vê um estado só. Limpo no TSan. Leitores durante uma escrita em andamento (C7/C8) ficam condicionados à medição C12)* Concorrência no servidor
 
 #### S10 — Clientes em outras linguagens, por um protocolo rápido *(médio)*
 
@@ -165,3 +165,4 @@ do desenho; a operação (S5) vem antes de usar o servidor fora da máquina loca
 | 2026-09-27 | S7–S8 (P2 concluído) | biblioteca 18cf90c | Biblioteca em dois processos: `biblioteca-server` (31 procs) e `biblioteca-web` (gateway HTTP → procs). Regras testadas pela rede (60) e web + servidor com queda e volta do servidor (20). Achado: `modb::app_client` puxa a biblioteca `modb` inteira; separar o cliente do motor fica para quando houver cliente fora do repositório |
 | 2026-09-27 | S10 (10.1–10.5) | (este commit) | Protocolo nativo publicado + anel de memória compartilhada (ADR-026), cliente Python de referência, `modb_rpc_bench`. Achados: o `Hello`/`HelloOk` sem `minor` decodificava com o minor do próprio build (virou 1 com esta mudança; o teste de compatibilidade pegou): peer antigo agora é minor 0. No desktop (não vale como número), janelas curtas de espera derrubavam payloads de 64 KiB de ~29 mil para ~3 mil chamadas/s: espera ajustada para girar 100 µs e ceder a CPU até 5 ms antes de dormir |
 | 2026-09-27 | S9 (C1–C3) | (este commit) | Época publicada (C1), índice sob snapshot antigo (C2), rollback com leitores (C3: sem defeito com uma thread). C4+ bloqueados: sem TSan no ambiente |
+| 2026-09-27 | S9 (etapa 1) | (este commit) | Leitores em paralelo e um escritor exclusivo no motor e no servidor (ADR-027); 149/149 no TSan; biblioteca com pool de conexões e teste de carga |

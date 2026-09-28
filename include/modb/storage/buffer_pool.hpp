@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <functional>
 #include <list>
+#include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 
@@ -15,6 +17,13 @@ namespace modb::storage {
 // Buffer pool LRU com capacidade configurável, pin/unpin, páginas sujas e
 // métricas. Páginas pinadas nunca são evictadas. Páginas dirty só saem do pool
 // via write-back explícito (após o WAL estar durável) ou discard (rollback).
+//
+// Seguro entre threads (PLANO_CONCORRENCIA C6.1): um mutex protege o índice, as
+// listas e as métricas. O conteúdo de cada frame é um `shared_ptr<const Page>`
+// que nunca é alterado depois de publicado: `put` sobre uma página residente
+// troca o ponteiro, e despejar só solta a referência do pool. Quem pegou a
+// página com `get` continua lendo a versão que pegou, mesmo que outra thread a
+// despeje ou substitua no meio (C6.2).
 class BufferPool {
 public:
     struct Metrics {
@@ -28,7 +37,8 @@ public:
     explicit BufferPool(std::size_t capacity_pages);
 
     // --- API de cache limpo (compatível com o PageCache da Fase 5) ---
-    [[nodiscard]] const Page* get(std::uint64_t page);
+    // A página residente, ou nullptr. A referência mantém a página viva.
+    [[nodiscard]] std::shared_ptr<const Page> get(std::uint64_t page);
     void put(std::uint64_t page, const Page& contents);
     void invalidate(std::uint64_t page);
 
@@ -49,19 +59,25 @@ public:
     // Descarta todas as páginas dirty (rollback); remove frames dirty sem pin.
     void discard_dirty() noexcept;
 
-    [[nodiscard]] std::size_t size() const noexcept { return index_.size(); }
+    [[nodiscard]] std::size_t size() const noexcept {
+        const std::scoped_lock lock{mu_};
+        return index_.size();
+    }
     [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
     [[nodiscard]] std::size_t pinned_count() const noexcept;
     [[nodiscard]] std::size_t dirty_count() const noexcept;
     [[nodiscard]] Metrics metrics() const noexcept;
     void reset_metrics() noexcept;
     // Contabiliza write-backs feitos pelo PageFile após o WAL (apply).
-    void record_dirty_flushes(std::uint64_t count) noexcept { metrics_.dirty_flushes += count; }
+    void record_dirty_flushes(std::uint64_t count) noexcept {
+        const std::scoped_lock lock{mu_};
+        metrics_.dirty_flushes += count;
+    }
 
 private:
     struct Frame {
         std::uint64_t page_id{};
-        Page page{};
+        std::shared_ptr<const Page> page{};
         std::uint32_t pin_count{0};
         bool dirty{false};
         // Em qual lista o frame está: `held_` (dirty ou pinado) ou `entries_`.
@@ -78,6 +94,10 @@ private:
     // Remove vítimas limpas e sem pin até caber `max_size` (ou não houver).
     void evict_until(std::size_t max_size);
     [[nodiscard]] bool can_evict(const Frame& frame) const noexcept;
+    [[nodiscard]] std::size_t pinned_count_locked() const noexcept;
+
+    // Protege tudo abaixo. `mutable`: leituras (size, métricas) também travam.
+    mutable std::mutex mu_;
 
     std::size_t capacity_;
     // Duas listas (T33.3): `entries_` guarda só frames evictáveis, em ordem

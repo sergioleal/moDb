@@ -59,10 +59,11 @@ struct member_of<F C::*> {
 
 // --- o que uma proc enxerga do banco (S4) -------------------------------------------
 //
-// Numa proc de escrita, tudo acontece na transação da chamada. Numa proc de
-// leitura, `read` usa o snapshot da chamada; as consultas abrem o próprio
-// snapshot, e como o servidor executa uma chamada por vez (engine_mutex_), o
-// estado que elas veem é o mesmo.
+// Numa proc de escrita, tudo acontece na transação da chamada (e as consultas
+// veem o estado confirmado mais as escritas da própria chamada, pelo índice).
+// Numa proc de leitura, tudo -- `read`, `where`/`all`, `find` -- usa o snapshot
+// da chamada: procs de leitura correm em paralelo com commits de outras
+// chamadas (C11) e mesmo assim cada uma vê um estado só.
 class Context {
 public:
     explicit Context(ops::ExecutionContext& context) noexcept : context_{&context} {}
@@ -90,7 +91,7 @@ public:
         if (auto ok = in_time(); !ok) {
             return std::unexpected(ok.error());
         }
-        auto query = database().query<T>();
+        auto query = open_query<T>();
         std::vector<object::ObjectId> ids;
         auto rows = predicate ? std::move(query).where(std::move(predicate)).select({object::FieldId{0}}).stream()
                               : std::move(query).select({object::FieldId{0}}).stream();
@@ -133,7 +134,24 @@ public:
         if (auto ok = in_time(); !ok) {
             return std::unexpected(ok.error());
         }
-        return database().indexed_object_ids<T>(field, std::move(value));
+        if (writable()) {
+            // Na transação: o índice corrente, que inclui o que esta chamada já escreveu.
+            return database().indexed_object_ids<T>(field, std::move(value));
+        }
+        // Proc de leitura: pelo índice, mas na época do snapshot da chamada.
+        std::vector<object::ObjectId> ids;
+        for (auto& row : open_query<T>().equals(field, std::move(value)).select({object::FieldId{0}}).stream()) {
+            if (!row) {
+                return std::unexpected(row.error());
+            }
+            const auto id_field = row->get(object::FieldId{0});
+            auto id = id_field ? id_field->as_ref() : Result<object::ObjectId>{std::unexpected(Error{ErrorCode::field_not_found, "query row without id"})};
+            if (!id) {
+                return std::unexpected(id.error());
+            }
+            ids.push_back(*id);
+        }
+        return ids;
     }
 
     // --- escrita (só em procs Mode::read_write) ---
@@ -198,6 +216,16 @@ public:
     [[nodiscard]] object::Transaction& transaction() { return context_->transaction(); }
 
 private:
+    // Consulta na época da chamada: o snapshot dela numa proc de leitura; o
+    // estado confirmado numa de escrita.
+    template <typename T>
+    [[nodiscard]] object::Query<T> open_query() {
+        if (auto* snapshot = context_->objects().snapshot()) {
+            return database().query<T>(*snapshot);
+        }
+        return database().query<T>();
+    }
+
     ops::ExecutionContext* context_;
 };
 

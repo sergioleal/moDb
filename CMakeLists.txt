@@ -652,13 +652,18 @@ if(BUILD_TESTING)
     # pode quebrar ao acaso).
     # C5: estresse com 1 escritor e N leitores. O modo serial (lock global)
     # valida o próprio teste e roda sempre; o concorrente é o alvo das C6-C8.
+    # C4-C10: leitores em paralelo e um escritor por vez. Depois da C6 o
+    # caminho de leitura é seguro entre threads, então tudo roda em todo preset.
+    modb_add_test(modb_concurrency_smoke_tests tests/concurrency_smoke_test.cpp)
+    add_test(NAME modb.concurrency_smoke COMMAND modb_concurrency_smoke_tests 8 300)
     modb_add_test(modb_concurrency_stress_tests tests/concurrency_stress_test.cpp)
     add_test(NAME modb.concurrency_stress_serial COMMAND modb_concurrency_stress_tests serial 2 4)
-    if(MODB_ENABLE_TSAN)
-        modb_add_test(modb_concurrency_smoke_tests tests/concurrency_smoke_test.cpp)
-        add_test(NAME modb.concurrency_smoke COMMAND modb_concurrency_smoke_tests 8 300)
-        add_test(NAME modb.concurrency_stress COMMAND modb_concurrency_stress_tests concurrent 3 4)
-    endif()
+    add_test(NAME modb.concurrency_stress COMMAND modb_concurrency_stress_tests concurrent 3 4)
+    modb_add_test(modb_concurrent_writers_tests tests/concurrent_writers_test.cpp)
+    add_test(NAME modb.concurrent_writers COMMAND modb_concurrent_writers_tests)
+    # Um travamento (inanição do escritor, deadlock) tem de falhar, não parar a suíte.
+    set_tests_properties(modb.concurrency_smoke modb.concurrency_stress_serial modb.concurrency_stress
+                         modb.concurrent_writers PROPERTIES TIMEOUT 180)
     modb_add_test(modb_shm_ring_tests tests/shm_ring_test.cpp)
     add_test(NAME modb.shm_ring COMMAND modb_shm_ring_tests)
     if(MODB_BUILD_EXAMPLES)

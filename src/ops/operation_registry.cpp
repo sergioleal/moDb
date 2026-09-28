@@ -84,6 +84,12 @@ Result<OperationResult> OperationRegistry::dispatch_unobserved(std::string_view 
     Logger& logger = *logger_;
     try {
         if (found->second.mode == OperationMode::read_only) {
+            // O lock de leitura ANTES do snapshot, e por toda a chamada (ADR-027):
+            // com o snapshot aberto enquanto esperava o lock atrás de escritores,
+            // cada um deles achava um snapshot mais antigo que o último commit e
+            // batia em snapshot_conflict. Assim, quando uma escrita entra, o
+            // snapshot desta chamada já fechou. Procs são curtas.
+            const auto read_lock = database.read_guard();
             auto snap = database.snapshot();
             if (!snap) {
                 return std::unexpected(snap.error());

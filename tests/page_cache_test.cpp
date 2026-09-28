@@ -33,12 +33,18 @@ int main() {
         PageCache cache{4};
         suite.check(cache.get(1) == nullptr, "a miss returns nullptr");
         cache.put(1, tagged_page(11));
-        const Page* got = cache.get(1);
+        auto got = cache.get(1);
         suite.check(got != nullptr && first_byte(*got) == 11, "a put is retrievable with content");
         // Reescrever a mesma página atualiza o conteúdo, não duplica.
         cache.put(1, tagged_page(99));
-        got = cache.get(1);
-        suite.check(got != nullptr && first_byte(*got) == 99, "a re-put updates the content");
+        auto updated = cache.get(1);
+        suite.check(updated != nullptr && first_byte(*updated) == 99, "a re-put updates the content");
+        // C6.2: quem já tinha a página segue com a versão que leu (o put troca o
+        // ponteiro, não escreve por cima), mesmo depois de ela sair do cache.
+        suite.check(first_byte(*got) == 11, "an earlier reader keeps the version it read");
+        cache.invalidate(1);
+        suite.check(first_byte(*updated) == 99, "a page stays alive after eviction while referenced");
+        cache.put(1, tagged_page(99));
         suite.check(cache.size() == 1, "updating keeps a single entry");
     }
 

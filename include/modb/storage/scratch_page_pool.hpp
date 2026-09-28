@@ -3,6 +3,7 @@
 #include "modb/error.hpp"
 #include "modb/storage/page.hpp"
 
+#include <mutex>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -55,7 +56,10 @@ public:
     // Empresta um buffer livre, ou std::nullopt quando todos estão em uso.
     [[nodiscard]] std::optional<Handle> try_acquire();
     [[nodiscard]] std::size_t capacity() const noexcept { return pages_.size(); }
-    [[nodiscard]] std::size_t available() const noexcept { return free_indices_.size(); }
+    [[nodiscard]] std::size_t available() const noexcept {
+        const std::scoped_lock lock{mu_};
+        return free_indices_.size();
+    }
 
 private:
     // Aloca todos os buffers e índices uma única vez; só create pode construir.
@@ -65,6 +69,8 @@ private:
     std::vector<Page> pages_;
     // A capacidade reservada impede alocações durante acquire/release.
     std::vector<std::size_t> free_indices_;
+    // Empréstimos de threads diferentes (C6.4).
+    mutable std::mutex mu_;
 };
 
 } // namespace modb::storage

@@ -271,12 +271,23 @@ A fonte de verdade é `modb.snapshot` (casos de GC) e `modb.cli.mvcc_gc`.
   `IdentityMap::clear_previous`, zerando o slot anterior e mantendo o `current`
   intacto. Um tombstone cujo `previous` foi coletado vira uma entrada vazia mas
   ainda alocada — o `ObjectId` nunca é reutilizado (ADR-001).
-- **Sincronização single-writer.** Commits são serializados pela guarda de
-  `begin()` (uma segunda transação falha com `transaction_active`, Fase 5). O
-  registro em memória das épocas de snapshots abertos é protegido por um mutex
-  curto (`snapshot_registry_mutex_`): abertura/fechamento de snapshot (leitor) e
-  escrita/commit/GC (escritor) sincronizam só nesse ponto, sem prender a duração
-  das leituras.
+- **Sincronização: leitores em paralelo, um escritor (ADR-027).** Leituras de
+  qualquer thread correm juntas; uma transação (e bind, create_index, GC,
+  checkpoint) espera as leituras em curso e roda sozinha. O `begin()` de outra
+  thread **espera a vez**; na mesma thread, uma segunda transação é
+  `transaction_active` (Fase 5). O registro das épocas de snapshots abertos
+  segue sob `snapshot_registry_mutex_`. Um snapshot só vê commits
+  **publicados** -- duráveis e aplicados (PLANO_CONCORRENCIA C1): um snapshot
+  aberto durante um commit fica na época anterior.
+- **Conflito de snapshot com leitores concorrentes.** Com leitores abrindo
+  snapshots o tempo todo, a regra de duas versões (abaixo) aparece em objetos
+  disputados. `Database::transact` repete a transação em `snapshot_conflict`:
+  desfaz, espera fecharem os snapshots mais antigos que o último commit (sem
+  segurar lock) e roda de novo, por até ~5 s. Quem usa `begin()` direto
+  recebe o erro e decide.
+- **Consulta por índice sob snapshot antigo (C2).** Se o índice perdeu uma
+  chave que o snapshot ainda enxerga, a consulta varre a época em vez de usar a
+  B+ tree, e devolve na mesma ordem do índice.
 
 Limitação mantida (ADR-009): **uma** versão anterior por objeto — uma segunda
 alteração enquanto a `previous` ainda é visível retorna `snapshot_conflict`. O

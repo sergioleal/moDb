@@ -219,7 +219,7 @@ namespace {
 
 Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Database> database,
                               const Query& query, std::optional<std::size_t> fail_after,
-                              Compression preferred_codec, std::mutex& engine_mutex) {
+                              Compression preferred_codec) {
     StreamStats stats{};
     query::CancellationToken token;
     {
@@ -227,22 +227,13 @@ Result<StreamStats> run_query(SessionState& session, std::shared_ptr<object::Dat
         session.tokens[query.query_id] = token;
     }
 
-    // O motor é single-thread (ADR-011): `BufferPool` e `ScratchPagePool` não
-    // têm sincronização, então dois workers percorrendo generators no mesmo
-    // `Database` corrompem as listas internas do pool — observado como
-    // STATUS_HEAP_CORRUPTION ao destruir o `BufferPool`. `engine_lock` fica
-    // tomado por todo o corpo (inclusive na destruição do generator, que
-    // rebobina a coroutine e o snapshot) e só é liberado em volta do `send`,
-    // que bloqueia em TCP: assim a multiplexação e o backpressure continuam
-    // valendo, sem que um cliente lento numa stream trave as outras.
-    std::unique_lock<std::mutex> engine_lock{engine_mutex};
-    // Envia com o motor liberado e o retoma antes de devolver, para que todo
-    // caminho de saída volte com o lock tomado.
+    // Antes o motor era single-thread e um `engine_mutex_` do servidor
+    // serializava tudo (ADR-011). Agora o próprio `Database` coordena (C10/C11,
+    // ADR-027): `query_objects` segura o lock de leitura só enquanto produz
+    // cada objeto, então vários workers leem juntos e uma escrita espera só o
+    // passo em curso. O `send`, que bloqueia em TCP, nunca segura o motor.
     const auto send_unlocked = [&](const Message& message) -> Result<void> {
-        engine_lock.unlock();
-        auto status = send_locked(session, message);
-        engine_lock.lock();
-        return status;
+        return send_locked(session, message);
     };
 
     if (auto status = send_unlocked(StreamBegin{.query_id = query.query_id}); !status) {
@@ -463,7 +454,7 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
             const Compression codec = session.selected_codec;
             std::thread worker([&, query_copy, codec]() mutable {
                 auto stats =
-                    run_query(session, database_, query_copy, fail_after_, codec, *engine_mutex_);
+                    run_query(session, database_, query_copy, fail_after_, codec);
                 if (stats) {
                     const std::scoped_lock lock{*stats_mutex_};
                     last_stats_ = *stats;
@@ -576,10 +567,13 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
         }
         workers.clear();
     }
-    (void)peer.close();
+    // shutdown acorda a thread leitora; só depois de ela sair o socket fecha
+    // (fechar com ela ainda num recv era a corrida em NativeSocket::close).
+    (void)peer.shutdown();
     if (reader.joinable()) {
         reader.join();
     }
+    (void)peer.close();
     return session_status;
 }
 
@@ -591,11 +585,8 @@ OpResult Server::execute_call(const OpCall& call) {
         reply.message = "server has no operation registry";
         return reply;
     }
-    // `dispatch` executa a operação de domínio no mesmo `Database` que os
-    // workers de consulta percorrem, então também precisa do lock do
-    // motor (ADR-011) — sem ele um OpCall concorrente com um stream
-    // ativo corrompe as mesmas estruturas do BufferPool.
-    const std::scoped_lock engine_lock{*engine_mutex_};
+    // Sem lock do servidor (C11): procs de leitura correm juntas; as de escrita
+    // abrem transação, e `Database::begin` as põe uma de cada vez.
     auto outcome = operations_->dispatch(call.operation_id, call.args, *database_);
     if (outcome) {
         reply.ok = true;

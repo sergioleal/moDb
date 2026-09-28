@@ -138,6 +138,29 @@ int main(int argc, char** argv) {
     std::atomic<int> read_errors{0}, poison_seen{0}, mismatches{0}, missing_epochs{0};
     const auto stop_at = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
 
+    // Onde cada thread está, para o vigia contar se o teste travar.
+    // 0 fora, 1 esperando begin, 2 na transação, 3 commit, 4 rollback,
+    // 11 snapshot, 12 scan, 13 esperando a época no ledger.
+    std::atomic<int> writer_phase{0};
+    std::vector<std::atomic<int>> reader_phase(static_cast<std::size_t>(readers));
+    std::atomic<bool> all_done{false};
+    std::thread watchdog{[&] {
+        const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(seconds + 90);
+        while (!all_done.load()) {
+            if (std::chrono::steady_clock::now() > limit) {
+                std::cerr << "VIGIA: travado. escritor fase " << writer_phase.load() << ", commits "
+                          << commits.load() << ", leituras " << reads.load() << ", writer_done "
+                          << writer_done.load() << "; leitores:";
+                for (auto& ph : reader_phase) {
+                    std::cerr << ' ' << ph.load();
+                }
+                std::cerr << std::endl;
+                std::abort();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }};
+
     std::thread writer{[&] {
         std::mt19937 rng{seed};
         std::uniform_int_distribution<int> percent{0, 99};
@@ -146,7 +169,9 @@ int main(int argc, char** argv) {
             if (serial) {
                 lock.lock();
             }
+            writer_phase.store(1);
             auto tx = db->begin();
+            writer_phase.store(2);
             if (!tx) {
                 continue;
             }
@@ -186,6 +211,7 @@ int main(int argc, char** argv) {
                 }
             }
             if (!ok) {
+                writer_phase.store(4);
                 // Conflito com um snapshot aberto (a versão anterior ainda é
                 // necessária): desiste da transação, o modelo não muda.
                 (void)tx->rollback();
@@ -197,6 +223,7 @@ int main(int argc, char** argv) {
                 ++rollbacks;
                 continue;
             }
+            writer_phase.store(3);
             if (!tx->commit()) {
                 ++conflicts;
                 continue;
@@ -206,17 +233,20 @@ int main(int argc, char** argv) {
             ledger.record(db->epoch(), model);
             ++commits;
         }
+        writer_phase.store(0);
         writer_done.store(true);
     }};
 
     std::vector<std::thread> pool;
     for (int r = 0; r < readers; ++r) {
-        pool.emplace_back([&] {
+        pool.emplace_back([&, r] {
+            auto& phase = reader_phase[static_cast<std::size_t>(r)];
             while (!writer_done.load()) {
                 std::unique_lock<std::mutex> lock{engine, std::defer_lock};
                 if (serial) {
                     lock.lock();
                 }
+                phase.store(11);
                 auto snap = db->snapshot();
                 if (!snap) {
                     ++read_errors;
@@ -224,6 +254,7 @@ int main(int argc, char** argv) {
                 }
                 State seen;
                 bool poison = false;
+                phase.store(12);
                 auto scanned = db->scan<Doc>(*snap, [&](const Doc& d) -> Result<void> {
                     seen.count += 1;
                     seen.sum += d.value;
@@ -243,7 +274,9 @@ int main(int argc, char** argv) {
                 if (poison) {
                     ++poison_seen;
                 }
+                phase.store(13);
                 auto expected = ledger.wait_for(epoch, writer_done);
+                phase.store(0);
                 if (!expected) {
                     ++missing_epochs;
                 } else if (expected->count != seen.count || expected->sum != seen.sum) {
@@ -256,6 +289,8 @@ int main(int argc, char** argv) {
     for (auto& t : pool) {
         t.join();
     }
+    all_done.store(true);
+    watchdog.join();
 
     std::cout << commits.load() << " commits, " << rollbacks.load() << " rollbacks, " << conflicts.load()
               << " conflitos, " << reads.load() << " leituras de snapshot\n";

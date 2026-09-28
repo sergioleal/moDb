@@ -118,15 +118,22 @@ planos dedicados). Para concorrência, também:
 - [x] 5.2 *(contagem e soma de cada snapshot iguais às anotadas pelo escritor para a época; nenhum veneno; nenhuma leitura falha)* Invariantes: cada snapshot vê um estado que existiu num commit (contagem e checksum iguais aos gravados pelo escritor na época), nenhum leitor vê transação abortada, nenhum crash ou erro de página
 - [ ] 5.3 *(parcial: `modb.concurrency_stress_serial` — com lock global, valida o teste — roda em todo preset; `modb.concurrency_stress` — sem lock, o alvo das C6-C8 — só no `tsan`. Falta o caso `concurrent_readers` do `modb_load`, junto da C12)* Entra no `ctest` numa versão curta; a versão longa entra como caso do `modb_load` (`concurrent_readers`), para a máquina dedicada
 
-#### C6 — Caches e contadores do caminho de leitura *(médio)*
+#### C6 — Caches e contadores do caminho de leitura *(médio)* ✅
 
-- [ ] 6.1 `BufferPool`: um mutex para `get`/`put`/`touch`/`evict` (primeira versão, simples) e métricas atômicas
-- [ ] 6.2 `PageFile::view` devolve `PageRef` (RAII) que pina o frame até sair de escopo; `view_scratch_` deixa de existir (um miss aloca ou usa um frame pinado); revisar os chamadores (`table_heap.cpp`, `identity_map.cpp`)
-- [ ] 6.3 `peeked_`: tirar do objeto compartilhado (por chamada, ou por thread) — medir se o ganho da T15 se mantém
-- [ ] 6.4 `BoundType::plans`: construir o plano no `bind` ou proteger a criação sob demanda com mutex; `data_pages_read_` atômico; `ScratchPagePool` com mutex
-- [ ] 6.5 Critério: `concurrency_smoke` (C4.2) limpo no TSan com leitores só; custo em thread única no ruído (máquina dedicada)
+- [x] 6.1 *(mutex em tudo; frames `shared_ptr<const Page>` imutáveis: `put` troca o ponteiro)* `BufferPool`: um mutex para `get`/`put`/`touch`/`evict` (primeira versão, simples) e métricas atômicas
+- [x] 6.2 *(`PageRef` segura um `shared_ptr` -- em vez de pinar, o que não protegeria contra um `put` escrevendo por cima; num miss, uma página própria da visão)* `PageFile::view` devolve `PageRef` (RAII) que pina o frame até sair de escopo; `view_scratch_` deixa de existir (um miss aloca ou usa um frame pinado); revisar os chamadores (`table_heap.cpp`, `identity_map.cpp`)
+- [x] 6.3 *(`thread_local`, com etiqueta única por instância de store; o ganho da T15 fica, medição pendente)* `peeked_`: tirar do objeto compartilhado (por chamada, ou por thread) — medir se o ganho da T15 se mantém
+- [x] 6.4 *(planos sob `shared_mutex`; `data_pages_read_` atômico; `ScratchPagePool` com mutex)* `BoundType::plans`: construir o plano no `bind` ou proteger a criação sob demanda com mutex; `data_pages_read_` atômico; `ScratchPagePool` com mutex
+- [x] 6.5 *(`concurrency_smoke` limpo no TSan e em todo preset; custo em thread única: medição pendente)* Critério: `concurrency_smoke` (C4.2) limpo no TSan com leitores só; custo em thread única no ruído (máquina dedicada)
 
 ### P2 — isolamento: leitores e escritor ao mesmo tempo
+
+> **C7 e C8 viraram etapa condicional (ADR-027).** A etapa 1 -- leitores em
+> paralelo, escritor exclusivo -- entrega o objetivo da S9 sem elas. Leitores
+> *durante* uma escrita em andamento só se a C12 mostrar que o escritor
+> exclusivo limita a vazão; e aí com a visão publicada pequena (raízes,
+> contadores, catálogo, índices), não a cópia do `ObjectStore` inteiro, que
+> custaria milissegundos por commit a 1M objetos.
 
 #### C7 — Escrita privada e aplicação atômica no commit *(grande)*
 
@@ -143,22 +150,22 @@ planos dedicados). Para concorrência, também:
 - [ ] 8.3 Rollback = descartar o conjunto da transação e a cópia do escritor; `resync_store_after_rollback` deixa de existir (remove o paliativo da C3)
 - [ ] 8.4 DDL (`bind`, `create_index`, `register_migration`, `register_computed`) em modo exclusivo: espera os leitores terminarem ou recusa com erro claro
 
-#### C9 — ADR de concorrência *(pequeno, junto com a C7)*
+#### C9 — ADR de concorrência *(pequeno, junto com a C7)* ✅
 
-- [ ] 9.1 ADR: modelo (N leitores + 1 escritor), escolhas das C2/C7/C8, por que não MVCC de páginas, multi-writer fora do escopo, contrato de thread-safety da API
-- [ ] 9.2 Atualizar ADR-011 (a tabela de componentes), `GARANTIAS_TRANSACIONAIS.md` §9 e o README
+- [x] 9.1 *(ADR-027)* ADR: modelo (N leitores + 1 escritor), escolhas das C2/C7/C8, por que não MVCC de páginas, multi-writer fora do escopo, contrato de thread-safety da API
+- [x] 9.2 *(ADR-011 com a coluna "Hoje"; GARANTIAS §9)* Atualizar ADR-011 (a tabela de componentes), `GARANTIAS_TRANSACIONAIS.md` §9 e o README
 
 ### P3 — API e adoção
 
-#### C10 — `Database` seguro entre threads, com um contrato claro *(médio)*
+#### C10 — `Database` seguro entre threads, com um contrato claro *(médio)* ✅
 
-- [ ] 10.1 Documentar (e checar em debug) quais chamadas podem ser concorrentes: leituras e snapshots de qualquer thread; uma transação por vez (a segunda espera ou falha — decidir); DDL exclusiva
-- [ ] 10.2 `begin()` com espera opcional (`begin(timeout)`) em vez de só `transaction_active`, para aplicações com várias threads escritoras enfileirarem
-- [ ] 10.3 `Handle`/`Snapshot` seguros para usar da thread que os criou; documentar que não são compartilháveis entre threads (ou torná-los)
+- [x] 10.1 *(contrato no ADR-027 e no cabeçalho do `Database`; lock de leitores e escritor interno, reentrante por thread; escrever no meio de uma leitura da mesma thread é erro, não deadlock)* Documentar (e checar em debug) quais chamadas podem ser concorrentes: leituras e snapshots de qualquer thread; uma transação por vez (a segunda espera ou falha — decidir); DDL exclusiva
+- [x] 10.2 *(`begin()` espera a vez; `transact()` repete em `snapshot_conflict` esperando os snapshots antigos fecharem)* `begin()` com espera opcional (`begin(timeout)`) em vez de só `transaction_active`, para aplicações com várias threads escritoras enfileirarem
+- [x] 10.3 *(usáveis de qualquer thread; uma `Transaction` termina na thread que a abriu)* `Handle`/`Snapshot` seguros para usar da thread que os criou; documentar que não são compartilháveis entre threads (ou torná-los)
 
-#### C11 — Servidor de rede e réplicas sem lock global *(médio)*
+#### C11 — Servidor de rede e réplicas sem lock global *(médio)* ✅ (réplica pendente)
 
-- [ ] 11.1 `Server`: tirar o `engine_mutex_` das consultas; manter a serialização só para `OpCall` de escrita (ou usar a fila da C10.2)
+- [x] 11.1 *(`engine_mutex_` removido; procs de leitura usam o snapshot da chamada em tudo -- `Database::query(snapshot)`; corrida de `NativeSocket::close` corrigida)* `Server`: tirar o `engine_mutex_` das consultas; manter a serialização só para `OpCall` de escrita (ou usar a fila da C10.2)
 - [ ] 11.2 Réplica (ADR-016 §6): aplicar a transação replicada com o mesmo latch de aplicação da C7
 
 #### C12 — Medir *(máquina dedicada)*
@@ -167,10 +174,10 @@ planos dedicados). Para concorrência, também:
 - [ ] 12.2 Predição: leitura escala até o número de núcleos enquanto o conjunto cabe no cache; o escritor perde no máximo o tempo das aplicações
 - [ ] 12.3 Se o mutex do `BufferPool` for o gargalo: particionar (por `page_id`) e medir de novo
 
-#### C13 — Biblioteca sem mutex próprio *(pequeno, depois da C10)*
+#### C13 — Biblioteca sem mutex próprio *(pequeno, depois da C10)* ✅
 
-- [ ] 13.1 Tirar o `std::mutex` do serviço da `biblioteca` para as leituras; manter a ordem nas escritas pela fila da C10.2
-- [ ] 13.2 Teste de carga HTTP simples (N clientes lendo + 1 emprestando/devolvendo) com as invariantes do domínio (um exemplar nunca em dois empréstimos abertos)
+- [x] 13.1 *(a biblioteca já não embute o motor: o mutex que sobrava era o da conexão única da `biblioteca-web`, trocado por um pool de conexões, `--conexoes N`)* Tirar o `std::mutex` do serviço da `biblioteca` para as leituras; manter a ordem nas escritas pela fila da C10.2
+- [x] 13.2 *(`biblioteca/tests/carga_test.cpp`: 8 leitores + 2 escritores por 4 s -- ~1.200 leituras, ~130 empréstimos e devoluções --, invariantes do domínio e nenhum 5xx)* Teste de carga HTTP simples (N clientes lendo + 1 emprestando/devolvendo) com as invariantes do domínio (um exemplar nunca em dois empréstimos abertos)
 
 ### P4 — depois
 
@@ -198,3 +205,7 @@ números de desempenho ficam pendentes, marcados como tal.
 | 2026-09-27 | C4 | — | ~~Bloqueado~~ (resolvido no mesmo dia: ferramentas instaladas): o WSL (Ubuntu 24.04) tem GCC 13 (não testado com o moDb; o build cai para C++23 sem C++26) mas não tem cmake nem ninja, e instalar pacotes pede a senha de sudo. Sem TSan, as tarefas C4 em diante não têm como cumprir o critério "limpo no TSan" |
 | 2026-09-27 | C4 | (este commit) | TSan no WSL (GCC 14, CMake do venv, `setarch -R`). Linha de base: 132/146 limpos; o `concurrency_smoke` confirma o diagnóstico (LRU, views despejadas, `peeked_`, planos) e o servidor de rede mostra uma corrida nova em `NativeSocket::close` |
 | 2026-09-27 | C5 | (este commit) | Estresse 1 escritor + N leitores com invariantes por época. Serial (lock global): 880 commits, 206 rollbacks, 8.185 snapshots, todos exatos — o teste vale. O modo concorrente fica para depois das C6-C8 |
+| 2026-09-27 | C6, C9, C10, C11 | (este commit) | Leitores em paralelo, um escritor exclusivo (ADR-027). `concurrency_smoke`, `concurrency_stress` (sem lock externo) e `concurrent_writers` limpos no TSan; servidor sem `engine_mutex_`. Achados: com leitores contínuos a regra de duas versões dá `snapshot_conflict` em objeto disputado -- `transact` passou a repetir esperando os snapshots antigos fecharem; uma proc de leitura misturava o snapshot da chamada com o de cada consulta; o servidor e o cliente fechavam o socket com a leitora ainda no `recv`. C7/C8 viram etapa condicional |
+| 2026-09-27 | C11 (fim), C13 | (este commit) | TSan: **149/149 limpos** (linha de base: 132/146). Achados: `send` sem `MSG_NOSIGNAL` -- no Linux, um cliente que some no meio de um stream matava o servidor com SIGPIPE; a demo de cancelamento dependia do servidor ser lento. Biblioteca: pool de conexões na web e teste de carga com invariantes |
+| 2026-09-27 | C10 (locks) | (este commit) | `std::shared_mutex` trocado por `RwLock` (include/modb/object/rw_lock.hpp). No MinGW, o rwlock da winpthreads devolvia erro em `lock_shared` sob contenção (asserção da libstdc++ no preset sanitizers, até com leitores só): SRWLOCK. No Linux, o rwlock padrão da glibc prefere leitores e o escritor morria de inanição -- `concurrency_stress` parado 20 min no TSan, 1 commit contra 60 mil leituras (achado com um vigia no teste): preferência ao escritor. Detalhe que custou uma rodada: `PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP` é enum, e o `#ifdef` nele era sempre falso. Testes de concorrência com TIMEOUT de 180 s |
+| 2026-09-27 | C10 (conflitos) | (este commit) | Com preferência ao escritor, um leitor que abria o snapshot e depois esperava o lock atrás de escritores segurava um snapshot mais velho que o último commit, e cada escritor do objeto disputado batia em `snapshot_conflict` (13 de 600 incrementos perdidos no TSan). Correções: o lock de leitura vem antes do snapshot e dura a leitura (toda proc de leitura faz isso no `OperationRegistry`); `transact` com dreno (escritores esperam os snapshots antigos antes de pedir o lock). O destrutor do `Database` solta a vez de uma transação abandonada (queda simulada) |

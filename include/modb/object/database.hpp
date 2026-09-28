@@ -13,6 +13,7 @@
 #include "modb/object/primary_storage.hpp"
 // Importa ProjectionPlan para materializar versões históricas.
 #include "modb/object/projection_plan.hpp"
+#include "modb/object/rw_lock.hpp"
 // Importa o encoding ordenável usado no fallback Scan+Predicate (Fase 7E).
 #include "modb/index/key_codec.hpp"
 
@@ -31,6 +32,9 @@
 
 // Disponibiliza std::size_t no resultado do GC.
 #include <atomic>
+#include <condition_variable>
+#include <shared_mutex>
+#include <thread>
 #include <cstddef>
 // Disponibiliza caminhos.
 #include <filesystem>
@@ -375,6 +379,18 @@ const void* type_key() {
 // É a fachada do MVP OO embedded. O PageFile é mantido por unique_ptr para ter
 // endereço estável — o ObjectStore guarda um PageFile* e o Database precisa
 // permanecer movível sem invalidar esse ponteiro.
+// Estado do lock de leitores e escritor de um Database (ver Database::ReadGuard).
+struct Concurrency {
+    RwLock rw;
+    std::atomic<std::thread::id> writer{};
+    // Época de dreno (ver Database::transact): diferente de zero, um escritor
+    // bateu em snapshot_conflict, e os escritores que chegam esperam os
+    // snapshots mais antigos que ela fecharem antes de pedir o lock. Sem isso,
+    // com preferência ao escritor e vários escritores na fila, os leitores que
+    // seguram esses snapshots nunca conseguem o lock para terminar.
+    std::atomic<std::uint64_t> drain{0};
+};
+
 class Database {
 public:
     using Migration = std::function<Result<FieldValues>(const DecodedObject&)>;
@@ -469,6 +485,7 @@ public:
     // Devolve um Handle para um objeto existente (verifica a existência).
     template <typename T>
     [[nodiscard]] Result<Handle<T>> get(ObjectId id) {
+        const auto read_lock = read_guard();
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
         }
@@ -504,6 +521,7 @@ public:
     // default-constructible (o materializador preenche cada membro bound).
     template <typename T>
     [[nodiscard]] Result<T> materialize(const Handle<T>& handle) {
+        const auto read_lock = read_guard();
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
         }
@@ -529,6 +547,7 @@ public:
     // identidade reaproveitável como `Handle`.
     template <typename T>
     [[nodiscard]] Result<T> get(ObjectId id, const Snapshot& snapshot) {
+        const auto read_lock = read_guard();
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
         }
@@ -562,6 +581,7 @@ public:
     template <typename T>
     [[nodiscard]] Result<void> scan(const Snapshot& snapshot,
                                     const std::function<Result<void>(const T&)>& visitor) {
+        const auto read_lock = read_guard();
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
         }
@@ -636,6 +656,7 @@ public:
     //   for (auto& r : db.query<Account>().where(...).limit(10).stream()) { ... }
     template <typename T>
     [[nodiscard]] Query<T> query() {
+        const auto read_lock = read_guard();
         const BoundType* bound = bound_for(type_key<T>());
         if (bound == nullptr) {
             return Query<T>{this, std::nullopt,
@@ -648,9 +669,29 @@ public:
         return Query<T>{this, std::move(*opened), std::nullopt};
     }
 
+    // A mesma consulta, na época de um snapshot já aberto: várias leituras de
+    // uma operação veem um estado só, mesmo com commits de outras threads no
+    // meio (C10). O snapshot passado continua do chamador.
+    template <typename T>
+    [[nodiscard]] Query<T> query(const Snapshot& at) {
+        const auto read_lock = read_guard();
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return Query<T>{this, std::nullopt,
+                            Error{ErrorCode::type_not_found, "type is not bound"}};
+        }
+        if (at.database() != database_id_) {
+            return Query<T>{this, std::nullopt,
+                            Error{ErrorCode::invalid_argument, "snapshot belongs to a different database"}};
+        }
+        register_snapshot_epoch(at.epoch());
+        return Query<T>{this, Snapshot{database_id_, at.epoch()}, std::nullopt};
+    }
+
     // Id persistido do tipo T após bind() (útil para QueryDescription remota).
     template <typename T>
     [[nodiscard]] Result<TypeDefinitionId> type_id_of() const {
+        const auto read_lock = read_guard();
         const BoundType* bound = bound_for(type_key<T>());
         if (bound == nullptr) {
             return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
@@ -672,15 +713,19 @@ public:
         bool has_cancel{false};
     };
 
-    [[nodiscard]] query::Generator<Result<DecodedObject>> query_objects(ObjectQuerySpec query);
+    [[nodiscard]] query::Generator<Result<DecodedObject>> query_objects(ObjectQuerySpec query) {
+        return guarded(query_objects_source(std::move(query)));
+    }
 
     // Indica se há índice B+ tree no campo do tipo T (Fase 7E — planner).
     template <typename T>
     [[nodiscard]] bool has_index_for(FieldId field) const noexcept {
+        const auto read_lock = read_guard();
         return has_index_for<T>(field.value);
     }
     template <typename T>
     [[nodiscard]] bool has_index_for(std::uint16_t field) const noexcept {
+        const auto read_lock = read_guard();
         const BoundType* bound = bound_for(type_key<T>());
         if (bound == nullptr) {
             return false;
@@ -701,10 +746,15 @@ public:
             return std::unexpected(
                 Error{ErrorCode::invalid_argument, "database must be attached before use"});
         }
-        if (file_->in_transaction()) {
+        if (is_writer_thread()) {
             return std::unexpected(Error{ErrorCode::transaction_active,
                                          "cannot create an index inside a transaction"});
         }
+        // DDL: espera as leituras e roda sozinho (C8.4).
+        if (auto entered = enter_writer(); !entered) {
+            return std::unexpected(entered.error());
+        }
+        const WriterScope writer_scope{this};
         const BoundType* bound = bound_for(type_key<T>());
         if (bound == nullptr) {
             return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
@@ -757,9 +807,96 @@ public:
     Result<void> register_migration(std::string type_name, std::uint64_t from_type_id,
                                     Migration migration);
 
-    // Inicia uma transação de escrita. Falha se já houver uma em andamento
-    // (single-writer) ou se o banco não estiver anexado ao registro.
+    // Inicia uma transação de escrita. Um escritor por vez: se outra thread
+    // tem uma transação aberta, espera ela terminar (e as leituras em curso);
+    // na mesma thread, uma segunda transação é `transaction_active`. A
+    // transação termina (commit ou rollback) na thread que a abriu.
     [[nodiscard]] Result<Transaction> begin();
+
+    // --- Concorrência (PLANO_CONCORRENCIA C10, ADR-027) -----------------------
+    //
+    // Leituras de qualquer thread correm juntas; uma escrita -- transação,
+    // bind, create_index, GC, checkpoint -- espera as leituras em curso e roda
+    // sozinha. A thread dona da transação lê o próprio estado (read-your-
+    // writes) sem travar. As leituras seguram o lock só durante cada chamada;
+    // um stream o segura só enquanto produz o próximo item (`guarded`), nunca
+    // entre um item e outro, então quem consome pode abrir uma transação no
+    // meio. Não abra transação dentro do visitor de `scan` (ele roda com o lock).
+    class ReadGuard {
+    public:
+        ReadGuard() = default;
+        ReadGuard(const ReadGuard&) = delete;
+        ReadGuard& operator=(const ReadGuard&) = delete;
+        ReadGuard(ReadGuard&& other) noexcept
+            : state_{std::exchange(other.state_, nullptr)}, held_{std::exchange(other.held_, false)} {}
+        ReadGuard& operator=(ReadGuard&&) = delete;
+        ~ReadGuard() { unlock(); }
+
+        // Não trava na thread escritora (read-your-writes) nem se esta thread já
+        // lê este banco: uma leitura que chama outra (get -> materialize, stream
+        // -> ...) toma o lock uma vez só -- tomar um shared_mutex duas vezes na
+        // mesma thread trava se um escritor estiver esperando no meio.
+        void lock() {
+            if (state_ == nullptr || held_ ||
+                state_->writer.load(std::memory_order_acquire) == std::this_thread::get_id()) {
+                return;
+            }
+            auto& reading = reading_now();
+            for (const auto* other : reading) {
+                if (other == state_) {
+                    return;
+                }
+            }
+            state_->rw.lock_shared();
+            reading.push_back(state_);
+            held_ = true;
+        }
+        void unlock() noexcept {
+            if (!held_) {
+                return;
+            }
+            auto& reading = reading_now();
+            for (auto it = reading.begin(); it != reading.end(); ++it) {
+                if (*it == state_) {
+                    reading.erase(it);
+                    break;
+                }
+            }
+            state_->rw.unlock_shared();
+            held_ = false;
+        }
+
+    private:
+        friend class Database;
+        explicit ReadGuard(Concurrency* state) : state_{state} { lock(); }
+        // Bancos que esta thread está lendo agora (quase sempre zero ou um).
+        static std::vector<const Concurrency*>& reading_now() noexcept {
+            thread_local std::vector<const Concurrency*> reading;
+            return reading;
+        }
+        Concurrency* state_{nullptr};
+        bool held_{false};
+    };
+    [[nodiscard]] ReadGuard read_guard() const { return ReadGuard{conc_.get()}; }
+
+    // Avança `inner` com o lock de leitura e o solta antes de entregar cada item.
+    template <typename V>
+    [[nodiscard]] query::Generator<V> guarded(query::Generator<V> inner) {
+        ReadGuard guard = read_guard();
+        auto it = inner.begin();
+        while (it != inner.end()) {
+            V value = std::move(*it);
+            guard.unlock();
+            co_yield std::move(value);
+            guard.lock();
+            ++it;
+        }
+    }
+
+    // Há uma transação aberta nesta thread?
+    [[nodiscard]] bool is_writer_thread() const noexcept {
+        return conc_ && conc_->writer.load(std::memory_order_acquire) == std::this_thread::get_id();
+    }
 
     // Abre um snapshot fixado na época corrente (Fase 6B): leituras via
     // `get(id, snapshot)`/`scan(snapshot, ...)` continuam vendo exatamente
@@ -783,6 +920,7 @@ public:
     // Localiza o FieldBinder do tipo T (Fase 12A — factories de EdgeHandle).
     template <typename T>
     [[nodiscard]] Result<const FieldBinder*> find_bound_field(FieldId field) const {
+        const auto read_lock = read_guard();
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
         }
@@ -804,6 +942,7 @@ public:
     template <typename T>
     [[nodiscard]] Result<std::vector<ObjectId>> indexed_object_ids(
         FieldId field, const AttributeValue& key) const {
+        const auto read_lock = read_guard();
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
         }
@@ -826,23 +965,56 @@ public:
     // commit; retorno de erro → rollback; exceção → rollback (via RAII do
     // destrutor da Transaction, que reverte quando não houve commit). É o
     // contrato reutilizado pela Fase 9 (Operations).
+    //
+    // `snapshot_conflict` é repetido (C10): com leitores concorrentes, um
+    // objeto disputado tem a versão anterior presa a um snapshot aberto antes
+    // do último commit (MVCC de duas versões, ADR-009). Esperar dentro da
+    // transação não adianta -- o leitor espera o lock que ela segura --, então
+    // a tentativa é desfeita, os leitores terminam, e `fn` roda de novo numa
+    // transação nova. `fn` precisa poder rodar de novo: tudo o que ela fez no
+    // banco foi desfeito, mas efeitos fora dele não.
     template <typename Fn>
     [[nodiscard]] auto transact(Fn&& fn) -> decltype(fn(std::declval<Transaction&>())) {
         using ResultType = decltype(fn(std::declval<Transaction&>()));
-        auto transaction = begin();
-        if (!transaction) {
-            return ResultType{std::unexpected(transaction.error())};
-        }
-        auto outcome = fn(*transaction);
-        if (!outcome) {
-            (void)transaction->rollback();
+        auto pause = std::chrono::microseconds{200};
+        for (int attempt = 0;; ++attempt) {
+            auto transaction = begin();
+            if (!transaction) {
+                return ResultType{std::unexpected(transaction.error())};
+            }
+            auto outcome = fn(*transaction);
+            if (!outcome) {
+                // Snapshots mais antigos que o último commit prendem a versão
+                // anterior; depois do rollback (que solta o lock), espera eles
+                // fecharem antes de tentar de novo -- e pede aos outros
+                // escritores que esperem também (dreno), para os leitores que
+                // os seguram conseguirem o lock e terminar.
+                const auto published = published_epoch();
+                const bool conflict = outcome.error().code == ErrorCode::snapshot_conflict;
+                if (conflict) {
+                    auto expected = conc_->drain.load(std::memory_order_acquire);
+                    while (expected < published &&
+                           !conc_->drain.compare_exchange_weak(expected, published, std::memory_order_acq_rel)) {
+                    }
+                }
+                (void)transaction->rollback();
+                if (conflict && attempt < k_conflict_retries) {
+                    wait_snapshots_from(published, std::chrono::milliseconds{50});
+                    std::this_thread::sleep_for(pause);
+                    pause = std::min(pause * 2, std::chrono::microseconds{2'000});
+                    continue;
+                }
+                return outcome;
+            }
+            if (auto committed = transaction->commit(); !committed) {
+                return ResultType{std::unexpected(committed.error())};
+            }
             return outcome;
         }
-        if (auto committed = transaction->commit(); !committed) {
-            return ResultType{std::unexpected(committed.error())};
-        }
-        return outcome;
     }
+    // Tentativas de `transact` diante de snapshot_conflict (até ~5 s no total:
+    // cada uma espera até 50 ms os snapshots antigos fecharem).
+    static constexpr int k_conflict_retries = 100;
 
     // Substitui a fábrica do arquivo do WAL. Uso restrito a testes: injeta um
     // FailpointFile para simular falhas de I/O reais no commit (Fase 5).
@@ -863,6 +1035,7 @@ public:
     }
 
     [[nodiscard]] Result<TypeDefinitionId> object_type(ObjectId id) {
+        const auto read_lock = read_guard();
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
         }
@@ -964,6 +1137,7 @@ public:
     // Estado de versionamento de um objeto (Fase 6): época/localização da
     // versão `current` e, se retida, da `previous`. Diagnóstico read-only.
     [[nodiscard]] Result<IdentityMap::VersionInfo> version_info(ObjectId id) {
+        const auto read_lock = read_guard();
         if (auto usable = check_usable(); !usable) {
             return std::unexpected(usable.error());
         }
@@ -1013,11 +1187,19 @@ public:
     [[nodiscard]] BlobStore blobs() const noexcept { return BlobStore{*file_, database_id_, true}; }
 
 private:
+    query::Generator<Result<DecodedObject>> query_objects_source(ObjectQuerySpec query);
+
     // Um tipo C++ ligado ao seu binding e ao id de tipo persistido.
     struct BoundType {
         Binding binding;
         TypeDefinitionId type_id;
+        // Planos de projeção por versão de tipo, montados sob demanda na
+        // leitura. Leitores de várias threads consultam e montam (C6.4): o
+        // mutex protege o mapa; um plano pronto nunca muda nem sai, e o
+        // unordered_map não move os elementos, então a referência vale depois
+        // de soltar o lock.
         mutable std::unordered_map<std::uint64_t, ProjectionPlan> plans;
+        mutable std::unique_ptr<RwLock> plans_mu{std::make_unique<RwLock>()};
     };
 
     Database(std::unique_ptr<storage::PageFile> file, ObjectStore store,
@@ -1158,8 +1340,14 @@ private:
             }
             return result;
         }
-        auto plan = bound.plans.find(object.type.value);
-        if (plan == bound.plans.end()) {
+        const ProjectionPlan* plan = nullptr;
+        {
+            const std::shared_lock read_lock{*bound.plans_mu};
+            if (const auto found = bound.plans.find(object.type.value); found != bound.plans.end()) {
+                plan = &found->second;
+            }
+        }
+        if (plan == nullptr) {
             auto stored_type = store_.find_type(object.type);
             if (!stored_type) {
                 return std::unexpected(stored_type.error());
@@ -1168,9 +1356,11 @@ private:
             if (!built) {
                 return std::unexpected(built.error());
             }
-            plan = bound.plans.emplace(object.type.value, std::move(*built)).first;
+            const std::unique_lock write_lock{*bound.plans_mu};
+            // Outra thread pode ter montado o mesmo plano entre os dois locks.
+            plan = &bound.plans.try_emplace(object.type.value, std::move(*built)).first->second;
         }
-        if (auto materialized = plan->second.materialize(object, bound.binding, &result);
+        if (auto materialized = plan->materialize(object, bound.binding, &result);
             !materialized) {
             return std::unexpected(materialized.error());
         }
@@ -1488,11 +1678,22 @@ private:
         open_snapshot_epochs_.insert(epoch);
     }
     void unregister_snapshot_epoch(std::uint64_t epoch) {
-        const std::scoped_lock lock{*snapshot_registry_mutex_};
-        const auto it = open_snapshot_epochs_.find(epoch);
-        if (it != open_snapshot_epochs_.end()) {
-            open_snapshot_epochs_.erase(it);
+        {
+            const std::scoped_lock lock{*snapshot_registry_mutex_};
+            const auto it = open_snapshot_epochs_.find(epoch);
+            if (it != open_snapshot_epochs_.end()) {
+                open_snapshot_epochs_.erase(it);
+            }
         }
+        snapshot_closed_->notify_all();
+    }
+    // Espera fecharem os snapshots mais antigos que `epoch` (ou o prazo acabar).
+    // true = fecharam.
+    bool wait_snapshots_from(std::uint64_t epoch, std::chrono::milliseconds timeout) {
+        std::unique_lock lock{*snapshot_registry_mutex_};
+        return snapshot_closed_->wait_for(lock, timeout, [&] {
+            return open_snapshot_epochs_.empty() || *open_snapshot_epochs_.begin() >= epoch;
+        });
     }
 
     friend class DatabaseRegistry;
@@ -1546,6 +1747,23 @@ private:
     bool commit_durable_{false};
     // Ver published_epoch(). Declarado depois de store_ (inicializado a partir dele).
     alignas(8) std::uint64_t published_epoch_{0};
+
+    // Lock de leitores e escritor (ver ReadGuard). unique_ptr: o Database segue movível.
+    std::unique_ptr<Concurrency> conc_{std::make_unique<Concurrency>()};
+
+public:
+    // Toma a vez de escrever (espera o escritor atual e as leituras em curso).
+    // Na thread que já escreve: `transaction_active`.
+    [[nodiscard]] Result<void> enter_writer();
+    // Devolve a vez; sem efeito se esta thread não é a escritora.
+    void leave_writer() noexcept;
+    // Devolve a vez ao sair do escopo (idempotente com rollback_transaction).
+    struct WriterScope {
+        Database* db;
+        ~WriterScope() { db->leave_writer(); }
+    };
+
+private:
     bool recovery_required_{false};
     // Épocas dos snapshots atualmente abertos (multiset: dois snapshots podem
     // capturar a mesma época). O mínimo é a época mais antiga ainda visível,
@@ -1559,6 +1777,8 @@ private:
     // em si é dada pela guarda single-writer de `begin()` (Fase 5): uma segunda
     // transação falha com `transaction_active`.
     std::unique_ptr<std::mutex> snapshot_registry_mutex_{std::make_unique<std::mutex>()};
+    // Avisado a cada snapshot fechado: `transact` espera os que prendem uma versão (C10).
+    std::unique_ptr<std::condition_variable> snapshot_closed_{std::make_unique<std::condition_variable>()};
 };
 
 template <typename T>
@@ -1633,6 +1853,8 @@ query::Generator<Result<T>> Query<T>::stream() && {
         return database_->template run_stream<T>(std::move(*snapshot_), std::move(predicate),
                                                  scan_limit, std::move(token_), has_token_);
     }();
+    // A fonte lê o motor: com o lock de leitura, passo a passo (C10).
+    gen = database_->guarded(std::move(gen));
 
     // Top-K explícito (maiores segundo `less`).
     if (top_k_ > 0 && order_less_) {
@@ -1698,10 +1920,10 @@ query::Generator<Result<query::ProjectedRow>> ProjectedQuery<T>::stream() && {
     if (setup_error_) {
         return database_->template failed_stream<query::ProjectedRow>(std::move(*setup_error_));
     }
-    return database_->template run_projected_stream<T>(
+    return database_->guarded(database_->template run_projected_stream<T>(
         std::move(*snapshot_), std::move(predicate_), limit_, std::move(token_), has_token_,
         index_field_, std::move(index_lo_), std::move(index_hi_), std::move(selected_),
-        std::move(computed_));
+        std::move(computed_)));
 }
 
 template <typename T>

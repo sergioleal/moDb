@@ -125,7 +125,6 @@ private:
     // corrompem as estruturas internas. `unique_ptr` porque `std::mutex` não é
     // movível e `Server` precisa continuar movível — mesma solução que
     // `Database::snapshot_registry_mutex_`.
-    std::unique_ptr<std::mutex> engine_mutex_{std::make_unique<std::mutex>()};
     // Sessões abertas em serve_forever: request_stop dá shutdown em cada uma,
     // acordando a leitura bloqueada, em vez de esperar o idle timeout (S5.5).
     struct ActiveSessions {

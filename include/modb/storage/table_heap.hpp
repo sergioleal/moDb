@@ -9,6 +9,7 @@
 #include "modb/storage/slotted_page.hpp"
 
 // Disponibiliza std::byte e std::size_t.
+#include <atomic>
 #include <cstddef>
 // Disponibiliza inteiros com largura fixa.
 #include <cstdint>
@@ -112,8 +113,14 @@ public:
     // Contador de páginas de dados lidas por `read_page_records` — instrumenta o
     // critério TTFR da Fase 7A (`limit 1` deve ler ≤ 2 páginas). Diagnóstico de
     // sessão, zerável.
-    [[nodiscard]] std::uint64_t data_pages_read() const noexcept { return data_pages_read_; }
-    void reset_data_pages_read() noexcept { data_pages_read_ = 0; }
+    // Contador lido e somado por leitores de várias threads (C6.4): acesso atômico.
+    [[nodiscard]] std::uint64_t data_pages_read() const noexcept {
+        return std::atomic_ref<std::uint64_t>{const_cast<std::uint64_t&>(data_pages_read_)}.load(
+            std::memory_order_relaxed);
+    }
+    void reset_data_pages_read() noexcept {
+        std::atomic_ref<std::uint64_t>{data_pages_read_}.store(0, std::memory_order_relaxed);
+    }
     // Retorna informações compreensíveis de todas as páginas.
     [[nodiscard]] Result<std::vector<TableHeapPageInfo>> layout();
     // Retorna a página usada para abrir o heap.
@@ -201,7 +208,7 @@ private:
     std::uint64_t page_count_{};
     std::uint64_t record_count_{};
     // Conta páginas de dados lidas por `read_page_records` (instrumentação 7A).
-    std::uint64_t data_pages_read_{};
+    alignas(8) std::uint64_t data_pages_read_{};
     // Permite validar e localizar diretamente páginas pertencentes ao heap.
     std::unordered_set<std::uint64_t> page_ids_;
     // Evita leituras de páginas que certamente não comportam uma inserção.
