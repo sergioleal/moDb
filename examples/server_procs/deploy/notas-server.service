@@ -12,6 +12,10 @@ User=modb
 Group=modb
 WorkingDirectory=/var/lib/notas-server
 ExecStart=/opt/notas-server/bin/notas-server --config /etc/notas-server/notas-server.conf
+# /run/notas-server, dono modb: onde fica o socket local do engine quando ele
+# roda atrás de um modb-proxy (`local = ...` no .conf; notas-proxy.service).
+RuntimeDirectory=notas-server
+RuntimeDirectoryMode=0700
 # SIGTERM → request_stop: fecha as sessões, termina a chamada em curso e sai com 0.
 KillSignal=SIGTERM
 TimeoutStopSec=30

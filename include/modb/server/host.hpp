@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -50,6 +51,16 @@ struct Options {
     std::filesystem::path database{};
     std::string host{"127.0.0.1"};
     std::uint16_t port{7474};
+    // Link dos proxies (ADR-028): socket local em que o engine atende os
+    // `modb-proxy`. Com ele, o TCP direto fica desligado, a não ser que
+    // `tcp = on`.
+    std::filesystem::path local{};
+    // TCP direto: vazio = ligado sem `local`, desligado com `local`.
+    std::optional<bool> tcp{};
+    // Segredo que os proxies mandam no LinkHello (arquivo com o segredo).
+    std::filesystem::path secret_file{};
+    // Threads que executam as sessões de cada link; 0 = núcleos da máquina.
+    std::uint32_t link_workers{0};
     // 0 = padrão do net::Server.
     std::uint16_t max_streams{0};
     std::uint32_t idle_timeout_ms{0};
@@ -61,8 +72,8 @@ struct Options {
 };
 
 // Uma configuração `chave = valor` (as mesmas chaves das flags, com '_' no
-// lugar de '-': db, host, port, max_streams, idle_timeout_ms, proc_timeout_ms,
-// log). Caminhos relativos em `db` e `log` são relativos a `base`
+// lugar de '-': db, host, port, local, tcp, secret_file, link_workers,
+// max_streams, idle_timeout_ms, proc_timeout_ms, log). Caminhos relativos em `db` e `log` são relativos a `base`
 // (a pasta do arquivo de configuração).
 [[nodiscard]] Result<void> apply_setting(Options& options, std::string_view key, std::string_view value,
                                          const std::filesystem::path& base = {});

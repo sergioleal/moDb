@@ -117,6 +117,10 @@ pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`]
 | `db` / `--db` | — (obrigatório) | arquivo do banco; criado se não existir |
 | `host` / `--host` | `127.0.0.1` | endereço de escuta |
 | `port` / `--port` | `7474` | porta TCP (`0` = qualquer livre; a escolhida sai em `READY <porta>`) |
+| `local` / `--local` | — | socket local em que o engine atende `modb-proxy` (ADR-028); com ele, o TCP direto fica desligado |
+| `tcp` / `--tcp` | `on` sem `local`, `off` com | `on` mantém o TCP direto junto com o link (transição) |
+| `secret_file` / `--secret-file` | — | segredo que os proxies precisam mandar no link |
+| `link_workers` / `--link-workers` | núcleos | threads que atendem as sessões de cada link |
 | `max_streams` / `--max-streams` | do `net::Server` | streams simultâneos por conexão |
 | `idle_timeout_ms` / `--idle-timeout-ms` | `30000` | fecha conexões ociosas |
 | `proc_timeout_ms` / `--proc-timeout-ms` | `0` (sem limite) | chamada que passar disso falha com `operation_timeout` e é desfeita |
@@ -189,6 +193,53 @@ modb call 127.0.0.1 7474 notas.listar '{\"contem\": \"café\"}'
 Não há esquema formal de argumentos: por convenção a descrição da proc cita os
 argumentos (`{texto}`, `{id}`), e um argumento ausente ou de tipo errado volta
 explicado no erro (`argument 'id' is required`).
+
+## Proxy de acesso remoto (`modb-proxy`)
+
+Atrás de proxies (ADR-028), o engine escuta só num socket local
+(`local = /run/notas-server/engine.sock`) e os clientes falam com um ou mais
+`modb-proxy`, que autenticam, autorizam e auditam cada pedido e o repassam ao
+engine por um link em que as sessões de todos os clientes são multiplexadas. O
+protocolo dos clientes não muda: um cliente que falava com o servidor fala com o
+proxy do mesmo jeito (mais o token, se o proxy pedir).
+
+Exemplos: [`notas-proxy.conf`](../examples/server_procs/deploy/notas-proxy.conf)
+e [`notas-proxy.service`](../examples/server_procs/deploy/notas-proxy.service).
+
+| Chave / flag | Padrão | Efeito |
+|---|---|---|
+| `engine` / `--engine` | — (obrigatório) | socket local do engine |
+| `secret_file` / `--secret-file` | — | segredo do link (o mesmo arquivo do engine) |
+| `host`, `port` | `127.0.0.1`, `7474` | onde os clientes conectam |
+| `tokens` / `--tokens` | — | exige token; linhas `sha256:<hex> principal [roles]` |
+| `policy` / `--policy` | `passthrough` | `read_only`: só procs de leitura, pelo catálogo que o engine manda |
+| `allowlist` / `--allowlist` | — | só o que as regras permitem: `<role\|user:NOME\|*> <call\|query\|facade\|*> <alvo>` |
+| `max_calls_per_second` | `0` | chamadas por segundo por principal (anônimos: por máquina) |
+| `max_streams_per_principal` | `0` | streams abertos por principal |
+| `audit` / `--audit` | off | uma linha por pedido: arquivo ou `stderr` |
+| `idle_timeout_ms`, `compression`, `stream_credit`, `reconnect_max_ms` | | como no servidor; crédito = frames a caminho por stream |
+
+Tokens:
+
+```bash
+modb-proxy hash-token "$(openssl rand -hex 24)" biblioteca-web leitor,escritor >> notas-proxy.tokens
+```
+
+O arquivo guarda só o SHA-256 do token; o token em si vai para o cliente
+(`ConnectionOptions::token`, `Client(..., token=...)` no Python). Ele viaja em
+claro: fora de uma rede confiável, ponha TLS entre cliente e proxy.
+
+Auditoria (a mesma linha para chamadas, consultas, facades e autenticação):
+
+```
+audit call notas.criar error 74 0.004ms denied by leitor from 10.0.0.7:51544
+audit query 3 ok 12.803ms objects 1200 by leitor from 10.0.0.7:51544
+```
+
+**Sonda de vida/prontidão:** `modb ping HOST PORTA` responde enquanto o proxy
+tem link com o engine. Sem link, o proxy fecha a conexão logo depois do `Hello`
+e o `ping` falha. O proxy reabre o link sozinho quando o engine volta, e os
+clientes daquele momento recebem a conexão fechada (reconectam).
 
 ## Relacionados
 

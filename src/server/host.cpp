@@ -9,6 +9,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -155,6 +156,17 @@ Result<void> apply_setting(Options& options, std::string_view key, std::string_v
         options.host = std::string{value};
     } else if (key == "port") {
         return set_number(options.port);
+    } else if (key == "local") {
+        options.local = resolve(base, value);
+    } else if (key == "tcp") {
+        if (value != "on" && value != "off") {
+            return std::unexpected(invalid("tcp must be on or off"));
+        }
+        options.tcp = value == "on";
+    } else if (key == "secret_file") {
+        options.secret_file = resolve(base, value);
+    } else if (key == "link_workers") {
+        return set_number(options.link_workers);
     } else if (key == "max_streams") {
         return set_number(options.max_streams);
     } else if (key == "idle_timeout_ms") {
@@ -242,6 +254,11 @@ std::string usage(std::string_view program, std::span<const Module> modules) {
                        "  --db FILE              database file (created if it does not exist)\n"
                        "  --host HOST            listen address (default 127.0.0.1)\n"
                        "  --port N               TCP port (default 7474; 0 = any free port)\n"
+                       "  --local SOCKET         serve modb-proxy links on a local socket (ADR-028);\n"
+                       "                         direct TCP then stays off unless --tcp on\n"
+                       "  --tcp on|off           direct TCP clients (default: on without --local)\n"
+                       "  --secret-file FILE     link secret the proxies must present\n"
+                       "  --link-workers N       threads per proxy link (default: CPU count)\n"
                        "  --max-streams N        concurrent streams per connection\n"
                        "  --idle-timeout-ms N    close idle connections after N ms\n"
                        "  --proc-timeout-ms N    fail (and roll back) a proc call after N ms; 0 = no limit\n"
@@ -264,9 +281,34 @@ Result<net::Server> start(const Options& options, std::span<const Module> module
     if (!log) {
         return std::unexpected(log.error());
     }
-    auto server = net::Server::listen(options.database, options.host, options.port);
+    auto server = net::Server::open(options.database);
     if (!server) {
         return std::unexpected(server.error());
+    }
+    if (!options.local.empty()) {
+        if (!options.secret_file.empty()) {
+            std::ifstream in{options.secret_file, std::ios::binary};
+            if (!in) {
+                return std::unexpected(invalid("cannot read secret file: " + options.secret_file.string()));
+            }
+            std::string secret{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+            while (!secret.empty() && (secret.back() == '\n' || secret.back() == '\r' || secret.back() == ' ')) {
+                secret.pop_back();
+            }
+            server->set_link_secret(std::move(secret));
+        }
+        server->set_link_workers(options.link_workers);
+        if (auto listening = server->listen_local(options.local); !listening) {
+            return std::unexpected(listening.error());
+        }
+    }
+    if (options.tcp.value_or(options.local.empty())) {
+        if (auto listening = server->listen_tcp(options.host, options.port); !listening) {
+            return std::unexpected(listening.error());
+        }
+    }
+    if (server->port() == 0 && server->local_path().empty()) {
+        return std::unexpected(invalid("nothing to listen on: set --local or turn --tcp on"));
     }
     if (options.max_streams != 0) {
         server->set_max_concurrent_streams(options.max_streams);
@@ -343,8 +385,14 @@ int run(int argc, char** argv, std::span<const Module> modules) {
 #endif
     // Linha lida por supervisores e testes para saber que já aceita conexões.
     std::cout << "READY " << server->port() << '\n';
-    std::cout << "serving " << std::filesystem::absolute(options->database).string() << " on "
-              << options->host << ':' << server->port() << " with " << modules.size() << " module(s)"
+    std::cout << "serving " << std::filesystem::absolute(options->database).string();
+    if (server->port() != 0) {
+        std::cout << " on " << options->host << ':' << server->port();
+    }
+    if (!server->local_path().empty()) {
+        std::cout << " on local socket " << server->local_path().string();
+    }
+    std::cout << " with " << modules.size() << " module(s)"
               << (options->proc_timeout_ms != 0
                       ? ", proc timeout " + std::to_string(options->proc_timeout_ms) + " ms"
                       : std::string{})

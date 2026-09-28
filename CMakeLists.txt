@@ -712,8 +712,9 @@ if(BUILD_TESTING)
         target_link_libraries(modb_server_host_tests PRIVATE modb::app_client notas_procs)
         target_compile_definitions(modb_server_host_tests PRIVATE
             MODB_NOTAS_SERVER_EXE="$<TARGET_FILE:notas-server>"
-            MODB_CLI_EXE="$<TARGET_FILE:modb_cli>")
-        add_dependencies(modb_server_host_tests notas-server modb_cli)
+            MODB_CLI_EXE="$<TARGET_FILE:modb_cli>"
+            MODB_PROXY_EXE="$<TARGET_FILE:modb_proxy_cli>")
+        add_dependencies(modb_server_host_tests notas-server modb_cli modb_proxy_cli)
         add_test(NAME modb.server_host COMMAND modb_server_host_tests)
         # Cliente de referência em Python (ADR-026): TCP e anel, contra o notas-server.
         find_package(Python3 COMPONENTS Interpreter)

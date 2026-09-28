@@ -130,13 +130,13 @@ Escolhas (2026-09-28):
 
 ### P3 — operação e desempenho
 
-#### X9 — `server_host` como engine *(médio)*
+#### X9 — `server_host` como engine *(médio)* ✅
 
-- [ ] 9.1 `modb_add_server` gera um engine que escuta em `--local CAMINHO`;
+- [x] 9.1 *(`local`, `tcp`, `secret_file`, `link_workers` no `server_host`; com `local` o TCP fica desligado, a não ser que `tcp = on`; o `modb.server_host` sobe `notas-server --local` e `modb-proxy --tokens --policy read_only` como processos)* `modb_add_server` gera um engine que escuta em `--local CAMINHO`;
   `--listen-tcp` mantém o modo atual.
-- [ ] 9.2 Unidades systemd e compose: engine + proxy, com o socket num volume
+- [x] 9.2 *(`notas-proxy.service`, `notas-proxy.conf`, `RuntimeDirectory` no `notas-server.service`, `docs/OPERACAO.md`; não há imagem OCI nem compose no repositório hoje, então não havia o que atualizar)* Unidades systemd e compose: engine + proxy, com o socket num volume
   compartilhado; atualizar a imagem OCI e `serve --from-env`.
-- [ ] 9.3 Probes: o proxy responde vivo/pronto conforme o estado do link.
+- [x] 9.3 *(sem endpoint novo: sem link, o proxy fecha a conexão depois do `Hello`, e o `modb ping` serve de sonda; documentado)* Probes: o proxy responde vivo/pronto conforme o estado do link.
 
 #### X10 — Medição *(médio, máquina dedicada)*
 

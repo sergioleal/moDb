@@ -1,0 +1,26 @@
+# Unidade systemd do modb-proxy na frente do notas-server (docs/OPERACAO.md,
+# "Proxy de acesso remoto"). O engine (notas-server.service, com `local = ...`
+# no .conf) escuta só no socket local; os clientes falam com o proxy.
+#   sudo cp notas-proxy.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now notas-proxy
+#   journalctl -u notas-proxy -f
+[Unit]
+Description=modb-proxy na frente do notas-server
+After=network.target notas-server.service
+Wants=notas-server.service
+
+[Service]
+Type=simple
+# O mesmo usuário do engine: o socket local é 0600, só o dono conecta.
+User=modb
+Group=modb
+ExecStart=/opt/notas-server/bin/modb-proxy --config /etc/notas-server/notas-proxy.conf
+# SIGTERM → request_stop: fecha os clientes e o link, sai com 0. Se o engine
+# cair, o proxy continua no ar, recusa clientes e reabre o link sozinho.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

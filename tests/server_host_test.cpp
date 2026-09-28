@@ -539,5 +539,70 @@ int main() {
         std::filesystem::remove(cfg, ignored);
     }
 
+    // --- o engine atrás de um modb-proxy, em dois processos (ADR-028, X9) ---
+    {
+        const auto db = temp_db("proxy");
+        const auto tag = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        // No diretório do teste: AF_UNIX sob %LOCALAPPDATA% falha em algumas máquinas Windows.
+        const auto sock = std::filesystem::current_path() / ("modb-x9-" + tag + ".sock");
+        const auto secret = std::filesystem::current_path() / ("modb-x9-" + tag + ".secret");
+        const auto tokens = std::filesystem::current_path() / ("modb-x9-" + tag + ".tokens");
+        {
+            std::ofstream{secret} << "segredo-do-link\n";
+            const auto linha = executar(std::string{"\""} + MODB_PROXY_EXE + "\" hash-token tok-leitor leitor");
+            std::ofstream{tokens} << linha.saida;
+        }
+        const auto porta = porta_livre();
+        Filho engine;
+        suite.check(engine.iniciar({MODB_NOTAS_SERVER_EXE, "--db", db.string(), "--local", sock.string(),
+                                    "--secret-file", secret.string(), "--log", "off"}),
+                    "sobe o notas-server só no link local");
+        for (int i = 0; i < 100 && !std::filesystem::exists(sock); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        suite.check(std::filesystem::exists(sock), "o engine criou o socket local");
+        Filho proxy;
+        suite.check(proxy.iniciar({MODB_PROXY_EXE, "--engine", sock.string(), "--secret-file", secret.string(),
+                                   "--port", std::to_string(porta), "--tokens", tokens.string(), "--policy",
+                                   "read_only"}),
+                    "sobe o modb-proxy na frente dele");
+
+        auto conn = [&]() -> Result<app::ServerConnection> {
+            Error ultimo{ErrorCode::connection_closed, "sem tentativa"};
+            for (int i = 0; i < 100; ++i) {
+                auto tentativa = app::ServerConnection::connect(app::ConnectionOptions{
+                    .port = porta, .database_name = db.filename().string(), .token = std::string{"tok-leitor"}});
+                if (tentativa) {
+                    return tentativa;
+                }
+                ultimo = tentativa.error();
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            return std::unexpected(ultimo);
+        }();
+        suite.check(conn && conn->info().principal == "leitor", "cliente entra pelo proxy com o token");
+        if (conn) {
+            auto listadas = chamar(*conn, "notas.listar", ops::Value::object({}));
+            suite.check(listadas.has_value(), "proc de leitura passa pelo proxy e chega ao engine");
+            auto criada = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "não pode"}}));
+            suite.check(!criada && criada.error().code == ErrorCode::permission_denied,
+                        "o proxy read_only recusa a proc de escrita (catálogo vindo do engine)");
+        }
+        auto sem_token = app::ServerConnection::connect(
+            app::ConnectionOptions{.port = porta, .database_name = db.filename().string()});
+        if (sem_token) {
+            auto negado = chamar(*sem_token, "notas.listar", ops::Value::object({}));
+            suite.check(!negado && negado.error().code == ErrorCode::unauthenticated,
+                        "sem token o proxy responde unauthenticated");
+        }
+        proxy.matar();
+        engine.matar();
+        apagar(db);
+        std::error_code ignored;
+        for (const auto& file : {sock, secret, tokens}) {
+            std::filesystem::remove(file, ignored);
+        }
+    }
+
     return suite.finish();
 }
