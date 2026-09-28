@@ -1,12 +1,14 @@
 #pragma once
 
-// Socket TCP nativo Win32/POSIX, no mesmo padrão de NativeFile (Fase 8B).
+// Socket TCP nativo Win32/POSIX, no mesmo padrão de NativeFile (Fase 8B), e
+// socket local AF_UNIX para o link proxy ↔ engine (ADR-028).
 
 #include "modb/error.hpp"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <span>
 #include <string_view>
 
@@ -25,6 +27,15 @@ public:
                                                      int backlog = 16);
     [[nodiscard]] static Result<NativeSocket> connect(std::string_view host, std::uint16_t port);
     [[nodiscard]] Result<NativeSocket> accept();
+
+    // Socket local (AF_UNIX; no Windows, 10 1803+). `listen_local` apaga um
+    // socket velho no caminho antes do bind e, no POSIX, deixa o arquivo com
+    // permissão 0600 (só o dono do processo conecta). Quem escuta apaga o
+    // arquivo quando termina (`remove_local`).
+    [[nodiscard]] static Result<NativeSocket> listen_local(const std::filesystem::path& path,
+                                                           int backlog = 16);
+    [[nodiscard]] static Result<NativeSocket> connect_local(const std::filesystem::path& path);
+    static void remove_local(const std::filesystem::path& path) noexcept;
 
     [[nodiscard]] Result<void> send_all(std::span<const std::byte> bytes);
     [[nodiscard]] Result<void> recv_exact(std::span<std::byte> destination);

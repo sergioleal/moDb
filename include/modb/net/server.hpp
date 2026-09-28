@@ -24,6 +24,8 @@
 
 namespace modb::net {
 
+struct EngineServices;
+
 // Limite de objetos no frame em trânsito (fila de saída da Fase 8D).
 inline constexpr std::size_t max_in_flight_objects = 8;
 
@@ -96,11 +98,8 @@ private:
            object::BaselineId baseline);
 
     [[nodiscard]] Result<void> handle_connection(NativeSocket& peer);
-    // Atende o anel de memória compartilhada de uma sessão (ADR-026) até a
-    // sessão acabar, o cliente sair ou o servidor parar.
-    void serve_shm(shm::Region& region, const std::atomic<bool>& session_stop);
-    // Executa um OpCall (com o lock do motor) e monta a resposta.
-    [[nodiscard]] OpResult execute_call(const OpCall& call);
+    // O que uma sessão nova usa do engine (configuração corrente do servidor).
+    [[nodiscard]] EngineServices session_services();
 
     std::shared_ptr<object::Database> database_;
     object::DatabaseId database_id_{};
@@ -119,12 +118,6 @@ private:
     std::shared_ptr<ops::OperationRegistry> operations_{};
     std::shared_ptr<ops::FacadeCatalog> facades_{};
     std::atomic<bool> stop_requested_{false};
-    // Serializa o avanço do motor entre os workers de consulta. O motor é
-    // single-thread (ADR-011): `BufferPool`/`ScratchPagePool` não têm
-    // sincronização, então dois generators correndo no mesmo `Database`
-    // corrompem as estruturas internas. `unique_ptr` porque `std::mutex` não é
-    // movível e `Server` precisa continuar movível — mesma solução que
-    // `Database::snapshot_registry_mutex_`.
     // Sessões abertas em serve_forever: request_stop dá shutdown em cada uma,
     // acordando a leitura bloqueada, em vez de esperar o idle timeout (S5.5).
     struct ActiveSessions {

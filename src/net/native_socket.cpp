@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #ifdef _WIN32
@@ -14,6 +15,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <afunix.h>
 #include <windows.h>
 #else
 #include <arpa/inet.h>
@@ -23,6 +25,8 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
@@ -140,7 +144,106 @@ Result<sockaddr_in> resolve_ipv4(std::string_view host, std::uint16_t port) {
     return address;
 }
 
+Result<sockaddr_un> unix_address(const std::filesystem::path& path) {
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    const std::string text = path.string();
+    if (text.empty() || text.size() >= sizeof(address.sun_path)) {
+        return std::unexpected(Error{ErrorCode::invalid_argument,
+                                     "local socket path is empty or too long: " + text});
+    }
+    std::memcpy(address.sun_path, text.data(), text.size());
+    return address;
+}
+
+Result<SocketHandle> create_local_socket() {
+    if (auto ready = ensure_winsock(); !ready) {
+        return std::unexpected(ready.error());
+    }
+    const SocketHandle socket = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (socket == kInvalid) {
+        return std::unexpected(make_io("socket(AF_UNIX) failed", last_error()));
+    }
+    return socket;
+}
+
 } // namespace
+
+void NativeSocket::remove_local(const std::filesystem::path& path) noexcept {
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+Result<NativeSocket> NativeSocket::listen_local(const std::filesystem::path& path, int backlog) {
+    auto address = unix_address(path);
+    if (!address) {
+        return std::unexpected(address.error());
+    }
+    auto created = create_local_socket();
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+    const SocketHandle handle = *created;
+    // Um socket velho (processo anterior que caiu) impede o bind.
+    remove_local(path);
+    if (::bind(handle, reinterpret_cast<sockaddr*>(&*address), sizeof(*address)) != 0) {
+        const int code = last_error();
+        close_handle(handle);
+        return std::unexpected(make_io("bind(" + path.string() + ") failed", code));
+    }
+#ifndef _WIN32
+    // Só o dono do processo conecta: o engine confia em quem abre o link.
+    if (::chmod(address->sun_path, S_IRUSR | S_IWUSR) != 0) {
+        const int code = last_error();
+        close_handle(handle);
+        remove_local(path);
+        return std::unexpected(make_io("chmod(" + path.string() + ") failed", code));
+    }
+#endif
+    if (::listen(handle, backlog) != 0) {
+        const int code = last_error();
+        close_handle(handle);
+        remove_local(path);
+        return std::unexpected(make_io("listen failed", code));
+    }
+#ifdef _WIN32
+    return NativeSocket{static_cast<std::uintptr_t>(handle)};
+#else
+    int pipe_fds[2] = {-1, -1};
+    if (::pipe(pipe_fds) != 0) {
+        const int code = last_error();
+        close_handle(handle);
+        remove_local(path);
+        return std::unexpected(make_io("pipe() failed", code));
+    }
+    NativeSocket socket{handle};
+    socket.stop_pipe_read_ = pipe_fds[0];
+    socket.stop_pipe_write_ = pipe_fds[1];
+    return socket;
+#endif
+}
+
+Result<NativeSocket> NativeSocket::connect_local(const std::filesystem::path& path) {
+    auto address = unix_address(path);
+    if (!address) {
+        return std::unexpected(address.error());
+    }
+    auto created = create_local_socket();
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+    const SocketHandle handle = *created;
+    if (::connect(handle, reinterpret_cast<sockaddr*>(&*address), sizeof(*address)) != 0) {
+        const int code = last_error();
+        close_handle(handle);
+        return std::unexpected(make_io("connect(" + path.string() + ") failed", code));
+    }
+#ifdef _WIN32
+    return NativeSocket{static_cast<std::uintptr_t>(handle)};
+#else
+    return NativeSocket{handle};
+#endif
+}
 
 #ifdef _WIN32
 
