@@ -122,6 +122,28 @@ Result<Message> recv_message(NativeSocket& socket, std::uint32_t negotiated_max_
     return decode_message(frame, negotiated_max_frame, max_expansion_ratio);
 }
 
+Result<HelloOk> negotiate_hello(const Hello& hello, HelloOk offer, Compression preferred) {
+    if (hello.version == 0) {
+        return std::unexpected(Error{ErrorCode::incompatible_protocol_version, "protocol major must not be zero"});
+    }
+    auto negotiated = modb::negotiate_protocol_version(modb::CompatibilityVersion{hello.version, hello.minor},
+                                                       modb::CompatibilityVersion{protocol_major, protocol_minor});
+    if (!negotiated) {
+        return std::unexpected(negotiated.error());
+    }
+    const auto accepts = [&](Compression codec) {
+        return std::find(hello.accepted_codecs.begin(), hello.accepted_codecs.end(), codec) !=
+               hello.accepted_codecs.end();
+    };
+    if (!accepts(Compression::none)) {
+        return std::unexpected(make_protocol("client must accept compression=none"));
+    }
+    offer.version = negotiated->major;
+    offer.minor = negotiated->minor;
+    offer.selected_codec = preferred != Compression::none && accepts(preferred) ? preferred : Compression::none;
+    return offer;
+}
+
 Server::Server(std::shared_ptr<object::Database> database, object::DatabaseId database_id,
                std::string database_name, object::BaselineId baseline)
     : database_{std::move(database)}, database_id_{database_id}, database_name_{std::move(database_name)},
@@ -254,40 +276,19 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
     if (hello == nullptr) {
         return std::unexpected(make_protocol("expected Hello as first message"));
     }
-    if (hello->version == 0) {
-        return std::unexpected(Error{ErrorCode::incompatible_protocol_version,
-                                     "protocol major must not be zero"});
-    }
-    auto negotiated = modb::negotiate_protocol_version(
-        modb::CompatibilityVersion{hello->version, hello->minor},
-        modb::CompatibilityVersion{protocol_major, protocol_minor});
+    auto negotiated = negotiate_hello(*hello,
+                                      HelloOk{.baseline = baseline_,
+                                              .max_frame_bytes = max_frame_bytes,
+                                              .max_concurrent_streams = max_concurrent_streams_,
+                                              .max_expansion_ratio = default_max_expansion_ratio,
+                                              .idle_timeout_ms = idle_timeout_ms_},
+                                      preferred_codec_);
     if (!negotiated) {
         return std::unexpected(negotiated.error());
     }
-    const bool accepts_none =
-        std::find(hello->accepted_codecs.begin(), hello->accepted_codecs.end(),
-                  Compression::none) != hello->accepted_codecs.end();
-    if (!accepts_none) {
-        return std::unexpected(make_protocol("client must accept compression=none"));
-    }
-
-    Compression selected = Compression::none;
-    if (preferred_codec_ != Compression::none &&
-        std::find(hello->accepted_codecs.begin(), hello->accepted_codecs.end(),
-                  preferred_codec_) != hello->accepted_codecs.end()) {
-        selected = preferred_codec_;
-    }
+    const HelloOk& ok = *negotiated;
+    const Compression selected = ok.selected_codec;
     selected_codec_ = selected;
-    (void)database_name_;
-
-    HelloOk ok{.version = negotiated->major,
-               .minor = negotiated->minor,
-               .baseline = baseline_,
-               .selected_codec = selected,
-               .max_frame_bytes = max_frame_bytes,
-               .max_concurrent_streams = max_concurrent_streams_,
-               .max_expansion_ratio = default_max_expansion_ratio,
-               .idle_timeout_ms = idle_timeout_ms_};
     if (auto status = send_message(peer, ok); !status) {
         return status;
     }

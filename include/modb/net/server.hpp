@@ -34,6 +34,11 @@ inline constexpr std::size_t max_in_flight_objects = 8;
 [[nodiscard]] Result<Message> recv_message(NativeSocket& socket, std::uint32_t negotiated_max_frame,
                                            std::uint16_t max_expansion_ratio);
 
+// Negocia o Hello de um cliente: major/minor, e o codec (`preferred` se o
+// cliente o aceita, senão none). `offer` traz baseline e limites; volta com a
+// versão e o codec escolhidos. Usado pelo servidor direto e pelo proxy.
+[[nodiscard]] Result<HelloOk> negotiate_hello(const Hello& hello, HelloOk offer, Compression preferred);
+
 // Contadores do último fluxo (produzidos − enviados = objetos na fila local).
 struct StreamStats {
     std::uint64_t produced{0};

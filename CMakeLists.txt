@@ -137,6 +137,16 @@ add_library(modb::app_client ALIAS modb_app_client)
 set_target_properties(modb_app_client PROPERTIES EXPORT_NAME app_client)
 target_link_libraries(modb_app_client PUBLIC modb::modb)
 
+# Proxy de acesso remoto: clientes na frente, engine atrás por um link local
+# (docs-process/PLANO_PROXY.md, ADR-028).
+add_library(modb_proxy
+    src/proxy/policy.cpp
+    src/proxy/proxy.cpp
+)
+add_library(modb::proxy ALIAS modb_proxy)
+set_target_properties(modb_proxy PROPERTIES EXPORT_NAME proxy)
+target_link_libraries(modb_proxy PUBLIC modb::modb)
+
 # Servidor de aplicação: o banco como processo, com as procs da aplicação
 # compiladas dentro dele (docs-process/PLANO_SERVIDOR_PROCS.md, ADR-025).
 add_library(modb_server_host
@@ -153,7 +163,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ModbServer.cmake")
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-install(TARGETS modb modb_app_client modb_server_host
+install(TARGETS modb modb_app_client modb_server_host modb_proxy
     EXPORT moDbTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -388,6 +398,10 @@ add_executable(modb_cli apps/modb_cli/main.cpp)
 target_link_libraries(modb_cli PRIVATE modb::modb)
 set_target_properties(modb_cli PROPERTIES OUTPUT_NAME modb)
 
+add_executable(modb_proxy_cli apps/modb_proxy/main.cpp)
+target_link_libraries(modb_proxy_cli PRIVATE modb::proxy)
+set_target_properties(modb_proxy_cli PROPERTIES OUTPUT_NAME modb-proxy)
+
 option(MODB_BUILD_EXAMPLES "Build Ring0 example applications" ON)
 if(MODB_BUILD_EXAMPLES)
     function(modb_add_server_example target source)
@@ -614,9 +628,11 @@ if(MINGW)
     # de RTTI; desativá-lo evita a definição duplicada e mantém a ABI coerente.
     target_compile_options(modb PUBLIC -fno-rtti)
     target_link_options(modb_cli PRIVATE ${MODB_MINGW_LINK_OPTS})
+    target_link_options(modb_proxy_cli PRIVATE ${MODB_MINGW_LINK_OPTS})
     target_link_options(modb_app_client PRIVATE ${MODB_MINGW_LINK_OPTS})
     if(TARGET modb_mingw_runtime_dlls)
         add_dependencies(modb_cli modb_mingw_runtime_dlls)
+        add_dependencies(modb_proxy_cli modb_mingw_runtime_dlls)
     endif()
     if(MODB_BUILD_EXAMPLES)
         target_link_options(ring0_server_phase_08_connect_query PRIVATE ${MODB_MINGW_LINK_OPTS})
@@ -676,6 +692,10 @@ if(BUILD_TESTING)
     modb_add_test(modb_engine_link_tests tests/engine_link_test.cpp)
     add_test(NAME modb.engine_link COMMAND modb_engine_link_tests)
     set_tests_properties(modb.engine_link PROPERTIES TIMEOUT 120)
+    modb_add_test(modb_proxy_tests tests/proxy_test.cpp)
+    target_link_libraries(modb_proxy_tests PRIVATE modb::proxy)
+    add_test(NAME modb.proxy COMMAND modb_proxy_tests)
+    set_tests_properties(modb.proxy PROPERTIES TIMEOUT 120)
     if(MODB_BUILD_EXAMPLES)
         # Servidor de aplicação ponta a ponta: sobe o notas-server em outro processo.
         modb_add_test(modb_server_host_tests tests/server_host_test.cpp)

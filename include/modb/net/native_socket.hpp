@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace modb::net {
@@ -48,6 +49,8 @@ public:
     [[nodiscard]] Result<void> set_recv_timeout_ms(std::uint32_t milliseconds);
 
     [[nodiscard]] Result<std::uint16_t> local_port() const;
+    // "a.b.c.d:porta" do outro lado de uma conexão TCP; "local" num socket AF_UNIX.
+    [[nodiscard]] Result<std::string> peer_address() const;
     [[nodiscard]] Result<void> close();
     // Encerra envio e recebimento sem fechar o descritor: uma recv/send
     // bloqueada em OUTRA thread acorda com connection_closed. É o que o

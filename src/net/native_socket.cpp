@@ -245,6 +245,32 @@ Result<NativeSocket> NativeSocket::connect_local(const std::filesystem::path& pa
 #endif
 }
 
+Result<std::string> NativeSocket::peer_address() const {
+    if (!is_open()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "peer_address on closed socket"});
+    }
+    sockaddr_storage address{};
+#ifdef _WIN32
+    int length = sizeof(address);
+    const auto handle = static_cast<SocketHandle>(raw());
+#else
+    socklen_t length = sizeof(address);
+    const auto handle = raw();
+#endif
+    if (::getpeername(handle, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+        return std::unexpected(make_io("getpeername failed", last_error()));
+    }
+    if (address.ss_family != AF_INET) {
+        return std::string{"local"};
+    }
+    const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(&address);
+    char text[INET_ADDRSTRLEN] = {};
+    if (::inet_ntop(AF_INET, &ipv4->sin_addr, text, sizeof(text)) == nullptr) {
+        return std::unexpected(make_io("inet_ntop failed", last_error()));
+    }
+    return std::string{text} + ":" + std::to_string(ntohs(ipv4->sin_port));
+}
+
 #ifdef _WIN32
 
 NativeSocket::NativeSocket(NativeSocket&& other) noexcept

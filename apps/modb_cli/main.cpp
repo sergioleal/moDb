@@ -163,7 +163,8 @@ int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
                        std::optional<std::size_t> fail_after, bool small_buffers,
                        std::string_view host = "127.0.0.1");
 int command_serve_loop(const std::filesystem::path& path, std::string_view host,
-                       std::uint16_t port);
+                       std::optional<std::uint16_t> port, const std::filesystem::path& local,
+                       const std::filesystem::path& secret_file);
 int command_ping(std::string_view host, std::uint16_t port, std::string_view database_name);
 int command_call(std::string_view host, std::uint16_t port, std::string_view proc,
                  std::string_view json_args);
@@ -347,8 +348,11 @@ void print_codec_help() {
 void print_serve_help() {
     std::cout << "Usage:\n"
                  "  modb serve <file> [--host H] [--port N] [--once]\n"
+                 "  modb serve <file> --local SOCKET [--secret-file F] [--port N]\n"
                  "\n"
-                 "--once             Accept one connection session until the client disconnects.\n";
+                 "--once             Accept one connection session until the client disconnects.\n"
+                 "--local SOCKET     Serve proxies (modb-proxy) on a local socket; TCP only with --port.\n"
+                 "--secret-file F    Link secret the proxies must present.\n";
 }
 
 void print_ping_help() {
@@ -1881,10 +1885,35 @@ int command_serve_once(const std::filesystem::path& path, std::uint16_t port,
 }
 
 int command_serve_loop(const std::filesystem::path& path, std::string_view host,
-                       std::uint16_t port) {
-    auto server = modb::net::Server::listen(path, host, port);
+                       std::optional<std::uint16_t> port, const std::filesystem::path& local,
+                       const std::filesystem::path& secret_file) {
+    auto server = modb::net::Server::open(path);
     if (!server) {
         return print_error(server.error());
+    }
+    // ADR-028: com --local o engine escuta só o link dos proxies; TCP direto
+    // só se --port também vier (transição). Sem --local, o TCP de sempre.
+    if (!local.empty()) {
+        if (!secret_file.empty()) {
+            std::ifstream in{secret_file, std::ios::binary};
+            if (!in) {
+                return print_error(modb::Error{modb::ErrorCode::file_not_found,
+                                               "cannot read secret file: " + secret_file.string()});
+            }
+            std::string secret{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+            while (!secret.empty() && (secret.back() == '\n' || secret.back() == '\r' || secret.back() == ' ')) {
+                secret.pop_back();
+            }
+            server->set_link_secret(std::move(secret));
+        }
+        if (auto listening = server->listen_local(local); !listening) {
+            return print_error(listening.error());
+        }
+    }
+    if (local.empty() || port) {
+        if (auto listening = server->listen_tcp(host, port.value_or(0)); !listening) {
+            return print_error(listening.error());
+        }
     }
 
     static modb::net::Server* signal_server = nullptr;
@@ -1901,8 +1930,14 @@ int command_serve_loop(const std::filesystem::path& path, std::string_view host,
 
     std::cout << "READY " << server->port() << '\n';
     std::cout.flush();
-    std::cout << "Serving " << path.string() << " on " << host << ':' << server->port()
-              << " (loop until SIGINT/SIGTERM)\n";
+    std::cout << "Serving " << path.string();
+    if (server->port() != 0) {
+        std::cout << " on " << host << ':' << server->port();
+    }
+    if (!local.empty()) {
+        std::cout << " on local socket " << local.string();
+    }
+    std::cout << " (loop until SIGINT/SIGTERM)\n";
     std::cout.flush();
     const auto status = server->serve_forever();
     signal_server = nullptr;
@@ -6079,12 +6114,17 @@ int run(int argc, char* argv[]) {
         const std::filesystem::path file = argv[2];
         std::string host = "127.0.0.1";
         std::uint16_t port = 0;
+        bool port_given = false;
+        std::filesystem::path local;
+        std::filesystem::path secret_file;
         bool once = false;
         std::optional<std::size_t> fail_after;
         bool small_buffers = false;
         for (int i = 3; i < argc; ++i) {
             const std::string_view arg{argv[i]};
-            if (arg == "--once") {
+            if ((arg == "--local" || arg == "--secret-file") && i + 1 < argc) {
+                (arg == "--local" ? local : secret_file) = argv[++i];
+            } else if (arg == "--once") {
                 once = true;
             } else if (arg == "--small-buffers") {
                 small_buffers = true;
@@ -6105,6 +6145,7 @@ int run(int argc, char* argv[]) {
                         "modb serve <file> [--host H] [--port N] [--once]");
                 }
                 port = static_cast<std::uint16_t>(*parsed);
+                port_given = true;
             } else if (arg == "--fail-after") {
                 if (i + 1 >= argc) {
                     return print_usage_error(
@@ -6124,7 +6165,8 @@ int run(int argc, char* argv[]) {
         if (once) {
             return command_serve_once(file, port, fail_after, small_buffers);
         }
-        return command_serve_loop(file, host, port);
+        return command_serve_loop(file, host, port_given ? std::optional<std::uint16_t>{port} : std::nullopt, local,
+                                  secret_file);
     }
     if (command == "ping") {
         if (argc == 2 || (argc == 3 && is_help_argument(argv[2]))) {

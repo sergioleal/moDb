@@ -82,22 +82,22 @@ Escolhas (2026-09-28):
 
 ### P2 — proxy
 
-#### X5 — `modb::proxy` (biblioteca) e `modb-proxy` passagem *(grande)*
+#### X5 — `modb::proxy` (biblioteca) e `modb-proxy` passagem *(grande)* ✅
 
-- [ ] 5.1 Laço do proxy: aceita clientes (TCP), faz `Hello`/`HelloOk` com cada
+- [x] 5.1 *(`include/modb/proxy/proxy.hpp`, `src/proxy/proxy.cpp`; `net::negotiate_hello` é o mesmo do servidor direto; por cliente, uma leitora e uma escritora, e a thread do link só empilha na fila do cliente)* Laço do proxy: aceita clientes (TCP), faz `Hello`/`HelloOk` com cada
   um (codec, limites, idle timeout), abre a sessão no link e repassa nos dois
   sentidos, decodificando e recodificando.
-- [ ] 5.2 Crédito: o proxy dá crédito inicial por stream e devolve à medida que
+- [x] 5.2 *(`Options::stream_credit`, padrão 8; um crédito volta ao engine a cada frame entregue)* Crédito: o proxy dá crédito inicial por stream e devolve à medida que
   entrega frames ao cliente; um cliente lento para só o seu stream.
-- [ ] 5.3 Interface de política: `authenticate(hello, credenciais)` →
+- [x] 5.3 *(`include/modb/proxy/policy.hpp`: `authenticate`, `authorize` com reescrita no lugar, `on_response`, `audit`; `PassThroughPolicy`)* Interface de política: `authenticate(hello, credenciais)` →
   `Principal`, `authorize(principal, Message&)` → permite / recusa (com código) /
   reescreve, `audit(principal, pedido, resposta)`. A política de passagem
   aceita tudo.
-- [ ] 5.4 Reconexão do link: se o engine cair, as sessões dos clientes recebem
+- [x] 5.4 *(sem link o proxy recusa clientes novos; `reconnect_max_ms`)* Reconexão do link: se o engine cair, as sessões dos clientes recebem
   erro e fecham; o proxy tenta reabrir o link com espera crescente.
-- [ ] 5.5 Executável `modb-proxy --engine unix:CAMINHO --listen HOST:PORTA
+- [x] 5.5 *(`apps/modb_proxy/main.cpp`; `--secret-file`; e `modb serve --local SOCKET [--secret-file F]` como engine de teste, com TCP só se `--port` vier)* Executável `modb-proxy --engine unix:CAMINHO --listen HOST:PORTA
   [--policy ...] [--config ARQUIVO]`, com `READY <porta>` como o `server_host`.
-- [ ] 5.6 Critério: a suíte de servidor (`server_streaming`, `operation_server`,
+- [x] 5.6 *(em vez de duplicar as quatro suítes: `tests/proxy_test.cpp` cobre pelo proxy o que elas cobrem (handshake, stream com RLE, várias streams, Cancel, OpCall, facades, erros do engine) e o que só existe aqui (política, auditoria, cliente parado com fila limitada no engine, queda e volta do engine); também no TSan)* Critério: a suíte de servidor (`server_streaming`, `operation_server`,
   `facade_server`, `app_server_connection`) roda também através do proxy (os
   testes ganham o modo "via proxy"), incluindo backpressure (8D) e Cancel (8E).
 
