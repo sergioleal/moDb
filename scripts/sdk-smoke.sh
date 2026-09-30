@@ -70,6 +70,16 @@ with Client("127.0.0.1", port, token=token) as c:
 print("cliente: recusa sem token, escrita e leitura ok")
 EOF
 
+# Cliente Node de referência contra os binários do SDK (sobe o próprio engine e
+# proxy). Precisa de Node >= 22.18; sem ele, fica de fora (a release instala).
+if command -v node > /dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=18)?0:1)'; then
+    (cd "$work" && MODB_NOTAS_SERVER="$work/build/notas-server" MODB_PROXY="$sdk/bin/modb-proxy" \
+        node --test "$root/clients/node/test/integration.test.ts")
+    echo "cliente Node: integração ok"
+else
+    echo "cliente Node: sem Node >= 22.18, pulado"
+fi
+
 "$sdk/bin/modb" ping 127.0.0.1 "$port" "" > /dev/null
 kill "$proxy_pid"
 wait "$proxy_pid" 2>/dev/null || true

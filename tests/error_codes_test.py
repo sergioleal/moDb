@@ -1,11 +1,11 @@
-"""Confere os ErrorCode do header contra a documentação e o cliente Python.
+"""Confere os ErrorCode do header contra a documentação e os clientes Python e Node.
 
 Uso: error_codes_test.py <raiz do repositório>
 
 O C++ (modb.error_code_values) fixa os números; este teste pega o que o
 compilador não vê: um código novo sem entrada no Apêndice A do
 PROTOCOLO_CLIENTES.md, uma tabela da documentação com número ou nome errado, e
-as constantes do cliente Python fora do header.
+as constantes dos clientes Python e Node fora do header.
 """
 import re
 import sys
@@ -41,6 +41,13 @@ def doc_tables(root: Path) -> tuple[dict[str, int], dict[str, int]]:
     return main, appendix
 
 
+def node_codes(root: Path) -> dict[str, int]:
+    text = (root / "clients/node/src/errors.ts").read_text(encoding="utf-8")
+    body = text[text.index("export const ErrorCode = {"):]
+    body = body[:body.index("} as const")]
+    return {name: int(code) for name, code in re.findall(r"^\s+([a-z_0-9]+): (\d+),", body, re.M)}
+
+
 def main() -> int:
     root = Path(sys.argv[1])
     sys.path.insert(0, str(root / "clients/python"))
@@ -61,6 +68,13 @@ def main() -> int:
     for name, code in main_table.items():
         if header.get(name) != code:
             failures.append(f"§3: {name} = {code}, header = {header.get(name)}")
+    node = node_codes(root)
+    for name, code in node.items():
+        if header.get(name) != code:
+            failures.append(f"clients/node ErrorCode: {name} = {code}, header = {header.get(name)}")
+    if set(node) != set(main_table):
+        failures.append(f"o ErrorCode do cliente Node e a tabela do §3 listam códigos diferentes: "
+                        f"{sorted(set(node) ^ set(main_table))}")
     for name, code in modb_client.ERROR_CODES.items():
         if header.get(name) != code:
             failures.append(f"modb_client.ERROR_CODES: {name} = {code}, header = {header.get(name)}")
@@ -71,7 +85,7 @@ def main() -> int:
     for failure in failures:
         print("FAIL:", failure)
     if not failures:
-        print(f"{len(header)} códigos: header, documentação e cliente Python conferem")
+        print(f"{len(header)} códigos: header, documentação e clientes Python e Node conferem")
     return 1 if failures else 0
 
 

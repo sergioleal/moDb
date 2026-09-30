@@ -2,10 +2,14 @@
 
 Como chamar as stored procedures de um servidor moDb (`modb_add_server`,
 ADR-025) de qualquer linguagem: o protocolo nativo por TCP e, na mesma máquina,
-o anel de memória compartilhada (ADR-026). Implementação de referência:
-[`clients/python/modb_client.py`](../clients/python/modb_client.py) (só
-biblioteca padrão, ~350 linhas), testada contra o `notas-server` em
-`modb.python_client`.
+o anel de memória compartilhada (ADR-026). Implementações de referência, só
+com a biblioteca padrão de cada linguagem:
+
+- Python: [`clients/python/modb_client.py`](../clients/python/modb_client.py),
+  com TCP e anel, testado contra o `notas-server` em `modb.python_client`;
+- Node (TypeScript): [`clients/node/`](../clients/node/README.md), com TCP,
+  token e pool, testado contra o `notas-server` atrás do `modb-proxy` em
+  `modb.node_client`.
 
 Tudo é **little-endian**. `string` = `u32 comprimento | bytes UTF-8`.
 

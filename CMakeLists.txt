@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.30)
 
 project(
     moDb
-    VERSION 0.1.2
+    VERSION 0.1.3
     DESCRIPTION "An embedded relational database written in C++26"
     LANGUAGES CXX
 )
@@ -748,6 +748,24 @@ if(BUILD_TESTING)
                              "$<TARGET_FILE:notas-server>" "$<TARGET_FILE:modb_proxy_cli>"
                              "${CMAKE_CURRENT_SOURCE_DIR}/clients/python")
             set_tests_properties(modb.stdin_eof PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8" TIMEOUT 120)
+        endif()
+        # Cliente Node de referência (R6): roda os .ts direto, sem compilar, o que
+        # pede Node >= 22.18. Sem Node (ou mais velho), os testes ficam de fora.
+        find_program(MODB_NODE_EXECUTABLE node)
+        if(MODB_NODE_EXECUTABLE)
+            execute_process(COMMAND "${MODB_NODE_EXECUTABLE}" --version
+                            OUTPUT_VARIABLE modb_node_version OUTPUT_STRIP_TRAILING_WHITESPACE)
+            string(REGEX REPLACE "^v" "" modb_node_version "${modb_node_version}")
+        endif()
+        if(MODB_NODE_EXECUTABLE AND modb_node_version VERSION_GREATER_EQUAL 22.18)
+            add_test(NAME modb.node_value
+                     COMMAND "${MODB_NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_SOURCE_DIR}/clients/node/src/value.test.ts")
+            add_test(NAME modb.node_client
+                     COMMAND "${MODB_NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_SOURCE_DIR}/clients/node/test/integration.test.ts")
+            set_tests_properties(modb.node_client PROPERTIES TIMEOUT 120 ENVIRONMENT
+                                 "MODB_NOTAS_SERVER=$<TARGET_FILE:notas-server>;MODB_PROXY=$<TARGET_FILE:modb_proxy_cli>")
+        elseif(MODB_NODE_EXECUTABLE)
+            message(STATUS "moDb: Node ${modb_node_version} < 22.18; testes do cliente Node desligados")
         endif()
     endif()
     modb_add_test(modb_model_tests tests/model_test.cpp)

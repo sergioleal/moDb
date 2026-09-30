@@ -15,6 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # O teste do SDK também roda o cliente Node de referência (clients/node).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Ferramentas
         run: |
           sudo apt-get update

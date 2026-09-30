@@ -2,10 +2,14 @@
 
 Como chamar as stored procedures de um servidor moDb (`modb_add_server`,
 ADR-025) de qualquer linguagem: o protocolo nativo por TCP e, na mesma máquina,
-o anel de memória compartilhada (ADR-026). Implementação de referência:
-[`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.2/clients/python/modb_client.py) (só
-biblioteca padrão, ~350 linhas), testada contra o `notas-server` em
-`modb.python_client`.
+o anel de memória compartilhada (ADR-026). Implementações de referência, só
+com a biblioteca padrão de cada linguagem:
+
+- Python: [`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.3/clients/python/modb_client.py),
+  com TCP e anel, testado contra o `notas-server` em `modb.python_client`;
+- Node (TypeScript): [`clients/node/`](https://github.com/sergioleal/moDb/blob/v0.1.3/clients/node/README.md), com TCP,
+  token e pool, testado contra o `notas-server` atrás do `modb-proxy` em
+  `modb.node_client`.
 
 Tudo é **little-endian**. `string` = `u32 comprimento | bytes UTF-8`.
 
@@ -76,7 +80,7 @@ OpResult = call_id u32 | ok u8 | se ok=1: payload_len u32 | payload (Value)
 
 `call_id` é do cliente (qualquer valor; a resposta repete). As respostas saem na
 ordem dos pedidos de uma conexão. `code` é o `modb::ErrorCode`
-([`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/include/modb/error.hpp)). Os que um cliente de procs encontra:
+([`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.3/include/modb/error.hpp)). Os que um cliente de procs encontra:
 
 | code | nome | significado | o que o cliente faz |
 |---|---|---|---|
@@ -97,7 +101,7 @@ ordem dos pedidos de uma conexão. `code` é o `modb::ErrorCode`
 
 Os números são estáveis: cada código tem um valor explícito no `error.hpp`, e um
 código novo entra no fim, sem renumerar nem reusar os outros
-([COMPATIBILIDADE.md](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/COMPATIBILIDADE.md)). Qualquer outro código que chegue a
+([COMPATIBILIDADE.md](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/COMPATIBILIDADE.md)). Qualquer outro código que chegue a
 um cliente de procs é erro interno do servidor: registre e mostre um erro
 genérico. A lista completa está no [Apêndice A](#apêndice-a--todos-os-códigos).
 `sys.procs` e `modb procs` listam as procs e os argumentos esperados.
@@ -196,7 +200,7 @@ p50/p99/p99,9). Números só valem de máquina dedicada.
 
 ## Apêndice A — todos os códigos
 
-Gerado do [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/include/modb/error.hpp); o teste `modb.error_codes` confere que esta
+Gerado do [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.3/include/modb/error.hpp); o teste `modb.error_codes` confere que esta
 tabela e o header não divergem.
 
 | code | nome | significado |

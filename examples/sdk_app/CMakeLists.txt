@@ -1,5 +1,5 @@
 # Aplicação de exemplo compilada contra o SDK instalado do Ring0 (release
-# v0.1.2 ou `cmake --install`), sem o código-fonte do motor: só o módulo de
+# v0.1.3 ou `cmake --install`), sem o código-fonte do motor: só o módulo de
 # procs é compilado aqui. É o modelo para o servidor de uma aplicação nova.
 #
 #   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=<sdk>

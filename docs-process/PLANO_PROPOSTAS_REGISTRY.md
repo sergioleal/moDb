@@ -99,17 +99,17 @@ tarefa.
   `pacote-dev-node` para `v0.1.2`.
 - [x] 5.2 Tag `v0.1.2`; o workflow publica a release; conferir o download.
 
-### P1 — cliente Node *(depende da decisão D1)*
+### P1 — cliente Node *(release `v0.1.3`)*
 
-#### R6 — `clients/node/` *(médio)*
+#### R6 — `clients/node/` *(médio)* ✅
 
-- [ ] 6.1 Trazer o cliente TypeScript para `clients/node/`: `Value` v1,
+- [x] 6.1 *(de `agentikalreg/packages/modb-client`, só lido; `package.json` e `tsconfig` sem o monorepo; Node ≥ 22.18 roda os `.ts` direto)* Trazer o cliente TypeScript para `clients/node/`: `Value` v1,
   conexão com `Hello`, `Authenticate` e várias chamadas em voo, e pool.
-- [ ] 6.2 Teste no CTest, como o `modb.python_client`, contra o
+- [x] 6.2 *(`modb.node_value` e `modb.node_client`, ligados só com Node ≥ 22.18; a queda é do proxy, parado pelo fim da entrada padrão e religado na mesma porta. No Linux, roda no `sdk-smoke.sh` da release, com `setup-node`)* Teste no CTest, como o `modb.python_client`, contra o
   `notas-server` atrás do `modb-proxy`: recusa sem token (73), erros de proc
   (1, 30, 48, 70), queda do servidor no meio (leitura repetida, escrita não).
-- [ ] 6.3 Constantes de `ErrorCode` conferidas contra a tabela da R1.
-- [ ] 6.4 `PROTOCOLO_CLIENTES.md` e o pacote passam a citar o cliente Node.
+- [x] 6.3 *(o `modb.error_codes` confere também o `errors.ts`; entraram 44 e 50)* Constantes de `ErrorCode` conferidas contra a tabela da R1.
+- [x] 6.4 `PROTOCOLO_CLIENTES.md` e o pacote passam a citar o cliente Node.
 - [ ] 6.5 *(opcional)* Publicar no npm.
 
 ### P2 — protocolo minor 3 *(release `v0.2.0`)*
@@ -226,7 +226,7 @@ tarefa.
 
 | # | Pergunta | Bloqueia |
 |---|---|---|
-| D1 | O cliente TypeScript do registry pode ser trazido para o moDb, e sob que licença? O código está no `agentikalreg`, fora deste projeto. | R6 |
+| D1 | ~~O cliente TypeScript do registry pode ser trazido para o moDb?~~ Sim (pedido da P1, 2026-09-30). | R6 ✅ |
 | D2 | Nome da role que permite delegar e se a delegação vale também para facades. | R9 |
 | D3 | `Ping`/`Pong`, chave de idempotência, ou os dois? | R11 |
 | D4 | Valores vazios ficam fora do índice único? | R13 |
@@ -246,4 +246,5 @@ R15 e R16 depois da P2, porque o `detail` do `unique` depende da R10.
 | 2026-09-30 | R2 | a1cca2f | Configurações de módulo validadas na subida; `sys.settings` |
 | 2026-09-30 | R3 | 68ca1d7 | `--stop-on-stdin-eof on` no servidor e no proxy; seção Windows no `OPERACAO.md` |
 | 2026-09-30 | R4 | 1f3c838 | `Context::range` e `Context::prefix`; aviso sobre `c.database()` fora do snapshot |
-| 2026-09-30 | R5 | (release) | `v0.1.2`: P0 concluída, sem mudar protocolo nem formato |
+| 2026-09-30 | R5 | ccce319 | `v0.1.2`: P0 concluída, sem mudar protocolo nem formato |
+| 2026-09-30 | R6 | (release) | `v0.1.3`: cliente Node em `clients/node/`, no CTest e no teste da release |
