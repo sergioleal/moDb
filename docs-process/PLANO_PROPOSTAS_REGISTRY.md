@@ -190,12 +190,12 @@ tarefa.
 - [ ] 13.4 Criar um índice único sobre dados que já têm duplicatas falha com a
   lista das duplicatas.
 
-#### R14 — `Value` embutido *(pequeno; sem mudar o formato)*
+#### R14 — `Value` embutido *(pequeno; sem mudar o formato)* ✅
 
-- [ ] 14.1 Utilitário de binding que grava um `ops::Value` codificado num
+- [x] 14.1 *(ponto de extensão genérico `object::bytes_codec<M>`, para a camada de objetos não depender de `ops`; `ops::Value` traz o seu)* Utilitário de binding que grava um `ops::Value` codificado num
   campo de bytes e devolve o `Value` na leitura. Resolve `tags`, `tools` e
   `inputSchema` sem JSON em texto e sem parse.
-- [ ] 14.2 Teste de ida e volta e de limite de tamanho (`value_too_large`).
+- [x] 14.2 *(`modb.stored_value`. Achado: o limite não é do campo, é do objeto inteiro, que precisa caber numa página do heap, cerca de 8 KB; o erro é `record_too_large` (28), não `value_too_large`. Documentado na referência do modelo de objetos)* Teste de ida e volta e de limite de tamanho.
 
 #### R15 — Instante e opcional *(grande)*
 
@@ -247,4 +247,5 @@ R15 e R16 depois da P2, porque o `detail` do `unique` depende da R10.
 | 2026-09-30 | R3 | 68ca1d7 | `--stop-on-stdin-eof on` no servidor e no proxy; seção Windows no `OPERACAO.md` |
 | 2026-09-30 | R4 | 1f3c838 | `Context::range` e `Context::prefix`; aviso sobre `c.database()` fora do snapshot |
 | 2026-09-30 | R5 | ccce319 | `v0.1.2`: P0 concluída, sem mudar protocolo nem formato |
-| 2026-09-30 | R6 | (release) | `v0.1.3`: cliente Node em `clients/node/`, no CTest e no teste da release |
+| 2026-09-30 | R6 | 3282796 | `v0.1.3`: cliente Node em `clients/node/`, no CTest e no teste da release |
+| 2026-09-30 | R14 | (este commit) | Campo `ops::Value` persistido via `bytes_codec`; objeto limitado a uma página |

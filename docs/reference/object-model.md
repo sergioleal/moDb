@@ -117,6 +117,31 @@ member type that doesn't match one of these falls into a `static_assert`
 members are deliberately excluded from this mapping; they go through the
 dedicated `.embedded<Id>(...)` builder method instead (§2.5).
 
+**Custom member types stored as `bytes`.** A member type `M` with a
+specialization of `object::bytes_codec<M>`
+(`include/modb/object/bytes_codec.hpp`: `static std::vector<std::byte>
+encode(const M&)` and `static Result<M> decode(std::span<const std::byte>)`)
+maps to `bytes` and binds like any other field. `ops::Value` ships with one
+(`include/modb/ops/value.hpp`), so a small list, a map or free-form JSON can
+live inside the object:
+
+```cpp
+struct Agent {
+    std::string name;
+    ops::Value tags;     // e.g. a list of texts
+    ops::Value schema;   // e.g. a JSON Schema as a nested map
+};
+b.field<1>("name", &Agent::name).field<2>("tags", &Agent::tags).field<3>("schema", &Agent::schema);
+```
+
+The stored bytes are the same binary `Value` v1 as `OpCall` arguments, so no
+text is re-parsed on read. Limits: the field is opaque to indexes and queries,
+changing a field's codec after data exists is a migration, and **the whole
+object must fit in one heap page** (about 8 KB with the default
+`MODB_PAGE_SIZE`). A larger object fails with `record_too_large` and nothing
+is written; put big payloads in a `BlobStore` blob or a persistent collection.
+Covered by `modb.stored_value` (`tests/stored_value_test.cpp`).
+
 ### 2.4 Schema evolution and lazy migration
 
 A field can declare a default value, used when reading an older record that

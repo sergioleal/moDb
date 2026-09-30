@@ -16,6 +16,7 @@
 // inteiros little-endian, como o resto do formato do moDb (ADR-003).
 
 #include "modb/error.hpp"
+#include "modb/object/bytes_codec.hpp"
 #include "modb/object/ids.hpp"
 
 #include <cstdint>
@@ -127,3 +128,16 @@ private:
 };
 
 } // namespace modb::ops
+
+namespace modb::object {
+
+// Um campo `ops::Value` num objeto persistido (R14): guardado como bytes, no
+// mesmo formato binário do OpCall. Serve para listas pequenas, mapas e JSON
+// livre sem outro objeto nem texto para reinterpretar; não é indexável.
+template <>
+struct bytes_codec<ops::Value> {
+    [[nodiscard]] static std::vector<std::byte> encode(const ops::Value& value) { return ops::encode(value); }
+    [[nodiscard]] static Result<ops::Value> decode(std::span<const std::byte> bytes) { return ops::decode(bytes); }
+};
+
+} // namespace modb::object

@@ -668,6 +668,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.ops_value COMMAND modb_ops_value_tests)
     # Números estáveis dos ErrorCode (docs/COMPATIBILIDADE.md): o C++ fixa os
     # valores; o Python confere o header contra a documentação e o cliente Python.
+    # Campo ops::Value num objeto persistido, via bytes_codec (R14).
+    modb_add_test(modb_stored_value_tests tests/stored_value_test.cpp)
+    add_test(NAME modb.stored_value COMMAND modb_stored_value_tests)
     modb_add_test(modb_error_code_value_tests tests/error_code_test.cpp)
     add_test(NAME modb.error_code_values COMMAND modb_error_code_value_tests)
     find_package(Python3 COMPONENTS Interpreter)

@@ -4,6 +4,8 @@
 #include "modb/error.hpp"
 // Importa AttributeValue/AttributeType.
 #include "modb/object/attribute_value.hpp"
+// Tipos de membro próprios guardados como bytes (R14).
+#include "modb/object/bytes_codec.hpp"
 // Importa FieldId.
 #include "modb/object/ids.hpp"
 // Importa Ref/OwnedRef/Embedded e seus traços.
@@ -52,6 +54,9 @@ consteval AttributeType attribute_type_of() {
         return AttributeType::string;
     } else if constexpr (std::same_as<Member, std::vector<std::byte>>) {
         return AttributeType::bytes;
+    } else if constexpr (has_bytes_codec<Member>) {
+        // Tipo próprio guardado como bytes (bytes_codec.hpp).
+        return AttributeType::bytes;
     } else if constexpr (std::same_as<Member, ObjectId>) {
         return AttributeType::ref;
     } else if constexpr (std::same_as<Member, BlobId>) {
@@ -73,6 +78,8 @@ template <typename Member>
 AttributeValue to_attribute_value(const Member& member) {
     if constexpr (is_ref_v<Member> || is_owned_ref_v<Member>) {
         return AttributeValue{member.target};
+    } else if constexpr (has_bytes_codec<Member>) {
+        return AttributeValue{bytes_codec<Member>::encode(member)};
     } else if constexpr (std::same_as<Member, bool>) {
         return AttributeValue{member};
     } else if constexpr (std::signed_integral<Member>) {
@@ -93,6 +100,12 @@ Result<Member> from_attribute_value(const AttributeValue& value) {
             return std::unexpected(target.error());
         }
         return Member{*target};
+    } else if constexpr (has_bytes_codec<Member>) {
+        auto raw = value.as_bytes();
+        if (!raw) {
+            return std::unexpected(raw.error());
+        }
+        return bytes_codec<Member>::decode(*raw);
     } else if constexpr (std::same_as<Member, bool>) {
         return value.as_bool();
     } else if constexpr (std::signed_integral<Member>) {
