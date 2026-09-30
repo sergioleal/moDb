@@ -40,6 +40,8 @@ struct Settings {
     std::string audit{};
     std::uint32_t max_calls_per_second{0};
     std::uint32_t max_streams_per_principal{0};
+    // Soma das chamadas por segundo dos delegados de um principal (ADR-029).
+    std::uint32_t max_delegated_calls_per_second{0};
     // Para limpo quando a entrada padrão fecha (supervisores sem sinais).
     bool stop_on_stdin_eof{false};
 };
@@ -132,6 +134,8 @@ Result<void> apply_setting(Settings& settings, std::string_view key, std::string
         return set_number(settings.max_calls_per_second);
     } else if (key == "max_streams_per_principal") {
         return set_number(settings.max_streams_per_principal);
+    } else if (key == "max_delegated_calls_per_second") {
+        return set_number(settings.max_delegated_calls_per_second);
     } else if (key == "stop_on_stdin_eof") {
         if (value != "on" && value != "off") {
             return std::unexpected(invalid("stop_on_stdin_eof must be on or off"));
@@ -234,9 +238,11 @@ Result<std::shared_ptr<modb::proxy::Policy>> make_policy(const Settings& setting
     } else if (settings.policy != "passthrough") {
         return std::unexpected(invalid("unknown policy: " + settings.policy + " (passthrough or read_only)"));
     }
-    if (settings.max_calls_per_second != 0 || settings.max_streams_per_principal != 0) {
-        chain.push_back(
-            std::make_shared<RateLimitPolicy>(settings.max_calls_per_second, settings.max_streams_per_principal));
+    if (settings.max_calls_per_second != 0 || settings.max_streams_per_principal != 0 ||
+        settings.max_delegated_calls_per_second != 0) {
+        chain.push_back(std::make_shared<RateLimitPolicy>(settings.max_calls_per_second,
+                                                          settings.max_streams_per_principal, RateLimitPolicy::Clock::now,
+                                                          settings.max_delegated_calls_per_second));
     }
     if (settings.audit == "stderr") {
         chain.push_back(AuditLogPolicy::to_stream(std::cerr));
@@ -285,6 +291,7 @@ constexpr std::string_view k_usage =
     "  --audit FILE|stderr    one line per request (default off)\n"
     "  --max-calls-per-second N      per principal (anonymous: per host); 0 = no limit\n"
     "  --max-streams-per-principal N open streams per principal; 0 = no limit\n"
+    "  --max-delegated-calls-per-second N  sum over the delegates of a principal (ADR-029); 0 = no limit\n"
     "  --tokens FILE          require a token (lines 'sha256:<hex> principal [roles]')\n"
     "  --name NAME            proxy name in the engine logs (default modb-proxy)\n"
     "  --idle-timeout-ms N    close idle clients after N ms\n"

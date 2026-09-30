@@ -424,6 +424,8 @@ Result<void> Server::handle_link(NativeSocket& peer) {
             services.caller = ops::Caller{.principal = std::move(open->principal),
                                           .roles = std::move(open->roles),
                                           .attributes = std::move(open->attributes)};
+            services.client_minor = open->client_minor;
+            services.delegation_allowed = true;
             auto session = std::make_shared<LinkSession>(state.writer, id);
             // Sem compressão no link: é local; quem comprime para o cliente é o proxy.
             session->engine = std::make_unique<EngineSession>(std::move(services), session->sink, Compression::none);

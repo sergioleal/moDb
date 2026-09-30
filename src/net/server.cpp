@@ -300,7 +300,9 @@ Result<void> Server::handle_connection(NativeSocket& peer) {
     }
 
     SocketSink sink{peer};
-    EngineSession engine{session_services(), sink, selected};
+    auto services = session_services();
+    services.client_minor = ok.minor;
+    EngineSession engine{std::move(services), sink, selected};
     DirectConnection session;
     session.peer = &peer;
     session.engine = &engine;

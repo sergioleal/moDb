@@ -7,7 +7,9 @@
 #include "modb/ops/object_access.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <optional>
+#include <vector>
 
 namespace modb::ops {
 
@@ -34,12 +36,17 @@ public:
     [[nodiscard]] bool past_deadline() const noexcept {
         return deadline_ && std::chrono::steady_clock::now() > *deadline_;
     }
+    // O detalhe de um erro da chamada (minor 3, ADR-029): um Value codificado
+    // que vai no OpResult junto com o código. Descartado se a chamada der certo.
+    void set_error_detail(std::vector<std::byte> detail) { error_detail_ = std::move(detail); }
+    [[nodiscard]] const std::vector<std::byte>& error_detail() const noexcept { return error_detail_; }
 
 private:
     ObjectAccess objects_;
     Logger* logger_{nullptr};
     std::optional<std::chrono::steady_clock::time_point> deadline_{};
     const Caller* caller_{nullptr};
+    std::vector<std::byte> error_detail_{};
 };
 
 } // namespace modb::ops

@@ -93,7 +93,7 @@ private:
 // Uma linha por pedido concluído ou recusado, no formato do log de chamadas
 // do servidor:
 //
-//   audit <kind> <target> ok|error <code> <ms>ms [denied] [objects N] by <principal|-> from <address>
+//   audit <kind> <target> ok|error <code> <ms>ms [denied] [objects N] by <principal|-> [as <delegado>] from <address>
 class AuditLogPolicy final : public Policy {
 public:
     using Sink = std::function<void(std::string_view line)>;
@@ -114,12 +114,17 @@ private:
 // Limites por principal (anônimos: por endereço): chamadas por segundo
 // (balde com rajada igual ao limite) e streams abertos ao mesmo tempo.
 // 0 = sem limite.
+//
+// Com delegação (ADR-029), os dois limites valem por delegado: cada usuário de
+// um gateway tem o seu balde. `delegated_calls_per_second` limita, além disso,
+// a soma de um principal sobre todos os delegados dele: um gateway
+// comprometido não contorna o limite inventando usuários.
 class RateLimitPolicy final : public Policy {
 public:
     using Clock = std::chrono::steady_clock;
 
     RateLimitPolicy(std::uint32_t calls_per_second, std::uint32_t streams_per_principal,
-                    std::function<Clock::time_point()> now = Clock::now);
+                    std::function<Clock::time_point()> now = Clock::now, std::uint32_t delegated_calls_per_second = 0);
 
     [[nodiscard]] std::string_view name() const noexcept override { return "limits"; }
     [[nodiscard]] Decision authorize(const ops::Caller& caller, net::Message& request) override;
@@ -134,8 +139,10 @@ private:
         std::uint32_t streams{0};
     };
     [[nodiscard]] static std::string key_of(const ops::Caller& caller);
-
+    // Tira uma ficha do balde; false = acabou.
+    [[nodiscard]] bool take(Account& account, std::uint32_t per_second, Clock::time_point now);
     std::uint32_t calls_per_second_;
+    std::uint32_t delegated_calls_per_second_;
     std::uint32_t streams_per_principal_;
     std::function<Clock::time_point()> now_;
     mutable std::mutex mu_;

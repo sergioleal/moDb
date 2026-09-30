@@ -71,9 +71,24 @@ std::string call_line(const ops::OperationRegistry::CallRecord& call) {
     line += call.error == nullptr
                 ? std::string{"ok"}
                 : std::format("error {} {}", static_cast<unsigned>(call.error->code), call.error->message);
+    // O `reason` do detail do erro (ADR-029), se a proc mandou um.
+    if (!call.error_detail.empty()) {
+        if (auto detail = ops::decode(call.error_detail); detail) {
+            if (const auto* reason = detail->field("reason"); reason != nullptr && reason->text() != nullptr) {
+                line += " reason " + *reason->text();
+            }
+        }
+    }
+    if (call.replayed) {
+        line += " replayed";
+    }
     // Chamada que veio por um proxy com cliente identificado (ADR-028).
     if (call.caller != nullptr && !call.caller->anonymous()) {
         line += " by " + call.caller->principal;
+        // Em nome de quem (ADR-029).
+        if (call.caller->delegated()) {
+            line += " as " + call.caller->acting_as;
+        }
     }
     return line;
 }
@@ -193,6 +208,8 @@ Result<void> apply_setting(Options& options, std::string_view key, std::string_v
         return set_number(options.idle_timeout_ms);
     } else if (key == "proc_timeout_ms") {
         return set_number(options.proc_timeout_ms);
+    } else if (key == "idempotency_retention_s") {
+        return set_number(options.idempotency_retention_s);
     } else if (key == "log") {
         options.log = value.empty() || value == "off" ? std::string{value} : resolve(base, value).string();
     } else if (key == "stop_on_stdin_eof") {
@@ -317,6 +334,7 @@ std::string usage(std::string_view program, std::span<const Module> modules) {
                        "  --max-streams N        concurrent streams per connection\n"
                        "  --idle-timeout-ms N    close idle connections after N ms\n"
                        "  --proc-timeout-ms N    fail (and roll back) a proc call after N ms; 0 = no limit\n"
+                       "  --idempotency-retention-s N  how long an idempotency key is kept (default 86400; 0 = off)\n"
                        "  --log FILE|off         call log (default stderr)\n"
                        "  --stop-on-stdin-eof on|off  stop cleanly when stdin closes (default off)\n"
                        "  --MODULE.SETTING V     a module setting (listed below; '-' or '_' in the name)\n"
@@ -397,6 +415,16 @@ Result<net::Server> start(const Options& options, std::span<const Module> module
     registry->set_call_observer(
         [log = *log](const ops::OperationRegistry::CallRecord& call) { log->write(call_line(call)); });
     registry->set_time_limit(std::chrono::milliseconds{options.proc_timeout_ms});
+
+    // Chaves de idempotência (ADR-029): o tipo de sistema entra no banco sem
+    // transação aberta e antes dos módulos, cujos manifestos levam a baseline.
+    if (options.idempotency_retention_s != 0) {
+        if (auto enabled = registry->enable_idempotency(server->database(),
+                                                         std::chrono::seconds{options.idempotency_retention_s});
+            !enabled) {
+            return std::unexpected(Error{enabled.error().code, "idempotency: " + enabled.error().message});
+        }
+    }
 
     std::vector<Module> all{modules.begin(), modules.end()};
     all.push_back(system_module(modules));

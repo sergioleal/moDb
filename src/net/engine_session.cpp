@@ -26,9 +26,27 @@ OpResult execute_op_call(const EngineServices& services, const OpCall& call) {
         reply.message = "server has no operation registry";
         return reply;
     }
+    // Em nome de quem (ADR-029): só o proxy autoriza uma delegação.
+    const ops::Caller* caller = &services.caller;
+    ops::Caller delegated;
+    if (!call.acting_as.empty()) {
+        if (!services.delegation_allowed) {
+            reply.ok = false;
+            reply.code = ErrorCode::permission_denied;
+            reply.message = "delegation (acting_as) requires a modb-proxy that authorizes it";
+            return reply;
+        }
+        delegated = services.caller;
+        delegated.acting_as = call.acting_as.subject;
+        delegated.acting_attributes = call.acting_as.attributes;
+        caller = &delegated;
+    }
     // Sem lock do servidor (C11): procs de leitura correm juntas; as de escrita
     // abrem transação, e `Database::begin` as põe uma de cada vez.
-    auto outcome = services.operations->dispatch(call.operation_id, call.args, *services.database, &services.caller);
+    std::vector<std::byte> detail;
+    auto outcome = services.operations->dispatch(
+        call.operation_id, call.args, *services.database, caller,
+        ops::CallExtras{.idempotency_key = call.idempotency_key, .error_detail = &detail});
     if (outcome) {
         reply.ok = true;
         reply.payload = std::move(outcome->payload);
@@ -36,6 +54,10 @@ OpResult execute_op_call(const EngineServices& services, const OpCall& call) {
         reply.ok = false;
         reply.code = outcome.error().code;
         reply.message = outcome.error().message;
+        // Só quem negociou minor ≥ 3 sabe ler o detail (ADR-029).
+        if (services.client_minor >= 3) {
+            reply.detail = std::move(detail);
+        }
     }
     return reply;
 }

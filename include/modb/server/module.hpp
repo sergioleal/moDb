@@ -153,6 +153,18 @@ public:
         return where<T>();
     }
 
+    // Erro de regra com detalhe (minor 3, ADR-029): o código e a mensagem de
+    // `error`, mais um Value que o cliente recebe no OpResult. Por convenção,
+    // `reason` (código estável da aplicação, [a-z_]+) e `field` (caminho do
+    // campo, com '.'); o log de chamadas grava o `reason`.
+    //
+    //   return c.fail(conflict("o endereço já está em uso"),
+    //                 ops::Value::object({{"reason", std::string{"handle_taken"}}, {"field", std::string{"handle"}}}));
+    [[nodiscard]] std::unexpected<Error> fail(Error error, const ops::Value& detail) {
+        context_->set_error_detail(ops::encode(detail));
+        return std::unexpected(std::move(error));
+    }
+
     // Ids com `field == value`, pelo índice (o campo precisa de índice: ModuleBuilder::index).
     template <typename T>
     [[nodiscard]] Result<std::vector<object::ObjectId>> find(object::FieldId field, object::AttributeValue value) {

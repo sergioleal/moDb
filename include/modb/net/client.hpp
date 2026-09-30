@@ -101,6 +101,17 @@ private:
     std::uint64_t received_{0};
 };
 
+// Opções de uma chamada, minor 3 (ADR-029).
+struct CallOptions {
+    // Em nome de quem: só atrás de um proxy, e com a role `delegate`.
+    Delegation acting_as{};
+    // Torna a escrita repetível: com a mesma chave, o engine devolve o
+    // resultado já confirmado em vez de executar de novo.
+    std::string idempotency_key{};
+    // Recebe o `detail` de um erro (vazio se a proc não mandou nenhum).
+    std::vector<std::byte>* error_detail{nullptr};
+};
+
 class Client {
 public:
     Client(const Client&) = delete;
@@ -125,6 +136,10 @@ public:
     // Fase 9: despacha operação de domínio (OpCall/OpResult).
     [[nodiscard]] Result<std::vector<std::byte>> call(std::string_view operation_id,
                                                       std::span<const std::byte> args);
+    // Com delegação, chave de idempotência ou detail do erro (minor 3). Pedir
+    // delegação ou chave a um servidor de minor < 3 é `invalid_argument`.
+    [[nodiscard]] Result<std::vector<std::byte>> call(std::string_view operation_id,
+                                                      std::span<const std::byte> args, const CallOptions& options);
 
     // ADR-026: passa os OpCall a um anel de memória compartilhada (cliente na
     // mesma máquina do servidor). Depois disto, `call` escreve o pedido e faz
@@ -193,7 +208,8 @@ private:
     Client(std::shared_ptr<ClientConn> conn, HelloOk hello_ok);
 
     [[nodiscard]] Result<std::vector<std::byte>> call_over_shm(std::uint32_t call_id, std::string_view operation_id,
-                                                               std::span<const std::byte> args);
+                                                               std::span<const std::byte> args,
+                                                               const CallOptions& options);
 
     struct ShmChannel;
     std::shared_ptr<ClientConn> conn_;

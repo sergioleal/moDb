@@ -737,6 +737,10 @@ if(BUILD_TESTING)
             MODB_PROXY_EXE="$<TARGET_FILE:modb_proxy_cli>")
         add_dependencies(modb_server_host_tests notas-server modb_cli modb_proxy_cli)
         add_test(NAME modb.server_host COMMAND modb_server_host_tests)
+        # Protocolo minor 3 de ponta a ponta: delegação, detail, idempotência (R9–R11).
+        modb_add_test(modb_minor3_e2e_tests tests/minor3_e2e_test.cpp)
+        target_link_libraries(modb_minor3_e2e_tests PRIVATE modb::app_client modb::server_host modb::proxy)
+        add_test(NAME modb.minor3_e2e COMMAND modb_minor3_e2e_tests)
         # Faixa e prefixo pelo índice nas procs (R4).
         modb_add_test(modb_proc_range_tests tests/proc_range_test.cpp)
         target_link_libraries(modb_proc_range_tests PRIVATE modb::app_client modb::server_host)

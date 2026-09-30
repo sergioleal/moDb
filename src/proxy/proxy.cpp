@@ -35,7 +35,38 @@ struct Pending {
     std::string target;
     Clock::time_point start{};
     std::uint64_t objects{0};
+    // O chamador efetivo do pedido (com o delegado, se houver), para a auditoria.
+    ops::Caller caller{};
 };
+
+// Delegação (ADR-029): um principal fala por outro só com esta role.
+constexpr std::string_view k_delegate_role = "delegate";
+
+// Quem o pedido representa. A regra fica no proxy, fora da cadeia de políticas:
+// nenhuma política configurada a desliga. Devolve a recusa, ou nada e o
+// chamador efetivo (o da sessão mais o delegado) em `effective`.
+[[nodiscard]] std::optional<Decision> check_delegation(const ops::Caller& caller, const net::Message& request,
+                                                       std::uint16_t engine_minor, ops::Caller& effective) {
+    effective = caller;
+    const auto* delegation = net::request_delegation(request);
+    const auto* call = std::get_if<net::OpCall>(&request);
+    const bool keyed = call != nullptr && !call->idempotency_key.empty();
+    if ((delegation != nullptr || keyed) && engine_minor < 3) {
+        return Decision::deny("the engine does not support protocol minor 3 (delegation, idempotency keys)",
+                              ErrorCode::invalid_argument);
+    }
+    if (delegation == nullptr) {
+        return std::nullopt;
+    }
+    // O delegado entra no chamador efetivo antes da recusa: a auditoria mostra
+    // em nome de quem tentaram falar.
+    effective.acting_as = delegation->subject;
+    effective.acting_attributes = delegation->attributes;
+    if (!caller.has_role(k_delegate_role)) {
+        return Decision::deny("acting_as requires the 'delegate' role", ErrorCode::permission_denied);
+    }
+    return std::nullopt;
+}
 
 // O que só o cliente manda numa sessão (o resto é resposta ou abertura).
 [[nodiscard]] bool is_client_request(const net::Message& message) noexcept {
@@ -107,6 +138,9 @@ struct ClientSession {
     net::Compression codec{net::Compression::none};
     ops::Caller caller;
     std::string address;
+    // Minor negociado com o cliente, e o do engine quando a sessão abriu.
+    std::uint16_t client_minor{0};
+    std::uint16_t engine_minor{0};
 
     // Saída para o cliente: a thread do link empilha, a escritora do cliente
     // manda. Assim um cliente lento nunca segura a thread do link.
@@ -357,9 +391,10 @@ struct Proxy::Impl {
         }
     }
 
-    void audit(const ClientSession& session, std::string_view kind, std::string_view target, const Clock::time_point& start,
-               bool ok, ErrorCode code, std::string_view message, std::uint64_t objects, bool denied) {
-        policy->audit(AuditRecord{.caller = &session.caller,
+    void audit(const ClientSession& session, const ops::Caller& caller, std::string_view kind, std::string_view target,
+               const Clock::time_point& start, bool ok, ErrorCode code, std::string_view message, std::uint64_t objects,
+               bool denied) {
+        policy->audit(AuditRecord{.caller = &caller,
                                   .client = session.address,
                                   .kind = kind,
                                   .target = target,
@@ -384,7 +419,7 @@ struct Proxy::Impl {
             }
         }
         if (done) {
-            audit(session, done->kind, done->target, done->start, ok, code, message, done->objects, false);
+            audit(session, done->caller, done->kind, done->target, done->start, ok, code, message, done->objects, false);
         }
     }
 
@@ -401,6 +436,10 @@ struct Proxy::Impl {
                 session.out.pop_front();
             }
             policy->on_response(session.caller, message);
+            // O detail do erro (minor 3) só vai a quem negociou minor ≥ 3.
+            if (auto* result = std::get_if<net::OpResult>(&message); result != nullptr && session.client_minor < 3) {
+                result->detail.clear();
+            }
 
             std::optional<std::uint32_t> credit_for;
             if (auto* frame = std::get_if<net::ObjectFrame>(&message)) {
@@ -511,11 +550,17 @@ struct Proxy::Impl {
                 continue;
             }
             const auto started = Clock::now();
-            const auto decision = policy->authorize(ring_session.caller, *message);
+            ops::Caller effective;
+            auto decision = Decision::allow();
+            if (auto refused = check_delegation(ring_session.caller, *message, ring_session.engine_minor, effective)) {
+                decision = std::move(*refused);
+            } else {
+                decision = policy->authorize(effective, *message);
+            }
             call = std::get_if<net::OpCall>(&*message);
             if (!decision.allowed || call == nullptr) {
-                audit(ring_session, "call", call != nullptr ? call->operation_id : std::string{}, started, false,
-                      decision.code, decision.message, 0, true);
+                audit(ring_session, effective, "call", call != nullptr ? call->operation_id : std::string{}, started,
+                      false, decision.code, decision.message, 0, true);
                 ring_session.push(net::OpResult{.call_id = call != nullptr ? call->call_id : 0,
                                                 .ok = false,
                                                 .code = decision.code,
@@ -525,7 +570,7 @@ struct Proxy::Impl {
             {
                 const std::scoped_lock lock{ring_session.pending_mu};
                 ring_session.calls[call->call_id] =
-                    Pending{.kind = "call", .target = call->operation_id, .start = started};
+                    Pending{.kind = "call", .target = call->operation_id, .start = started, .caller = effective};
             }
             if (!send_engine(ring_session.id, *message)) {
                 ring_session.push(net::OpResult{.call_id = call->call_id,
@@ -561,6 +606,8 @@ struct Proxy::Impl {
         ring_session->socket = owner->socket;
         ring_session->caller = owner->caller;
         ring_session->address = owner->address;
+        ring_session->client_minor = owner->client_minor;
+        ring_session->engine_minor = owner->engine_minor;
         owner->shm_region = std::make_unique<net::shm::Region>(std::move(*region));
         ring_session->ring = owner->shm_region.get();
         if (!open_session(ring_session, client_minor)) {
@@ -597,7 +644,7 @@ struct Proxy::Impl {
         // A auditoria fecha a conta de cada pedido (e os limites por
         // principal dependem disso).
         for (const auto& entry : abandoned) {
-            audit(session, entry.kind, entry.target, entry.start, false, ErrorCode::connection_closed,
+            audit(session, entry.caller, entry.kind, entry.target, entry.start, false, ErrorCode::connection_closed,
                   "client left before the answer", entry.objects, false);
         }
     }
@@ -673,7 +720,7 @@ struct Proxy::Impl {
             auto caller = policy->authenticate(info, Credentials{.mechanism = auth->mechanism, .payload = auth->payload});
             if (!caller) {
                 ++refused;
-                audit(*session, "authenticate", auth->mechanism, started, false, caller.error().code,
+                audit(*session, session->caller, "authenticate", auth->mechanism, started, false, caller.error().code,
                       caller.error().message, 0, true);
                 if (!net::send_message(socket, net::AuthenticateOk{.request_id = auth->request_id,
                                                                    .ok = false,
@@ -691,7 +738,8 @@ struct Proxy::Impl {
                                                                                 .message = "engine unavailable"}));
                 return false;
             }
-            audit(*session, "authenticate", auth->mechanism, started, true, ErrorCode::invalid_argument, {}, 0, false);
+            audit(*session, session->caller, "authenticate", auth->mechanism, started, true, ErrorCode::invalid_argument,
+                  {}, 0, false);
             if (!net::send_message(socket, net::AuthenticateOk{.request_id = auth->request_id,
                                                                .principal = session->caller.principal})) {
                 unregister_session(session->id);
@@ -729,6 +777,8 @@ struct Proxy::Impl {
                                                options.preferred_codec);
         if (negotiated) {
             negotiated->auth_mechanisms = policy->mechanisms();
+            // O cliente não pode usar o que o engine atrás do proxy não entende.
+            negotiated->minor = std::min(negotiated->minor, engine_now.protocol_minor);
         }
         if (!negotiated || !net::send_message(*socket, *negotiated)) {
             return;
@@ -742,6 +792,8 @@ struct Proxy::Impl {
         session->socket = socket;
         session->codec = negotiated->selected_codec;
         session->address = info.address;
+        session->client_minor = negotiated->minor;
+        session->engine_minor = engine_now.protocol_minor;
         const auto frame_limit = negotiated->max_frame_bytes;
         const auto expansion = negotiated->max_expansion_ratio;
 
@@ -787,11 +839,18 @@ struct Proxy::Impl {
                 continue;
             }
             const auto started = Clock::now();
-            auto decision = policy->authorize(session->caller, *message);
+            ops::Caller effective;
+            auto decision = Decision::allow();
+            if (auto refused = check_delegation(session->caller, *message, session->engine_minor, effective)) {
+                decision = std::move(*refused);
+            } else {
+                decision = policy->authorize(effective, *message);
+            }
             auto key = request_key(*message);
             if (!decision.allowed) {
                 if (key) {
-                    audit(*session, key->kind, key->target, started, false, decision.code, decision.message, 0, true);
+                    audit(*session, effective, key->kind, key->target, started, false, decision.code, decision.message,
+                          0, true);
                 }
                 if (auto reply = denial(*message, decision)) {
                     session->push(std::move(*reply));
@@ -801,7 +860,7 @@ struct Proxy::Impl {
             if (key) {
                 const std::scoped_lock lock{session->pending_mu};
                 session->pending_for(key->kind)[key->id] =
-                    Pending{.kind = key->kind, .target = std::move(key->target), .start = started};
+                    Pending{.kind = key->kind, .target = std::move(key->target), .start = started, .caller = effective};
             }
             if (!send_engine(id, *message)) {
                 break;

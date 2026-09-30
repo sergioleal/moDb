@@ -87,6 +87,8 @@ struct Options {
     // Para limpo quando a entrada padrão fecha (supervisores sem sinais, como no
     // Windows). Desligado por padrão: com a entrada em /dev/null pararia na subida.
     bool stop_on_stdin_eof{false};
+    // Quanto tempo uma chave de idempotência vale (ADR-029); 0 = desliga as chaves.
+    std::uint32_t idempotency_retention_s{86'400};
     // Configurações dos módulos, "<módulo>.<nome>" -> valor; conferidas contra
     // o que cada módulo declara em `start`.
     std::map<std::string, std::string> module_settings{};
@@ -94,7 +96,8 @@ struct Options {
 
 // Uma configuração `chave = valor` (as mesmas chaves das flags, com '_' no
 // lugar de '-': db, host, port, local, tcp, secret_file, link_workers,
-// max_streams, idle_timeout_ms, proc_timeout_ms, log, stop_on_stdin_eof), ou `<módulo>.<nome>` para
+// max_streams, idle_timeout_ms, proc_timeout_ms, log, stop_on_stdin_eof,
+// idempotency_retention_s), ou `<módulo>.<nome>` para
 // uma configuração de módulo (conferida só em `start`, que conhece os módulos).
 // Caminhos relativos em `db` e `log` são relativos a `base` (a pasta do arquivo
 // de configuração).

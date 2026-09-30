@@ -328,9 +328,12 @@ Result<std::string> Client::authenticate_token(std::string_view token) {
 }
 
 Result<std::vector<std::byte>> Client::call_over_shm(std::uint32_t call_id, std::string_view operation_id,
-                                                     std::span<const std::byte> args) {
-    auto frame = encode_message(
-        OpCall{.call_id = call_id, .operation_id = std::string{operation_id}, .args = {args.begin(), args.end()}});
+                                                     std::span<const std::byte> args, const CallOptions& options) {
+    auto frame = encode_message(OpCall{.call_id = call_id,
+                                       .operation_id = std::string{operation_id},
+                                       .args = {args.begin(), args.end()},
+                                       .acting_as = options.acting_as,
+                                       .idempotency_key = options.idempotency_key});
     if (!frame) {
         return std::unexpected(frame.error());
     }
@@ -371,6 +374,9 @@ Result<std::vector<std::byte>> Client::call_over_shm(std::uint32_t call_id, std:
                 return std::unexpected(make_protocol("unexpected message on the shared-memory ring"));
             }
             if (!result->ok) {
+                if (options.error_detail != nullptr) {
+                    *options.error_detail = result->detail;
+                }
                 return std::unexpected(Error{result->code, result->message});
             }
             return std::move(const_cast<OpResult*>(result)->payload);
@@ -459,16 +465,31 @@ Result<void> Client::cancel(std::uint32_t query_id) {
 
 Result<std::vector<std::byte>> Client::call(std::string_view operation_id,
                                             std::span<const std::byte> args) {
+    return call(operation_id, args, CallOptions{});
+}
+
+Result<std::vector<std::byte>> Client::call(std::string_view operation_id, std::span<const std::byte> args,
+                                            const CallOptions& options) {
     if (!conn_) {
         return std::unexpected(Error{ErrorCode::connection_closed, "client socket is closed"});
     }
+    if (options.error_detail != nullptr) {
+        options.error_detail->clear();
+    }
+    // Um servidor de minor < 3 recusaria os bytes a mais: melhor um erro claro.
+    if ((!options.acting_as.empty() || !options.idempotency_key.empty()) && hello_ok_.minor < 3) {
+        return std::unexpected(Error{ErrorCode::invalid_argument,
+                                     "the server does not support protocol minor 3 (delegation, idempotency keys)"});
+    }
     const auto call_id = next_query_id_++;
     if (shm_) {
-        return call_over_shm(call_id, operation_id, args);
+        return call_over_shm(call_id, operation_id, args, options);
     }
     OpCall message{.call_id = call_id,
                    .operation_id = std::string{operation_id},
-                   .args = {args.begin(), args.end()}};
+                   .args = {args.begin(), args.end()},
+                   .acting_as = options.acting_as,
+                   .idempotency_key = options.idempotency_key};
     if (auto status = conn_->send(message); !status) {
         return std::unexpected(status.error());
     }
@@ -484,6 +505,9 @@ Result<std::vector<std::byte>> Client::call(std::string_view operation_id,
         return std::unexpected(make_protocol("OpResult call_id mismatch"));
     }
     if (!result->ok) {
+        if (options.error_detail != nullptr) {
+            *options.error_detail = result->detail;
+        }
         return std::unexpected(Error{result->code, result->message});
     }
     return result->payload;

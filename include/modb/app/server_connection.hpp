@@ -65,6 +65,11 @@ public:
 
     [[nodiscard]] Result<std::vector<std::byte>> call(std::string_view operation_id,
                                                       std::span<const std::byte> args);
+    // Minor 3 (ADR-029): em nome de quem, chave de idempotência, detail do erro.
+    [[nodiscard]] Result<std::vector<std::byte>> call(std::string_view operation_id, std::span<const std::byte> args,
+                                                      const net::CallOptions& options) {
+        return client_.call(operation_id, args, options);
+    }
     // ADR-026: chamadas pelo anel de memória compartilhada (mesma máquina).
     [[nodiscard]] Result<void> attach_shared_memory(std::uint32_t ring_bytes = 0) {
         return client_.attach_shared_memory(ring_bytes);

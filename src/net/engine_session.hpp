@@ -81,6 +81,10 @@ struct EngineServices {
     const std::atomic<bool>* server_stop{nullptr};
     // Quem é o cliente da sessão (dado pelo proxy no SessionOpen); anônimo no modo direto.
     ops::Caller caller{};
+    // Minor negociado com o cliente: com ≥ 3 o OpResult de erro leva o detail.
+    std::uint16_t client_minor{protocol_minor};
+    // Só atrás de um proxy, que autorizou (ADR-029); no modo direto não há quem autorize.
+    bool delegation_allowed{false};
 };
 
 // Executa um OpCall no engine e monta a resposta.

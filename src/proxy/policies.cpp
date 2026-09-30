@@ -238,6 +238,9 @@ std::string AuditLogPolicy::format(const AuditRecord& record) {
     }
     const bool anonymous = record.caller == nullptr || record.caller->anonymous();
     line += " by " + (anonymous ? std::string{"-"} : record.caller->principal);
+    if (!anonymous && record.caller->delegated()) {
+        line += " as " + record.caller->acting_as;
+    }
     line += " from " + (record.client.empty() ? std::string{"-"} : std::string{record.client});
     return line;
 }
@@ -251,10 +254,15 @@ void AuditLogPolicy::audit(const AuditRecord& record) {
 // --- RateLimitPolicy ----------------------------------------------------------
 
 RateLimitPolicy::RateLimitPolicy(std::uint32_t calls_per_second, std::uint32_t streams_per_principal,
-                                 std::function<Clock::time_point()> now)
-    : calls_per_second_{calls_per_second}, streams_per_principal_{streams_per_principal}, now_{std::move(now)} {}
+                                 std::function<Clock::time_point()> now, std::uint32_t delegated_calls_per_second)
+    : calls_per_second_{calls_per_second}, delegated_calls_per_second_{delegated_calls_per_second},
+      streams_per_principal_{streams_per_principal}, now_{std::move(now)} {}
 
 std::string RateLimitPolicy::key_of(const ops::Caller& caller) {
+    if (caller.delegated()) {
+        // Cada delegado tem o seu balde, dentro do principal que fala por ele.
+        return "user:" + caller.principal + " as " + caller.acting_as;
+    }
     if (!caller.anonymous()) {
         return "user:" + caller.principal;
     }
@@ -271,19 +279,17 @@ Decision RateLimitPolicy::authorize(const ops::Caller& caller, net::Message& req
     }
     const std::scoped_lock lock{mu_};
     auto& account = accounts_[key_of(caller)];
-    if (call && calls_per_second_ > 0) {
+    if (call && (calls_per_second_ > 0 || (caller.delegated() && delegated_calls_per_second_ > 0))) {
         const auto now = now_();
-        if (account.refilled == Clock::time_point{}) {
-            account.tokens = calls_per_second_;
-        } else {
-            const double elapsed = std::chrono::duration<double>(now - account.refilled).count();
-            account.tokens = std::min<double>(calls_per_second_, account.tokens + elapsed * calls_per_second_);
-        }
-        account.refilled = now;
-        if (account.tokens < 1.0) {
+        if (calls_per_second_ > 0 && !take(account, calls_per_second_, now)) {
             return Decision::deny("rate limit: more than " + std::to_string(calls_per_second_) + " calls per second");
         }
-        account.tokens -= 1.0;
+        // A soma dos delegados de um principal.
+        if (caller.delegated() && delegated_calls_per_second_ > 0 &&
+            !take(accounts_["delegates:" + caller.principal], delegated_calls_per_second_, now)) {
+            return Decision::deny("rate limit: more than " + std::to_string(delegated_calls_per_second_) +
+                                  " delegated calls per second for " + caller.principal);
+        }
     }
     if (query && streams_per_principal_ > 0) {
         if (account.streams >= streams_per_principal_) {
@@ -292,6 +298,21 @@ Decision RateLimitPolicy::authorize(const ops::Caller& caller, net::Message& req
         ++account.streams;
     }
     return Decision::allow();
+}
+
+bool RateLimitPolicy::take(Account& account, std::uint32_t per_second, Clock::time_point now) {
+    if (account.refilled == Clock::time_point{}) {
+        account.tokens = per_second;
+    } else {
+        const double elapsed = std::chrono::duration<double>(now - account.refilled).count();
+        account.tokens = std::min<double>(per_second, account.tokens + elapsed * per_second);
+    }
+    account.refilled = now;
+    if (account.tokens < 1.0) {
+        return false;
+    }
+    account.tokens -= 1.0;
+    return true;
 }
 
 void RateLimitPolicy::audit(const AuditRecord& record) {
