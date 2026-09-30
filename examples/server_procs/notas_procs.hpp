@@ -12,6 +12,9 @@
 //   notas.excecao   (escrita)  {texto}            -> cria e lança exceção: prova o rollback
 //
 // Argumentos e resultados são ops::Value (binário no fio; JSON no `modb call`).
+//
+// Configuração (ModuleBuilder::setting): `notas.max_texto = N` no `.conf`, ou
+// `--notas.max-texto N`; o tamanho máximo do texto em bytes (padrão 1000).
 
 #include "modb/server/module.hpp"
 

@@ -31,6 +31,17 @@
 
 namespace modb::server {
 
+// Uma configuração da aplicação declarada por um módulo (ModuleBuilder::setting).
+// No `.conf` é `<módulo>.<nome> = valor`; na linha de comando,
+// `--<módulo>.<nome> valor` (com '-' ou '_'). O valor é validado na subida.
+struct ModuleSetting {
+    std::string name{};
+    std::string default_value{};
+    std::string description{};
+    // Recusa um valor inválido; vazio = qualquer texto serve.
+    std::function<Result<void>(std::string_view)> validate{};
+};
+
 // Um módulo de aplicação compilado junto com o servidor.
 struct Module {
     // Identifica o módulo no manifesto e nos logs ("biblioteca").
@@ -45,6 +56,10 @@ struct Module {
     std::vector<ops::ExportedMethod> methods{};
     // Descrição de cada proc (id -> texto), para a ajuda e a descoberta.
     std::map<std::string, std::string> descriptions{};
+    // Configurações declaradas e onde entregar os valores (nome -> valor, já
+    // validados), antes de servir.
+    std::vector<ModuleSetting> settings{};
+    std::function<void(std::map<std::string, std::string>)> configure{};
 };
 
 struct Options {
@@ -69,12 +84,17 @@ struct Options {
     // Log de chamadas e mensagens das procs: vazio = stderr, "off" = nenhum,
     // senão um arquivo (acrescenta ao fim) (S5.2).
     std::string log{};
+    // Configurações dos módulos, "<módulo>.<nome>" -> valor; conferidas contra
+    // o que cada módulo declara em `start`.
+    std::map<std::string, std::string> module_settings{};
 };
 
 // Uma configuração `chave = valor` (as mesmas chaves das flags, com '_' no
 // lugar de '-': db, host, port, local, tcp, secret_file, link_workers,
-// max_streams, idle_timeout_ms, proc_timeout_ms, log). Caminhos relativos em `db` e `log` são relativos a `base`
-// (a pasta do arquivo de configuração).
+// max_streams, idle_timeout_ms, proc_timeout_ms, log), ou `<módulo>.<nome>` para
+// uma configuração de módulo (conferida só em `start`, que conhece os módulos).
+// Caminhos relativos em `db` e `log` são relativos a `base` (a pasta do arquivo
+// de configuração).
 [[nodiscard]] Result<void> apply_setting(Options& options, std::string_view key, std::string_view value,
                                          const std::filesystem::path& base = {});
 // Lê um arquivo de configuração: linhas `chave = valor`, `#` comenta (S5.1).
@@ -85,9 +105,15 @@ struct Options {
 [[nodiscard]] Result<Options> parse_options(std::span<char* const> args, bool& help);
 [[nodiscard]] std::string usage(std::string_view program, std::span<const Module> modules);
 
-// Abre (ou cria) o banco, prepara e carrega os módulos (mais o módulo de
-// sistema "sys", com `sys.procs`: a lista das procs, S6) e devolve o servidor
-// escutando, pronto para `serve_forever`.
+// Os valores das configurações de cada módulo (na ordem de `modules`): o padrão
+// declarado, ou o de `options`, validado. Uma chave de módulo desconhecida ou um
+// valor recusado é erro.
+[[nodiscard]] Result<std::vector<std::map<std::string, std::string>>> resolve_module_settings(
+    const Options& options, std::span<const Module> modules);
+
+// Confere as configurações dos módulos, abre (ou cria) o banco, prepara e
+// carrega os módulos (mais o módulo de sistema "sys", com `sys.procs` e
+// `sys.settings`, S6) e devolve o servidor escutando, pronto para `serve_forever`.
 [[nodiscard]] Result<net::Server> start(const Options& options, std::span<const Module> modules);
 
 // `main` completo: argumentos, start, SIGINT/SIGTERM → parada limpa,

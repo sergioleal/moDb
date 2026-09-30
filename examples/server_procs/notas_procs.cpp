@@ -1,5 +1,6 @@
 #include "notas_procs.hpp"
 
+#include <charconv>
 #include <chrono>
 #include <stdexcept>
 #include <thread>
@@ -26,7 +27,18 @@ modb::object::BindingBuilder<Nota> nota_binding() {
 
 Value nota_json(ObjectId id, const Nota& n) { return Value::object({{"id", id}, {"texto", n.texto}}); }
 
-// Texto obrigatório, não vazio e único (pelo índice). `proprio` é a nota sendo editada.
+// Configuração `notas.max_texto`: um inteiro de 1 a 1000000 (bytes).
+Result<std::size_t> parse_max_texto(std::string_view text) {
+    std::size_t value = 0;
+    const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (text.empty() || ec != std::errc{} || end != text.data() + text.size() || value < 1 || value > 1000000) {
+        return std::unexpected(invalid("use um inteiro de 1 a 1000000"));
+    }
+    return value;
+}
+
+// Texto obrigatório, não vazio, até `notas.max_texto` bytes e único (pelo
+// índice). `proprio` é a nota sendo editada.
 Result<std::string> texto_valido(Context& c, const Args& a, ObjectId proprio = {}) {
     auto texto = a.text("texto");
     if (!texto) {
@@ -34,6 +46,10 @@ Result<std::string> texto_valido(Context& c, const Args& a, ObjectId proprio = {
     }
     if (texto->empty()) {
         return std::unexpected(invalid("a nota não pode ser vazia"));
+    }
+    // Validado na subida: aqui só converte.
+    if (const auto max = *parse_max_texto(c.setting("max_texto")); texto->size() > max) {
+        return std::unexpected(invalid("a nota passa de " + std::to_string(max) + " bytes"));
     }
     auto iguais = c.find<Nota>(k_texto, modb::object::AttributeValue{*texto});
     if (!iguais) {
@@ -62,6 +78,13 @@ modb::server::Module modb_module_notas_procs() {
     return modb::server::ModuleBuilder{"notas"}
         .type(nota_binding())
         .index<Nota>(k_texto)
+        .setting("max_texto", "1000", "Tamanho máximo do texto de uma nota, em bytes (1 a 1000000)",
+                 [](std::string_view v) -> Result<void> {
+                     if (auto n = parse_max_texto(v); !n) {
+                         return std::unexpected(n.error());
+                     }
+                     return {};
+                 })
         .proc("notas.criar", Mode::read_write, "Cria uma nota; o texto é único",
               [](Context& c, const Args& a) -> Result<Value> {
                   auto texto = texto_valido(c, a);

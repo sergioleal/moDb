@@ -249,6 +249,87 @@ int main() {
         std::filesystem::remove_all(pasta, ignored);
     }
 
+    // --- R2: configurações declaradas pelos módulos ---
+    {
+        bool help = false;
+        const char* flag[] = {"srv", "--db", "x.modb", "--notas.max-texto", "5"};
+        auto lido = server::parse_options(std::span<char* const>{const_cast<char**>(flag), 5}, help);
+        suite.check(lido && lido->module_settings.at("notas.max_texto") == "5",
+                    "--<módulo>.<nome> lê uma configuração de módulo ('-' vira '_')");
+        suite.check(server::usage("srv", modulos).find("setting notas.max_texto (default '1000')") != std::string::npos,
+                    "a ajuda lista as configurações do módulo com o padrão");
+
+        const auto padrao = server::resolve_module_settings(server::Options{}, modulos);
+        suite.check(padrao && (*padrao)[0].at("max_texto") == "1000", "sem valor, vale o padrão declarado");
+        server::Options opcoes;
+        opcoes.module_settings["notas.max_texto"] = "0";
+        auto invalida = server::resolve_module_settings(opcoes, modulos);
+        suite.check(!invalida && invalida.error().message.starts_with("invalid notas.max_texto: "),
+                    "valor recusado pelo validador é erro na subida");
+        opcoes.module_settings = {{"notas.cor", "azul"}};
+        auto desconhecida = server::resolve_module_settings(opcoes, modulos);
+        suite.check(!desconhecida && desconhecida.error().message == "unknown setting: notas.cor",
+                    "configuração não declarada é recusada");
+
+        const auto pasta = std::filesystem::temp_directory_path() /
+                           ("modb-server-host-set-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(pasta);
+        const auto cfg = pasta / "notas.conf";
+        {
+            std::ofstream out{cfg};
+            out << "db = notas.modb\nnotas.max_texto = 7\n";
+        }
+        const std::string cfg_str = cfg.string();
+        const char* arquivo[] = {"srv", "--config", cfg_str.c_str()};
+        auto do_arquivo = server::parse_options(std::span<char* const>{const_cast<char**>(arquivo), 3}, help);
+        suite.check(do_arquivo && do_arquivo->module_settings.at("notas.max_texto") == "7",
+                    "o .conf aceita <módulo>.<nome> = valor");
+        const char* arquivo_e_flag[] = {"srv", "--config", cfg_str.c_str(), "--notas.max_texto", "9"};
+        auto sobreposto = server::parse_options(std::span<char* const>{const_cast<char**>(arquivo_e_flag), 5}, help);
+        suite.check(sobreposto && sobreposto->module_settings.at("notas.max_texto") == "9",
+                    "a flag vale mais que o .conf também nas configurações de módulo");
+
+        const auto nunca_aberto = pasta / "nunca.modb";
+        server::Options ruim{.database = nunca_aberto, .host = "127.0.0.1", .port = 0};
+        ruim.module_settings["notas.max_texto"] = "muitos";
+        suite.check(!server::start(ruim, modulos) && !std::filesystem::exists(nunca_aberto),
+                    "start recusa a configuração antes de abrir o banco");
+
+        const auto db = temp_db("settings");
+        server::Options curto{.database = db, .host = "127.0.0.1", .port = 0};
+        curto.module_settings["notas.max_texto"] = "5";
+        auto srv = server::start(curto, modulos);
+        suite.check(srv.has_value(), "start com configuração de módulo");
+        if (srv) {
+            std::thread laco{[&] { (void)srv->serve_forever(); }};
+            if (auto conn = conectar(srv->port(), db); !conn) {
+                suite.check(false, "cliente conecta");
+            } else {
+                auto longa = chamar(*conn, "notas.criar", ops::Value::object({{"texto", "abcdef"}}));
+                suite.check(!longa && longa.error().code == ErrorCode::invalid_argument &&
+                                longa.error().message.find("passa de 5 bytes") != std::string::npos,
+                            "a proc lê o valor configurado (c.setting)");
+                suite.check(chamar(*conn, "notas.criar", ops::Value::object({{"texto", "abc"}})).has_value(),
+                            "dentro do limite configurado, cria");
+                auto lista = chamar(*conn, "sys.settings", ops::Value::object({}));
+                bool achou = false;
+                if (lista && lista->list()) {
+                    for (const auto& s : *lista->list()) {
+                        achou = achou || (*s.field("module")->text() == "notas" && *s.field("name")->text() == "max_texto" &&
+                                          *s.field("default")->text() == "1000" && !s.field("value"));
+                    }
+                }
+                suite.check(achou, "sys.settings lista módulo, nome e padrão, sem o valor em uso");
+            }
+            srv->request_stop();
+            laco.join();
+        }
+        apagar(db);
+        std::error_code ignored;
+        std::filesystem::remove_all(pasta, ignored);
+    }
+
     // --- no mesmo processo: start() + cliente real ---
     {
         const auto db = temp_db("inproc");

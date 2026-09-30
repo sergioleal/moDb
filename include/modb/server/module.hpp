@@ -33,8 +33,11 @@
 
 #include <chrono>
 #include <functional>
+#include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -66,7 +69,21 @@ struct member_of<F C::*> {
 // chamadas (C11) e mesmo assim cada uma vê um estado só.
 class Context {
 public:
-    explicit Context(ops::ExecutionContext& context) noexcept : context_{&context} {}
+    explicit Context(ops::ExecutionContext& context,
+                     const std::map<std::string, std::string>* settings = nullptr) noexcept
+        : context_{&context}, settings_{settings} {}
+
+    // Valor de uma configuração declarada pelo módulo (ModuleBuilder::setting),
+    // já validado na subida. Um nome não declarado é defeito da proc: lança, e a
+    // chamada falha com `internal_error`, com a transação desfeita.
+    [[nodiscard]] const std::string& setting(std::string_view name) const {
+        if (settings_ != nullptr) {
+            if (const auto found = settings_->find(std::string{name}); found != settings_->end()) {
+                return found->second;
+            }
+        }
+        throw std::out_of_range{"setting not declared by the module: " + std::string{name}};
+    }
 
     [[nodiscard]] bool writable() const noexcept { return context_->writable(); }
     [[nodiscard]] object::Database& database() noexcept { return context_->objects().database(); }
@@ -230,6 +247,7 @@ private:
     }
 
     ops::ExecutionContext* context_;
+    const std::map<std::string, std::string>* settings_;
 };
 
 using ProcFn = std::function<Result<ops::Value>(Context&, const ops::Args&)>;
@@ -260,6 +278,11 @@ public:
         return *this;
     }
     ModuleBuilder& proc(std::string name, Mode mode, std::string description, ProcFn fn);
+    // Configuração da aplicação: `<módulo>.<nome> = valor` no `.conf` ou
+    // `--<módulo>.<nome> valor`; a proc lê com `c.setting(nome)`. `validate`
+    // recusa um valor inválido, e o servidor não sobe.
+    ModuleBuilder& setting(std::string name, std::string default_value, std::string description,
+                           std::function<Result<void>(std::string_view)> validate = {});
 
     [[nodiscard]] Module build() const;
 
@@ -274,6 +297,7 @@ private:
     std::uint32_t version_;
     std::vector<std::function<Result<void>(object::Database&)>> preparers_;
     std::vector<Proc> procs_;
+    std::vector<ModuleSetting> settings_;
 };
 
 } // namespace modb::server

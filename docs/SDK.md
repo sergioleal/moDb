@@ -75,6 +75,12 @@ alvo da biblioteca, com `-` e `.` trocados por `_`. Como escrever as procs:
 [`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/include/modb/server/module.hpp)
 e o exemplo [`examples/server_procs/notas_procs.cpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/notas_procs.cpp).
 
+Configuração da aplicação (prefixos, códigos, limites) não vai em variável de
+ambiente: o módulo declara com `.setting(nome, padrão, descrição, validador)`, o
+servidor lê `<módulo>.<nome>` do `.conf` ou de `--<módulo>.<nome>`, valida na
+subida, e a proc lê com `c.setting(nome)`
+([`OPERACAO.md`](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/OPERACAO.md), "Configurações dos módulos").
+
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_PREFIX_PATH=/opt/modb-sdk-0.1.1-linux-x86_64

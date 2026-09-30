@@ -126,6 +126,29 @@ pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`]
 | `proc_timeout_ms` / `--proc-timeout-ms` | `0` (sem limite) | chamada que passar disso falha com `operation_timeout` e é desfeita |
 | `log` / `--log` | stderr | log de chamadas: arquivo (acrescenta), vazio = stderr, `off` = nenhum |
 
+### Configurações dos módulos
+
+Um módulo declara as configurações da aplicação que usa
+(`ModuleBuilder::setting(nome, padrão, descrição, validador)`), e elas entram no
+mesmo arquivo e nas mesmas flags, com o id do módulo na frente:
+
+```ini
+# notas-server.conf
+notas.max_texto = 500
+```
+
+```bash
+notas-server --db notas.modb --notas.max-texto 500   # '-' ou '_' no nome
+```
+
+- A proc lê o valor com `c.setting("max_texto")` (texto; o módulo converte).
+- O valor é validado na subida, antes de abrir o banco: um valor recusado ou uma
+  chave `<módulo>.<nome>` que o módulo não declarou impede o servidor de subir.
+- `--help` lista as configurações de cada módulo com o padrão; a proc
+  `sys.settings` devolve módulo, nome, padrão e descrição, mas **não** o valor
+  em uso. Mesmo assim, não use configuração de módulo para segredo: ela fica
+  no `.conf` e na linha de comando.
+
 O tempo limite é cooperativo: o `Context` confere o prazo a cada acesso ao banco
 (`read`, consultas, `find`, `create`, `update`, `set`, `remove`) e, ao fim, o
 `OperationRegistry` desfaz a transação de qualquer chamada que tenha passado do

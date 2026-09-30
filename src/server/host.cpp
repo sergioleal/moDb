@@ -78,6 +78,8 @@ std::string call_line(const ops::OperationRegistry::CallRecord& call) {
 }
 
 constexpr std::string_view k_sys_procs_description = "As procs deste servidor: nome, modo, módulo e descrição";
+constexpr std::string_view k_sys_settings_description =
+    "As configurações dos módulos: módulo, nome, padrão e descrição (sem o valor em uso)";
 
 // Módulo de sistema: descoberta das procs do servidor (S6.1).
 Module system_module(std::span<const Module> modules) {
@@ -98,10 +100,27 @@ Module system_module(std::span<const Module> modules) {
         }
     }
     add("sys", "sys.procs", ops::OperationMode::read_only, k_sys_procs_description);
+    add("sys", "sys.settings", ops::OperationMode::read_only, k_sys_settings_description);
     auto list = std::make_shared<const ops::Value>(std::move(procs));
+    // Só nome, padrão e descrição: o valor em uso fica no servidor, que pode
+    // ter configuração que não é de todos os clientes.
+    ops::ValueList settings;
+    for (const auto& m : modules) {
+        for (const auto& s : m.settings) {
+            settings.push_back(ops::Value::object({
+                {"module", m.id},
+                {"name", s.name},
+                {"default", s.default_value},
+                {"description", s.description},
+            }));
+        }
+    }
+    auto setting_list = std::make_shared<const ops::Value>(std::move(settings));
     return ModuleBuilder{"sys"}
         .proc("sys.procs", Mode::read_only, std::string{k_sys_procs_description},
               [list](Context&, const ops::Args&) -> Result<ops::Value> { return *list; })
+        .proc("sys.settings", Mode::read_only, std::string{k_sys_settings_description},
+              [setting_list](Context&, const ops::Args&) -> Result<ops::Value> { return *setting_list; })
         .build();
 }
 
@@ -175,10 +194,40 @@ Result<void> apply_setting(Options& options, std::string_view key, std::string_v
         return set_number(options.proc_timeout_ms);
     } else if (key == "log") {
         options.log = value.empty() || value == "off" ? std::string{value} : resolve(base, value).string();
+    } else if (key.find('.') != std::string_view::npos) {
+        // Configuração de módulo: conferida em `start`, que conhece os módulos.
+        options.module_settings[std::string{key}] = std::string{value};
     } else {
         return std::unexpected(invalid("unknown setting: " + std::string{key}));
     }
     return {};
+}
+
+Result<std::vector<std::map<std::string, std::string>>> resolve_module_settings(const Options& options,
+                                                                                std::span<const Module> modules) {
+    std::vector<std::map<std::string, std::string>> resolved;
+    std::map<std::string, const ModuleSetting*> declared;
+    for (const auto& m : modules) {
+        auto& values = resolved.emplace_back();
+        for (const auto& s : m.settings) {
+            const auto key = m.id + "." + s.name;
+            declared.emplace(key, &s);
+            const auto given = options.module_settings.find(key);
+            const std::string& value = given != options.module_settings.end() ? given->second : s.default_value;
+            if (s.validate) {
+                if (auto ok = s.validate(value); !ok) {
+                    return std::unexpected(invalid("invalid " + key + ": " + ok.error().message));
+                }
+            }
+            values.emplace(s.name, value);
+        }
+    }
+    for (const auto& [key, value] : options.module_settings) {
+        if (!declared.contains(key)) {
+            return std::unexpected(invalid("unknown setting: " + key));
+        }
+    }
+    return resolved;
 }
 
 Result<void> load_config(const std::filesystem::path& file, Options& options) {
@@ -263,6 +312,7 @@ std::string usage(std::string_view program, std::span<const Module> modules) {
                        "  --idle-timeout-ms N    close idle connections after N ms\n"
                        "  --proc-timeout-ms N    fail (and roll back) a proc call after N ms; 0 = no limit\n"
                        "  --log FILE|off         call log (default stderr)\n"
+                       "  --MODULE.SETTING V     a module setting (listed below; '-' or '_' in the name)\n"
                        "modules:";
     for (const auto& m : modules) {
         text += "\n  " + m.id + " v" + std::to_string(m.version);
@@ -272,11 +322,29 @@ std::string usage(std::string_view program, std::span<const Module> modules) {
                 text += "  " + d->second;
             }
         }
+        for (const auto& s : m.settings) {
+            text += "\n    setting " + m.id + "." + s.name + " (default '" + s.default_value + "')";
+            if (!s.description.empty()) {
+                text += "  " + s.description;
+            }
+        }
     }
-    return text + "\n  sys\n    sys.procs (read)  " + std::string{k_sys_procs_description} + '\n';
+    return text + "\n  sys\n    sys.procs (read)  " + std::string{k_sys_procs_description} +
+           "\n    sys.settings (read)  " + std::string{k_sys_settings_description} + '\n';
 }
 
 Result<net::Server> start(const Options& options, std::span<const Module> modules) {
+    // Antes de abrir o banco: um erro de configuração aparece na subida, e não
+    // na primeira chamada que a usa.
+    auto settings = resolve_module_settings(options, modules);
+    if (!settings) {
+        return std::unexpected(settings.error());
+    }
+    for (std::size_t i = 0; i < modules.size(); ++i) {
+        if (modules[i].configure) {
+            modules[i].configure(std::move((*settings)[i]));
+        }
+    }
     auto log = LineLog::open(options.log);
     if (!log) {
         return std::unexpected(log.error());
