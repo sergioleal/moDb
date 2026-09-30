@@ -68,6 +68,7 @@ pontual.
 | Formato de arquivo em disco | [FORMATO_DE_ARQUIVO.md](FORMATO_DE_ARQUIVO.md) | ✅ |
 | Compatibilidade major/minor | [COMPATIBILIDADE.md](COMPATIBILIDADE.md) | ✅ |
 | API pública C++ instalável | [API_PUBLICA.md](API_PUBLICA.md) | ✅ |
+| SDK binário (Linux x86_64, releases por tag) | [SDK.md](SDK.md) | ✅ |
 | Operação de arquivo (backup/restore) | [OPERACAO.md](OPERACAO.md) | ✅ |
 | Modelo de falhas de módulos | [OPERACAO_MODULOS.md](OPERACAO_MODULOS.md) | ✅ |
 | Metodologia de benchmarks | [PLANO_BENCHMARKS.md](PLANO_BENCHMARKS.md) | ✅ |

@@ -404,6 +404,10 @@ add_executable(modb_proxy_cli apps/modb_proxy/main.cpp)
 target_link_libraries(modb_proxy_cli PRIVATE modb::proxy)
 set_target_properties(modb_proxy_cli PROPERTIES OUTPUT_NAME modb-proxy)
 
+# Os executáveis entram no pacote instalado (SDK), fora do export: quem usa o
+# SDK roda o CLI e o proxy prontos e compila só o próprio módulo de procs.
+install(TARGETS modb_cli modb_proxy_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 option(MODB_BUILD_EXAMPLES "Build Ring0 example applications" ON)
 if(MODB_BUILD_EXAMPLES)
     function(modb_add_server_example target source)
