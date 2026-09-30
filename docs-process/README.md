@@ -58,6 +58,10 @@ serem atemporais, não histórico puro.
   selecionadas no follower; com o WAL fisico atual, o MVP colunar assume row
   sombra + projecao colunar ate haver WAL logico ou spike que elimine esse
   custo.
+- **[PLANO_PROPOSTAS_REGISTRY.md](PLANO_PROPOSTAS_REGISTRY.md)** — as propostas
+  que vieram do backend do registry (identidade delegada, erros estruturados,
+  `ErrorCode` estável, índices, tipos de campo, configuração de módulos,
+  parada no Windows, cliente Node), em tarefas R1–R17 por release.
 
 ## 2. Relatórios de fechamento e medição
 

@@ -1,0 +1,244 @@
+# Plano — propostas do backend do registry
+
+Criado em 2026-09-30. Origem: `PROPOSTAS_RING0.md`, escrito durante a
+construção do backend do registry sobre o Ring0 (base: moDb `568d959`, mesmo
+protocolo da `v0.1.1`). As nove propostas foram conferidas no código. O
+diagnóstico de todas se confirmou; as mudanças de forma estão anotadas em cada
+tarefa.
+
+| # | Proposta | Tarefas |
+|---|---|---|
+| 1 | Identidade do usuário final | R9 |
+| 2 | Erros estruturados | R10 |
+| 3 | Tabela estável de `ErrorCode` | R1 |
+| 4 | Índices: unicidade, prefixo, multivalorado, texto | R4, R13, R16, R17 |
+| 5 | Tipos de campo: instante, opcional, lista, `Value` | R14, R15, R16 |
+| 6 | Configuração dos módulos pelo `.conf` | R2 |
+| 7 | Parada limpa no Windows e socket local | R3 |
+| 8 | Cliente Node de referência | R6 |
+| 9 | Validar conexão ociosa | R11 |
+
+## Regras
+
+- Cada tarefa deixa todos os testes passando (preset `debug` no Windows e
+  build Linux no WSL). As que mexem em threads do engine ou do proxy rodam
+  também no TSan (preset `tsan`, WSL).
+- Cada etapa termina numa release por tag. O workflow `release-sdk` gera,
+  testa e publica o SDK; `project(VERSION)` sobe junto com a tag.
+- **P0 e P1 não mudam o protocolo nem o formato do arquivo.** O registry só
+  precisa mudar quando for adotar o que é novo.
+- **P2 é um minor novo do protocolo (3), num lançamento só.** Clientes de minor
+  2 continuam funcionando sem mudança (ADR-015).
+- **P3 muda o formato do arquivo.** Cada mudança tem ADR própria, uma entrada
+  no `FORMATO_DE_ARQUIVO.md` e um teste de abertura de um arquivo da versão
+  anterior.
+- Medições de desempenho só na máquina dedicada (droplet).
+
+## Tarefas
+
+### P0 — sem mudar o protocolo *(release `v0.1.2`)*
+
+#### R1 — `ErrorCode` estável *(pequeno)*
+
+- [ ] 1.1 Valores explícitos em todo o enum de `include/modb/error.hpp`, iguais
+  aos de hoje (`invalid_identifier = 0`, `invalid_argument = 1`, …,
+  `permission_denied = 74`).
+- [ ] 1.2 Teste que fixa cada valor numa tabela (`tests/error_code_test.cpp`) e
+  falha se algum mudar ou se aparecer um código sem entrada na tabela.
+- [ ] 1.3 Regra no `docs/COMPATIBILIDADE.md`: código novo entra no fim, e
+  nenhum número é reusado nem renumerado.
+- [ ] 1.4 Tabela completa em `docs/PROTOCOLO_CLIENTES.md` §3, com a coluna "o
+  que o cliente faz": repetir (só leitura), reconectar, mostrar ao usuário ou
+  tratar como defeito.
+- [ ] 1.5 Constantes do cliente Python geradas ou conferidas contra a tabela
+  (um teste compara as duas).
+
+#### R2 — Configurações declaradas pelos módulos *(pequeno)*
+
+- [ ] 2.1 `ModuleBuilder::setting(nome, padrão, descrição, validador?)`.
+- [ ] 2.2 `server_host`: aceita `<módulo>.<nome> = valor` no `.conf` e
+  `--<módulo>.<nome> valor` na linha de comando. Chave desconhecida ou valor
+  inválido falha na subida, com a mesma mensagem de hoje para chaves do engine.
+- [ ] 2.3 Na proc, `c.setting("nome")` devolve o texto já validado.
+- [ ] 2.4 `--help` e `sys.procs` (ou um `sys.settings`) listam nomes, padrões e
+  descrições.
+- [ ] 2.5 Teste no `server_host_test`: padrão, valor pelo `.conf`, valor pela
+  linha de comando (que vence o `.conf`), valor inválido derruba a subida.
+- [ ] 2.6 `notas` ganha uma configuração de exemplo; `OPERACAO.md` e
+  `SDK.md` documentam.
+
+#### R3 — Parada limpa sem sinal e Windows no `OPERACAO.md` *(pequeno)*
+
+- [ ] 3.1 `--stop-on-stdin-eof` no `server_host` e no `modb-proxy`: quando a
+  entrada padrão fecha, chama `request_stop` (mesma parada do `SIGTERM`, com
+  checkpoint).
+- [ ] 3.2 Teste nas duas plataformas: o supervisor fecha o pipe, o processo sai
+  com 0 e o arquivo abre sem recuperação.
+- [ ] 3.3 `OPERACAO.md`, subseção "Windows": o que para limpo (NSSM, Ctrl+C no
+  console, `--stop-on-stdin-eof`), o que não para (`TerminateProcess`,
+  `child.kill` do Node) e a restrição do socket local sob `%LOCALAPPDATA%`
+  (inclui o `%TEMP%` padrão). O que hoje está só na ADR-028 passa para lá.
+
+#### R4 — Faixa e prefixo nas procs *(pequeno)*
+
+- [ ] 4.1 `Context::range<T>(campo, lo, hi)` e `Context::prefix<T>(campo,
+  texto)`, pelo índice e no snapshot da chamada (como o `find`). O prefixo é
+  `between(texto, texto + "\xFF")`: o índice guarda texto em bytes crus, e
+  UTF-8 nunca tem o byte 0xFF.
+- [ ] 4.2 Teste: prefixo com acentos, prefixo vazio, campo sem índice (erro
+  claro, como o `find`).
+- [ ] 4.3 Fechar ou documentar o risco de `c.database().query<T>()`: numa proc
+  de leitura, ele lê fora do snapshot da chamada. Decidir entre esconder o
+  `database()` das procs ou avisar no `module.hpp` e na referência.
+- [ ] 4.4 `docs/reference/queries-indexes.md`: seção de procs com `find`,
+  `range` e `prefix`.
+
+#### R5 — Release `v0.1.2` *(pequeno)*
+
+- [ ] 5.1 `VERSION 0.1.2`, `SDK.md` (tabela de versões), links do
+  `pacote-dev-node` para `v0.1.2`.
+- [ ] 5.2 Tag `v0.1.2`; o workflow publica a release; conferir o download.
+
+### P1 — cliente Node *(depende da decisão D1)*
+
+#### R6 — `clients/node/` *(médio)*
+
+- [ ] 6.1 Trazer o cliente TypeScript para `clients/node/`: `Value` v1,
+  conexão com `Hello`, `Authenticate` e várias chamadas em voo, e pool.
+- [ ] 6.2 Teste no CTest, como o `modb.python_client`, contra o
+  `notas-server` atrás do `modb-proxy`: recusa sem token (73), erros de proc
+  (1, 30, 48, 70), queda do servidor no meio (leitura repetida, escrita não).
+- [ ] 6.3 Constantes de `ErrorCode` conferidas contra a tabela da R1.
+- [ ] 6.4 `PROTOCOLO_CLIENTES.md` e o pacote passam a citar o cliente Node.
+- [ ] 6.5 *(opcional)* Publicar no npm.
+
+### P2 — protocolo minor 3 *(release `v0.2.0`)*
+
+#### R7 — ADR-029 *(pequeno)*
+
+- [ ] 7.1 Decidir e registrar: delegação por chamada (R9), `detail` nos erros
+  (R10), validação de conexão ou idempotência (R11, decisão D3), e o formato
+  de cada campo novo no fio.
+- [ ] 7.2 Negociação: o servidor só manda os campos novos com minor ≥ 3; um
+  cliente de minor 2 continua lendo `code` e `message`.
+
+#### R8 — Minor 3 no codec *(médio)*
+
+- [ ] 8.1 `Hello`/`HelloOk` negociam minor 3 no engine, no link e no proxy.
+- [ ] 8.2 Testes de compatibilidade: cliente de minor 2 contra servidor de
+  minor 3, e o contrário (`compatibility_test`, `protocol_test`).
+
+#### R9 — Delegação: em nome de quem *(grande)*
+
+- [ ] 9.1 Campo `acting_as` + atributos em **`OpCall`, `Query` e nas mensagens
+  de facade**. Uma consulta em stream também é feita em nome de alguém; só no
+  `OpCall` ela voltaria a ser "do gateway".
+- [ ] 9.2 Proxy: só um principal com a role de delegar (nome na ADR-029) pode
+  preencher o campo. Os outros recebem `permission_denied` sem chegar ao
+  engine.
+- [ ] 9.3 Política: allowlist e rate limit veem o par (principal, delegado). O
+  limite por delegado **soma** a um teto por principal, para um gateway
+  comprometido não contornar o limite inventando usuários.
+- [ ] 9.4 Auditoria do proxy e log de chamadas do engine: `by <principal> as
+  <delegado>`.
+- [ ] 9.5 `Caller` ganha `acting_as`, `acting_attributes` e `subject()`.
+- [ ] 9.6 Testes: delegação permitida, recusada, auditada e com limite; proc
+  lendo `subject()`; TSan.
+
+#### R10 — Erros com `detail` *(médio)*
+
+- [ ] 10.1 `detail` (um `Value`) no `OpResult` de erro, só com minor ≥ 3.
+- [ ] 10.2 O `detail` fica **na camada das procs**, não no `modb::Error`. O
+  `Error` é o tipo base do motor, e pôr um `ops::Value` nele faria a camada
+  mais baixa depender de `ops`. Exemplo: `invalid(...).with_detail(...)` em
+  `module.hpp`, carregado pelo `OperationRegistry` até a resposta.
+- [ ] 10.3 Convenção documentada: `reason` (`[a-z_]+`, estável) e `field`
+  (caminho com `.`). O log de chamadas grava só o `reason`.
+- [ ] 10.4 Testes: proc com e sem `detail`, cliente de minor 2 recebendo só
+  `code` e `message`.
+
+#### R11 — Conexão ociosa *(médio; depende da decisão D3)*
+
+- [ ] 11.1 Opção A, `Ping`/`Pong`: o proxy responde sem ir ao engine. Estreita
+  a janela, mas não permite repetir uma escrita.
+- [ ] 11.2 Opção B, chave de idempotência por `OpCall`: o engine guarda o
+  resultado das últimas chamadas por chave e, numa repetição, devolve o
+  resultado confirmado em vez de executar de novo. Resolve a causa: o pool
+  passa a poder repetir escritas.
+- [ ] 11.3 Testes da opção escolhida, incluindo queda do servidor entre o
+  commit e a resposta.
+
+#### R12 — Clientes, documentação e release *(médio)*
+
+- [ ] 12.1 Clientes Python e Node com minor 3: `acting_as`, `detail` e a
+  opção da R11.
+- [ ] 12.2 `PROTOCOLO_CLIENTES.md`, `networking-protocol.md`, `OPERACAO.md`,
+  `SDK.md` e o pacote.
+- [ ] 12.3 `VERSION 0.2.0`, tag `v0.2.0`, conferir a release.
+
+### P3 — modelo de dados *(muda o formato do arquivo)*
+
+#### R13 — Índice único *(médio)*
+
+- [ ] 13.1 `ModuleBuilder::unique<T>(campo)`: `create` e `update` recusam um
+  segundo valor igual com `conflict` e, com a R10, `detail{reason:
+  "unique_violation", field}`.
+- [ ] 13.2 Decisão D4: valores vazios (`""`, ref 0) ficam fora da restrição,
+  como o `NULL` do SQL.
+- [ ] 13.3 A marca de unicidade no catálogo do índice; um banco antigo abre
+  como índice comum.
+- [ ] 13.4 Criar um índice único sobre dados que já têm duplicatas falha com a
+  lista das duplicatas.
+
+#### R14 — `Value` embutido *(pequeno; sem mudar o formato)*
+
+- [ ] 14.1 Utilitário de binding que grava um `ops::Value` codificado num
+  campo de bytes e devolve o `Value` na leitura. Resolve `tags`, `tools` e
+  `inputSchema` sem JSON em texto e sem parse.
+- [ ] 14.2 Teste de ida e volta e de limite de tamanho (`value_too_large`).
+
+#### R15 — Instante e opcional *(grande)*
+
+- [ ] 15.1 ADR: unidade do instante (proposta: µs UTC, int64) e como ele chega
+  ao cliente. Se for uma tag nova no `Value`, isso é protocolo (entra num
+  minor); se for inteiro com convenção documentada, não é.
+- [ ] 15.2 Tipo `timestamp` no catálogo, no codec e no índice;
+  `Context::now()`.
+- [ ] 15.3 `std::optional<T>` nos bindings, gravando ausência de verdade;
+  `null` no `Value`.
+- [ ] 15.4 Evolução de esquema: campo novo opcional num tipo já persistido.
+
+#### R16 — Lista embutida e índice multivalorado *(grande)*
+
+- [ ] 16.1 `std::vector<std::string>` e `std::vector<std::int64_t>` no próprio
+  objeto, com limite de elementos e de bytes.
+- [ ] 16.2 Índice multivalorado: uma entrada por elemento. Consulta "contém
+  todos" (o filtro por tag).
+- [ ] 16.3 Medição na máquina dedicada: busca por tag com índice contra a
+  varredura atual.
+
+#### R17 — Índice de texto *(fora por ora)*
+
+- [ ] 17.1 Só depois da R16, e se a aplicação precisar. Proposta: o motor
+  expõe o índice multivalorado, e tokenização e ranking ficam na aplicação.
+
+## Decisões pendentes
+
+| # | Pergunta | Bloqueia |
+|---|---|---|
+| D1 | O cliente TypeScript do registry pode ser trazido para o moDb, e sob que licença? O código está no `agentikalreg`, fora deste projeto. | R6 |
+| D2 | Nome da role que permite delegar e se a delegação vale também para facades. | R9 |
+| D3 | `Ping`/`Pong`, chave de idempotência, ou os dois? | R11 |
+| D4 | Valores vazios ficam fora do índice único? | R13 |
+| D5 | O instante é uma tag nova do `Value` (protocolo) ou um inteiro com convenção? | R15 |
+
+## Ordem
+
+R1 → R2 → R3 → R4 → R5 (P0; pode começar já). R6 quando D1 estiver resolvida.
+R7 → R8 → R9 → R10 → R11 → R12 (P2). R14 pode entrar a qualquer momento; R13,
+R15 e R16 depois da P2, porque o `detail` do `unique` depende da R10.
+
+## Registro
+
+| Data | Tarefa | Commit | Nota |
+|---|---|---|---|
