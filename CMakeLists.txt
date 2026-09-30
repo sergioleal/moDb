@@ -666,6 +666,17 @@ if(BUILD_TESTING)
     modb_add_test(modb_tests tests/version_test.cpp)
     modb_add_test(modb_ops_value_tests tests/ops_value_test.cpp)
     add_test(NAME modb.ops_value COMMAND modb_ops_value_tests)
+    # Números estáveis dos ErrorCode (docs/COMPATIBILIDADE.md): o C++ fixa os
+    # valores; o Python confere o header contra a documentação e o cliente Python.
+    modb_add_test(modb_error_code_value_tests tests/error_code_test.cpp)
+    add_test(NAME modb.error_code_values COMMAND modb_error_code_value_tests)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME modb.error_codes
+                 COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tests/error_codes_test.py"
+                         "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(modb.error_codes PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8")
+    endif()
     modb_add_test(modb_epoch_publication_tests tests/epoch_publication_test.cpp)
     add_test(NAME modb.epoch_publication COMMAND modb_epoch_publication_tests)
     modb_add_test(modb_rollback_readers_tests tests/rollback_readers_test.cpp)

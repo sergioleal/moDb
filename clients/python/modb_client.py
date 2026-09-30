@@ -46,6 +46,27 @@ class Id(int):
         return f"Id({int(self)})"
 
 
+# Códigos de erro (modb::ErrorCode) que um cliente de procs encontra; os números
+# são estáveis (docs/COMPATIBILIDADE.md) e o teste modb.error_codes os confere
+# contra o include/modb/error.hpp.
+ERROR_CODES = {
+    "invalid_argument": 1,
+    "value_too_large": 21,
+    "record_not_found": 30,
+    "snapshot_conflict": 44,
+    "protocol_error": 45,
+    "frame_too_large": 46,
+    "connection_closed": 47,
+    "operation_not_found": 48,
+    "incompatible_protocol_version": 50,
+    "conflict": 70,
+    "internal_error": 71,
+    "operation_timeout": 72,
+    "unauthenticated": 73,
+    "permission_denied": 74,
+}
+
+
 class ModbError(Exception):
     def __init__(self, code: int, message: str):
         super().__init__(f"{message} (code {code})")

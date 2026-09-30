@@ -12,6 +12,21 @@ Tag: `0.0.10e` · ADR: [ADR-015](decisions/ADR-015-compatibilidade.md)
 Helpers: `include/modb/compatibility.hpp` (`from_wire_u16`, `ensure_readable`,
 `negotiate_protocol_version`).
 
+## Códigos de erro (`ErrorCode`)
+
+O número de cada `ErrorCode` viaja no `OpResult` e é lido por clientes em
+outras linguagens, que não recompilam junto com o servidor. Por isso:
+
+- cada código tem um valor explícito em `include/modb/error.hpp`;
+- um código novo entra **no fim**, com o próximo número livre;
+- nenhum número é renumerado nem reusado, nem quando um código deixa de ser
+  usado (ele fica no enum, com o comentário dizendo que está obsoleto);
+- a tabela do [PROTOCOLO_CLIENTES.md](PROTOCOLO_CLIENTES.md) (Apêndice A) e as
+  constantes do cliente Python acompanham o header.
+
+`modb.error_code_values` fixa os valores no C++; `modb.error_codes` confere o
+header contra a documentação e o cliente Python.
+
 ## Testes
 
 ```powershell
