@@ -738,6 +738,12 @@ if(BUILD_TESTING)
                      COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tests/python_client_test.py"
                              "$<TARGET_FILE:notas-server>" "${CMAKE_CURRENT_SOURCE_DIR}/clients/python")
             set_tests_properties(modb.python_client PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8" TIMEOUT 120)
+            # Parada limpa pelo fim da entrada padrão, no servidor e no proxy (R3).
+            add_test(NAME modb.stdin_eof
+                     COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdin_eof_test.py"
+                             "$<TARGET_FILE:notas-server>" "$<TARGET_FILE:modb_proxy_cli>"
+                             "${CMAKE_CURRENT_SOURCE_DIR}/clients/python")
+            set_tests_properties(modb.stdin_eof PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8" TIMEOUT 120)
         endif()
     endif()
     modb_add_test(modb_model_tests tests/model_test.cpp)

@@ -3,8 +3,10 @@
 //
 //   modb-proxy --engine /run/modb/app.sock --port 7474 [--policy passthrough]
 //
-// Imprime "READY <porta>" quando já aceita clientes; SIGINT/SIGTERM param limpo.
+// Imprime "READY <porta>" quando já aceita clientes; SIGINT/SIGTERM param limpo,
+// e também o fim da entrada padrão com --stop-on-stdin-eof on.
 
+#include "modb/net/stdin_eof.hpp"
 #include "modb/proxy/policies.hpp"
 #include "modb/proxy/proxy.hpp"
 #include "modb/proxy/token_policy.hpp"
@@ -38,6 +40,8 @@ struct Settings {
     std::string audit{};
     std::uint32_t max_calls_per_second{0};
     std::uint32_t max_streams_per_principal{0};
+    // Para limpo quando a entrada padrão fecha (supervisores sem sinais).
+    bool stop_on_stdin_eof{false};
 };
 
 Error invalid(std::string message) { return Error{ErrorCode::invalid_argument, std::move(message)}; }
@@ -128,6 +132,11 @@ Result<void> apply_setting(Settings& settings, std::string_view key, std::string
         return set_number(settings.max_calls_per_second);
     } else if (key == "max_streams_per_principal") {
         return set_number(settings.max_streams_per_principal);
+    } else if (key == "stop_on_stdin_eof") {
+        if (value != "on" && value != "off") {
+            return std::unexpected(invalid("stop_on_stdin_eof must be on or off"));
+        }
+        settings.stop_on_stdin_eof = value == "on";
     } else {
         return std::unexpected(invalid("unknown setting: " + std::string{key}));
     }
@@ -282,6 +291,7 @@ constexpr std::string_view k_usage =
     "  --compression rle|none codec offered to clients (default rle)\n"
     "  --stream-credit N      frames in flight per stream (default 8)\n"
     "  --reconnect-max-ms N   longest wait between link reconnection attempts (default 5000)\n"
+    "  --stop-on-stdin-eof on|off  stop cleanly when stdin closes (default off)\n"
     "\n"
     "       modb-proxy hash-token <token> <principal> [role1,role2]\n"
     "  prints the tokens-file line for a token\n";
@@ -326,6 +336,9 @@ int main(int argc, char** argv) {
 #ifdef SIGBREAK
     std::signal(SIGBREAK, on_stop_signal);
 #endif
+    if (settings->stop_on_stdin_eof) {
+        modb::net::stop_on_stdin_eof([p = &*proxy] { p->request_stop(); });
+    }
     std::cout << "READY " << proxy->port() << '\n';
     std::cout << "proxy " << settings->proxy.name << " on " << settings->proxy.host << ':' << proxy->port()
               << " -> " << settings->proxy.engine.string() << " (policy " << (*policy)->name() << ")" << std::endl;

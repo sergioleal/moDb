@@ -125,6 +125,8 @@ pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`]
 | `idle_timeout_ms` / `--idle-timeout-ms` | `30000` | fecha conexões ociosas |
 | `proc_timeout_ms` / `--proc-timeout-ms` | `0` (sem limite) | chamada que passar disso falha com `operation_timeout` e é desfeita |
 | `log` / `--log` | stderr | log de chamadas: arquivo (acrescenta), vazio = stderr, `off` = nenhum |
+| `stop_on_stdin_eof` / `--stop-on-stdin-eof` | `off` | `on`: para limpo quando a entrada padrão fecha (ver "Parada") |
+| `<módulo>.<nome>` / `--<módulo>.<nome>` | o do módulo | configuração declarada por um módulo (ver abaixo) |
 
 ### Configurações dos módulos
 
@@ -172,9 +174,39 @@ procs (`c.log()`) vão para o mesmo destino, como `info`/`warn`/`error`.
 
 `SIGINT`/`SIGTERM` (Ctrl+C; `SIGBREAK` no Windows) chamam `request_stop`: o
 servidor para de aceitar, fecha as sessões abertas (inclusive clientes ociosos),
-termina a chamada em curso, imprime `stopped` e sai com 0. Um crash ou
-`kill -9` não perde nada confirmado: na próxima abertura o WAL recupera (coberto
-por `modb.server_host`, que mata o processo à força e reabre o mesmo banco).
+termina a chamada em curso, faz o fechamento limpo do banco (checkpoint),
+imprime `stopped` e sai com 0. Um crash ou `kill -9` não perde nada confirmado:
+na próxima abertura o WAL recupera (coberto por `modb.server_host`, que mata o
+processo à força e reabre o mesmo banco), mas toda parada à força vira uma
+recuperação.
+
+Com `--stop-on-stdin-eof on`, fechar a entrada padrão faz a mesma parada limpa.
+É o caminho para um supervisor que não manda sinais: abra o processo com um pipe
+na entrada e feche o pipe para parar. Vale também para o `modb-proxy`. Fica
+desligado por padrão porque um serviço com a entrada em `/dev/null` (o padrão
+do systemd) receberia o fim da entrada logo na subida e pararia. Coberto por
+`modb.stdin_eof`.
+
+### Windows
+
+O que para limpo e o que não para:
+
+| Como | Parada |
+|---|---|
+| NSSM (abaixo), que para o serviço com Ctrl+C | limpa |
+| Ctrl+C ou Ctrl+Break no console do processo | limpa |
+| fechar a entrada padrão, com `--stop-on-stdin-eof on` | limpa |
+| `TerminateProcess`, `Stop-Process`, `taskkill /F`, `child.kill()` do Node | **à força**: o Windows não entrega sinal a outro processo; nada confirmado se perde, mas a próxima abertura recupera pelo WAL |
+
+Um supervisor em Node, por exemplo, abre o servidor com
+`spawn(exe, [..., "--stop-on-stdin-eof", "on"], {stdio: ["pipe", "pipe", "inherit"]})`
+e para com `child.stdin.end()`.
+
+**Socket local (`local = ...`).** Na máquina de desenvolvimento, `connect` num
+socket AF_UNIX sob `%LOCALAPPDATA%` falhou com `WSAEINVAL` (ADR-028). Isso
+inclui o `%TEMP%` padrão, que fica dentro de `%LOCALAPPDATA%`. Ponha o socket
+numa pasta fora dele (a do projeto ou a do serviço), com acesso restrito à
+conta do serviço.
 
 ### Como serviço — Linux (systemd)
 
@@ -241,6 +273,7 @@ e [`notas-proxy.service`](../examples/server_procs/deploy/notas-proxy.service).
 | `max_streams_per_principal` | `0` | streams abertos por principal |
 | `audit` / `--audit` | off | uma linha por pedido: arquivo ou `stderr` |
 | `idle_timeout_ms`, `compression`, `stream_credit`, `reconnect_max_ms` | | como no servidor; crédito = frames a caminho por stream |
+| `stop_on_stdin_eof` / `--stop-on-stdin-eof` | `off` | `on`: para limpo quando a entrada padrão fecha, como no servidor |
 
 Tokens:
 

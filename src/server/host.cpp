@@ -1,5 +1,6 @@
 #include "modb/server/host.hpp"
 
+#include "modb/net/stdin_eof.hpp"
 #include "modb/server/module.hpp"
 
 #include <algorithm>
@@ -194,6 +195,11 @@ Result<void> apply_setting(Options& options, std::string_view key, std::string_v
         return set_number(options.proc_timeout_ms);
     } else if (key == "log") {
         options.log = value.empty() || value == "off" ? std::string{value} : resolve(base, value).string();
+    } else if (key == "stop_on_stdin_eof") {
+        if (value != "on" && value != "off") {
+            return std::unexpected(invalid("stop_on_stdin_eof must be on or off"));
+        }
+        options.stop_on_stdin_eof = value == "on";
     } else if (key.find('.') != std::string_view::npos) {
         // Configuração de módulo: conferida em `start`, que conhece os módulos.
         options.module_settings[std::string{key}] = std::string{value};
@@ -312,6 +318,7 @@ std::string usage(std::string_view program, std::span<const Module> modules) {
                        "  --idle-timeout-ms N    close idle connections after N ms\n"
                        "  --proc-timeout-ms N    fail (and roll back) a proc call after N ms; 0 = no limit\n"
                        "  --log FILE|off         call log (default stderr)\n"
+                       "  --stop-on-stdin-eof on|off  stop cleanly when stdin closes (default off)\n"
                        "  --MODULE.SETTING V     a module setting (listed below; '-' or '_' in the name)\n"
                        "modules:";
     for (const auto& m : modules) {
@@ -451,6 +458,9 @@ int run(int argc, char** argv, std::span<const Module> modules) {
 #ifdef SIGBREAK
     std::signal(SIGBREAK, on_stop_signal);  // Ctrl+Break / serviço no Windows
 #endif
+    if (options->stop_on_stdin_eof) {
+        net::stop_on_stdin_eof([s = &*server] { s->request_stop(); });
+    }
     // Linha lida por supervisores e testes para saber que já aceita conexões.
     std::cout << "READY " << server->port() << '\n';
     std::cout << "serving " << std::filesystem::absolute(options->database).string();
