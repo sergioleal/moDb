@@ -236,9 +236,117 @@ Result<HelloOk> decode_hello_ok(storage::BinaryReader& reader) {
     return message;
 }
 
+// Extensão do minor 3 (ADR-029), no fim de OpCall/Query/FacadeList/FacadeOpen:
+//   flags u8 | [1: acting_as string | n u8 | (chave, valor)*] | [2: idempotency_key string]
+// Só é gravada com algum campo preenchido: um pedido sem ela é idêntico ao do minor 2.
+constexpr std::uint8_t k_ext_acting_as = 1;
+constexpr std::uint8_t k_ext_idempotency_key = 2;
+
+Result<void> encode_extension(storage::BinaryWriter& writer, const Delegation& acting_as,
+                              std::string_view idempotency_key = {}) {
+    std::uint8_t flags = 0;
+    if (!acting_as.empty()) {
+        flags |= k_ext_acting_as;
+    }
+    if (!idempotency_key.empty()) {
+        flags |= k_ext_idempotency_key;
+    }
+    if (flags == 0) {
+        if (!acting_as.attributes.empty()) {
+            return std::unexpected(make_error(ErrorCode::invalid_argument, "delegation attributes without a subject"));
+        }
+        return {};
+    }
+    writer.write_u8(flags);
+    if ((flags & k_ext_acting_as) != 0) {
+        if (acting_as.attributes.size() > max_delegation_attributes) {
+            return std::unexpected(make_error(ErrorCode::value_too_large, "too many delegation attributes"));
+        }
+        if (auto status = write_string(writer, acting_as.subject); !status) {
+            return status;
+        }
+        writer.write_u8(static_cast<std::uint8_t>(acting_as.attributes.size()));
+        for (const auto& [key, value] : acting_as.attributes) {
+            if (auto status = write_string(writer, key); !status) {
+                return status;
+            }
+            if (auto status = write_string(writer, value); !status) {
+                return status;
+            }
+        }
+    }
+    if ((flags & k_ext_idempotency_key) != 0) {
+        if (idempotency_key.size() > max_idempotency_key_bytes) {
+            return std::unexpected(make_error(ErrorCode::value_too_large, "idempotency key is too long"));
+        }
+        if (auto status = write_string(writer, idempotency_key); !status) {
+            return status;
+        }
+    }
+    return {};
+}
+
+// Lê a extensão, se houver bytes depois do corpo. `key` nulo = a mensagem não
+// aceita chave de idempotência.
+Result<void> decode_extension(storage::BinaryReader& reader, Delegation& acting_as, std::string* key) {
+    if (reader.remaining() == 0) {
+        return {};
+    }
+    const auto flags = reader.read_u8();
+    if (!flags) {
+        return std::unexpected(flags.error());
+    }
+    const std::uint8_t known = key != nullptr ? (k_ext_acting_as | k_ext_idempotency_key) : k_ext_acting_as;
+    if (*flags == 0 || (*flags & ~known) != 0) {
+        return std::unexpected(make_error(ErrorCode::protocol_error, "unknown request extension flags"));
+    }
+    if ((*flags & k_ext_acting_as) != 0) {
+        auto subject = read_string(reader);
+        if (!subject) {
+            return std::unexpected(subject.error());
+        }
+        if (subject->empty()) {
+            return std::unexpected(make_error(ErrorCode::protocol_error, "delegation without a subject"));
+        }
+        acting_as.subject = std::move(*subject);
+        const auto count = reader.read_u8();
+        if (!count) {
+            return std::unexpected(count.error());
+        }
+        if (*count > max_delegation_attributes) {
+            return std::unexpected(make_error(ErrorCode::protocol_error, "too many delegation attributes"));
+        }
+        for (std::uint8_t i = 0; i < *count; ++i) {
+            auto name = read_string(reader);
+            if (!name) {
+                return std::unexpected(name.error());
+            }
+            auto value = read_string(reader);
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            acting_as.attributes.emplace_back(std::move(*name), std::move(*value));
+        }
+    }
+    if ((*flags & k_ext_idempotency_key) != 0) {
+        auto text = read_string(reader);
+        if (!text) {
+            return std::unexpected(text.error());
+        }
+        if (text->empty() || text->size() > max_idempotency_key_bytes) {
+            return std::unexpected(make_error(ErrorCode::protocol_error, "idempotency key must have 1 to 128 bytes"));
+        }
+        *key = std::move(*text);
+    }
+    return {};
+}
+
 Result<void> encode_query(storage::BinaryWriter& writer, const Query& message) {
     writer.write_u32(message.query_id);
-    return encode_query_description(writer, message.description);
+    if (auto status = encode_query_description(writer, message.description); !status) {
+        return status;
+    }
+    return encode_extension(writer, message.acting_as);
 }
 
 Result<Query> decode_query(storage::BinaryReader& reader) {
@@ -253,6 +361,9 @@ Result<Query> decode_query(storage::BinaryReader& reader) {
         return std::unexpected(description.error());
     }
     message.description = std::move(*description);
+    if (auto ext = decode_extension(reader, message.acting_as, nullptr); !ext) {
+        return std::unexpected(ext.error());
+    }
     return message;
 }
 
@@ -340,7 +451,7 @@ Result<void> encode_op_call(storage::BinaryWriter& writer, const OpCall& message
     }
     writer.write_u32(static_cast<std::uint32_t>(message.args.size()));
     writer.write_bytes(message.args);
-    return {};
+    return encode_extension(writer, message.acting_as, message.idempotency_key);
 }
 
 Result<OpCall> decode_op_call(storage::BinaryReader& reader) {
@@ -368,6 +479,9 @@ Result<OpCall> decode_op_call(storage::BinaryReader& reader) {
         return std::unexpected(args.error());
     }
     message.args.assign(args->begin(), args->end());
+    if (auto ext = decode_extension(reader, message.acting_as, &message.idempotency_key); !ext) {
+        return std::unexpected(ext.error());
+    }
     return message;
 }
 
@@ -378,6 +492,14 @@ Result<void> encode_op_result(storage::BinaryWriter& writer, const OpResult& mes
         writer.write_u16(static_cast<std::uint16_t>(message.code));
         if (auto status = write_string(writer, message.message); !status) {
             return status;
+        }
+        // Minor 3: o detalhe, só quando há (quem manda só o preenche para sessões de minor ≥ 3).
+        if (!message.detail.empty()) {
+            if (message.detail.size() > max_frame_bytes) {
+                return std::unexpected(make_error(ErrorCode::value_too_large, "OpResult detail exceeds max_frame_bytes"));
+            }
+            writer.write_u32(static_cast<std::uint32_t>(message.detail.size()));
+            writer.write_bytes(message.detail);
         }
         return {};
     }
@@ -416,6 +538,20 @@ Result<OpResult> decode_op_result(storage::BinaryReader& reader) {
             return std::unexpected(text.error());
         }
         message.message = std::move(*text);
+        if (reader.remaining() > 0) {
+            const auto detail_len = reader.read_u32();
+            if (!detail_len) {
+                return std::unexpected(detail_len.error());
+            }
+            if (*detail_len == 0 || reader.remaining() < *detail_len) {
+                return std::unexpected(make_error(ErrorCode::protocol_error, "OpResult detail truncated or empty"));
+            }
+            auto detail = reader.read_bytes(*detail_len);
+            if (!detail) {
+                return std::unexpected(detail.error());
+            }
+            message.detail.assign(detail->begin(), detail->end());
+        }
         return message;
     }
     const auto payload_len = reader.read_u32();
@@ -526,7 +662,7 @@ Result<ops::FacadeDescriptor> decode_facade_descriptor(storage::BinaryReader& re
 
 Result<void> encode_facade_list(storage::BinaryWriter& writer, const FacadeList& message) {
     writer.write_u32(message.request_id);
-    return {};
+    return encode_extension(writer, message.acting_as);
 }
 
 Result<FacadeList> decode_facade_list(storage::BinaryReader& reader) {
@@ -534,7 +670,11 @@ Result<FacadeList> decode_facade_list(storage::BinaryReader& reader) {
     if (!request_id) {
         return std::unexpected(request_id.error());
     }
-    return FacadeList{.request_id = *request_id};
+    FacadeList message{.request_id = *request_id};
+    if (auto ext = decode_extension(reader, message.acting_as, nullptr); !ext) {
+        return std::unexpected(ext.error());
+    }
+    return message;
 }
 
 Result<void> encode_facade_list_ok(storage::BinaryWriter& writer, const FacadeListOk& message) {
@@ -580,7 +720,7 @@ Result<void> encode_facade_open(storage::BinaryWriter& writer, const FacadeOpen&
         return status;
     }
     writer.write_u32(message.facade_version);
-    return {};
+    return encode_extension(writer, message.acting_as);
 }
 
 Result<FacadeOpen> decode_facade_open(storage::BinaryReader& reader) {
@@ -600,6 +740,9 @@ Result<FacadeOpen> decode_facade_open(storage::BinaryReader& reader) {
         return std::unexpected(version.error());
     }
     message.facade_version = *version;
+    if (auto ext = decode_extension(reader, message.acting_as, nullptr); !ext) {
+        return std::unexpected(ext.error());
+    }
     return message;
 }
 
@@ -1308,6 +1451,20 @@ Result<QueryDescription> decode_query_description(storage::BinaryReader& reader)
         description.project.push_back(object::FieldId{*field});
     }
     return description;
+}
+
+const Delegation* request_delegation(const Message& message) noexcept {
+    return std::visit(
+        [](const auto& body) -> const Delegation* {
+            using T = std::decay_t<decltype(body)>;
+            if constexpr (std::is_same_v<T, OpCall> || std::is_same_v<T, Query> || std::is_same_v<T, FacadeList> ||
+                          std::is_same_v<T, FacadeOpen>) {
+                return body.acting_as.empty() ? nullptr : &body.acting_as;
+            } else {
+                return nullptr;
+            }
+        },
+        message);
 }
 
 MessageType message_type(const Message& message) noexcept {

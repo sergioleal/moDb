@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -22,7 +23,9 @@ namespace modb::net {
 // Major do protocolo no fio (`Hello.version` / `HelloOk.version`).
 inline constexpr std::uint16_t protocol_major = 1;
 // Minor aditivo (Fase 10E); extensões desconhecidas no Hello/HelloOk são ignoráveis.
-inline constexpr std::uint16_t protocol_minor = 2;  // 1: ShmAttach (ADR-026); 2: Authenticate (ADR-028)
+// 1: ShmAttach (ADR-026); 2: Authenticate (ADR-028); 3: delegação, detalhe nos
+// erros e chave de idempotência (ADR-029).
+inline constexpr std::uint16_t protocol_minor = 3;
 // Alias legado (= major).
 inline constexpr std::uint16_t protocol_version = protocol_major;
 // length cobre type+payload; frames maiores → frame_too_large.
@@ -97,9 +100,26 @@ struct HelloOk {
     friend bool operator==(const HelloOk&, const HelloOk&) = default;
 };
 
+// Minor 3 (ADR-029): em nome de quem é o pedido. Só um principal com a role
+// `delegate` pode mandar; quem autoriza é o proxy. `subject` vazio = o próprio
+// principal.
+struct Delegation {
+    std::string subject{};
+    std::vector<std::pair<std::string, std::string>> attributes{};
+
+    [[nodiscard]] bool empty() const noexcept { return subject.empty(); }
+    friend bool operator==(const Delegation&, const Delegation&) = default;
+};
+
+// Limites da extensão do minor 3.
+inline constexpr std::size_t max_delegation_attributes = 32;
+inline constexpr std::size_t max_idempotency_key_bytes = 128;
+
 struct Query {
     std::uint32_t query_id{0};
     QueryDescription description{};
+    // Minor 3: gravada no fim, só quando preenchida.
+    Delegation acting_as{};
 
     friend bool operator==(const Query&, const Query&) = default;
 };
@@ -154,6 +174,11 @@ struct OpCall {
     std::uint32_t call_id{0};
     std::string operation_id{};
     std::vector<std::byte> args{};
+    // Minor 3 (ADR-029), gravados no fim só quando preenchidos: em nome de quem,
+    // e a chave que torna a escrita repetível (o engine devolve o resultado já
+    // confirmado em vez de executar de novo).
+    Delegation acting_as{};
+    std::string idempotency_key{};
 
     friend bool operator==(const OpCall&, const OpCall&) = default;
 };
@@ -164,6 +189,10 @@ struct OpResult {
     ErrorCode code{ErrorCode::invalid_argument};
     std::string message{};
     std::vector<std::byte> payload{};
+    // Minor 3 (ADR-029), só em erro: um Value com o que a proc quis dizer além
+    // do código (por convenção `reason` e `field`). Gravado só quando há, e só
+    // para sessões de minor ≥ 3.
+    std::vector<std::byte> detail{};
 
     friend bool operator==(const OpResult&, const OpResult&) = default;
 };
@@ -171,6 +200,7 @@ struct OpResult {
 // Fase 11C: descoberta e negociação de facades.
 struct FacadeList {
     std::uint32_t request_id{0};
+    Delegation acting_as{};  // minor 3
 
     friend bool operator==(const FacadeList&, const FacadeList&) = default;
 };
@@ -186,6 +216,7 @@ struct FacadeOpen {
     std::uint32_t request_id{0};
     std::string facade_id{};
     std::uint32_t facade_version{1};
+    Delegation acting_as{};  // minor 3
 
     friend bool operator==(const FacadeOpen&, const FacadeOpen&) = default;
 };
@@ -257,6 +288,9 @@ using Message = std::variant<Hello, HelloOk, Query, StreamBegin, ObjectFrame, St
                              AuthenticateOk>;
 
 [[nodiscard]] MessageType message_type(const Message& message) noexcept;
+
+// A delegação de um pedido (vazia para mensagens que não a levam).
+[[nodiscard]] const Delegation* request_delegation(const Message& message) noexcept;
 
 // Codifica uma mensagem completa: | length u32 | type u8 | payload |.
 [[nodiscard]] Result<std::vector<std::byte>> encode_message(const Message& message);

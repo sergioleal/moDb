@@ -668,6 +668,9 @@ if(BUILD_TESTING)
     add_test(NAME modb.ops_value COMMAND modb_ops_value_tests)
     # Números estáveis dos ErrorCode (docs/COMPATIBILIDADE.md): o C++ fixa os
     # valores; o Python confere o header contra a documentação e o cliente Python.
+    # Codec do protocolo minor 3: delegação, chave de idempotência, detail (R8).
+    modb_add_test(modb_protocol_minor3_tests tests/protocol_minor3_test.cpp)
+    add_test(NAME modb.protocol_minor3 COMMAND modb_protocol_minor3_tests)
     # Campo ops::Value num objeto persistido, via bytes_codec (R14).
     modb_add_test(modb_stored_value_tests tests/stored_value_test.cpp)
     add_test(NAME modb.stored_value COMMAND modb_stored_value_tests)

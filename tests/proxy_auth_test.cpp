@@ -112,7 +112,7 @@ int main() {
                       "palavras demais");
 
     // --- codec (minor 2) ---
-    suite.check(net::protocol_minor == 2, "protocolo no minor 2");
+    suite.check(net::protocol_minor >= 2, "protocolo com Authenticate (minor >= 2)");
     suite.check(round_trips(net::Authenticate{.request_id = 3, .mechanism = "token", .payload = bytes_of("x")}),
                 "Authenticate ida e volta");
     suite.check(round_trips(net::AuthenticateOk{.request_id = 3, .principal = "ana"}), "AuthenticateOk ida e volta");
