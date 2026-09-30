@@ -38,66 +38,66 @@ tarefa.
 
 ### P0 — sem mudar o protocolo *(release `v0.1.2`)*
 
-#### R1 — `ErrorCode` estável *(pequeno)*
+#### R1 — `ErrorCode` estável *(pequeno)* ✅
 
-- [ ] 1.1 Valores explícitos em todo o enum de `include/modb/error.hpp`, iguais
+- [x] 1.1 *(75 códigos, 0 a 74)* Valores explícitos em todo o enum de `include/modb/error.hpp`, iguais
   aos de hoje (`invalid_identifier = 0`, `invalid_argument = 1`, …,
   `permission_denied = 74`).
-- [ ] 1.2 Teste que fixa cada valor numa tabela (`tests/error_code_test.cpp`) e
+- [x] 1.2 *(`modb.error_code_values`: `static_assert` por valor e tabela contínua; um código novo sem documentação é pego pelo `modb.error_codes`, porque o C++ não enumera um enum)* Teste que fixa cada valor numa tabela (`tests/error_code_test.cpp`) e
   falha se algum mudar ou se aparecer um código sem entrada na tabela.
-- [ ] 1.3 Regra no `docs/COMPATIBILIDADE.md`: código novo entra no fim, e
+- [x] 1.3 Regra no `docs/COMPATIBILIDADE.md`: código novo entra no fim, e
   nenhum número é reusado nem renumerado.
-- [ ] 1.4 Tabela completa em `docs/PROTOCOLO_CLIENTES.md` §3, com a coluna "o
+- [x] 1.4 *(§3 com os 14 códigos que um cliente de procs encontra e a ação; Apêndice A com os 75, gerado dos comentários do header)* Tabela completa em `docs/PROTOCOLO_CLIENTES.md` §3, com a coluna "o
   que o cliente faz": repetir (só leitura), reconectar, mostrar ao usuário ou
   tratar como defeito.
-- [ ] 1.5 Constantes do cliente Python geradas ou conferidas contra a tabela
+- [x] 1.5 *(`modb_client.ERROR_CODES`; `modb.error_codes` confere header × Apêndice A × §3 × cliente)* Constantes do cliente Python geradas ou conferidas contra a tabela
   (um teste compara as duas).
 
-#### R2 — Configurações declaradas pelos módulos *(pequeno)*
+#### R2 — Configurações declaradas pelos módulos *(pequeno)* ✅
 
-- [ ] 2.1 `ModuleBuilder::setting(nome, padrão, descrição, validador?)`.
-- [ ] 2.2 `server_host`: aceita `<módulo>.<nome> = valor` no `.conf` e
+- [x] 2.1 `ModuleBuilder::setting(nome, padrão, descrição, validador?)`.
+- [x] 2.2 *(`resolve_module_settings` roda no começo do `start`, antes de abrir o banco)* `server_host`: aceita `<módulo>.<nome> = valor` no `.conf` e
   `--<módulo>.<nome> valor` na linha de comando. Chave desconhecida ou valor
   inválido falha na subida, com a mesma mensagem de hoje para chaves do engine.
-- [ ] 2.3 Na proc, `c.setting("nome")` devolve o texto já validado.
-- [ ] 2.4 `--help` e `sys.procs` (ou um `sys.settings`) listam nomes, padrões e
+- [x] 2.3 *(nome não declarado lança: vira `internal_error`, com rollback)* Na proc, `c.setting("nome")` devolve o texto já validado.
+- [x] 2.4 *(`sys.settings` nova, sem o valor em uso: pode haver configuração que não é de todos os clientes)* `--help` e `sys.procs` (ou um `sys.settings`) listam nomes, padrões e
   descrições.
-- [ ] 2.5 Teste no `server_host_test`: padrão, valor pelo `.conf`, valor pela
+- [x] 2.5 Teste no `server_host_test`: padrão, valor pelo `.conf`, valor pela
   linha de comando (que vence o `.conf`), valor inválido derruba a subida.
-- [ ] 2.6 `notas` ganha uma configuração de exemplo; `OPERACAO.md` e
+- [x] 2.6 *(`notas.max_texto`)* `notas` ganha uma configuração de exemplo; `OPERACAO.md` e
   `SDK.md` documentam.
 
-#### R3 — Parada limpa sem sinal e Windows no `OPERACAO.md` *(pequeno)*
+#### R3 — Parada limpa sem sinal e Windows no `OPERACAO.md` *(pequeno)* ✅
 
-- [ ] 3.1 `--stop-on-stdin-eof` no `server_host` e no `modb-proxy`: quando a
+- [x] 3.1 *(`on\|off`, como `--tcp`: `--stop-on-stdin-eof on`; `include/modb/net/stdin_eof.hpp`)* `--stop-on-stdin-eof` no `server_host` e no `modb-proxy`: quando a
   entrada padrão fecha, chama `request_stop` (mesma parada do `SIGTERM`, com
   checkpoint).
-- [ ] 3.2 Teste nas duas plataformas: o supervisor fecha o pipe, o processo sai
+- [x] 3.2 *(`modb.stdin_eof`, Python como o `modb.python_client`; confere `stopped`, saída 0 e a nota confirmada na reabertura, e que sem a opção o fim da entrada não para nada)* Teste nas duas plataformas: o supervisor fecha o pipe, o processo sai
   com 0 e o arquivo abre sem recuperação.
-- [ ] 3.3 `OPERACAO.md`, subseção "Windows": o que para limpo (NSSM, Ctrl+C no
+- [x] 3.3 `OPERACAO.md`, subseção "Windows": o que para limpo (NSSM, Ctrl+C no
   console, `--stop-on-stdin-eof`), o que não para (`TerminateProcess`,
   `child.kill` do Node) e a restrição do socket local sob `%LOCALAPPDATA%`
   (inclui o `%TEMP%` padrão). O que hoje está só na ADR-028 passa para lá.
 
-#### R4 — Faixa e prefixo nas procs *(pequeno)*
+#### R4 — Faixa e prefixo nas procs *(pequeno)* ✅
 
-- [ ] 4.1 `Context::range<T>(campo, lo, hi)` e `Context::prefix<T>(campo,
+- [x] 4.1 *(`Database::indexed_object_ids_between` para a proc de escrita; a de leitura usa `between` no snapshot)* `Context::range<T>(campo, lo, hi)` e `Context::prefix<T>(campo,
   texto)`, pelo índice e no snapshot da chamada (como o `find`). O prefixo é
   `between(texto, texto + "\xFF")`: o índice guarda texto em bytes crus, e
   UTF-8 nunca tem o byte 0xFF.
-- [ ] 4.2 Teste: prefixo com acentos, prefixo vazio, campo sem índice (erro
+- [x] 4.2 *(`modb.proc_range`)* Teste: prefixo com acentos, prefixo vazio, campo sem índice (erro
   claro, como o `find`).
-- [ ] 4.3 Fechar ou documentar o risco de `c.database().query<T>()`: numa proc
+- [x] 4.3 *(documentado em `module.hpp` e nas armadilhas da referência; esconder o `database()` quebraria procs que usam `blobs()` por ele)* Fechar ou documentar o risco de `c.database().query<T>()`: numa proc
   de leitura, ele lê fora do snapshot da chamada. Decidir entre esconder o
   `database()` das procs ou avisar no `module.hpp` e na referência.
-- [ ] 4.4 `docs/reference/queries-indexes.md`: seção de procs com `find`,
+- [x] 4.4 *(§3.10)* `docs/reference/queries-indexes.md`: seção de procs com `find`,
   `range` e `prefix`.
 
-#### R5 — Release `v0.1.2` *(pequeno)*
+#### R5 — Release `v0.1.2` *(pequeno)* ✅
 
-- [ ] 5.1 `VERSION 0.1.2`, `SDK.md` (tabela de versões), links do
+- [x] 5.1 `VERSION 0.1.2`, `SDK.md` (tabela de versões), links do
   `pacote-dev-node` para `v0.1.2`.
-- [ ] 5.2 Tag `v0.1.2`; o workflow publica a release; conferir o download.
+- [x] 5.2 Tag `v0.1.2`; o workflow publica a release; conferir o download.
 
 ### P1 — cliente Node *(depende da decisão D1)*
 
@@ -242,3 +242,8 @@ R15 e R16 depois da P2, porque o `detail` do `unique` depende da R10.
 
 | Data | Tarefa | Commit | Nota |
 |---|---|---|---|
+| 2026-09-30 | R1 | 6252983 | `ErrorCode` com valores explícitos, fixados no C++ e conferidos contra a documentação e o cliente Python |
+| 2026-09-30 | R2 | a1cca2f | Configurações de módulo validadas na subida; `sys.settings` |
+| 2026-09-30 | R3 | 68ca1d7 | `--stop-on-stdin-eof on` no servidor e no proxy; seção Windows no `OPERACAO.md` |
+| 2026-09-30 | R4 | 1f3c838 | `Context::range` e `Context::prefix`; aviso sobre `c.database()` fora do snapshot |
+| 2026-09-30 | R5 | (release) | `v0.1.2`: P0 concluída, sem mudar protocolo nem formato |

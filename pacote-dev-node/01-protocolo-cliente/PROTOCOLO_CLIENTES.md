@@ -3,7 +3,7 @@
 Como chamar as stored procedures de um servidor moDb (`modb_add_server`,
 ADR-025) de qualquer linguagem: o protocolo nativo por TCP e, na mesma máquina,
 o anel de memória compartilhada (ADR-026). Implementação de referência:
-[`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.1/clients/python/modb_client.py) (só
+[`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.2/clients/python/modb_client.py) (só
 biblioteca padrão, ~350 linhas), testada contra o `notas-server` em
 `modb.python_client`.
 
@@ -76,21 +76,31 @@ OpResult = call_id u32 | ok u8 | se ok=1: payload_len u32 | payload (Value)
 
 `call_id` é do cliente (qualquer valor; a resposta repete). As respostas saem na
 ordem dos pedidos de uma conexão. `code` é o `modb::ErrorCode`
-([`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/include/modb/error.hpp)); os de regra das procs:
+([`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/include/modb/error.hpp)). Os que um cliente de procs encontra:
 
-| code | nome | significado |
-|---|---|---|
-| 1 | `invalid_argument` | dados inválidos (argumento ausente ou de tipo errado, regra violada) |
-| 30 | `record_not_found` | não existe |
-| 48 | `operation_not_found` | proc desconhecida |
-| 70 | `conflict` | conflito com o estado atual |
-| 71 | `internal_error` | a proc falhou (exceção); a transação foi desfeita |
-| 72 | `operation_timeout` | passou do tempo limite do servidor; desfeita |
-| 73 | `unauthenticated` | o proxy exige autenticação, ou a credencial foi recusada |
-| 74 | `permission_denied` | a política do proxy não permite o pedido |
+| code | nome | significado | o que o cliente faz |
+|---|---|---|---|
+| 1 | `invalid_argument` | dados inválidos: argumento ausente ou de tipo errado, regra violada | mostrar ao usuário; não repetir igual |
+| 21 | `value_too_large` | pedido maior que o frame, ou resposta maior que o anel (§5) | defeito do cliente; no anel, refazer a chamada pelo TCP ou pedir um anel maior |
+| 30 | `record_not_found` | não existe | mostrar ao usuário |
+| 44 | `snapshot_conflict` | escrita concorrente num objeto disputado (ADR-027); a transação foi desfeita | o servidor já repete escritas sozinho; se chegar ao cliente, repetir a chamada |
+| 45 | `protocol_error` | frame inválido | defeito do cliente; a conexão fecha: reconectar |
+| 46 | `frame_too_large` | frame acima do `max_frame_bytes` | defeito do cliente; a conexão fecha: reconectar |
+| 47 | `connection_closed` | a conexão caiu (erro local da biblioteca cliente) | reconectar; repetir só leituras |
+| 48 | `operation_not_found` | proc desconhecida | defeito: nome errado ou servidor de outra versão |
+| 50 | `incompatible_protocol_version` | major do `Hello` incompatível | atualizar o cliente ou o servidor |
+| 70 | `conflict` | conflito com o estado atual | mostrar ao usuário |
+| 71 | `internal_error` | a proc falhou (exceção); a transação foi desfeita | defeito do servidor: registrar e mostrar erro genérico |
+| 72 | `operation_timeout` | passou do tempo limite do servidor; a transação foi desfeita | pode repetir (nada ficou gravado), mas o custo tende a se repetir |
+| 73 | `unauthenticated` | o proxy exige autenticação, ou a credencial foi recusada | autenticar; com credencial recusada, não insistir (três recusas fecham) |
+| 74 | `permission_denied` | a política do proxy não permite o pedido | mostrar ao usuário; não repetir |
 
-Os valores numéricos seguem a ordem do enum; confira no `error.hpp` da versão do
-servidor (`sys.procs` e `modb procs` listam as procs e os argumentos esperados).
+Os números são estáveis: cada código tem um valor explícito no `error.hpp`, e um
+código novo entra no fim, sem renumerar nem reusar os outros
+([COMPATIBILIDADE.md](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/COMPATIBILIDADE.md)). Qualquer outro código que chegue a
+um cliente de procs é erro interno do servidor: registre e mostre um erro
+genérico. A lista completa está no [Apêndice A](#apêndice-a--todos-os-códigos).
+`sys.procs` e `modb procs` listam as procs e os argumentos esperados.
 
 ## 4. Value (versão 1)
 
@@ -183,3 +193,86 @@ peça um anel maior no `ShmAttach` ou faça essa chamada pelo TCP.
 
 `modb_rpc_bench` mede a mesma proc pelos dois transportes (CSV com ops/s e
 p50/p99/p99,9). Números só valem de máquina dedicada.
+
+## Apêndice A — todos os códigos
+
+Gerado do [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/include/modb/error.hpp); o teste `modb.error_codes` confere que esta
+tabela e o header não divergem.
+
+| code | nome | significado |
+|---|---|---|
+| 0 | `invalid_identifier` | O nome de uma tabela ou coluna é inválido. |
+| 1 | `invalid_argument` | Um argumento fornecido para uma operação é inválido. |
+| 2 | `empty_schema` | Foi criado um schema sem colunas. |
+| 3 | `duplicate_column` | Duas colunas possuem o mesmo nome. |
+| 4 | `column_not_found` | A coluna procurada não existe. |
+| 5 | `value_count_mismatch` | A quantidade de valores não corresponde à quantidade de colunas. |
+| 6 | `type_mismatch` | O tipo de um valor não corresponde ao tipo da coluna. |
+| 7 | `null_constraint_violation` | Uma coluna NOT NULL recebeu NULL. |
+| 8 | `duplicate_table` | Já existe uma tabela com o mesmo nome. |
+| 9 | `table_not_found` | A tabela procurada não existe. |
+| 10 | `file_already_exists` | A criação não pode sobrescrever um arquivo existente. |
+| 11 | `file_not_found` | O arquivo solicitado não foi encontrado. |
+| 12 | `io_error` | O sistema operacional informou uma falha de entrada ou saída. |
+| 13 | `invalid_file_format` | O arquivo não possui a assinatura do moDb. |
+| 14 | `incompatible_format_version` | A versão do arquivo não é suportada. |
+| 15 | `corrupt_file` | O arquivo está truncado ou possui metadados inconsistentes. |
+| 16 | `page_not_found` | O identificador aponta para uma página que não existe. |
+| 17 | `reserved_page` | A operação tentou alterar diretamente uma página reservada. |
+| 18 | `unexpected_end_of_input` | Os bytes terminaram antes que o valor estivesse completo. |
+| 19 | `invalid_encoding` | Os bytes não representam uma codificação reconhecida. |
+| 20 | `trailing_data` | Restaram bytes depois que o objeto completo foi decodificado. |
+| 21 | `value_too_large` | O valor não cabe nos campos de tamanho do formato. |
+| 22 | `too_many_columns` | O schema ultrapassa o limite de colunas do produto. |
+| 23 | `invalid_page_format` | A página não contém a assinatura esperada para seu tipo. |
+| 24 | `incompatible_page_version` | A versão da estrutura interna da página não é suportada. |
+| 25 | `corrupt_page` | Os offsets ou tamanhos internos da página são inconsistentes. |
+| 26 | `page_full` | A página não possui espaço livre suficiente para o registro. |
+| 27 | `slot_not_found` | O identificador aponta para um slot que não existe. |
+| 28 | `record_too_large` | O registro é maior que a capacidade de uma página vazia. |
+| 29 | `page_chain_cycle` | Uma cadeia de páginas aponta novamente para uma página já visitada. |
+| 30 | `record_not_found` | O RecordId não pertence ao heap consultado. |
+| 31 | `duplicate_field` | Duas colunas/atributos de um mesmo tipo usam o mesmo FieldId. |
+| 32 | `field_not_found` | O FieldId consultado não existe no tipo. |
+| 33 | `duplicate_type` | Já existe um tipo registrado com o mesmo nome. |
+| 34 | `type_not_found` | O tipo consultado não existe no registro. |
+| 35 | `invalid_object_id` | Um ObjectId/TypeDefinitionId/BaselineId igual a zero foi usado onde um identificador válido (não nulo) era exigido. |
+| 36 | `binding_mismatch` | Um tipo C++ já possui outro binding ativo na instância. |
+| 37 | `incompatible_projection` | Uma projeção não pôde reconciliar o tipo persistido com o binding atual (conversão de tipo não permitida sem migração registrada). |
+| 38 | `transaction_required` | Uma escrita foi tentada sem uma transação ativa (Fase 5). |
+| 39 | `transaction_active` | Uma segunda transação foi iniciada com uma já em andamento (single-writer). |
+| 40 | `transaction_committed` | A transação já alcançou o ponto de commit durável e não pode mais reverter. |
+| 41 | `commit_recovery_required` | O commit está durável no WAL, mas a aplicação local falhou; reabra o banco para a recuperação refazer as páginas pendentes. |
+| 42 | `database_recovery_required` | Esta instância observou uma falha depois de um commit durável e só pode voltar a ser usada após reabrir o banco. |
+| 43 | `wal_corrupt` | O WAL presente não pode ser interpretado com segurança; ele é preservado para diagnóstico e a abertura do banco é interrompida. |
+| 44 | `snapshot_conflict` | Uma segunda alteração do mesmo objeto foi tentada enquanto a versão anterior ainda é visível a um snapshot aberto (Fase 6B: só há uma posição `previous` por objeto — limitação documentada no ADR-009). |
+| 45 | `protocol_error` | Frame de protocolo inválido, inconsistente ou hostil (Fase 8). |
+| 46 | `frame_too_large` | length do frame excede o máximo negociado / 16 MiB (Fase 8). |
+| 47 | `connection_closed` | A conexão de rede foi fechada pelo peer ou pelo transporte (Fase 8). |
+| 48 | `operation_not_found` | Operação de domínio não registrada (Fase 9). |
+| 49 | `incompatible_module` | Manifesto/módulo incompatível com o runtime ou a allowlist (Fase 9). |
+| 50 | `incompatible_protocol_version` | Major de protocolo incompatível na negociação Hello (Fase 10E). |
+| 51 | `facade_not_found` | Facade ausente no catálogo (Fase 11). |
+| 52 | `facade_method_not_found` | Método invocado não pertence à facade do handle (Fase 11). |
+| 53 | `incompatible_facade_version` | Versão de facade incompatível na negociação/lookup (Fase 11). |
+| 54 | `invalid_edge` | Campo/membro não forma aresta tipada válida (Fase 12). |
+| 55 | `edge_target_not_found` | Alvo da aresta ausente sob o Snapshot (ref órfã; Fase 12). |
+| 56 | `graph_limit_exceeded` | Travessia excedeu profundidade/máximo de vértices (Fase 12). |
+| 57 | `graph_cycle` | Ciclo detectado onde a topologia não permite (Fase 12). |
+| 58 | `replica_read_only` | Escrita/begin/GC em follower read-only (Fase 14). |
+| 59 | `replication_gap` | Pedido de LSN abaixo da retenção / gap no stream (Fase 14). |
+| 60 | `timeline_mismatch` | timeline_id diverge entre primary e follower (Fase 14). |
+| 61 | `database_uuid_mismatch` | DatabaseUuid diverge entre primary e follower (Fase 14). |
+| 62 | `bootstrap_required` | Follower precisa de novo bootstrap (Fase 14). |
+| 63 | `invalid_instance_config` | Combinação inválida de papel/parâmetro de instância (Fase 15). |
+| 64 | `data_files_disabled` | Operação exige arquivo de dados; primary está em wal_only (Fase 15). |
+| 65 | `no_data_replica` | Commit wal_only exige réplica de dados e nenhuma está disponível (Fase 15). |
+| 66 | `commit_await_replica_timeout` | Timeout aguardando ACK de réplica de dados (Fase 15). |
+| 67 | `invalid_replica_state` | Transição ou estado de catch-up inválido para a réplica (Fase 16). |
+| 68 | `replica_download_failed` | Falha ao baixar/spoolar segmentos WAL para catch-up (Fase 16). |
+| 69 | `manifest_hash_mismatch` | Manifesto ou segmento WAL não bate com o hash/tamanho declarado (Fase 16). |
+| 70 | `conflict` | A operação é válida, mas conflita com o estado atual (regra de negócio de uma stored procedure: ex. exemplar já emprestado). Servidor de aplicação, S3. |
+| 71 | `internal_error` | Falha interna de uma stored procedure (exceção): a transação foi desfeita. |
+| 72 | `operation_timeout` | A stored procedure passou do tempo máximo configurado: a transação foi desfeita. |
+| 73 | `unauthenticated` | O cliente não se autenticou, ou a credencial foi recusada (proxy, ADR-028). |
+| 74 | `permission_denied` | O cliente autenticado não pode fazer o que pediu (política do proxy, ADR-028). |

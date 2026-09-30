@@ -4,7 +4,7 @@ O que é preciso para reescrever uma aplicação React + Node usando o Ring0 com
 backend, acessado através do `modb-proxy` (2026-09-30).
 
 - **Ring0 / moDb:** https://github.com/sergioleal/moDb, tag
-  [`v0.1.1`](https://github.com/sergioleal/moDb/releases/tag/v0.1.1) (protocolo
+  [`v0.1.2`](https://github.com/sergioleal/moDb/releases/tag/v0.1.2) (protocolo
   minor 2), com o **SDK binário para Linux x86_64** anexado à release.
 - **biblioteca (exemplo):** https://github.com/sergioleal/biblioteca0, commit
   [`7178285`](https://github.com/sergioleal/biblioteca0/tree/71782858f75a311971b9897f80bef3bfce7c0a3c).
@@ -36,13 +36,13 @@ servidor (ADR-025). O Node só chama procs pelo nome.
 
 | Passo | Documento (no pacote) | Código (no remoto) | Para quê |
 |---|---|---|---|
-| 0 | `00-sdk/SDK.md` | [`examples/sdk_app/`](https://github.com/sergioleal/moDb/tree/v0.1.1/examples/sdk_app) | Baixar o SDK da release, compilar o servidor da aplicação só com o próprio módulo e subir engine + proxy com token. **Comece por aqui.** |
-| 1 | `01-protocolo-cliente/PROTOCOLO_CLIENTES.md` | [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/include/modb/error.hpp) | Especificação byte a byte do cliente: frame, `Hello`, `Authenticate`, `OpCall`/`OpResult`, `Value`, códigos de erro. **É o que o cliente Node precisa implementar.** |
-| 2 | — | [`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.1/clients/python/modb_client.py) | Cliente de referência em Python (só biblioteca padrão), para portar para Node (`net` + `Buffer`). |
-| 3 | `03-procs/ADR-025-…md` | [`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/include/modb/server/module.hpp), [`examples/server_procs/`](https://github.com/sergioleal/moDb/tree/v0.1.1/examples/server_procs), [`cmake/ModbServer.cmake`](https://github.com/sergioleal/moDb/blob/v0.1.1/cmake/ModbServer.cmake) | Como escrever um módulo de procs (`ModuleBuilder`, `Context`, `ops::Args`, erros de regra). O `notas-server` é o modelo mínimo. |
-| 4 | `04-operacao/OPERACAO.md` | [`examples/server_procs/deploy/`](https://github.com/sergioleal/moDb/tree/v0.1.1/examples/server_procs/deploy) | Subir engine + proxy: configuração, `--local`, tokens (`modb-proxy hash-token`), unidades systemd, sonda (`modb ping`). Leia as seções "Servidor de aplicação" e "Proxy de acesso remoto". |
-| 5 | `05-proxy/ADR-028-…md`, `05-proxy/networking-protocol.md` (§2.7) | [`include/modb/proxy/`](https://github.com/sergioleal/moDb/tree/v0.1.1/include/modb/proxy), [`apps/modb_proxy/main.cpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/apps/modb_proxy/main.cpp) | Como o proxy funciona e as políticas prontas: token, allowlist de procs, `read_only`, rate limit, auditoria. |
-| 6 | `06-concorrencia-erros/ADR-027-…md` | [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/include/modb/error.hpp) | Semântica das escritas concorrentes e a tabela de `ErrorCode` (os números do `OpResult`). |
+| 0 | `00-sdk/SDK.md` | [`examples/sdk_app/`](https://github.com/sergioleal/moDb/tree/v0.1.2/examples/sdk_app) | Baixar o SDK da release, compilar o servidor da aplicação só com o próprio módulo e subir engine + proxy com token. **Comece por aqui.** |
+| 1 | `01-protocolo-cliente/PROTOCOLO_CLIENTES.md` | [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/include/modb/error.hpp) | Especificação byte a byte do cliente: frame, `Hello`, `Authenticate`, `OpCall`/`OpResult`, `Value`, códigos de erro. **É o que o cliente Node precisa implementar.** |
+| 2 | — | [`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.2/clients/python/modb_client.py) | Cliente de referência em Python (só biblioteca padrão), para portar para Node (`net` + `Buffer`). |
+| 3 | `03-procs/ADR-025-…md` | [`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/include/modb/server/module.hpp), [`examples/server_procs/`](https://github.com/sergioleal/moDb/tree/v0.1.2/examples/server_procs), [`cmake/ModbServer.cmake`](https://github.com/sergioleal/moDb/blob/v0.1.2/cmake/ModbServer.cmake) | Como escrever um módulo de procs (`ModuleBuilder`, `Context`, `ops::Args`, erros de regra). O `notas-server` é o modelo mínimo. |
+| 4 | `04-operacao/OPERACAO.md` | [`examples/server_procs/deploy/`](https://github.com/sergioleal/moDb/tree/v0.1.2/examples/server_procs/deploy) | Subir engine + proxy: configuração, `--local`, tokens (`modb-proxy hash-token`), unidades systemd, sonda (`modb ping`). Leia as seções "Servidor de aplicação" e "Proxy de acesso remoto". |
+| 5 | `05-proxy/ADR-028-…md`, `05-proxy/networking-protocol.md` (§2.7) | [`include/modb/proxy/`](https://github.com/sergioleal/moDb/tree/v0.1.2/include/modb/proxy), [`apps/modb_proxy/main.cpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/apps/modb_proxy/main.cpp) | Como o proxy funciona e as políticas prontas: token, allowlist de procs, `read_only`, rate limit, auditoria. |
+| 6 | `06-concorrencia-erros/ADR-027-…md` | [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/include/modb/error.hpp) | Semântica das escritas concorrentes e a tabela de `ErrorCode` (os números do `OpResult`). |
 | 7 | `07-exemplo-biblioteca/README.md` | [`modulo/biblioteca_procs.cpp`](https://github.com/sergioleal/biblioteca0/blob/71782858f75a311971b9897f80bef3bfce7c0a3c/modulo/biblioteca_procs.cpp), [`servidor/`](https://github.com/sergioleal/biblioteca0/tree/71782858f75a311971b9897f80bef3bfce7c0a3c/servidor), [`web/gateway.cpp`](https://github.com/sergioleal/biblioteca0/blob/71782858f75a311971b9897f80bef3bfce7c0a3c/web/gateway.cpp) | O caso real mais próximo: 31 procs, o servidor gerado por `modb_add_server` e o gateway web (rota → proc, pool de conexões). |
 
 ## Estado atual: o que existe e o que falta
@@ -77,6 +77,26 @@ Falta:
   `unauthenticated` (73) → 401, `permission_denied` (74) → 403,
   `operation_timeout` (72) → 504, `internal_error` (71) → 500, servidor
   indisponível → 503.
+- **Números de erro:** use a tabela do `PROTOCOLO_CLIENTES.md` §3 (e o
+  Apêndice A). Desde a `v0.1.2` os números são estáveis: código novo só entra
+  no fim, nenhum é renumerado.
+
+## O que a `v0.1.2` acrescenta
+
+Nada muda no protocolo nem no formato do arquivo: quem já usa a `v0.1.1`
+continua funcionando.
+
+- **Configuração da aplicação no `.conf`.** O módulo declara
+  `.setting(nome, padrão, descrição, validador)`, o servidor lê
+  `<módulo>.<nome>` do `.conf` ou `--<módulo>.<nome>` e valida na subida, e a
+  proc lê com `c.setting(nome)`. Substitui variáveis de ambiente
+  (`04-operacao/OPERACAO.md`, "Configurações dos módulos").
+- **Parada limpa sem sinal.** `--stop-on-stdin-eof on` no servidor e no proxy:
+  um supervisor em Node para com `child.stdin.end()` em vez de `kill()`, que
+  no Windows é à força (`OPERACAO.md`, "Windows").
+- **Faixa e prefixo pelo índice nas procs.** `c.range<T>(campo, de, ate)` e
+  `c.prefix<T>(campo, texto)` substituem a varredura com `c.all<T>()` para
+  buscas por prefixo e por faixa.
 
 ## Limites do servidor
 

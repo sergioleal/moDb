@@ -1,6 +1,6 @@
 # Operação — backup, restauração, supervisor e diagnóstico
 
-Fase **10F**. Complementa [OPERACAO_MODULOS.md](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/OPERACAO_MODULOS.md) (falhas do
+Fase **10F**. Complementa [OPERACAO_MODULOS.md](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/OPERACAO_MODULOS.md) (falhas do
 runtime de módulos) com o ciclo operacional do arquivo.
 
 ## Papéis dos arquivos
@@ -44,7 +44,7 @@ if (Test-Path shop.modb.wal) { Copy-Item shop.modb.wal backup\2026-07-19\ }
 Não faça backup “a quente” sem coordenação: páginas e WAL podem divergir.
 
 **O WAL não é opcional no backup.** Com o checkpoint preguiçoso
-([ADR-022](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/decisions/ADR-022-menos-fsync-por-commit.md)), o arquivo de dados só
+([ADR-022](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/decisions/ADR-022-menos-fsync-por-commit.md)), o arquivo de dados só
 fica completo num checkpoint: a cada `checkpoint_interval` commits (padrão 64)
 e no fechamento limpo do banco. Depois de uma queda, ou com o processo ainda
 aberto, os últimos commits podem estar só no WAL. Copiar o par cobre os dois
@@ -110,7 +110,7 @@ operado como qualquer serviço.
 
 `--config ARQUIVO` lê linhas `chave = valor` (`#` comenta); as flags valem mais
 que o arquivo, em qualquer ordem. Caminhos relativos no arquivo são relativos à
-pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/deploy/notas-server.conf).
+pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`](https://github.com/sergioleal/moDb/blob/v0.1.2/examples/server_procs/deploy/notas-server.conf).
 
 | Chave / flag | Padrão | Efeito |
 |---|---|---|
@@ -125,6 +125,31 @@ pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`]
 | `idle_timeout_ms` / `--idle-timeout-ms` | `30000` | fecha conexões ociosas |
 | `proc_timeout_ms` / `--proc-timeout-ms` | `0` (sem limite) | chamada que passar disso falha com `operation_timeout` e é desfeita |
 | `log` / `--log` | stderr | log de chamadas: arquivo (acrescenta), vazio = stderr, `off` = nenhum |
+| `stop_on_stdin_eof` / `--stop-on-stdin-eof` | `off` | `on`: para limpo quando a entrada padrão fecha (ver "Parada") |
+| `<módulo>.<nome>` / `--<módulo>.<nome>` | o do módulo | configuração declarada por um módulo (ver abaixo) |
+
+### Configurações dos módulos
+
+Um módulo declara as configurações da aplicação que usa
+(`ModuleBuilder::setting(nome, padrão, descrição, validador)`), e elas entram no
+mesmo arquivo e nas mesmas flags, com o id do módulo na frente:
+
+```ini
+# notas-server.conf
+notas.max_texto = 500
+```
+
+```bash
+notas-server --db notas.modb --notas.max-texto 500   # '-' ou '_' no nome
+```
+
+- A proc lê o valor com `c.setting("max_texto")` (texto; o módulo converte).
+- O valor é validado na subida, antes de abrir o banco: um valor recusado ou uma
+  chave `<módulo>.<nome>` que o módulo não declarou impede o servidor de subir.
+- `--help` lista as configurações de cada módulo com o padrão; a proc
+  `sys.settings` devolve módulo, nome, padrão e descrição, mas **não** o valor
+  em uso. Mesmo assim, não use configuração de módulo para segredo: ela fica
+  no `.conf` e na linha de comando.
 
 O tempo limite é cooperativo: o `Context` confere o prazo a cada acesso ao banco
 (`read`, consultas, `find`, `create`, `update`, `set`, `remove`) e, ao fim, o
@@ -149,13 +174,43 @@ procs (`c.log()`) vão para o mesmo destino, como `info`/`warn`/`error`.
 
 `SIGINT`/`SIGTERM` (Ctrl+C; `SIGBREAK` no Windows) chamam `request_stop`: o
 servidor para de aceitar, fecha as sessões abertas (inclusive clientes ociosos),
-termina a chamada em curso, imprime `stopped` e sai com 0. Um crash ou
-`kill -9` não perde nada confirmado: na próxima abertura o WAL recupera (coberto
-por `modb.server_host`, que mata o processo à força e reabre o mesmo banco).
+termina a chamada em curso, faz o fechamento limpo do banco (checkpoint),
+imprime `stopped` e sai com 0. Um crash ou `kill -9` não perde nada confirmado:
+na próxima abertura o WAL recupera (coberto por `modb.server_host`, que mata o
+processo à força e reabre o mesmo banco), mas toda parada à força vira uma
+recuperação.
+
+Com `--stop-on-stdin-eof on`, fechar a entrada padrão faz a mesma parada limpa.
+É o caminho para um supervisor que não manda sinais: abra o processo com um pipe
+na entrada e feche o pipe para parar. Vale também para o `modb-proxy`. Fica
+desligado por padrão porque um serviço com a entrada em `/dev/null` (o padrão
+do systemd) receberia o fim da entrada logo na subida e pararia. Coberto por
+`modb.stdin_eof`.
+
+### Windows
+
+O que para limpo e o que não para:
+
+| Como | Parada |
+|---|---|
+| NSSM (abaixo), que para o serviço com Ctrl+C | limpa |
+| Ctrl+C ou Ctrl+Break no console do processo | limpa |
+| fechar a entrada padrão, com `--stop-on-stdin-eof on` | limpa |
+| `TerminateProcess`, `Stop-Process`, `taskkill /F`, `child.kill()` do Node | **à força**: o Windows não entrega sinal a outro processo; nada confirmado se perde, mas a próxima abertura recupera pelo WAL |
+
+Um supervisor em Node, por exemplo, abre o servidor com
+`spawn(exe, [..., "--stop-on-stdin-eof", "on"], {stdio: ["pipe", "pipe", "inherit"]})`
+e para com `child.stdin.end()`.
+
+**Socket local (`local = ...`).** Na máquina de desenvolvimento, `connect` num
+socket AF_UNIX sob `%LOCALAPPDATA%` falhou com `WSAEINVAL` (ADR-028). Isso
+inclui o `%TEMP%` padrão, que fica dentro de `%LOCALAPPDATA%`. Ponha o socket
+numa pasta fora dele (a do projeto ou a do serviço), com acesso restrito à
+conta do serviço.
 
 ### Como serviço — Linux (systemd)
 
-Unidade de exemplo: [`examples/server_procs/deploy/notas-server.service`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/deploy/notas-server.service)
+Unidade de exemplo: [`examples/server_procs/deploy/notas-server.service`](https://github.com/sergioleal/moDb/blob/v0.1.2/examples/server_procs/deploy/notas-server.service)
 (`Restart=on-failure`, `KillSignal=SIGTERM`).
 
 ```bash
@@ -203,8 +258,8 @@ engine por um link em que as sessões de todos os clientes são multiplexadas. O
 protocolo dos clientes não muda: um cliente que falava com o servidor fala com o
 proxy do mesmo jeito (mais o token, se o proxy pedir).
 
-Exemplos: [`notas-proxy.conf`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/deploy/notas-proxy.conf)
-e [`notas-proxy.service`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/deploy/notas-proxy.service).
+Exemplos: [`notas-proxy.conf`](https://github.com/sergioleal/moDb/blob/v0.1.2/examples/server_procs/deploy/notas-proxy.conf)
+e [`notas-proxy.service`](https://github.com/sergioleal/moDb/blob/v0.1.2/examples/server_procs/deploy/notas-proxy.service).
 
 | Chave / flag | Padrão | Efeito |
 |---|---|---|
@@ -218,6 +273,7 @@ e [`notas-proxy.service`](https://github.com/sergioleal/moDb/blob/v0.1.1/example
 | `max_streams_per_principal` | `0` | streams abertos por principal |
 | `audit` / `--audit` | off | uma linha por pedido: arquivo ou `stderr` |
 | `idle_timeout_ms`, `compression`, `stream_credit`, `reconnect_max_ms` | | como no servidor; crédito = frames a caminho por stream |
+| `stop_on_stdin_eof` / `--stop-on-stdin-eof` | `off` | `on`: para limpo quando a entrada padrão fecha, como no servidor |
 
 Tokens:
 
@@ -248,5 +304,5 @@ clientes daquele momento recebem a conexão fechada (reconectam).
 ## Relacionados
 
 - Transações / crash: `modb demo tx`, `modb tx crash`, `modb tx wal-info`
-- API: [API_PUBLICA.md](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/API_PUBLICA.md)
-- Formato: [FORMATO_DE_ARQUIVO.md](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/FORMATO_DE_ARQUIVO.md)
+- API: [API_PUBLICA.md](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/API_PUBLICA.md)
+- Formato: [FORMATO_DE_ARQUIVO.md](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/FORMATO_DE_ARQUIVO.md)

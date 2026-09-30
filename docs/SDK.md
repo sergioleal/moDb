@@ -16,8 +16,9 @@ Cada release é uma tag do repositório, com o SDK anexado:
 
 | Tag | Protocolo | Conteúdo |
 |---|---|---|
+| [`v0.1.2`](https://github.com/sergioleal/moDb/releases/tag/v0.1.2) | major 1, minor 2 | SDK Linux x86_64; configurações de módulo, `--stop-on-stdin-eof`, `Context::range`/`prefix`, `ErrorCode` estável |
 | [`v0.1.1`](https://github.com/sergioleal/moDb/releases/tag/v0.1.1) | major 1, minor 2 (proxy e autenticação por token) | SDK Linux x86_64 |
-| `v0.1.0` | major 1, minor 2 | só o código-fonte, sem SDK anexado (use a `v0.1.1`) |
+| `v0.1.0` | major 1, minor 2 | só o código-fonte, sem SDK anexado (use uma mais nova) |
 
 Os links para o código nesta documentação apontam para a tag, e não para
 `master`: o que está na tag é o que foi compilado no SDK.
@@ -35,13 +36,13 @@ sistema: `python3 -m venv ~/.venvs/cmake && ~/.venvs/cmake/bin/pip install "cmak
 ## 1. Baixar
 
 ```bash
-curl -LO https://github.com/sergioleal/moDb/releases/download/v0.1.1/modb-sdk-0.1.1-linux-x86_64.tar.gz
-curl -LO https://github.com/sergioleal/moDb/releases/download/v0.1.1/modb-sdk-0.1.1-linux-x86_64.tar.gz.sha256
-sha256sum -c modb-sdk-0.1.1-linux-x86_64.tar.gz.sha256
-sudo tar -C /opt -xzf modb-sdk-0.1.1-linux-x86_64.tar.gz
+curl -LO https://github.com/sergioleal/moDb/releases/download/v0.1.2/modb-sdk-0.1.2-linux-x86_64.tar.gz
+curl -LO https://github.com/sergioleal/moDb/releases/download/v0.1.2/modb-sdk-0.1.2-linux-x86_64.tar.gz.sha256
+sha256sum -c modb-sdk-0.1.2-linux-x86_64.tar.gz.sha256
+sudo tar -C /opt -xzf modb-sdk-0.1.2-linux-x86_64.tar.gz
 ```
 
-Conteúdo, em `/opt/modb-sdk-0.1.1-linux-x86_64`:
+Conteúdo, em `/opt/modb-sdk-0.1.2-linux-x86_64`:
 
 ```text
 bin/modb, bin/modb-proxy
@@ -55,7 +56,7 @@ share/modb/SDK.md                este guia
 
 ## 2. Compilar o servidor da aplicação
 
-O exemplo [`examples/sdk_app/CMakeLists.txt`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/sdk_app/CMakeLists.txt)
+O exemplo [`examples/sdk_app/CMakeLists.txt`](https://github.com/sergioleal/moDb/blob/v0.1.2/examples/sdk_app/CMakeLists.txt)
 é o modelo:
 
 ```cmake
@@ -72,18 +73,18 @@ modb_add_server(minha-app-server MODULES minha_app_procs)
 
 O módulo define `modb::server::Module modb_module_minha_app_procs()`: o nome do
 alvo da biblioteca, com `-` e `.` trocados por `_`. Como escrever as procs:
-[`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/include/modb/server/module.hpp)
-e o exemplo [`examples/server_procs/notas_procs.cpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/notas_procs.cpp).
+[`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/include/modb/server/module.hpp)
+e o exemplo [`examples/server_procs/notas_procs.cpp`](https://github.com/sergioleal/moDb/blob/v0.1.2/examples/server_procs/notas_procs.cpp).
 
 Configuração da aplicação (prefixos, códigos, limites) não vai em variável de
 ambiente: o módulo declara com `.setting(nome, padrão, descrição, validador)`, o
 servidor lê `<módulo>.<nome>` do `.conf` ou de `--<módulo>.<nome>`, valida na
 subida, e a proc lê com `c.setting(nome)`
-([`OPERACAO.md`](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/OPERACAO.md), "Configurações dos módulos").
+([`OPERACAO.md`](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/OPERACAO.md), "Configurações dos módulos").
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_PREFIX_PATH=/opt/modb-sdk-0.1.1-linux-x86_64
+      -DCMAKE_PREFIX_PATH=/opt/modb-sdk-0.1.2-linux-x86_64
 cmake --build build
 ```
 
@@ -91,9 +92,9 @@ Para testar o SDK antes de escrever o seu módulo, compile o exemplo que vem
 dentro dele:
 
 ```bash
-cp -r /opt/modb-sdk-0.1.1-linux-x86_64/share/modb/examples ~/modb-exemplo
+cp -r /opt/modb-sdk-0.1.2-linux-x86_64/share/modb/examples ~/modb-exemplo
 cmake -S ~/modb-exemplo/sdk_app -B ~/modb-exemplo/build -G Ninja \
-      -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/modb-sdk-0.1.1-linux-x86_64
+      -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/modb-sdk-0.1.2-linux-x86_64
 cmake --build ~/modb-exemplo/build      # gera ~/modb-exemplo/build/notas-server
 ```
 
@@ -103,7 +104,7 @@ O engine escuta só num socket local; os clientes falam com o `modb-proxy`
 (ADR-028). O segredo do link é o mesmo arquivo nos dois lados.
 
 ```bash
-SDK=/opt/modb-sdk-0.1.1-linux-x86_64
+SDK=/opt/modb-sdk-0.1.2-linux-x86_64
 openssl rand -hex 32 > link.secret
 chmod 600 link.secret
 
@@ -121,16 +122,16 @@ $SDK/bin/modb ping 127.0.0.1 7474 ""     # sonda: responde enquanto o proxy tem 
 Cada processo imprime `READY <porta>` quando está pronto. O engine imprime
 `READY 0` porque não tem TCP. Configuração por arquivo, systemd, políticas
 (`read_only`, allowlist, limites) e auditoria:
-[`docs/OPERACAO.md`](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/OPERACAO.md)
-e [`examples/server_procs/deploy/`](https://github.com/sergioleal/moDb/tree/v0.1.1/examples/server_procs/deploy).
+[`docs/OPERACAO.md`](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/OPERACAO.md)
+e [`examples/server_procs/deploy/`](https://github.com/sergioleal/moDb/tree/v0.1.2/examples/server_procs/deploy).
 
 ## 4. Clientes
 
 O cliente conecta no proxy (`127.0.0.1:7474` acima) e se autentica com o
 token. O protocolo está em
-[`docs/PROTOCOLO_CLIENTES.md`](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/PROTOCOLO_CLIENTES.md);
+[`docs/PROTOCOLO_CLIENTES.md`](https://github.com/sergioleal/moDb/blob/v0.1.2/docs/PROTOCOLO_CLIENTES.md);
 a implementação de referência em Python é
-[`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.1/clients/python/modb_client.py):
+[`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.2/clients/python/modb_client.py):
 
 ```python
 from modb_client import Client
@@ -153,10 +154,10 @@ Um cliente C++ usa `modb::app_client` do próprio SDK
 ## Gerar o SDK (mantenedores)
 
 A release sai sozinha: um push de tag `v<versão>` dispara o workflow
-[`release-sdk`](https://github.com/sergioleal/moDb/blob/v0.1.1/.github/workflows/release-sdk.yml).
+[`release-sdk`](https://github.com/sergioleal/moDb/blob/v0.1.2/.github/workflows/release-sdk.yml).
 Ele confere se a tag bate com o `project(VERSION)` do `CMakeLists.txt`, gera o
 SDK no Ubuntu 24.04, testa o tarball como quem o usa
-([`scripts/sdk-smoke.sh`](https://github.com/sergioleal/moDb/blob/v0.1.1/scripts/sdk-smoke.sh))
+([`scripts/sdk-smoke.sh`](https://github.com/sergioleal/moDb/blob/v0.1.2/scripts/sdk-smoke.sh))
 e publica a release com o `.tar.gz` e o `.sha256`.
 
 ```bash
@@ -168,5 +169,5 @@ Localmente, num Linux ou no WSL com CMake ≥ 3.30 no PATH:
 
 ```bash
 scripts/package-sdk.sh                                        # gera dist/modb-sdk-<versão>-linux-x86_64.tar.gz e o .sha256
-scripts/sdk-smoke.sh dist/modb-sdk-0.1.1-linux-x86_64.tar.gz  # o mesmo teste da release
+scripts/sdk-smoke.sh dist/modb-sdk-0.1.2-linux-x86_64.tar.gz  # o mesmo teste da release
 ```
