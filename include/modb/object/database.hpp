@@ -958,6 +958,25 @@ public:
         return store_.index_equal(bound->binding.type_name(), field.value, key);
     }
 
+    // Faixa `[lo, hi]` no índice B+ do campo, na ordem das chaves (inteiros por
+    // valor, texto por bytes). Exige índice; não faz fallback para scan.
+    template <typename T>
+    [[nodiscard]] Result<std::vector<ObjectId>> indexed_object_ids_between(
+        FieldId field, const AttributeValue& lo, const AttributeValue& hi) const {
+        const auto read_lock = read_guard();
+        if (auto usable = check_usable(); !usable) {
+            return std::unexpected(usable.error());
+        }
+        const BoundType* bound = bound_for(type_key<T>());
+        if (bound == nullptr) {
+            return std::unexpected(Error{ErrorCode::type_not_found, "type is not bound"});
+        }
+        if (!store_.has_index(bound->binding.type_name(), field.value)) {
+            return std::unexpected(Error{ErrorCode::invalid_argument, "range requires an index on the field"});
+        }
+        return store_.index_range(bound->binding.type_name(), field.value, lo, hi);
+    }
+
     [[nodiscard]] Result<TypeDefinitionId> define_type(Transaction& tx,
                                                         TypeDefinition definition);
 

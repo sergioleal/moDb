@@ -86,6 +86,11 @@ public:
     }
 
     [[nodiscard]] bool writable() const noexcept { return context_->writable(); }
+    // O banco inteiro, para o que o Context não cobre (ex.: `blobs()`).
+    // Cuidado: `database().query<T>()` e as leituras diretas NÃO usam o snapshot
+    // da chamada. Numa proc de leitura, elas veem commits de outras chamadas que
+    // acontecem enquanto a proc roda; use `read`, `where`, `find`, `range` e
+    // `prefix`, que leem na época da chamada.
     [[nodiscard]] object::Database& database() noexcept { return context_->objects().database(); }
     [[nodiscard]] ops::Logger& log() noexcept { return context_->logger(); }
     // Quem chamou: o principal, as roles e os atributos que o proxy deu na
@@ -172,6 +177,54 @@ public:
             ids.push_back(*id);
         }
         return ids;
+    }
+
+    // Ids com `lo <= field <= hi`, pelo índice e na época da chamada, como o
+    // `find`. A ordem é a das chaves do índice: inteiros pelo valor, texto pelos
+    // bytes (UTF-8, sem acento nem maiúscula normalizados). Exige índice no
+    // campo (ModuleBuilder::index): sem ele, `invalid_argument`, e não uma
+    // varredura escondida.
+    template <typename T>
+    [[nodiscard]] Result<std::vector<object::ObjectId>> range(object::FieldId field, object::AttributeValue lo,
+                                                              object::AttributeValue hi) {
+        if (auto ok = in_time(); !ok) {
+            return std::unexpected(ok.error());
+        }
+        if (writable()) {
+            // Na transação: o índice corrente, que inclui o que esta chamada já escreveu.
+            return database().indexed_object_ids_between<T>(field, lo, hi);
+        }
+        if (!database().has_index_for<T>(field)) {
+            return std::unexpected(Error{ErrorCode::invalid_argument, "range requires an index on the field"});
+        }
+        // Proc de leitura: pelo índice, mas na época do snapshot da chamada.
+        std::vector<object::ObjectId> ids;
+        for (auto& row : open_query<T>().between(field, std::move(lo), std::move(hi)).select({object::FieldId{0}}).stream()) {
+            if (auto ok = in_time(); !ok) {
+                return std::unexpected(ok.error());
+            }
+            if (!row) {
+                return std::unexpected(row.error());
+            }
+            const auto id_field = row->get(object::FieldId{0});
+            auto id = id_field ? id_field->as_ref() : Result<object::ObjectId>{std::unexpected(Error{ErrorCode::field_not_found, "query row without id"})};
+            if (!id) {
+                return std::unexpected(id.error());
+            }
+            ids.push_back(*id);
+        }
+        return ids;
+    }
+
+    // Ids cujo campo de texto começa com `prefix` (vazio = todos), pelo índice.
+    // É a faixa [prefix, prefix + 0xFF]: o índice guarda texto em bytes crus, e
+    // nenhum byte de UTF-8 válido é 0xFF. Comparação exata de bytes: "Lago" não
+    // acha "lago-sul"; normalize o texto ao gravar se a busca não distingue.
+    template <typename T>
+    [[nodiscard]] Result<std::vector<object::ObjectId>> prefix(object::FieldId field, std::string prefix) {
+        std::string hi = prefix;
+        hi.push_back('\xFF');
+        return range<T>(field, object::AttributeValue{std::move(prefix)}, object::AttributeValue{std::move(hi)});
     }
 
     // --- escrita (só em procs Mode::read_write) ---

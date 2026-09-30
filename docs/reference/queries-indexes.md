@@ -246,7 +246,36 @@ Result<void> remove(std::span<const std::byte> key, std::uint64_t object_id);
 - B+ tree keys are value bytes + a trailing `ObjectId` — duplicate field
   values are always representable and stably ordered.
 
+### 3.10 Inside a stored procedure: `Context::find`, `range`, `prefix`
+
+`include/modb/server/module.hpp` — a proc (ADR-025) reads through its
+`server::Context`, which answers at the call's own epoch: the call's
+transaction in a `read_write` proc (including what the call itself already
+wrote), the call's snapshot in a `read_only` proc.
+
+```cpp
+c.find<T>(field, value);           // ids with field == value
+c.range<T>(field, lo, hi);         // ids with lo <= field <= hi (inclusive)
+c.prefix<T>(field, "lago");        // ids whose text starts with "lago"; "" = all
+```
+
+- `range` and `prefix` **require an index** on the field
+  (`ModuleBuilder::index<T>(field)`); without one they fail with
+  `invalid_argument` instead of scanning the table.
+- Order is the index key order: integers by value, text by raw UTF-8 bytes.
+  `prefix(field, p)` is `range(field, p, p + "\xFF")`: no valid UTF-8 byte is
+  `0xFF`. Matching is byte-exact — `"la"` does not find `"lá"`, `"Lago"` does
+  not find `"lago-sul"` — so store a normalized copy of the text if the search
+  should ignore case or accents.
+
+Covered by `modb.proc_range` (`tests/proc_range_test.cpp`).
+
 ## 5. Common Pitfalls
+
+- **Querying `c.database()` directly in a read-only proc.**
+  `c.database().query<T>()` and direct reads do not use the call's snapshot:
+  they see commits from other calls that land while the proc runs. Use the
+  `Context` methods (`read`, `where`, `find`, `range`, `prefix`).
 
 - **Assuming every query is O(1) memory.** `order_by`/`distinct_by` (and
   `top_k`/auto-selected Top-K) all materialize some or all of the input

@@ -731,6 +731,10 @@ if(BUILD_TESTING)
             MODB_PROXY_EXE="$<TARGET_FILE:modb_proxy_cli>")
         add_dependencies(modb_server_host_tests notas-server modb_cli modb_proxy_cli)
         add_test(NAME modb.server_host COMMAND modb_server_host_tests)
+        # Faixa e prefixo pelo índice nas procs (R4).
+        modb_add_test(modb_proc_range_tests tests/proc_range_test.cpp)
+        target_link_libraries(modb_proc_range_tests PRIVATE modb::app_client modb::server_host)
+        add_test(NAME modb.proc_range COMMAND modb_proc_range_tests)
         # Cliente de referência em Python (ADR-026): TCP e anel, contra o notas-server.
         find_package(Python3 COMPONENTS Interpreter)
         if(Python3_Interpreter_FOUND)
