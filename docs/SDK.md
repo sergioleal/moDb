@@ -145,9 +145,21 @@ Um cliente C++ usa `modb::app_client` do próprio SDK
 
 ## Gerar o SDK (mantenedores)
 
+A release sai sozinha: um push de tag `v<versão>` dispara o workflow
+[`release-sdk`](https://github.com/sergioleal/moDb/blob/v0.1.0/.github/workflows/release-sdk.yml).
+Ele confere se a tag bate com o `project(VERSION)` do `CMakeLists.txt`, gera o
+SDK no Ubuntu 24.04, testa o tarball como quem o usa
+([`scripts/sdk-smoke.sh`](https://github.com/sergioleal/moDb/blob/v0.1.0/scripts/sdk-smoke.sh))
+e publica a release com o `.tar.gz` e o `.sha256`.
+
 ```bash
-scripts/package-sdk.sh            # Linux ou WSL, CMake ≥ 3.30 no PATH
+# nova versão: suba o VERSION no CMakeLists.txt, commit, e então
+git tag -a v0.2.0 -m "Ring0 v0.2.0" && git push origin v0.2.0
 ```
 
-Saída: `dist/modb-sdk-<versão>-linux-x86_64.tar.gz` e o `.sha256`. A versão
-vem do `project(VERSION)` do `CMakeLists.txt`, e a tag é `v<versão>`.
+Localmente, num Linux ou no WSL com CMake ≥ 3.30 no PATH:
+
+```bash
+scripts/package-sdk.sh                                        # gera dist/modb-sdk-<versão>-linux-x86_64.tar.gz e o .sha256
+scripts/sdk-smoke.sh dist/modb-sdk-0.1.0-linux-x86_64.tar.gz  # o mesmo teste da release
+```

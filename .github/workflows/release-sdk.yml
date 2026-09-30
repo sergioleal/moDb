@@ -1,0 +1,54 @@
+# Release do SDK binário (docs/SDK.md): cada tag v<versão> compila o SDK para
+# Linux x86_64, testa o tarball como quem o usa e publica a release com ele.
+name: release-sdk
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  sdk-linux-x86_64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ferramentas
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          python3 -m venv "$RUNNER_TEMP/tools"
+          "$RUNNER_TEMP/tools/bin/pip" install "cmake>=3.30"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+      - name: Versões
+        run: |
+          cmake --version
+          g++ --version
+
+      - name: Tag e versão do CMake conferem
+        run: |
+          version="$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt | head -1)"
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME, CMakeLists $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Gerar o SDK
+        run: bash scripts/package-sdk.sh "$RUNNER_TEMP/sdk-build"
+
+      - name: Testar o SDK
+        run: bash scripts/sdk-smoke.sh "dist/modb-sdk-$VERSION-linux-x86_64.tar.gz"
+
+      - name: Publicar a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="dist/modb-sdk-$VERSION-linux-x86_64.tar.gz dist/modb-sdk-$VERSION-linux-x86_64.tar.gz.sha256"
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $files --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" $files --title "$GITHUB_REF_NAME" --notes \
+          "SDK binário do Ring0 para Linux x86_64 (protocolo major 1, minor 2: proxy e autenticação por token).
+
+          Guia: https://github.com/sergioleal/moDb/blob/$GITHUB_REF_NAME/docs/SDK.md"
+          fi
