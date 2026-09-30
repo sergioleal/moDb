@@ -20,13 +20,18 @@ export const ErrorCode = {
   permission_denied: 74,
 } as const;
 
-/** Erro devolvido pelo servidor (OpResult/AuthenticateOk com ok = 0). */
+/**
+ * Erro devolvido pelo servidor (OpResult/AuthenticateOk com ok = 0). `detail` (minor 3, ADR-029) é o Value que
+ * a proc mandou com o erro, por convenção `{ reason, field }`; `undefined` se não mandou.
+ */
 export class ModbError extends Error {
   readonly code: number;
-  constructor(code: number, message: string) {
+  readonly detail: unknown;
+  constructor(code: number, message: string, detail?: unknown) {
     super(message);
     this.name = "ModbError";
     this.code = code;
+    this.detail = detail;
   }
 }
 

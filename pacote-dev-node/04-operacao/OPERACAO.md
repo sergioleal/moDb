@@ -1,6 +1,6 @@
 # Operação — backup, restauração, supervisor e diagnóstico
 
-Fase **10F**. Complementa [OPERACAO_MODULOS.md](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/OPERACAO_MODULOS.md) (falhas do
+Fase **10F**. Complementa [OPERACAO_MODULOS.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/OPERACAO_MODULOS.md) (falhas do
 runtime de módulos) com o ciclo operacional do arquivo.
 
 ## Papéis dos arquivos
@@ -44,7 +44,7 @@ if (Test-Path shop.modb.wal) { Copy-Item shop.modb.wal backup\2026-07-19\ }
 Não faça backup “a quente” sem coordenação: páginas e WAL podem divergir.
 
 **O WAL não é opcional no backup.** Com o checkpoint preguiçoso
-([ADR-022](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/decisions/ADR-022-menos-fsync-por-commit.md)), o arquivo de dados só
+([ADR-022](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-022-menos-fsync-por-commit.md)), o arquivo de dados só
 fica completo num checkpoint: a cada `checkpoint_interval` commits (padrão 64)
 e no fechamento limpo do banco. Depois de uma queda, ou com o processo ainda
 aberto, os últimos commits podem estar só no WAL. Copiar o par cobre os dois
@@ -110,7 +110,7 @@ operado como qualquer serviço.
 
 `--config ARQUIVO` lê linhas `chave = valor` (`#` comenta); as flags valem mais
 que o arquivo, em qualquer ordem. Caminhos relativos no arquivo são relativos à
-pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`](https://github.com/sergioleal/moDb/blob/v0.1.3/examples/server_procs/deploy/notas-server.conf).
+pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`](https://github.com/sergioleal/moDb/blob/v0.2.0/examples/server_procs/deploy/notas-server.conf).
 
 | Chave / flag | Padrão | Efeito |
 |---|---|---|
@@ -126,6 +126,7 @@ pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`]
 | `proc_timeout_ms` / `--proc-timeout-ms` | `0` (sem limite) | chamada que passar disso falha com `operation_timeout` e é desfeita |
 | `log` / `--log` | stderr | log de chamadas: arquivo (acrescenta), vazio = stderr, `off` = nenhum |
 | `stop_on_stdin_eof` / `--stop-on-stdin-eof` | `off` | `on`: para limpo quando a entrada padrão fecha (ver "Parada") |
+| `idempotency_retention_s` / `--idempotency-retention-s` | `86400` | quanto tempo uma chave de idempotência vale (ADR-029); `0` desliga as chaves |
 | `<módulo>.<nome>` / `--<módulo>.<nome>` | o do módulo | configuração declarada por um módulo (ver abaixo) |
 
 ### Configurações dos módulos
@@ -163,11 +164,16 @@ Uma linha por chamada, começando pelo instante UTC:
 
 ```
 2026-09-27T16:32:12.754Z call notas.criar write 3.502ms ok
-2026-09-27T16:32:12.759Z call notas.editar write 2.981ms error 70 já existe uma nota com esse texto
+2026-09-27T16:32:12.759Z call notas.editar write 2.981ms error 70 já existe uma nota com esse texto reason texto_repetido
 2026-09-27T16:32:12.749Z call nao.existe - 0.000ms error 48 operation not found: nao.existe
+2026-09-30T14:02:07.310Z call agents.create write 3.120ms ok by registry-web as user:24
+2026-09-30T14:02:07.402Z call agents.create write 0.210ms ok by registry-web as user:24 replayed
 ```
 
-O número depois de `error` é o `ErrorCode` que o cliente recebe. As mensagens das
+O número depois de `error` é o `ErrorCode` que o cliente recebe, e `reason`, o do
+`detail` do erro (ADR-029). `by` é o principal que o proxy autenticou, e `as`, o
+delegado em nome de quem ele falou. `replayed` marca uma chamada com chave de
+idempotência que devolveu o resultado de antes, sem executar de novo. As mensagens das
 procs (`c.log()`) vão para o mesmo destino, como `info`/`warn`/`error`.
 
 ### Parada
@@ -210,7 +216,7 @@ conta do serviço.
 
 ### Como serviço — Linux (systemd)
 
-Unidade de exemplo: [`examples/server_procs/deploy/notas-server.service`](https://github.com/sergioleal/moDb/blob/v0.1.3/examples/server_procs/deploy/notas-server.service)
+Unidade de exemplo: [`examples/server_procs/deploy/notas-server.service`](https://github.com/sergioleal/moDb/blob/v0.2.0/examples/server_procs/deploy/notas-server.service)
 (`Restart=on-failure`, `KillSignal=SIGTERM`).
 
 ```bash
@@ -258,8 +264,8 @@ engine por um link em que as sessões de todos os clientes são multiplexadas. O
 protocolo dos clientes não muda: um cliente que falava com o servidor fala com o
 proxy do mesmo jeito (mais o token, se o proxy pedir).
 
-Exemplos: [`notas-proxy.conf`](https://github.com/sergioleal/moDb/blob/v0.1.3/examples/server_procs/deploy/notas-proxy.conf)
-e [`notas-proxy.service`](https://github.com/sergioleal/moDb/blob/v0.1.3/examples/server_procs/deploy/notas-proxy.service).
+Exemplos: [`notas-proxy.conf`](https://github.com/sergioleal/moDb/blob/v0.2.0/examples/server_procs/deploy/notas-proxy.conf)
+e [`notas-proxy.service`](https://github.com/sergioleal/moDb/blob/v0.2.0/examples/server_procs/deploy/notas-proxy.service).
 
 | Chave / flag | Padrão | Efeito |
 |---|---|---|
@@ -269,8 +275,9 @@ e [`notas-proxy.service`](https://github.com/sergioleal/moDb/blob/v0.1.3/example
 | `tokens` / `--tokens` | — | exige token; linhas `sha256:<hex> principal [roles]` |
 | `policy` / `--policy` | `passthrough` | `read_only`: só procs de leitura, pelo catálogo que o engine manda |
 | `allowlist` / `--allowlist` | — | só o que as regras permitem: `<role\|user:NOME\|*> <call\|query\|facade\|*> <alvo>` |
-| `max_calls_per_second` | `0` | chamadas por segundo por principal (anônimos: por máquina) |
-| `max_streams_per_principal` | `0` | streams abertos por principal |
+| `max_calls_per_second` | `0` | chamadas por segundo por principal (anônimos: por máquina); com delegação, por delegado |
+| `max_streams_per_principal` | `0` | streams abertos por principal; com delegação, por delegado |
+| `max_delegated_calls_per_second` | `0` | soma das chamadas por segundo de todos os delegados de um principal (ADR-029) |
 | `audit` / `--audit` | off | uma linha por pedido: arquivo ou `stderr` |
 | `idle_timeout_ms`, `compression`, `stream_credit`, `reconnect_max_ms` | | como no servidor; crédito = frames a caminho por stream |
 | `stop_on_stdin_eof` / `--stop-on-stdin-eof` | `off` | `on`: para limpo quando a entrada padrão fecha, como no servidor |
@@ -285,11 +292,30 @@ O arquivo guarda só o SHA-256 do token; o token em si vai para o cliente
 (`ConnectionOptions::token`, `Client(..., token=...)` no Python). Ele viaja em
 claro: fora de uma rede confiável, ponha TLS entre cliente e proxy.
 
+**Delegação (ADR-029).** Um gateway web atende muitos usuários com um pool de
+conexões, todas com o mesmo token. Para cada chamada dizer em nome de qual
+usuário ela é, dê ao token do gateway a role `delegate`:
+
+```bash
+modb-proxy hash-token "$(openssl rand -hex 24)" registry-web delegate >> registry-proxy.tokens
+```
+
+Só um principal com `delegate` pode mandar `acting_as`: sem ela, o proxy recusa
+com `permission_denied`, sem ir ao engine. Nenhuma política configurada desliga
+essa regra. O proxy confia no que o gateway diz sobre o usuário, assim como o
+engine confia no principal que o proxy lhe passa. Por isso o token de
+`delegate` vale tanto quanto a credencial de todos os usuários do gateway:
+guarde-o como tal. Os limites de chamadas e de streams passam a valer por
+delegado, e `max_delegated_calls_per_second` limita a soma: um gateway
+comprometido não contorna o limite inventando usuários. A allowlist continua
+decidindo pelo principal e pelas roles dele.
+
 Auditoria (a mesma linha para chamadas, consultas, facades e autenticação):
 
 ```
 audit call notas.criar error 74 0.004ms denied by leitor from 10.0.0.7:51544
 audit query 3 ok 12.803ms objects 1200 by leitor from 10.0.0.7:51544
+audit call agents.create ok 3.410ms by registry-web as user:24 from 10.0.0.9:40112
 ```
 
 Um cliente na mesma máquina do proxy pode pedir o anel de memória compartilhada
@@ -304,5 +330,5 @@ clientes daquele momento recebem a conexão fechada (reconectam).
 ## Relacionados
 
 - Transações / crash: `modb demo tx`, `modb tx crash`, `modb tx wal-info`
-- API: [API_PUBLICA.md](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/API_PUBLICA.md)
-- Formato: [FORMATO_DE_ARQUIVO.md](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/FORMATO_DE_ARQUIVO.md)
+- API: [API_PUBLICA.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/API_PUBLICA.md)
+- Formato: [FORMATO_DE_ARQUIVO.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/FORMATO_DE_ARQUIVO.md)

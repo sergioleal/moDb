@@ -174,6 +174,39 @@ client ──TCP──► modb-proxy ──link (AF_UNIX, multiplexed)──► 
   (`Client::authenticate_token`, `ConnectionOptions::token`). Until then every
   request is answered with `unauthenticated`.
 
+### 2.8 Protocol minor 3: delegation, idempotency keys, error detail (ADR-029)
+
+Optional trailing fields, written only when set and only after minor 3 was
+negotiated, so a minor 2 peer never sees them (it would reject the extra
+bytes). The proxy negotiates `min(client, proxy, engine)`.
+
+- **Delegation.** `OpCall`, `Query`, `FacadeList` and `FacadeOpen` may carry
+  `acting_as` (plus up to 32 attributes): a gateway with a connection pool says
+  on whose behalf each request is. Only a principal with the `delegate` role
+  may send it; the proxy enforces this outside the policy chain and answers
+  `permission_denied` otherwise. The engine refuses it in direct TCP mode.
+  Procs see it as `ops::Caller::acting_as` / `subject()`; rate limits apply per
+  delegate (`max_delegated_calls_per_second` caps the sum per principal); the
+  proxy audit and the engine call log print `by <principal> as <delegate>`.
+- **Idempotency key** (`OpCall` only, 1–128 bytes). In a `read_write` proc the
+  engine looks the key up **inside the call's transaction** and, if the same
+  principal already committed a call with it, returns the stored result
+  without running the proc again; otherwise it runs the proc and stores key and
+  result before the commit. The record is `sys.Idempotency` in the database
+  file, so it survives a crash between commit and reply. Results over 4 KB keep
+  only the key; a repeat then gets `conflict` with
+  `detail.reason = "idempotent_result_too_large"`. Enabled by
+  `OperationRegistry::enable_idempotency` (the `server_host` does it;
+  `idempotency_retention_s`, default 86400).
+- **Error detail.** An error `OpResult` may carry `detail`, a `Value` the proc
+  sent with `server::Context::fail(error, value)`; by convention `reason` and
+  `field`. Sent only to sessions that negotiated minor 3.
+
+C++: `net::CallOptions{.acting_as, .idempotency_key, .error_detail}` on
+`Client::call` / `ServerConnection::call`. Covered by `modb.protocol_minor3`
+(codec) and `modb.minor3_e2e` (through `server_host` and `modb-proxy`, with a
+hand-rolled minor 2 client).
+
 ## 3. API Reference
 
 ### 3.1 `Server`
@@ -298,7 +331,7 @@ doesn't expose.
 
 Handshake, then a streaming query, condensed from
 `examples/server/by_phase/phase_08/connect_query.cpp` and
-`phase_10/handshake_capabilities.cpp`:
+`examples/server/by_phase/phase_10/handshake_capabilities.cpp`:
 
 ```cpp
 auto server = modb::net::Server::listen(path, "127.0.0.1", 0);
@@ -325,7 +358,8 @@ acceptor.join();
   `set_operation_registry`/`call` actually invoke
 - [ADR-010](../decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md),
   [ADR-011](../decisions/ADR-011-concorrencia-do-servidor.md),
-  [ADR-028](../decisions/ADR-028-proxy-de-acesso-remoto.md) (proxies)
+  [ADR-028](../decisions/ADR-028-proxy-de-acesso-remoto.md) (proxies),
+  [ADR-029](../decisions/ADR-029-delegacao-detalhe-e-idempotencia.md) (minor 3)
 - [OPERACAO.md](../OPERACAO.md), "Proxy de acesso remoto" — running `modb-proxy`
 
 ## 8. Related Source
@@ -338,6 +372,7 @@ acceptor.join();
 - `include/modb/proxy/` (`proxy.hpp`, `policy.hpp`, `policies.hpp`,
   `token_policy.hpp`), `apps/modb_proxy/main.cpp`
 - `examples/server/by_phase/phase_08/connect_query.cpp`,
-  `phase_10/handshake_capabilities.cpp`
-- `tests/server_streaming_tests.cpp`, `tests/protocol_tests.cpp`,
-  `tests/app_server_connection_test.cpp`
+  `examples/server/by_phase/phase_10/handshake_capabilities.cpp`
+- `tests/server_streaming_test.cpp`, `tests/protocol_test.cpp`,
+  `tests/app_server_connection_test.cpp`, `tests/protocol_minor3_test.cpp`,
+  `tests/minor3_e2e_test.cpp`

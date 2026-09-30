@@ -44,8 +44,11 @@ Result<std::string> texto_valido(Context& c, const Args& a, ObjectId proprio = {
     if (!texto) {
         return texto;
     }
+    // O detail (minor 3, ADR-029) diz ao cliente qual campo e por quê, sem ele
+    // precisar ler a mensagem.
     if (texto->empty()) {
-        return std::unexpected(invalid("a nota não pode ser vazia"));
+        return c.fail(invalid("a nota não pode ser vazia"),
+                      Value::object({{"reason", std::string{"texto_vazio"}}, {"field", std::string{"texto"}}}));
     }
     // Validado na subida: aqui só converte.
     if (const auto max = *parse_max_texto(c.setting("max_texto")); texto->size() > max) {
@@ -57,7 +60,8 @@ Result<std::string> texto_valido(Context& c, const Args& a, ObjectId proprio = {
     }
     for (const auto id : *iguais) {
         if (id != proprio) {
-            return std::unexpected(conflict("já existe uma nota com esse texto"));
+            return c.fail(conflict("já existe uma nota com esse texto"),
+                          Value::object({{"reason", std::string{"texto_repetido"}}, {"field", std::string{"texto"}}}));
         }
     }
     return texto;

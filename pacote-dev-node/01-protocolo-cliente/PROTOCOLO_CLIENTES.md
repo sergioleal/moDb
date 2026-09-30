@@ -5,11 +5,12 @@ ADR-025) de qualquer linguagem: o protocolo nativo por TCP e, na mesma máquina,
 o anel de memória compartilhada (ADR-026). Implementações de referência, só
 com a biblioteca padrão de cada linguagem:
 
-- Python: [`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.3/clients/python/modb_client.py),
-  com TCP e anel, testado contra o `notas-server` em `modb.python_client`;
-- Node (TypeScript): [`clients/node/`](https://github.com/sergioleal/moDb/blob/v0.1.3/clients/node/README.md), com TCP,
+- Python: [`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.2.0/clients/python/modb_client.py),
+  com TCP e anel, testado contra o `notas-server` em `modb.python_client`
+  (`call(..., acting_as=..., idempotency_key=...)`, `ModbError.detail`);
+- Node (TypeScript): [`clients/node/`](https://github.com/sergioleal/moDb/blob/v0.2.0/clients/node/README.md), com TCP,
   token e pool, testado contra o `notas-server` atrás do `modb-proxy` em
-  `modb.node_client`.
+  `modb.node_client` (`{ actingAs, idempotencyKey }`, `ModbError.detail`).
 
 Tudo é **little-endian**. `string` = `u32 comprimento | bytes UTF-8`.
 
@@ -40,15 +41,18 @@ Os demais (consultas em *stream*, facades) estão na ADR-010.
 ## 2. Abertura
 
 ```text
-Hello    = version u16 (=1) | database string | codecs u8 n, u8[n] (use 1, [0]) | minor u16 (=2)
+Hello    = version u16 (=1) | database string | codecs u8 n, u8[n] (use 1, [0]) | minor u16 (=3)
 HelloOk  = version u16 | baseline u64 | codec u8 | max_frame_bytes u32 |
            max_streams u16 | max_expansion u16 | idle_timeout_ms u32 | minor u16 |
            [minor ≥ 2 e o proxy exige autenticação: mechanisms u8 n, string[n]]
 ```
 
 `database` pode ser vazio (o servidor tem um banco só). O `minor` do `HelloOk` é
-o negociado: `≥ 1` significa que o servidor aceita `ShmAttach`. Um `HelloOk` sem
-o `minor` no fim é de um servidor antigo (minor 0).
+o negociado: `≥ 1` significa que o servidor aceita `ShmAttach`; `≥ 2`,
+`Authenticate`; `≥ 3`, delegação, chave de idempotência e `detail` nos erros
+(§3.1). Um `HelloOk` sem o `minor` no fim é de um servidor antigo (minor 0). Um
+cliente pode mandar um `minor` menor que o seu: o servidor negocia o menor dos
+dois, e nada do minor 3 viaja.
 
 ### 2.1 Autenticação (minor ≥ 2, atrás de um `modb-proxy`)
 
@@ -68,19 +72,21 @@ confiável, use TLS entre cliente e proxy. Um servidor sem proxy responde
 
 O servidor fecha conexões ociosas depois de `idle_timeout_ms`: um cliente que
 fica parado reconecta, e só deve repetir sozinho chamadas de leitura (uma
-escrita pode ter sido confirmada antes da queda).
+escrita pode ter sido confirmada antes da queda), a não ser que a escrita leve
+uma chave de idempotência (§3.1).
 
 ## 3. Chamada de proc
 
 ```text
-OpCall   = call_id u32 | proc string | args_len u32 | args (Value, §4)
+OpCall   = call_id u32 | proc string | args_len u32 | args (Value, §4) | [minor ≥ 3: extensão, §3.1]
 OpResult = call_id u32 | ok u8 | se ok=1: payload_len u32 | payload (Value)
-                                 se ok=0: code u16 | message string
+                                 se ok=0: code u16 | message string |
+                                          [minor ≥ 3 e há detalhe: detail_len u32 | detail (Value)]
 ```
 
 `call_id` é do cliente (qualquer valor; a resposta repete). As respostas saem na
 ordem dos pedidos de uma conexão. `code` é o `modb::ErrorCode`
-([`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.3/include/modb/error.hpp)). Os que um cliente de procs encontra:
+([`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/error.hpp)). Os que um cliente de procs encontra:
 
 | code | nome | significado | o que o cliente faz |
 |---|---|---|---|
@@ -101,10 +107,47 @@ ordem dos pedidos de uma conexão. `code` é o `modb::ErrorCode`
 
 Os números são estáveis: cada código tem um valor explícito no `error.hpp`, e um
 código novo entra no fim, sem renumerar nem reusar os outros
-([COMPATIBILIDADE.md](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/COMPATIBILIDADE.md)). Qualquer outro código que chegue a
+([COMPATIBILIDADE.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/COMPATIBILIDADE.md)). Qualquer outro código que chegue a
 um cliente de procs é erro interno do servidor: registre e mostre um erro
 genérico. A lista completa está no [Apêndice A](#apêndice-a--todos-os-códigos).
 `sys.procs` e `modb procs` listam as procs e os argumentos esperados.
+
+### 3.1 Minor 3: delegação, chave de idempotência e `detail` (ADR-029)
+
+Só com minor 3 negociado. Os campos novos vão no fim e só quando têm valor: um
+`OpCall` sem eles tem os bytes do minor 2.
+
+```text
+extensão = flags u8 |
+           [flags & 1: acting_as string | n u8 | n × (chave string, valor string)] |
+           [flags & 2: idempotency_key string]
+```
+
+- **Delegação (`flags & 1`).** Em nome de quem é a chamada. O caso típico é um
+  gateway web com um pool de conexões falando por cada usuário. Só um token com
+  a role `delegate` pode mandar; sem ela, o proxy responde `permission_denied`
+  (74) sem ir ao engine. O engine direto, sem proxy, também recusa. Até 32
+  atributos. A proc vê o principal (o gateway) e o delegado, e a auditoria
+  registra `by <principal> as <delegado>`. A mesma extensão, só com o bit 1,
+  vale no fim de `Query`, `FacadeList` e `FacadeOpen`.
+- **Chave de idempotência (`flags & 2`).** De 1 a 128 bytes; use um UUID por
+  escrita lógica. Numa proc de escrita, o servidor procura a chave na mesma
+  transação: se ela já existe para o mesmo principal, devolve o resultado
+  gravado sem executar de novo. Por isso a escrita pode ser repetida depois de
+  uma queda de conexão, inclusive se o servidor caiu entre o commit e a
+  resposta. Numa proc de leitura, a chave é ignorada. A chave vale por
+  `idempotency_retention_s` do servidor (padrão 24 h). Um resultado maior que
+  4 KB não é guardado: a repetição volta `conflict` (70) com
+  `detail.reason = "idempotent_result_too_large"`, e a escrita não acontece
+  duas vezes.
+- **`detail` no erro.** Um `Value` que a proc manda junto com o código, por
+  convenção `{"reason": "<código da aplicação>", "field": "<campo>"}`.
+  Exemplo: `{"reason": "texto_repetido", "field": "texto"}`. Decida pelo
+  `code` e pelo `reason`; a `message` é texto para pessoas.
+
+Mandar a extensão a um servidor que negociou minor ≤ 2 quebra a conexão (ele
+recusa bytes sobrando): os clientes de referência recusam antes, com
+`invalid_argument`.
 
 ## 4. Value (versão 1)
 
@@ -200,7 +243,7 @@ p50/p99/p99,9). Números só valem de máquina dedicada.
 
 ## Apêndice A — todos os códigos
 
-Gerado do [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.3/include/modb/error.hpp); o teste `modb.error_codes` confere que esta
+Gerado do [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/error.hpp); o teste `modb.error_codes` confere que esta
 tabela e o header não divergem.
 
 | code | nome | significado |

@@ -10,7 +10,7 @@ import { ModbConnectionError, ModbError } from "./errors.ts";
 import { decodeValue, encodeValue, type ModbValue } from "./value.ts";
 
 export const PROTOCOL_MAJOR = 1;
-export const PROTOCOL_MINOR = 2;
+export const PROTOCOL_MINOR = 3;
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 
 const T_HELLO = 1;
@@ -29,6 +29,16 @@ export interface ConnectionOptions {
   token?: string;
   /** Tempo máximo para abrir, negociar e autenticar (ms). */
   connectTimeoutMs?: number;
+}
+
+/** Opções de uma chamada, minor 3 (ADR-029). */
+export interface WireCallOptions {
+  /** Em nome de quem: só atrás de um modb-proxy, com um token que tenha a role `delegate`. */
+  actingAs?: string;
+  /** Atributos do delegado (ex.: `{ email }`), que a proc vê. */
+  actingAttributes?: Record<string, string>;
+  /** Torna a escrita repetível: com a mesma chave, o servidor devolve o resultado já confirmado. */
+  idempotencyKey?: string;
 }
 
 export interface ServerInfo {
@@ -125,12 +135,15 @@ export class Connection {
   }
 
   /** Chama uma proc. Rejeita com ModbError (erro da proc) ou ModbConnectionError (conexão). */
-  call(proc: string, args: Record<string, unknown> = {}): Promise<ModbValue> {
+  call(proc: string, args: Record<string, unknown> = {}, options: WireCallOptions = {}): Promise<ModbValue> {
     if (this.closedError) return Promise.reject(this.closedError);
+    if ((options.actingAs || options.idempotencyKey) && this.info.minor < 3) {
+      return Promise.reject(new ModbError(1, "o servidor não aceita delegação nem chave de idempotência (protocolo minor < 3)"));
+    }
     const callId = this.nextId;
     this.nextId = this.nextId >= 0xffff_ffff ? 1 : this.nextId + 1;
     const encoded = encodeValue(args);
-    const payload = Buffer.concat([u32(callId), str(proc), u32(encoded.length), encoded]);
+    const payload = Buffer.concat([u32(callId), str(proc), u32(encoded.length), encoded, extension(options)]);
     if (payload.length + 1 > this.info.maxFrameBytes) {
       return Promise.reject(new ModbError(21, `pedido de ${payload.length} bytes excede o limite do servidor`));
     }
@@ -176,7 +189,14 @@ export class Connection {
     } else {
       const code = body.readUInt16LE(5);
       const n = body.readUInt32LE(7);
-      p.reject(new ModbError(code, body.toString("utf8", 11, 11 + n)));
+      // Minor 3: o detail do erro, se veio (detail_len u32 | Value).
+      let detail: unknown;
+      const at = 11 + n;
+      if (body.length - at >= 4) {
+        const d = body.readUInt32LE(at);
+        detail = decodeValue(body.subarray(at + 4, at + 4 + d));
+      }
+      p.reject(new ModbError(code, body.toString("utf8", 11, 11 + n), detail));
     }
   }
 
@@ -322,6 +342,27 @@ function parseAuthenticateOk(b: Buffer): string {
   if (!ok) throw new ModbError(code, message || "credencial recusada");
   const m = b.readUInt32LE(11 + n);
   return b.toString("utf8", 15 + n, 15 + n + m);
+}
+
+/**
+ * Extensão do minor 3 no fim do OpCall (ADR-029), só quando há o que mandar:
+ *   flags u8 | [1: acting_as string | n u8 | (chave, valor)*] | [2: idempotency_key string]
+ */
+function extension(options: WireCallOptions): Buffer {
+  const flags = (options.actingAs ? 1 : 0) | (options.idempotencyKey ? 2 : 0);
+  if (!flags) return Buffer.alloc(0);
+  const parts = [Buffer.from([flags])];
+  if (options.actingAs) {
+    const attributes = Object.entries(options.actingAttributes ?? {});
+    if (attributes.length > 32) throw new RangeError("no máximo 32 atributos de delegação");
+    parts.push(str(options.actingAs), Buffer.from([attributes.length]));
+    for (const [key, value] of attributes) parts.push(str(key), str(value));
+  }
+  if (options.idempotencyKey) {
+    if (Buffer.byteLength(options.idempotencyKey, "utf8") > 128) throw new RangeError("chave de idempotência acima de 128 bytes");
+    parts.push(str(options.idempotencyKey));
+  }
+  return Buffer.concat(parts);
 }
 
 function u16(v: number) {

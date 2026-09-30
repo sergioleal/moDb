@@ -189,16 +189,20 @@ int main() {
     const server::Options opcoes{.database = db, .host = "127.0.0.1", .port = 0, .local = sock, .tcp = true,
                                  .log = log.string()};
 
-    auto tokens = proxy::TokenStore::parse(proxy::token_line("tok-gw", "gw", {"delegate"}) + "\n" +
-                                           proxy::token_line("tok-app", "app", {"escritor"}) + "\n");
+    const std::vector<std::string> roles_gw{"delegate"};
+    const std::vector<std::string> roles_app{"escritor"};
+    auto tokens = proxy::TokenStore::parse(proxy::token_line("tok-gw", "gw", roles_gw) + "\n" +
+                                           proxy::token_line("tok-app", "app", roles_app) + "\n");
     std::mutex audit_mu;
     std::vector<std::string> audit_lines;
     auto audit = std::make_shared<proxy::AuditLogPolicy>([&](std::string_view l) {
         const std::scoped_lock lock{audit_mu};
         audit_lines.emplace_back(l);
     });
-    auto chain = std::make_shared<proxy::PolicyChain>(std::vector<std::shared_ptr<proxy::Policy>>{
-        std::make_shared<proxy::TokenPolicy>(std::move(*tokens), std::make_shared<proxy::PassThroughPolicy>()), audit});
+    std::vector<std::shared_ptr<proxy::Policy>> links;
+    links.push_back(std::make_shared<proxy::TokenPolicy>(std::move(*tokens), std::make_shared<proxy::PassThroughPolicy>()));
+    links.push_back(audit);
+    auto chain = std::make_shared<proxy::PolicyChain>(std::move(links));
 
     std::uint16_t engine_port = 0;
     {

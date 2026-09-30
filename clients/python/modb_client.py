@@ -12,6 +12,9 @@ quem for escrever um cliente em outra linguagem.
         # atrás de um modb-proxy com --tokens: Client(..., token="...")
         nota = c.call("notas.criar", {"texto": "comprar café"})
         print(c.call("notas.ler", {"id": nota["id"]}))
+        # minor 3 (ADR-029): em nome de quem (token com a role delegate) e
+        # uma chave que torna a escrita repetível
+        c.call("notas.criar", {"texto": "x"}, acting_as="user:24", idempotency_key="uuid-...")
 
 Valores: None, bool, int, float, str, list, dict (chaves str) e Id (id de
 objeto; uma subclasse de int).
@@ -31,7 +34,7 @@ import time
 __all__ = ["Client", "Id", "ModbError", "encode_value", "decode_value"]
 
 PROTOCOL_MAJOR = 1
-PROTOCOL_MINOR = 2
+PROTOCOL_MINOR = 3
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 
 T_OP_CALL, T_OP_RESULT = 9, 10
@@ -68,10 +71,13 @@ ERROR_CODES = {
 
 
 class ModbError(Exception):
-    def __init__(self, code: int, message: str):
+    def __init__(self, code: int, message: str, detail=None):
         super().__init__(f"{message} (code {code})")
         self.code = code
         self.message = message
+        # Minor 3: o Value que a proc mandou com o erro (por convenção
+        # {"reason": ..., "field": ...}); None se não mandou.
+        self.detail = detail
 
 
 # --- Value v1 ---------------------------------------------------------------------
@@ -185,8 +191,22 @@ def _frame(mtype: int, payload: bytes) -> bytes:
     return struct.pack("<IB", len(payload) + 1, mtype) + payload
 
 
-def _op_call(call_id: int, proc: str, args: bytes) -> bytes:
-    return _frame(T_OP_CALL, struct.pack("<I", call_id) + _string(proc) + struct.pack("<I", len(args)) + args)
+def _op_call(call_id: int, proc: str, args: bytes, acting_as: str | None = None,
+             acting_attributes: dict | None = None, idempotency_key: str | None = None) -> bytes:
+    payload = struct.pack("<I", call_id) + _string(proc) + struct.pack("<I", len(args)) + args
+    # Extensão do minor 3 (ADR-029), só quando há o que mandar:
+    #   flags u8 | [1: acting_as string | n u8 | (chave, valor)*] | [2: idempotency_key string]
+    flags = (1 if acting_as else 0) | (2 if idempotency_key else 0)
+    if flags:
+        payload += bytes((flags,))
+        if acting_as:
+            attributes = list((acting_attributes or {}).items())
+            payload += _string(acting_as) + bytes((len(attributes),))
+            for key, value in attributes:
+                payload += _string(key) + _string(value)
+        if idempotency_key:
+            payload += _string(idempotency_key)
+    return _frame(T_OP_CALL, payload)
 
 
 def _parse_op_result(body, pos: int):
@@ -198,7 +218,14 @@ def _parse_op_result(body, pos: int):
         return call_id, True, bytes(body[pos:pos + n])
     code, n = struct.unpack_from("<HI", body, pos)
     pos += 6
-    return call_id, False, (code, bytes(body[pos:pos + n]).decode("utf-8"))
+    message = bytes(body[pos:pos + n]).decode("utf-8")
+    pos += n
+    detail = None
+    # Minor 3: o detail do erro, se veio.
+    if len(body) - pos >= 4:
+        (d,) = struct.unpack_from("<I", body, pos)
+        detail = decode_value(bytes(body[pos + 4:pos + 4 + d]))
+    return call_id, False, (code, message, detail)
 
 
 class _Backoff:
@@ -413,9 +440,16 @@ class Client:
         self.next_id = (self.next_id + 1) & 0xFFFFFFFF or 1
         return i
 
-    def call(self, proc: str, args: dict | None = None):
+    def call(self, proc: str, args: dict | None = None, *, acting_as: str | None = None,
+             acting_attributes: dict | None = None, idempotency_key: str | None = None):
+        """Chama uma proc. `acting_as` (em nome de quem; só atrás de um proxy e com a
+        role delegate) e `idempotency_key` (a mesma chave devolve o resultado já
+        confirmado, sem executar de novo) pedem minor 3."""
+        if (acting_as or idempotency_key) and self.server_minor < 3:
+            raise ModbError(1, "server does not support protocol minor 3 (delegation, idempotency keys)")
         call_id = self._take_id()
-        frame = _op_call(call_id, proc, encode_value({} if args is None else args))
+        frame = _op_call(call_id, proc, encode_value({} if args is None else args), acting_as, acting_attributes,
+                         idempotency_key)
         if self.shm is not None:
             body = self._call_shm(frame)
         else:

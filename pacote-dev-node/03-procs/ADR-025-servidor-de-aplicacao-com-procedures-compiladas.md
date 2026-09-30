@@ -2,10 +2,10 @@
 
 - Estado: **aceito**
 - Data: 2026-09-27
-- Plano: [PLANO_SERVIDOR_PROCS.md](https://github.com/sergioleal/moDb/blob/v0.1.3/docs-process/PLANO_SERVIDOR_PROCS.md)
-- Relacionados: [ADR-010](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) (protocolo),
-  [ADR-011](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/decisions/ADR-011-concorrencia-do-servidor.md) (concorrência do servidor),
-  [ADR-012](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/decisions/ADR-012-runtime-de-modulos-no-processo.md) (módulos de domínio)
+- Plano: [PLANO_SERVIDOR_PROCS.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs-process/PLANO_SERVIDOR_PROCS.md)
+- Relacionados: [ADR-010](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md) (protocolo),
+  [ADR-011](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-011-concorrencia-do-servidor.md) (concorrência do servidor),
+  [ADR-012](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-012-runtime-de-modulos-no-processo.md) (módulos de domínio)
 
 ## Contexto
 
@@ -37,7 +37,7 @@ nenhuma, e cada exemplo montava o servidor à mão num `main`.
    - carrega o módulo pelo `ModuleLoader`, que confere métodos contra o registro;
    - serve com `serve_forever`, parando limpo em SIGINT/SIGTERM.
    - Imprime `READY <porta>` quando aceita conexões.
-3. **`modb_add_server(<alvo> MODULES <lib>...)`** ([`cmake/ModbServer.cmake`](https://github.com/sergioleal/moDb/blob/v0.1.3/cmake/ModbServer.cmake), instalado com o pacote) gera o `main`. Cada `<lib>` define `modb::server::Module modb_module_<lib>()`.
+3. **`modb_add_server(<alvo> MODULES <lib>...)`** ([`cmake/ModbServer.cmake`](https://github.com/sergioleal/moDb/blob/v0.2.0/cmake/ModbServer.cmake), instalado com o pacote) gera o `main`. Cada `<lib>` define `modb::server::Module modb_module_<lib>()`.
 4. **Isolamento:**
    - a aplicação fica isolada do banco: outro processo, e outra máquina se quiser;
    - as procs rodam **no processo do banco, sem sandbox**. Um erro ou exceção desfaz só a transação da chamada. Um crash de verdade derruba o servidor; o supervisor reinicia, e o WAL garante o que foi confirmado. Um teste mata o processo com `TerminateProcess`/`SIGKILL` e confere isso;
@@ -55,10 +55,10 @@ Cada um vira uma decisão própria, se aparecer necessidade.
 
 ## Consequências
 
-- Uma aplicação servidor é um `main` gerado mais os módulos; o exemplo [`examples/server_procs`](https://github.com/sergioleal/moDb/tree/v0.1.3/examples/server_procs) (`notas-server`) é o modelo, e [`tests/server_host_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.1.3/tests/server_host_test.cpp) o sobe como processo à parte.
+- Uma aplicação servidor é um `main` gerado mais os módulos; o exemplo [`examples/server_procs`](https://github.com/sergioleal/moDb/tree/v0.2.0/examples/server_procs) (`notas-server`) é o modelo, e [`tests/server_host_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/tests/server_host_test.cpp) o sobe como processo à parte.
 - Atualizar uma regra é recompilar e trocar o executável do servidor. O arquivo do banco continua o mesmo; mudanças de esquema seguem o catálogo e a baseline.
 - Encontrado ao implementar: o construtor de movimento de `net::Server` não levava o registro de procs, o catálogo de facades nem os limites configurados. Um servidor configurado e devolvido por valor respondia "server has no operation registry". Corrigido no mesmo commit.
-- Um módulo se declara com `modb::server::ModuleBuilder` ([`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.3/include/modb/server/module.hpp)):
+- Um módulo se declara com `modb::server::ModuleBuilder` ([`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/server/module.hpp)):
   tipos, índices e procs como funções que recebem um `Context` (leitura,
   consulta, índice, escrita, coleções) e `ops::Args`, e devolvem `ops::Value`.
   Erros de regra têm código (`invalid_argument`, `record_not_found`, `conflict`);
@@ -67,7 +67,7 @@ Cada um vira uma decisão própria, se aparecer necessidade.
   tempo limite por proc (cooperativo — o `Context` confere o prazo a cada acesso
   ao banco — e com rollback garantido pelo `OperationRegistry`, código
   `operation_timeout`) e parada ativa (`request_stop` fecha as sessões abertas).
-  Como serviço: [`docs/OPERACAO.md`](https://github.com/sergioleal/moDb/blob/v0.1.3/docs/OPERACAO.md) § Servidor de aplicação.
+  Como serviço: [`docs/OPERACAO.md`](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/OPERACAO.md) § Servidor de aplicação.
 - Descoberta (S6): todo servidor carrega o módulo de sistema `sys` com
   `sys.procs`; o CLI tem `modb procs`. Não há esquema formal de argumentos: a
   descrição da proc os cita, e `ops::Args` explica o que falta ou está errado.

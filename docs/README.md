@@ -103,6 +103,16 @@ foi tomada, mas o conteúdo é atemporal.
 | [ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md) | Primary `wal_only`: só WAL; arquivos de dados nas réplicas |
 | [ADR-018](decisions/ADR-018-handles-de-arestas-e-algoritmos-de-grafos.md) | `EdgeHandle` tipado, snapshot e algoritmos básicos de grafos |
 | [ADR-019](decisions/ADR-019-io-assincrono.md) | I/O assíncrono posicional com backpressure |
+| [ADR-020](decisions/ADR-020-replica-catch-up-por-wal.md) | Catch-up de réplica por WAL baixável |
+| [ADR-021](decisions/ADR-021-replica-colunar-derivada.md) | Réplica de leitura com armazenamento colunar selecionável |
+| [ADR-022](decisions/ADR-022-menos-fsync-por-commit.md) | Menos `fsync` por commit: um sync de WAL e checkpoint preguiçoso |
+| [ADR-023](decisions/ADR-023-lista-de-paginas-livres-do-heap.md) | Lista de páginas livres do TableHeap |
+| [ADR-024](decisions/ADR-024-recuperacao-imediata-da-versao-sobrescrita.md) | Recuperação imediata da versão sobrescrita |
+| [ADR-025](decisions/ADR-025-servidor-de-aplicacao-com-procedures-compiladas.md) | Servidor de aplicação com procedures compiladas |
+| [ADR-026](decisions/ADR-026-transporte-de-memoria-compartilhada.md) | Clientes em outras linguagens: protocolo nativo publicado e transporte por memória compartilhada |
+| [ADR-027](decisions/ADR-027-leitores-concorrentes-escritor-exclusivo.md) | Concorrência: leitores em paralelo, um escritor exclusivo |
+| [ADR-028](decisions/ADR-028-proxy-de-acesso-remoto.md) | Acesso remoto por proxies: o engine só fala localmente |
+| [ADR-029](decisions/ADR-029-delegacao-detalhe-e-idempotencia.md) | Protocolo minor 3: delegação, detalhe nos erros e idempotência |
 
 ### ADRs legadas (modelo relacional, `0001`/`0002`)
 

@@ -8,9 +8,10 @@
  * - Perto do idle timeout do servidor, a conexão pode estar sendo fechada: é descartada antes de usar. Numa
  *   escrita, só se reaproveita uma conexão usada há pouco (WRITE_REUSE_MS).
  * - Leituras que falham por conexão caída numa conexão reaproveitada são repetidas uma vez numa conexão nova.
- *   Escritas nunca: o servidor pode ter confirmado antes de a conexão cair.
+ *   Escritas só com chave de idempotência (minor 3, ADR-029): sem ela, o servidor pode ter confirmado antes de a
+ *   conexão cair; com ela, a repetição devolve o resultado confirmado em vez de executar de novo.
  */
-import { Connection, type ConnectionOptions } from "./connection.ts";
+import { Connection, type ConnectionOptions, type WireCallOptions } from "./connection.ts";
 import { ModbConnectionError } from "./errors.ts";
 import type { ModbValue } from "./value.ts";
 
@@ -19,7 +20,7 @@ export interface PoolOptions extends ConnectionOptions {
   size?: number;
 }
 
-export interface CallOptions {
+export interface CallOptions extends WireCallOptions {
   /** A proc só lê: pode ser repetida numa conexão nova se a conexão caiu. */
   read?: boolean;
 }
@@ -44,16 +45,18 @@ export class Pool {
   }
 
   async call(proc: string, args: Record<string, unknown> = {}, opts: CallOptions = {}): Promise<ModbValue> {
-    const read = opts.read ?? false;
+    const { read = false, ...wire } = opts;
+    // Uma escrita com chave pode ser repetida como uma leitura.
+    const repeatable = read || Boolean(wire.idempotencyKey);
     const slot = this.pick();
-    const reused = this.usable(slot, read);
+    const reused = this.usable(slot, repeatable);
     const conn = reused ?? (await this.open(slot));
     try {
-      return await conn.call(proc, args);
+      return await conn.call(proc, args, wire);
     } catch (err) {
       if (!(err instanceof ModbConnectionError)) throw err;
       if (slot.conn === conn) slot.conn = null;
-      if (read && reused) return (await this.open(slot)).call(proc, args);
+      if (repeatable && reused) return (await this.open(slot)).call(proc, args, wire);
       throw err;
     }
   }

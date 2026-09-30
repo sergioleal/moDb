@@ -25,6 +25,8 @@ const sock = join(work, "engine.sock");
 const secret = join(work, "link.secret");
 const tokens = join(work, "proxy.tokens");
 const token = randomBytes(24).toString("hex");
+// Um gateway, que pode falar em nome dos usuários (role delegate, ADR-029).
+const gatewayToken = randomBytes(24).toString("hex");
 
 interface Running {
   child: ChildProcess;
@@ -61,7 +63,13 @@ const startProxy = (port: number) =>
 before(async () => {
   mkdirSync(work, { recursive: true });
   writeFileSync(secret, randomBytes(32).toString("hex"));
-  writeFileSync(tokens, execFileSync(proxyExe, ["hash-token", token, "web", "leitor,escritor"]));
+  writeFileSync(
+    tokens,
+    Buffer.concat([
+      execFileSync(proxyExe, ["hash-token", token, "web", "leitor,escritor"]),
+      execFileSync(proxyExe, ["hash-token", gatewayToken, "gateway", "delegate"]),
+    ]),
+  );
   engine = await startReady(serverExe, ["--db", join(work, "notas.modb"), "--local", sock, "--secret-file", secret, "--log", "off"]);
   proxy = await startProxy(0);
   proxyPort = proxy.port;
@@ -111,6 +119,49 @@ test("com token: principal, escrita, leitura e os erros das procs", async () => 
     );
   } finally {
     conn.close();
+  }
+});
+
+test("minor 3: o erro traz o detail", async () => {
+  const pool = new Pool({ host: "127.0.0.1", port: proxyPort, token, size: 1 });
+  try {
+    await assert.rejects(pool.call("notas.criar", { texto: "" }), (e: unknown) => {
+      assert.ok(e instanceof ModbError && e.code === ErrorCode.invalid_argument);
+      assert.deepEqual(e.detail, { reason: "texto_vazio", field: "texto" });
+      return true;
+    });
+  } finally {
+    pool.close();
+  }
+});
+
+test("minor 3: delegação só com a role delegate", async () => {
+  const gateway = new Pool({ host: "127.0.0.1", port: proxyPort, token: gatewayToken, size: 1 });
+  const web = new Pool({ host: "127.0.0.1", port: proxyPort, token, size: 1 });
+  try {
+    const lista = await gateway.call("notas.listar", {}, { read: true, actingAs: "user:24", actingAttributes: { email: "ana@exemplo.org" } });
+    assert.ok(Array.isArray(lista));
+    await assert.rejects(
+      web.call("notas.listar", {}, { read: true, actingAs: "user:24" }),
+      (e: unknown) => e instanceof ModbError && e.code === ErrorCode.permission_denied,
+    );
+  } finally {
+    gateway.close();
+    web.close();
+  }
+});
+
+test("minor 3: a mesma chave de idempotência não cria outra nota", async () => {
+  const pool = new Pool({ host: "127.0.0.1", port: proxyPort, token, size: 2 });
+  try {
+    const idempotencyKey = randomBytes(16).toString("hex");
+    const primeira = await pool.call("notas.criar", { texto: "idem node" }, { idempotencyKey });
+    const repetida = await pool.call("notas.criar", { texto: "idem node" }, { idempotencyKey });
+    assert.deepEqual(repetida, primeira);
+    const iguais = (await pool.call("notas.listar", { contem: "idem node" }, { read: true })) as unknown[];
+    assert.equal(iguais.length, 1);
+  } finally {
+    pool.close();
   }
 });
 

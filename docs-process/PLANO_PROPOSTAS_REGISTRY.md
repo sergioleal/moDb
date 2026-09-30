@@ -114,67 +114,67 @@ tarefa.
 
 ### P2 — protocolo minor 3 *(release `v0.2.0`)*
 
-#### R7 — ADR-029 *(pequeno)*
+#### R7 — ADR-029 *(pequeno)* ✅
 
-- [ ] 7.1 Decidir e registrar: delegação por chamada (R9), `detail` nos erros
+- [x] 7.1 *(`docs/decisions/ADR-029-delegacao-detalhe-e-idempotencia.md`)* Decidir e registrar: delegação por chamada (R9), `detail` nos erros
   (R10), validação de conexão ou idempotência (R11, decisão D3), e o formato
   de cada campo novo no fio.
-- [ ] 7.2 Negociação: o servidor só manda os campos novos com minor ≥ 3; um
+- [x] 7.2 *(o proxy negocia `min(cliente, proxy, engine)`)* Negociação: o servidor só manda os campos novos com minor ≥ 3; um
   cliente de minor 2 continua lendo `code` e `message`.
 
-#### R8 — Minor 3 no codec *(médio)*
+#### R8 — Minor 3 no codec *(médio)* ✅
 
-- [ ] 8.1 `Hello`/`HelloOk` negociam minor 3 no engine, no link e no proxy.
-- [ ] 8.2 Testes de compatibilidade: cliente de minor 2 contra servidor de
+- [x] 8.1 *(campos no fim, gravados só quando preenchidos: sem eles, os bytes do minor 2)* `Hello`/`HelloOk` negociam minor 3 no engine, no link e no proxy.
+- [x] 8.2 *(`modb.protocol_minor3`: ida e volta, frame do minor 2, bits desconhecidos, limites, negociação; `modb.minor3_e2e` com um cliente de minor 2 feito à mão)* Testes de compatibilidade: cliente de minor 2 contra servidor de
   minor 3, e o contrário (`compatibility_test`, `protocol_test`).
 
-#### R9 — Delegação: em nome de quem *(grande)*
+#### R9 — Delegação: em nome de quem *(grande)* ✅
 
-- [ ] 9.1 Campo `acting_as` + atributos em **`OpCall`, `Query` e nas mensagens
+- [x] 9.1 Campo `acting_as` + atributos em **`OpCall`, `Query` e nas mensagens
   de facade**. Uma consulta em stream também é feita em nome de alguém; só no
   `OpCall` ela voltaria a ser "do gateway".
-- [ ] 9.2 Proxy: só um principal com a role de delegar (nome na ADR-029) pode
+- [x] 9.2 *(D2: role `delegate`; a regra fica no proxy, fora da cadeia de políticas; o engine direto recusa)* Proxy: só um principal com a role de delegar (nome na ADR-029) pode
   preencher o campo. Os outros recebem `permission_denied` sem chegar ao
   engine.
-- [ ] 9.3 Política: allowlist e rate limit veem o par (principal, delegado). O
+- [x] 9.3 *(limites por delegado e `max_delegated_calls_per_second` por principal; a allowlist segue pelo principal e roles)* Política: allowlist e rate limit veem o par (principal, delegado). O
   limite por delegado **soma** a um teto por principal, para um gateway
   comprometido não contornar o limite inventando usuários.
-- [ ] 9.4 Auditoria do proxy e log de chamadas do engine: `by <principal> as
+- [x] 9.4 *(também na recusa: a auditoria mostra em nome de quem tentaram falar)* Auditoria do proxy e log de chamadas do engine: `by <principal> as
   <delegado>`.
-- [ ] 9.5 `Caller` ganha `acting_as`, `acting_attributes` e `subject()`.
-- [ ] 9.6 Testes: delegação permitida, recusada, auditada e com limite; proc
+- [x] 9.5 `Caller` ganha `acting_as`, `acting_attributes` e `subject()`.
+- [x] 9.6 *(`modb.minor3_e2e`; TSan não rodado: nenhuma thread nova, só dados por pedido)* Testes: delegação permitida, recusada, auditada e com limite; proc
   lendo `subject()`; TSan.
 
-#### R10 — Erros com `detail` *(médio)*
+#### R10 — Erros com `detail` *(médio)* ✅
 
-- [ ] 10.1 `detail` (um `Value`) no `OpResult` de erro, só com minor ≥ 3.
-- [ ] 10.2 O `detail` fica **na camada das procs**, não no `modb::Error`. O
+- [x] 10.1 `detail` (um `Value`) no `OpResult` de erro, só com minor ≥ 3.
+- [x] 10.2 *(`Context::fail(error, Value)`; o detalhe vive no `ExecutionContext` e volta pelo `CallExtras`)* O `detail` fica **na camada das procs**, não no `modb::Error`. O
   `Error` é o tipo base do motor, e pôr um `ops::Value` nele faria a camada
   mais baixa depender de `ops`. Exemplo: `invalid(...).with_detail(...)` em
   `module.hpp`, carregado pelo `OperationRegistry` até a resposta.
-- [ ] 10.3 Convenção documentada: `reason` (`[a-z_]+`, estável) e `field`
+- [x] 10.3 *(o log grava `reason <r>`; o `notas` manda `texto_vazio`/`texto_repetido`)* Convenção documentada: `reason` (`[a-z_]+`, estável) e `field`
   (caminho com `.`). O log de chamadas grava só o `reason`.
-- [ ] 10.4 Testes: proc com e sem `detail`, cliente de minor 2 recebendo só
+- [x] 10.4 Testes: proc com e sem `detail`, cliente de minor 2 recebendo só
   `code` e `message`.
 
-#### R11 — Conexão ociosa *(médio; depende da decisão D3)*
+#### R11 — Conexão ociosa *(médio; D3: chave de idempotência)* ✅
 
-- [ ] 11.1 Opção A, `Ping`/`Pong`: o proxy responde sem ir ao engine. Estreita
+- [ ] 11.1 *(não feita: D3 escolheu só a chave)* Opção A, `Ping`/`Pong`: o proxy responde sem ir ao engine. Estreita
   a janela, mas não permite repetir uma escrita.
-- [ ] 11.2 Opção B, chave de idempotência por `OpCall`: o engine guarda o
+- [x] 11.2 *(`sys.Idempotency` gravado na transação da escrita, por principal; resultado acima de 4 KB guarda só a chave e a repetição volta `conflict` com `reason = idempotent_result_too_large`; até 16 vencidos apagados por escrita)* Opção B, chave de idempotência por `OpCall`: o engine guarda o
   resultado das últimas chamadas por chave e, numa repetição, devolve o
   resultado confirmado em vez de executar de novo. Resolve a causa: o pool
   passa a poder repetir escritas.
-- [ ] 11.3 Testes da opção escolhida, incluindo queda do servidor entre o
+- [x] 11.3 *(a queda entre commit e resposta é coberta pela reabertura do servidor com a mesma chave)* Testes da opção escolhida, incluindo queda do servidor entre o
   commit e a resposta.
 
-#### R12 — Clientes, documentação e release *(médio)*
+#### R12 — Clientes, documentação e release *(médio)* ✅
 
-- [ ] 12.1 Clientes Python e Node com minor 3: `acting_as`, `detail` e a
+- [x] 12.1 *(C++ `net::CallOptions`; Python `call(..., acting_as=, idempotency_key=)` e `ModbError.detail`; Node `{ actingAs, idempotencyKey }`, `ModbError.detail`, e o pool repete escritas com chave)* Clientes Python e Node com minor 3: `acting_as`, `detail` e a
   opção da R11.
-- [ ] 12.2 `PROTOCOLO_CLIENTES.md`, `networking-protocol.md`, `OPERACAO.md`,
+- [x] 12.2 `PROTOCOLO_CLIENTES.md`, `networking-protocol.md`, `OPERACAO.md`,
   `SDK.md` e o pacote.
-- [ ] 12.3 `VERSION 0.2.0`, tag `v0.2.0`, conferir a release.
+- [x] 12.3 `VERSION 0.2.0`, tag `v0.2.0`, conferir a release.
 
 ### P3 — modelo de dados *(muda o formato do arquivo)*
 
@@ -227,8 +227,8 @@ tarefa.
 | # | Pergunta | Bloqueia |
 |---|---|---|
 | D1 | ~~O cliente TypeScript do registry pode ser trazido para o moDb?~~ Sim (pedido da P1, 2026-09-30). | R6 ✅ |
-| D2 | Nome da role que permite delegar e se a delegação vale também para facades. | R9 |
-| D3 | `Ping`/`Pong`, chave de idempotência, ou os dois? | R11 |
+| D2 | ~~Nome da role e alcance da delegação.~~ `delegate`; vale para `OpCall`, `Query` e facades (2026-09-30). | R9 ✅ |
+| D3 | ~~`Ping`/`Pong` ou chave de idempotência?~~ Só a chave (2026-09-30). | R11 ✅ |
 | D4 | Valores vazios ficam fora do índice único? | R13 |
 | D5 | O instante é uma tag nova do `Value` (protocolo) ou um inteiro com convenção? | R15 |
 
@@ -248,4 +248,7 @@ R15 e R16 depois da P2, porque o `detail` do `unique` depende da R10.
 | 2026-09-30 | R4 | 1f3c838 | `Context::range` e `Context::prefix`; aviso sobre `c.database()` fora do snapshot |
 | 2026-09-30 | R5 | ccce319 | `v0.1.2`: P0 concluída, sem mudar protocolo nem formato |
 | 2026-09-30 | R6 | 3282796 | `v0.1.3`: cliente Node em `clients/node/`, no CTest e no teste da release |
-| 2026-09-30 | R14 | (este commit) | Campo `ops::Value` persistido via `bytes_codec`; objeto limitado a uma página |
+| 2026-09-30 | R14 | 1ece70a | Campo `ops::Value` persistido via `bytes_codec`; objeto limitado a uma página |
+| 2026-09-30 | R7–R8 | 4c6a2b4 | ADR-029 e o codec do minor 3 |
+| 2026-09-30 | R9–R11 | bcd80a0 | Delegação, `detail` e chave de idempotência, de ponta a ponta |
+| 2026-09-30 | R12 | (release) | `v0.2.0`: clientes Python e Node no minor 3, documentação |

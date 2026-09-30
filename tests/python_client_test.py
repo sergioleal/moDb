@@ -12,7 +12,7 @@ import time
 
 server_exe, client_dir = os.path.abspath(sys.argv[1]), sys.argv[2]
 sys.path.insert(0, client_dir)
-from modb_client import Client, Id, ModbError, decode_value, encode_value  # noqa: E402
+from modb_client import ERROR_CODES, Client, Id, ModbError, decode_value, encode_value  # noqa: E402
 
 total = falhas = 0
 
@@ -61,8 +61,20 @@ try:
                       f"[{modo}] id como int comum também serve")
             e = erro(lambda: c.call("notas.criar", {"texto": ""}))
             verificar(e is not None and e.message == "a nota não pode ser vazia", f"[{modo}] erro de regra com mensagem")
+            verificar(e is not None and e.detail == {"reason": "texto_vazio", "field": "texto"},
+                      f"[{modo}] o erro traz o detail (minor 3)")
             e = erro(lambda: c.call("notas.criar", {"texto": f"nota pelo {modo}"}))
-            verificar(e is not None and "já existe" in e.message, f"[{modo}] conflict")
+            verificar(e is not None and "já existe" in e.message and e.code == ERROR_CODES["conflict"] and
+                      e.detail == {"reason": "texto_repetido", "field": "texto"}, f"[{modo}] conflict com detail")
+            # Chave de idempotência: a mesma chave devolve a mesma nota, sem criar outra.
+            chave = f"idem-{modo}-{os.getpid()}"
+            r1 = c.call("notas.criar", {"texto": f"idem {modo}"}, idempotency_key=chave)
+            r2 = c.call("notas.criar", {"texto": f"idem {modo}"}, idempotency_key=chave)
+            verificar(r1 == r2, f"[{modo}] a mesma chave devolve o mesmo resultado")
+            verificar(len(c.call("notas.listar", {"contem": f"idem {modo}"})) == 1, f"[{modo}] e não cria outra nota")
+            # Delegação sem proxy: ninguém autoriza.
+            e = erro(lambda: c.call("notas.listar", acting_as="user:1"))
+            verificar(e is not None and e.code == ERROR_CODES["permission_denied"], f"[{modo}] delegação sem proxy é recusada")
             e = erro(lambda: c.call("nao.existe"))
             verificar(e is not None and "not found" in e.message, f"[{modo}] proc desconhecida")
             procs = c.call("sys.procs")
@@ -73,7 +85,7 @@ try:
     # O que cada cliente escreveu, o outro vê (mesmo banco, outro transporte).
     with Client("127.0.0.1", porta) as c:
         todas = c.call("notas.listar")
-        verificar(sorted(n["texto"] for n in todas) == ["nota pelo anel", "nota pelo tcp"],
+        verificar(sorted(n["texto"] for n in todas if n["texto"].startswith("nota pelo")) == ["nota pelo anel", "nota pelo tcp"],
                   "as duas notas estão no banco")
 
     # Servidor morre com o cliente no anel: erro, não espera eterna.
