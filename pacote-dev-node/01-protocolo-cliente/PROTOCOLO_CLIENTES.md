@@ -3,7 +3,7 @@
 Como chamar as stored procedures de um servidor moDb (`modb_add_server`,
 ADR-025) de qualquer linguagem: o protocolo nativo por TCP e, na mesma máquina,
 o anel de memória compartilhada (ADR-026). Implementação de referência:
-[`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.0/clients/python/modb_client.py) (só
+[`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.1.1/clients/python/modb_client.py) (só
 biblioteca padrão, ~350 linhas), testada contra o `notas-server` em
 `modb.python_client`.
 
@@ -76,7 +76,7 @@ OpResult = call_id u32 | ok u8 | se ok=1: payload_len u32 | payload (Value)
 
 `call_id` é do cliente (qualquer valor; a resposta repete). As respostas saem na
 ordem dos pedidos de uma conexão. `code` é o `modb::ErrorCode`
-([`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.0/include/modb/error.hpp)); os de regra das procs:
+([`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.1.1/include/modb/error.hpp)); os de regra das procs:
 
 | code | nome | significado |
 |---|---|---|

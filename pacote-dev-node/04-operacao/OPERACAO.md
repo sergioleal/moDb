@@ -1,6 +1,6 @@
 # Operação — backup, restauração, supervisor e diagnóstico
 
-Fase **10F**. Complementa [OPERACAO_MODULOS.md](https://github.com/sergioleal/moDb/blob/v0.1.0/docs/OPERACAO_MODULOS.md) (falhas do
+Fase **10F**. Complementa [OPERACAO_MODULOS.md](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/OPERACAO_MODULOS.md) (falhas do
 runtime de módulos) com o ciclo operacional do arquivo.
 
 ## Papéis dos arquivos
@@ -44,7 +44,7 @@ if (Test-Path shop.modb.wal) { Copy-Item shop.modb.wal backup\2026-07-19\ }
 Não faça backup “a quente” sem coordenação: páginas e WAL podem divergir.
 
 **O WAL não é opcional no backup.** Com o checkpoint preguiçoso
-([ADR-022](https://github.com/sergioleal/moDb/blob/v0.1.0/docs/decisions/ADR-022-menos-fsync-por-commit.md)), o arquivo de dados só
+([ADR-022](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/decisions/ADR-022-menos-fsync-por-commit.md)), o arquivo de dados só
 fica completo num checkpoint: a cada `checkpoint_interval` commits (padrão 64)
 e no fechamento limpo do banco. Depois de uma queda, ou com o processo ainda
 aberto, os últimos commits podem estar só no WAL. Copiar o par cobre os dois
@@ -110,7 +110,7 @@ operado como qualquer serviço.
 
 `--config ARQUIVO` lê linhas `chave = valor` (`#` comenta); as flags valem mais
 que o arquivo, em qualquer ordem. Caminhos relativos no arquivo são relativos à
-pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`](https://github.com/sergioleal/moDb/blob/v0.1.0/examples/server_procs/deploy/notas-server.conf).
+pasta dele. Exemplo completo: [`examples/server_procs/deploy/notas-server.conf`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/deploy/notas-server.conf).
 
 | Chave / flag | Padrão | Efeito |
 |---|---|---|
@@ -155,7 +155,7 @@ por `modb.server_host`, que mata o processo à força e reabre o mesmo banco).
 
 ### Como serviço — Linux (systemd)
 
-Unidade de exemplo: [`examples/server_procs/deploy/notas-server.service`](https://github.com/sergioleal/moDb/blob/v0.1.0/examples/server_procs/deploy/notas-server.service)
+Unidade de exemplo: [`examples/server_procs/deploy/notas-server.service`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/deploy/notas-server.service)
 (`Restart=on-failure`, `KillSignal=SIGTERM`).
 
 ```bash
@@ -203,8 +203,8 @@ engine por um link em que as sessões de todos os clientes são multiplexadas. O
 protocolo dos clientes não muda: um cliente que falava com o servidor fala com o
 proxy do mesmo jeito (mais o token, se o proxy pedir).
 
-Exemplos: [`notas-proxy.conf`](https://github.com/sergioleal/moDb/blob/v0.1.0/examples/server_procs/deploy/notas-proxy.conf)
-e [`notas-proxy.service`](https://github.com/sergioleal/moDb/blob/v0.1.0/examples/server_procs/deploy/notas-proxy.service).
+Exemplos: [`notas-proxy.conf`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/deploy/notas-proxy.conf)
+e [`notas-proxy.service`](https://github.com/sergioleal/moDb/blob/v0.1.1/examples/server_procs/deploy/notas-proxy.service).
 
 | Chave / flag | Padrão | Efeito |
 |---|---|---|
@@ -248,5 +248,5 @@ clientes daquele momento recebem a conexão fechada (reconectam).
 ## Relacionados
 
 - Transações / crash: `modb demo tx`, `modb tx crash`, `modb tx wal-info`
-- API: [API_PUBLICA.md](https://github.com/sergioleal/moDb/blob/v0.1.0/docs/API_PUBLICA.md)
-- Formato: [FORMATO_DE_ARQUIVO.md](https://github.com/sergioleal/moDb/blob/v0.1.0/docs/FORMATO_DE_ARQUIVO.md)
+- API: [API_PUBLICA.md](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/API_PUBLICA.md)
+- Formato: [FORMATO_DE_ARQUIVO.md](https://github.com/sergioleal/moDb/blob/v0.1.1/docs/FORMATO_DE_ARQUIVO.md)

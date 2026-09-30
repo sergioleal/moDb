@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.30)
 
 project(
     moDb
-    VERSION 0.1.0
+    VERSION 0.1.1
     DESCRIPTION "An embedded relational database written in C++26"
     LANGUAGES CXX
 )
