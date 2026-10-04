@@ -75,8 +75,9 @@
 
 ## Termos gerais de armazenamento (vigentes)
 
-- **Página**: bloco de tamanho fixo (4096 bytes) para leitura e escrita no
-  arquivo.
+- **Página**: bloco de tamanho fixo para leitura e escrita no arquivo. O
+  tamanho é escolhido na compilação (`MODB_PAGE_SIZE`): 8 KB no build padrão,
+  16 KB no SDK binário. Um objeto inteiro precisa caber numa página.
 - **PageId**: identificador lógico e estável de uma página.
 - **Superbloco**: página zero com identidade, versão, tamanho de página e a
   raiz do banco (`catalog_root`).

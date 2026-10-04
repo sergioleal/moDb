@@ -29,8 +29,10 @@ Os links para o código nesta documentação apontam para a tag, e não para
 ## Tamanho de página
 
 O SDK é compilado com páginas de **16 KB** (`MODB_PAGE_SIZE=16384`). Cada objeto
-persistido, com todos os campos, precisa caber numa página; um maior falha com
-`record_too_large`. Conteúdo grande vai num blob (`BlobStore`) ou numa coleção
+persistido, com todos os campos, precisa caber numa página: o objeto codificado
+tem no máximo 16348 bytes (a página menos 36 de cabeçalho e slot), e um maior
+falha com `record_too_large`. Strings, `bytes` e campos `ops::Value` contam
+nesse total. Conteúdo grande vai num blob (`BlobStore`) ou numa coleção
 persistente. O tamanho fica gravado no arquivo, e um banco criado com outro
 tamanho é recusado na abertura (`page size mismatch`). O build do código-fonte
 usa 8 KB por padrão; passe `-DMODB_PAGE_SIZE=16384` para abrir os mesmos arquivos.

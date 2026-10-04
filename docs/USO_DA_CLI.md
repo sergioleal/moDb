@@ -161,6 +161,10 @@ modb db delete <file>
   [plano OO](../docs-process/PLANO_ODB.md).
 - **`delete`**: remove o arquivo.
 
+As saídas abaixo vieram de um build com páginas de 4 KB. Num build com outro
+`MODB_PAGE_SIZE` (8 KB no padrão, 16 KB no SDK), `Page size`, `Total size` e os
+offsets mudam na mesma proporção.
+
 ```text
 $ modb db create demo.modb
 Database created

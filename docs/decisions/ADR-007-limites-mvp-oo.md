@@ -24,6 +24,12 @@ codec e evolução de schema; limites maiores entram depois, com medição.
 
 - Os limites vivem centralizados em `limits.hpp` (estendendo o arquivo atual) e
   são checados antes de escrever.
+
+> **Atualização (2026-10).** O tamanho de página deixou de ser 4096: o build
+> CMake usa 8192 por padrão e o SDK binário, 16384 (`MODB_PAGE_SIZE`, release
+> `v0.3.0`). O payload de um objeto continua limitado à área útil de uma página:
+> `page_size − 36` bytes (16348 no SDK). Ver `docs/FORMATO_DE_ARQUIVO.md` e
+> `docs/SDK.md`.
 - Objetos maiores que uma página não são fatiados no MVP; dados grandes vão
   para a `BlobStore` (Fase 4), e o objeto guarda apenas o `BlobId`.
 

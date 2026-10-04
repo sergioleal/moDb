@@ -119,8 +119,8 @@ foi tomada, mas o conteúdo é atemporal.
 - [0001-formato-de-armazenamento.md](decisions/0001-formato-de-armazenamento.md)
   e [0002-tipos-e-erros.md](decisions/0002-tipos-e-erros.md).
 - **Parcialmente supersedidas**: cada uma tem um aviso no topo dizendo qual
-  parte ainda vale. O que sobrevive ao pivô é a camada física (página de 4096
-  bytes, little-endian, sem cópia direta de struct, política de erros via
+  parte ainda vale. O que sobrevive ao pivô é a camada física (página de
+  tamanho fixo, então de 4096 bytes e hoje escolhida na compilação, little-endian, sem cópia direta de struct, política de erros via
   `Result`/`std::expected`) — o storage reaproveitado pelo Ring0 (ver
   [ADR-006](decisions/ADR-006-destino-do-codigo-relacional.md)). O que não
   sobrevive são os tipos SQL e os metadados relacionais, superados por

@@ -8,7 +8,13 @@ Estado: consolidado na **Fase 10F**. Compatibilidade major/minor:
 
 ## Regras gerais
 
-- tamanho de página fixo na compilação (`MODB_PAGE_SIZE`, padrão 4096);
+- tamanho de página fixo na compilação (`MODB_PAGE_SIZE`): 8192 no build
+  CMake padrão, 16384 no SDK binário, 4096 nos bancos antigos; vai gravado no
+  superbloco, e um arquivo de outro tamanho é recusado na abertura
+  (`page size mismatch`);
+- um registro do heap (o objeto codificado) tem no máximo
+  `page_size − 36` bytes (cabeçalho da página de 28 e um slot de 8): 8156 no
+  build padrão, 16348 no SDK. Acima disso, `record_too_large`;
 - inteiros little-endian; estruturas C++ nunca são memcpy’d para o disco;
 - `PageId` = índice da página; offset = `PageId * page_size`;
 - o banco OO vive num único arquivo `<db>`; o WAL é `<db>.wal` (arquivo separado).

@@ -91,7 +91,8 @@ cliente ou usar a `Connection` sem o `Pool`.
 ## O que a `v0.3.0` muda: páginas de 16 KB
 
 O SDK passa a usar páginas de 16 KB (antes 8 KB). Cada objeto persistido, com
-todos os campos, precisa caber numa página: o limite sobe de ~8 KB para ~16 KB.
+todos os campos, precisa caber numa página: o limite sobe de 8156 para 16348
+bytes por objeto codificado.
 Bancos criados com SDKs anteriores não abrem nesta versão; recrie-os do zero.
 O protocolo não muda.
 
@@ -140,6 +141,10 @@ continua funcionando.
 - **Uma proc de escrita por vez** (ADR-027). As procs de leitura rodam em
   paralelo, e as escritas se repetem automaticamente em conflito de snapshot.
 - **Um banco por servidor.**
+- **Um objeto cabe numa página.** No SDK, o objeto codificado tem no máximo
+  16348 bytes, contando strings, `bytes` e campos `ops::Value`; acima disso,
+  `record_too_large` (28). Conteúdo grande vai num blob (`BlobStore`) ou numa
+  coleção persistente, e listas pequenas de valores, num campo `ops::Value`.
 - **Procs compiladas no servidor.** Mudar uma regra é recompilar e trocar o
   executável; não há carga em tempo de execução nem sandbox.
 - **Sem esquema formal de argumentos.** A descrição de cada proc
