@@ -3,6 +3,7 @@
 // create/update/remove, duplicatas, uso comprovado do índice (menos páginas que
 // um scan completo), erro sem índice e sobrevivência a recovery e reabertura.
 #include "modb/object/database.hpp"
+#include "modb/storage/page.hpp"
 #include "test_support.hpp"
 
 #include <chrono>
@@ -122,7 +123,10 @@ int main() {
         // Muitas pessoas em várias páginas, idades 0..N-1 e algumas repetidas.
         constexpr int total = 400;
         for (int i = 0; i < total; ++i) {
-            auto id = create_committed(*database, Person{"p" + std::to_string(i), i % 100});
+            // Nome comprido o bastante para as 400 pessoas ocuparem várias
+            // páginas em qualquer tamanho de página.
+            auto id = create_committed(*database, Person{"p" + std::to_string(i) + std::string(modb::storage::page_size / 128, 'n'),
+                                                         i % 100});
             if (i == 250) {
                 if (id) {
                     target = *id;  // age 50, para exercitar update/remove

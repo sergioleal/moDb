@@ -86,7 +86,7 @@ server::Module modulo_teste() {
                   if (auto id = c.create(Evento{"g"}); !id) {
                       return std::unexpected(id.error());
                   }
-                  return Value{std::string(6000, 'x')};
+                  return Value{std::string(storage::page_size, 'x')};
               })
         .build();
 }

@@ -138,7 +138,7 @@ The stored bytes are the same binary `Value` v1 as `OpCall` arguments, so no
 text is re-parsed on read. Limits: the field is opaque to indexes and queries,
 changing a field's codec after data exists is a migration, and **the whole
 object must fit in one heap page** (about 8 KB with the default
-`MODB_PAGE_SIZE`). A larger object fails with `record_too_large` and nothing
+`MODB_PAGE_SIZE` of a source build, about 16 KB in the binary SDK). A larger object fails with `record_too_large` and nothing
 is written; put big payloads in a `BlobStore` blob or a persistent collection.
 Covered by `modb.stored_value` (`tests/stored_value_test.cpp`).
 

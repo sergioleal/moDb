@@ -12,7 +12,7 @@ navegador ── HTTP ──▶ biblioteca-web ── protocolo moDb ──▶ b
 
 Cada chamada de escrita roda numa transação no servidor: se uma regra falha no
 meio, nada do que a chamada escreveu fica. O servidor é gerado por
-`modb_add_server` (moDb, ADR-025); veja [`docs/OPERACAO.md` do moDb](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/OPERACAO.md) para
+`modb_add_server` (moDb, ADR-025); veja [`docs/OPERACAO.md` do moDb](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/OPERACAO.md) para
 configuração, log de chamadas, tempo limite de procs e como rodar como serviço.
 
 ## Entidades
@@ -43,7 +43,7 @@ ISBN, tombo e e-mail têm índice (B+ tree do moDb), usado para garantir que sej
 ## Compilar e rodar
 
 Pré-requisitos: CMake ≥ 3.30, Ninja, g++ ≥ 13 (ou outro compilador C++23) e o
-repositório do moDb em `../moDb2` ([moDb no GitHub](https://github.com/sergioleal/moDb/tree/v0.2.0)) (ou `-DMODB_SOURCE_DIR=<caminho>`). Na
+repositório do moDb em `../moDb2` ([moDb no GitHub](https://github.com/sergioleal/moDb/tree/v0.3.0)) (ou `-DMODB_SOURCE_DIR=<caminho>`). Na
 primeira configuração o CMake baixa o [cpp-httplib](https://github.com/yhirose/cpp-httplib)
 v0.18.1 (header-only, MIT).
 

@@ -4,7 +4,7 @@
 - Data: 2026-09-28
 - Relacionados: ADR-010 (protocolo binário), ADR-011 (concorrência do servidor),
   ADR-025 (servidor com procs compiladas), ADR-026 (memória compartilhada),
-  ADR-027 (leitores concorrentes), [`docs-process/PLANO_PROXY.md`](https://github.com/sergioleal/moDb/blob/v0.2.0/docs-process/PLANO_PROXY.md)
+  ADR-027 (leitores concorrentes), [`docs-process/PLANO_PROXY.md`](https://github.com/sergioleal/moDb/blob/v0.3.0/docs-process/PLANO_PROXY.md)
 
 ## Contexto
 

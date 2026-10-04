@@ -193,7 +193,7 @@ bytes). The proxy negotiates `min(client, proxy, engine)`.
   principal already committed a call with it, returns the stored result
   without running the proc again; otherwise it runs the proc and stores key and
   result before the commit. The record is `sys.Idempotency` in the database
-  file, so it survives a crash between commit and reply. Results over 4 KB keep
+  file, so it survives a crash between commit and reply. Results over half a page (8 KB in the SDK) keep
   only the key; a repeat then gets `conflict` with
   `detail.reason = "idempotent_result_too_large"`. Enabled by
   `OperationRegistry::enable_idempotency` (the `server_host` does it;

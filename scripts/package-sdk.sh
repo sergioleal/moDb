@@ -6,6 +6,8 @@
 # Uso (da raiz do repositório, num Linux ou no WSL):
 #   scripts/package-sdk.sh [diretório-de-build]
 # CMake ≥ 3.30 no PATH (docs/CONCORRENCIA_TSAN.md mostra como instalar no WSL).
+# Páginas de 16 KB (MODB_PAGE_SIZE): cada objeto precisa caber numa página, e o
+# SDK prefere objetos maiores ao padrão de 8 KB do build do código-fonte.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,7 +20,8 @@ cmake -S "$root" -B "$build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DMODB_BUILD_EXAMPLES=OFF \
     -DBUILD_TESTING=OFF \
-    -DMODB_BUILD_TRAINING=OFF
+    -DMODB_BUILD_TRAINING=OFF \
+    -DMODB_PAGE_SIZE=16384
 cmake --build "$build" --target modb modb_app_client modb_server_host modb_proxy modb_cli modb_proxy_cli
 rm -rf "$stage"
 cmake --install "$build" --prefix "$stage" --strip

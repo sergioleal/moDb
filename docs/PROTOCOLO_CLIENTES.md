@@ -137,7 +137,7 @@ extensão = flags u8 |
   uma queda de conexão, inclusive se o servidor caiu entre o commit e a
   resposta. Numa proc de leitura, a chave é ignorada. A chave vale por
   `idempotency_retention_s` do servidor (padrão 24 h). Um resultado maior que
-  4 KB não é guardado: a repetição volta `conflict` (70) com
+  meia página (8 KB no SDK) não é guardado: a repetição volta `conflict` (70) com
   `detail.reason = "idempotent_result_too_large"`, e a escrita não acontece
   duas vezes.
 - **`detail` no erro.** Um `Value` que a proc manda junto com o código, por

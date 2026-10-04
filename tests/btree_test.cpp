@@ -6,6 +6,7 @@
 #include "modb/index/key_codec.hpp"
 #include "modb/object/attribute_value.hpp"
 #include "modb/storage/page_file.hpp"
+#include "modb/storage/page.hpp"
 #include "test_support.hpp"
 
 #include <algorithm>
@@ -132,7 +133,9 @@ int main() {
         if (!file || !tree) {
             return suite.finish();
         }
-        constexpr int total = 3000;
+        // Altura 3 pede mais que fanout² chaves; o fanout cresce com a página.
+        constexpr double scale = static_cast<double>(modb::storage::page_size) / 8192.0;
+        constexpr int total = scale <= 1.0 ? 3000 : static_cast<int>(3000 * scale * scale);
         const std::string pad(180, 'x');  // chaves grandes: poucas por página
         bool ok = true;
         for (int i = 0; i < total; ++i) {
@@ -144,7 +147,7 @@ int main() {
                 break;
             }
         }
-        suite.check(ok, "B: 3000 long keys inserted");
+        suite.check(ok, "B: " + std::to_string(total) + " long keys inserted");
         auto height = tree->validate();
         suite.check(height.has_value(), "B: structure valid with internal splits");
         suite.check(height.has_value() && *height >= 3,

@@ -2,11 +2,11 @@
 
 - Estado: aceito
 - Data: 2026-09-30
-- Plano: [PLANO_PROPOSTAS_REGISTRY.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs-process/PLANO_PROPOSTAS_REGISTRY.md), P2 (R7–R12)
-- Relacionados: [ADR-015](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-015-compatibilidade.md) (compatibilidade),
-  [ADR-025](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-025-servidor-de-aplicacao-com-procedures-compiladas.md) (procs),
-  [ADR-027](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-027-leitores-concorrentes-escritor-exclusivo.md) (um escritor),
-  [ADR-028](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-028-proxy-de-acesso-remoto.md) (proxy)
+- Plano: [PLANO_PROPOSTAS_REGISTRY.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs-process/PLANO_PROPOSTAS_REGISTRY.md), P2 (R7–R12)
+- Relacionados: [ADR-015](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/decisions/ADR-015-compatibilidade.md) (compatibilidade),
+  [ADR-025](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/decisions/ADR-025-servidor-de-aplicacao-com-procedures-compiladas.md) (procs),
+  [ADR-027](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/decisions/ADR-027-leitores-concorrentes-escritor-exclusivo.md) (um escritor),
+  [ADR-028](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/decisions/ADR-028-proxy-de-acesso-remoto.md) (proxy)
 
 ## Contexto
 
@@ -86,7 +86,7 @@ OpResult (ok = 0) = call_id u32 | ok u8 | code u16 | message string |
   `ops`. O `ExecutionContext` guarda o detalhe da chamada, e o
   `OperationRegistry` o devolve junto com o erro.
 - Convenção documentada (não obrigatória): `reason` (`[a-z_]+`, estável) e
-  `field` (caminho com [`.`](https://github.com/sergioleal/moDb/tree/v0.2.0/.)). O log de chamadas grava o `reason`.
+  `field` (caminho com [`.`](https://github.com/sergioleal/moDb/tree/v0.3.0/.)). O log de chamadas grava o `reason`.
 - Só em erro: num sucesso, o detalhe é descartado.
 
 ### 3. Chave de idempotência
@@ -104,8 +104,9 @@ escrita lógica).
 - Numa proc de leitura, a chave é ignorada.
 - Retenção: `idempotency_retention_s` no servidor (padrão 86400). Cada escrita
   apaga até 16 registros vencidos.
-- Um resultado maior que 4 KB não cabe no registro (um objeto precisa caber
-  numa página, R14). A chave é gravada sem ele, e a repetição recebe
+- Um resultado maior que meia página (4 KB com páginas de 8 KB; 8 KB no SDK, de
+  páginas de 16 KB) não cabe no registro (um objeto precisa caber numa página,
+  R14). A chave é gravada sem ele, e a repetição recebe
   `conflict` com `detail.reason = "idempotent_result_too_large"`: a escrita não
   acontece duas vezes, mas o resultado não é repetido.
 - Com isso, o pool pode repetir uma escrita que leva chave.

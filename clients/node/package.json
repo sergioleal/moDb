@@ -1,6 +1,6 @@
 {
   "name": "modb-client",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Cliente Node do Ring0 (moDb): protocolo nativo, token do modb-proxy e pool de conexões",
   "private": true,
   "type": "module",

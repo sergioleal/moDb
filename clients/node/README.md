@@ -84,7 +84,7 @@ Contra um servidor de minor ≤ 2, `actingAs` e `idempotencyKey` são recusados
 antes de sair do cliente, com `ModbError` 1.
 
 Para usar de outro projeto sem publicar no npm, aponte a dependência para esta
-pasta, fixada numa tag do repositório (por exemplo, a `v0.2.0`).
+pasta, fixada numa tag do repositório (por exemplo, a `v0.3.0`).
 
 ## Testes
 

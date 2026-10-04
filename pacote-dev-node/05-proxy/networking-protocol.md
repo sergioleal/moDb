@@ -1,7 +1,7 @@
 # Networking and Protocol
 
-> Part of the [`docs/reference/`](https://github.com/sergioleal/moDb/tree/v0.2.0/docs/reference) set — see [docs/README.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/README.md) for
-> the full index and [DEVELOPER_GUIDE.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/DEVELOPER_GUIDE.md) for a
+> Part of the [`docs/reference/`](https://github.com/sergioleal/moDb/tree/v0.3.0/docs/reference) set — see [docs/README.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/README.md) for
+> the full index and [DEVELOPER_GUIDE.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/DEVELOPER_GUIDE.md) for a
 > narrative, tutorial-style introduction. This document is a precise
 > reference: it assumes you already know C++ well and want exact behavior,
 > not a learning path.
@@ -18,7 +18,7 @@ application code should actually use.
 
 The single most important invariant to internalize: **networking does not
 change the transaction model.** The server enforces the same single-writer
-rule from [reference/database-lifecycle.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/reference/database-lifecycle.md)
+rule from [reference/database-lifecycle.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/reference/database-lifecycle.md)
 regardless of how many clients or concurrent streams are connected.
 
 ## 2. Concepts
@@ -126,14 +126,14 @@ unbounded queue anywhere in the streaming path.
 generator for that query stops, but it still replies with a normal
 `StreamEnd` carrying the partial count — **the same connection stays usable
 for a new query afterward**. This is demonstrated by the CLI's
-`modb demo serve-cancel` (see [USO_DA_CLI.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/USO_DA_CLI.md)): cancel
+`modb demo serve-cancel` (see [USO_DA_CLI.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/USO_DA_CLI.md)): cancel
 mid-stream, then immediately issue a second query on the same connection.
 
 ### 2.6 Client-side concurrency model
 
 The lower-level `net::Client` demultiplexes incoming frames by `query_id` on
 a single background reader thread per connection
-([`include/modb/net/client.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/net/client.hpp)). `co_await`ing a stream still resumes on the
+([`include/modb/net/client.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/net/client.hpp)). `co_await`ing a stream still resumes on the
 *caller's* thread, per ADR-011 — there is no hidden thread-pool executor
 scheduling your continuations onto arbitrary threads.
 
@@ -152,7 +152,7 @@ client ──TCP──► modb-proxy ──link (AF_UNIX, multiplexed)──► 
 - **Link.** One connection carries every client session of a proxy. Each frame
   is a client frame prefixed with its session number
   (`| session u32 | length u32 | type u8 | payload |`,
-  [`include/modb/net/link_protocol.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/net/link_protocol.hpp)). Control messages use types ≥ `0x80`:
+  [`include/modb/net/link_protocol.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/net/link_protocol.hpp)). Control messages use types ≥ `0x80`:
   `LinkHello`/`LinkHelloOk` (version, optional shared secret, and the engine's
   operation catalog), `SessionOpen` (the principal the proxy authenticated),
   `SessionClose`, `StreamCredit`.
@@ -161,11 +161,11 @@ client ──TCP──► modb-proxy ──link (AF_UNIX, multiplexed)──► 
   per-stream credit, which the proxy returns as it delivers frames to the
   client. A client that stops reading stalls only its own streams.
 - **Policy.** The proxy decodes every client message and runs it through a
-  `modb::proxy::Policy` ([`include/modb/proxy/policy.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/proxy/policy.hpp)): `authenticate`,
+  `modb::proxy::Policy` ([`include/modb/proxy/policy.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/proxy/policy.hpp)): `authenticate`,
   `authorize` (allow, deny, or rewrite in place), `on_response`, `audit`, and
   `on_engine` for the catalog. Reference policies: token authentication,
   allowlist, read-only, per-principal limits, audit log, composed by
-  `PolicyChain` ([`include/modb/proxy/policies.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/proxy/policies.hpp)).
+  `PolicyChain` ([`include/modb/proxy/policies.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/proxy/policies.hpp)).
 - **Identity.** The engine does not check credentials; it trusts the link and
   hands the session's principal, roles and attributes to procs as
   `ops::ExecutionContext::caller()` (`modb::server::Context::caller()`).
@@ -193,7 +193,7 @@ bytes). The proxy negotiates `min(client, proxy, engine)`.
   principal already committed a call with it, returns the stored result
   without running the proc again; otherwise it runs the proc and stores key and
   result before the commit. The record is `sys.Idempotency` in the database
-  file, so it survives a crash between commit and reply. Results over 4 KB keep
+  file, so it survives a crash between commit and reply. Results over half a page (8 KB in the SDK) keep
   only the key; a repeat then gets `conflict` with
   `detail.reason = "idempotent_result_too_large"`. Enabled by
   `OperationRegistry::enable_idempotency` (the `server_host` does it;
@@ -242,7 +242,7 @@ public:
 ```
 
 `set_operation_registry`/`set_facade_catalog` are how you wire in
-[reference/domain-operations.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/reference/domain-operations.md) and remote facades —
+[reference/domain-operations.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/reference/domain-operations.md) and remote facades —
 without them, the server can still stream queries but has nothing to
 `OpCall` into.
 
@@ -250,7 +250,7 @@ without them, the server can still stream queries but has nothing to
 
 `include/modb/app/server_connection.hpp:24-76` — the recommended
 application-facing entry point (`modb::app_client` CMake target, see
-[API_PUBLICA.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/API_PUBLICA.md)).
+[API_PUBLICA.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/API_PUBLICA.md)).
 
 ```cpp
 struct ConnectionOptions {
@@ -295,7 +295,7 @@ wait for the whole result set.
 
 ### 3.3 `modb::net::Client` (lower-level)
 
-[`include/modb/net/client.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/net/client.hpp) — what `ServerConnection` wraps. Reach for
+[`include/modb/net/client.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/net/client.hpp) — what `ServerConnection` wraps. Reach for
 this directly only if you need protocol-level control `ServerConnection`
 doesn't expose.
 
@@ -330,8 +330,8 @@ doesn't expose.
 ## 6. Worked Example
 
 Handshake, then a streaming query, condensed from
-[`examples/server/by_phase/phase_08/connect_query.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/examples/server/by_phase/phase_08/connect_query.cpp) and
-[`examples/server/by_phase/phase_10/handshake_capabilities.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/examples/server/by_phase/phase_10/handshake_capabilities.cpp):
+[`examples/server/by_phase/phase_08/connect_query.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/examples/server/by_phase/phase_08/connect_query.cpp) and
+[`examples/server/by_phase/phase_10/handshake_capabilities.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/examples/server/by_phase/phase_10/handshake_capabilities.cpp):
 
 ```cpp
 auto server = modb::net::Server::listen(path, "127.0.0.1", 0);
@@ -353,26 +353,26 @@ acceptor.join();
 
 ## 7. Related Documentation
 
-- [DEVELOPER_GUIDE.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/DEVELOPER_GUIDE.md), Chapter 9
-- [reference/domain-operations.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/reference/domain-operations.md) — what
+- [DEVELOPER_GUIDE.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/DEVELOPER_GUIDE.md), Chapter 9
+- [reference/domain-operations.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/reference/domain-operations.md) — what
   `set_operation_registry`/`call` actually invoke
-- [ADR-010](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md),
-  [ADR-011](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-011-concorrencia-do-servidor.md),
-  [ADR-028](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-028-proxy-de-acesso-remoto.md) (proxies),
-  [ADR-029](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/decisions/ADR-029-delegacao-detalhe-e-idempotencia.md) (minor 3)
-- [OPERACAO.md](https://github.com/sergioleal/moDb/blob/v0.2.0/docs/OPERACAO.md), "Proxy de acesso remoto" — running `modb-proxy`
+- [ADR-010](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/decisions/ADR-010-protocolo-binario-proximo-do-armazenamento.md),
+  [ADR-011](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/decisions/ADR-011-concorrencia-do-servidor.md),
+  [ADR-028](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/decisions/ADR-028-proxy-de-acesso-remoto.md) (proxies),
+  [ADR-029](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/decisions/ADR-029-delegacao-detalhe-e-idempotencia.md) (minor 3)
+- [OPERACAO.md](https://github.com/sergioleal/moDb/blob/v0.3.0/docs/OPERACAO.md), "Proxy de acesso remoto" — running `modb-proxy`
 
 ## 8. Related Source
 
-- [`include/modb/net/server.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/net/server.hpp), `client.hpp`, `protocol.hpp`,
+- [`include/modb/net/server.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/net/server.hpp), `client.hpp`, `protocol.hpp`,
   `native_socket.hpp`, `query_description.hpp`
-- [`include/modb/app/server_connection.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/app/server_connection.hpp)
-- [`include/modb/net/link_protocol.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/net/link_protocol.hpp), [`src/net/engine_link.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/src/net/engine_link.cpp),
-  [`src/net/engine_session.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/src/net/engine_session.hpp) (the engine side of the link)
-- [`include/modb/proxy/`](https://github.com/sergioleal/moDb/tree/v0.2.0/include/modb/proxy) (`proxy.hpp`, `policy.hpp`, `policies.hpp`,
-  `token_policy.hpp`), [`apps/modb_proxy/main.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/apps/modb_proxy/main.cpp)
-- [`examples/server/by_phase/phase_08/connect_query.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/examples/server/by_phase/phase_08/connect_query.cpp),
-  [`examples/server/by_phase/phase_10/handshake_capabilities.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/examples/server/by_phase/phase_10/handshake_capabilities.cpp)
-- [`tests/server_streaming_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/tests/server_streaming_test.cpp), [`tests/protocol_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/tests/protocol_test.cpp),
-  [`tests/app_server_connection_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/tests/app_server_connection_test.cpp), [`tests/protocol_minor3_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/tests/protocol_minor3_test.cpp),
-  [`tests/minor3_e2e_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/tests/minor3_e2e_test.cpp)
+- [`include/modb/app/server_connection.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/app/server_connection.hpp)
+- [`include/modb/net/link_protocol.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/net/link_protocol.hpp), [`src/net/engine_link.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/src/net/engine_link.cpp),
+  [`src/net/engine_session.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/src/net/engine_session.hpp) (the engine side of the link)
+- [`include/modb/proxy/`](https://github.com/sergioleal/moDb/tree/v0.3.0/include/modb/proxy) (`proxy.hpp`, `policy.hpp`, `policies.hpp`,
+  `token_policy.hpp`), [`apps/modb_proxy/main.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/apps/modb_proxy/main.cpp)
+- [`examples/server/by_phase/phase_08/connect_query.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/examples/server/by_phase/phase_08/connect_query.cpp),
+  [`examples/server/by_phase/phase_10/handshake_capabilities.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/examples/server/by_phase/phase_10/handshake_capabilities.cpp)
+- [`tests/server_streaming_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/tests/server_streaming_test.cpp), [`tests/protocol_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/tests/protocol_test.cpp),
+  [`tests/app_server_connection_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/tests/app_server_connection_test.cpp), [`tests/protocol_minor3_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/tests/protocol_minor3_test.cpp),
+  [`tests/minor3_e2e_test.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/tests/minor3_e2e_test.cpp)

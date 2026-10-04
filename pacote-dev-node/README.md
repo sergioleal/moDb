@@ -4,8 +4,8 @@ O que é preciso para reescrever uma aplicação React + Node usando o Ring0 com
 backend, acessado através do `modb-proxy` (2026-09-30).
 
 - **Ring0 / moDb:** https://github.com/sergioleal/moDb, tag
-  [`v0.2.0`](https://github.com/sergioleal/moDb/releases/tag/v0.2.0) (protocolo
-  minor 3), com o **SDK binário para Linux x86_64** anexado à release.
+  [`v0.3.0`](https://github.com/sergioleal/moDb/releases/tag/v0.3.0) (protocolo
+  minor 3, páginas de 16 KB), com o **SDK binário para Linux x86_64** anexado à release.
 - **biblioteca (exemplo):** https://github.com/sergioleal/biblioteca0, commit
   [`7178285`](https://github.com/sergioleal/biblioteca0/tree/71782858f75a311971b9897f80bef3bfce7c0a3c).
 
@@ -36,13 +36,13 @@ servidor (ADR-025). O Node só chama procs pelo nome.
 
 | Passo | Documento (no pacote) | Código (no remoto) | Para quê |
 |---|---|---|---|
-| 0 | `00-sdk/SDK.md` | [`examples/sdk_app/`](https://github.com/sergioleal/moDb/tree/v0.2.0/examples/sdk_app) | Baixar o SDK da release, compilar o servidor da aplicação só com o próprio módulo e subir engine + proxy com token. **Comece por aqui.** |
-| 1 | `01-protocolo-cliente/PROTOCOLO_CLIENTES.md` | [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/error.hpp) | Especificação byte a byte do cliente: frame, `Hello`, `Authenticate`, `OpCall`/`OpResult`, `Value`, códigos de erro. **É o que o cliente Node precisa implementar.** |
-| 2 | — | [`clients/node/`](https://github.com/sergioleal/moDb/tree/v0.2.0/clients/node) (e o Python, [`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.2.0/clients/python/modb_client.py)) | **Cliente Node de referência**, pronto: `Value`, conexão com token, pool e as regras de repetição. Use-o no gateway em vez de escrever outro. |
-| 3 | `03-procs/ADR-025-…md` | [`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/server/module.hpp), [`examples/server_procs/`](https://github.com/sergioleal/moDb/tree/v0.2.0/examples/server_procs), [`cmake/ModbServer.cmake`](https://github.com/sergioleal/moDb/blob/v0.2.0/cmake/ModbServer.cmake) | Como escrever um módulo de procs (`ModuleBuilder`, `Context`, `ops::Args`, erros de regra). O `notas-server` é o modelo mínimo. |
-| 4 | `04-operacao/OPERACAO.md` | [`examples/server_procs/deploy/`](https://github.com/sergioleal/moDb/tree/v0.2.0/examples/server_procs/deploy) | Subir engine + proxy: configuração, `--local`, tokens (`modb-proxy hash-token`), unidades systemd, sonda (`modb ping`). Leia as seções "Servidor de aplicação" e "Proxy de acesso remoto". |
-| 5 | `05-proxy/ADR-028-…md`, `05-proxy/ADR-029-…md`, `05-proxy/networking-protocol.md` (§2.7, §2.8) | [`include/modb/proxy/`](https://github.com/sergioleal/moDb/tree/v0.2.0/include/modb/proxy), [`apps/modb_proxy/main.cpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/apps/modb_proxy/main.cpp) | Como o proxy funciona e as políticas prontas: token, allowlist de procs, `read_only`, rate limit, auditoria; delegação (`delegate`), `detail` e chave de idempotência (minor 3). |
-| 6 | `06-concorrencia-erros/ADR-027-…md` | [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.2.0/include/modb/error.hpp) | Semântica das escritas concorrentes e a tabela de `ErrorCode` (os números do `OpResult`). |
+| 0 | `00-sdk/SDK.md` | [`examples/sdk_app/`](https://github.com/sergioleal/moDb/tree/v0.3.0/examples/sdk_app) | Baixar o SDK da release, compilar o servidor da aplicação só com o próprio módulo e subir engine + proxy com token. **Comece por aqui.** |
+| 1 | `01-protocolo-cliente/PROTOCOLO_CLIENTES.md` | [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/error.hpp) | Especificação byte a byte do cliente: frame, `Hello`, `Authenticate`, `OpCall`/`OpResult`, `Value`, códigos de erro. **É o que o cliente Node precisa implementar.** |
+| 2 | — | [`clients/node/`](https://github.com/sergioleal/moDb/tree/v0.3.0/clients/node) (e o Python, [`clients/python/modb_client.py`](https://github.com/sergioleal/moDb/blob/v0.3.0/clients/python/modb_client.py)) | **Cliente Node de referência**, pronto: `Value`, conexão com token, pool e as regras de repetição. Use-o no gateway em vez de escrever outro. |
+| 3 | `03-procs/ADR-025-…md` | [`include/modb/server/module.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/server/module.hpp), [`examples/server_procs/`](https://github.com/sergioleal/moDb/tree/v0.3.0/examples/server_procs), [`cmake/ModbServer.cmake`](https://github.com/sergioleal/moDb/blob/v0.3.0/cmake/ModbServer.cmake) | Como escrever um módulo de procs (`ModuleBuilder`, `Context`, `ops::Args`, erros de regra). O `notas-server` é o modelo mínimo. |
+| 4 | `04-operacao/OPERACAO.md` | [`examples/server_procs/deploy/`](https://github.com/sergioleal/moDb/tree/v0.3.0/examples/server_procs/deploy) | Subir engine + proxy: configuração, `--local`, tokens (`modb-proxy hash-token`), unidades systemd, sonda (`modb ping`). Leia as seções "Servidor de aplicação" e "Proxy de acesso remoto". |
+| 5 | `05-proxy/ADR-028-…md`, `05-proxy/ADR-029-…md`, `05-proxy/networking-protocol.md` (§2.7, §2.8) | [`include/modb/proxy/`](https://github.com/sergioleal/moDb/tree/v0.3.0/include/modb/proxy), [`apps/modb_proxy/main.cpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/apps/modb_proxy/main.cpp) | Como o proxy funciona e as políticas prontas: token, allowlist de procs, `read_only`, rate limit, auditoria; delegação (`delegate`), `detail` e chave de idempotência (minor 3). |
+| 6 | `06-concorrencia-erros/ADR-027-…md` | [`include/modb/error.hpp`](https://github.com/sergioleal/moDb/blob/v0.3.0/include/modb/error.hpp) | Semântica das escritas concorrentes e a tabela de `ErrorCode` (os números do `OpResult`). |
 | 7 | `07-exemplo-biblioteca/README.md` | [`modulo/biblioteca_procs.cpp`](https://github.com/sergioleal/biblioteca0/blob/71782858f75a311971b9897f80bef3bfce7c0a3c/modulo/biblioteca_procs.cpp), [`servidor/`](https://github.com/sergioleal/biblioteca0/tree/71782858f75a311971b9897f80bef3bfce7c0a3c/servidor), [`web/gateway.cpp`](https://github.com/sergioleal/biblioteca0/blob/71782858f75a311971b9897f80bef3bfce7c0a3c/web/gateway.cpp) | O caso real mais próximo: 31 procs, o servidor gerado por `modb_add_server` e o gateway web (rota → proc, pool de conexões). |
 
 ## Estado atual: o que existe e o que falta
@@ -88,6 +88,13 @@ cliente ou usar a `Connection` sem o `Pool`.
   no fim, nenhum é renumerado. Decida pelo `code` e pelo `detail.reason`, não
   pela mensagem.
 
+## O que a `v0.3.0` muda: páginas de 16 KB
+
+O SDK passa a usar páginas de 16 KB (antes 8 KB). Cada objeto persistido, com
+todos os campos, precisa caber numa página: o limite sobe de ~8 KB para ~16 KB.
+Bancos criados com SDKs anteriores não abrem nesta versão; recrie-os do zero.
+O protocolo não muda.
+
 ## O que a `v0.2.0` acrescenta: protocolo minor 3
 
 Clientes de minor 2 continuam funcionando com a `v0.2.0`, e o cliente Node da
@@ -106,7 +113,8 @@ Clientes de minor 2 continuam funcionando com a `v0.2.0`, e o cliente Node da
 - **Escritas repetíveis.** `idempotencyKey` (um UUID por escrita lógica): o
   servidor devolve o resultado já confirmado em vez de executar de novo, e o
   pool pode repetir a escrita depois de uma queda. A chave vale por 24 h
-  (`idempotency_retention_s`).
+  (`idempotency_retention_s`). Um resultado acima de meia página (8 KB no SDK)
+  guarda só a chave.
 - **Limites por usuário.** Com delegação, `max_calls_per_second` vale por
   usuário, e `max_delegated_calls_per_second` limita a soma do gateway.
 

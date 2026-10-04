@@ -267,16 +267,21 @@ int main() {
         suite.check_error(heap->read(removed_id), ErrorCode::record_not_found,
                           "erased RecordId cannot be read");
 
-        // Uma inserção pequena deve reutilizar o mesmo SlotId com outra geração.
+        // Se uma inserção reutilizar o SlotId removido, ela ganha outra geração,
+        // e o RecordId antigo continua inválido. Qual página recebe a inserção
+        // é da política do heap (a de menor capacidade que serve), que muda com
+        // o tamanho da página: a reutilização só é conferida quando acontece.
         const Row replacement_row{Value{std::int64_t{2000}}, Value{"replacement"}};
         auto replacement_bytes = encode_row(replacement_row);
         if (replacement_bytes) {
             auto replacement_id = heap->insert(*replacement_bytes);
-            suite.check(replacement_id.has_value() &&
-                            replacement_id->page == removed_id.page &&
-                            replacement_id->slot == removed_id.slot &&
-                            replacement_id->generation != removed_id.generation,
-                        "TableHeap reuses a slot with a new generation");
+            suite.check(replacement_id.has_value(), "TableHeap inserts the replacement record");
+            if (replacement_id && replacement_id->page == removed_id.page && replacement_id->slot == removed_id.slot) {
+                suite.check(replacement_id->generation != removed_id.generation,
+                            "TableHeap reuses a slot with a new generation");
+            }
+            suite.check_error(heap->read(removed_id), ErrorCode::record_not_found,
+                              "the erased RecordId stays invalid after another insert");
         }
 
         // Esvazia uma página não raiz para confirmar sua retirada da cadeia lógica.
@@ -498,7 +503,7 @@ int main() {
     // arquivo -- inclusive depois de fechar e reabrir.
     {
         TemporaryDatabase free_db;
-        const std::vector<std::byte> big(1900, std::byte{0x5A});   // 4 por página
+        const std::vector<std::byte> big(page_size / 4 - 150, std::byte{0x5A});   // 4 por página
         PageId free_root{};
         PageId retired{};
         std::uint64_t file_pages = 0;

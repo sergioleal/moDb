@@ -70,8 +70,9 @@ public:
     [[nodiscard]] Result<void> enable_idempotency(object::Database& database,
                                                   std::chrono::seconds retention = std::chrono::hours{24});
     [[nodiscard]] bool idempotency_enabled() const noexcept { return idempotency_; }
-    // Maior resultado que o registro guarda: o objeto precisa caber numa página.
-    static constexpr std::size_t k_idempotency_max_result = 4096;
+    // Maior resultado que o registro guarda: o objeto precisa caber numa página
+    // (metade dela; 8 KB com páginas de 16 KB, como no SDK).
+    static constexpr std::size_t k_idempotency_max_result = storage::page_size / 2;
 
     [[nodiscard]] Result<void> register_factory(std::string id, OperationFactory factory,
                                                 OperationMode mode = OperationMode::read_write);

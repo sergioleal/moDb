@@ -335,7 +335,8 @@ int main() {
             }
             modb::object::BlobStore blobs{*file};
             // Blob multi-página para exercitar mais de uma página BLBP.
-            std::vector<std::byte> data(10 * 1024, std::byte{0xAB});
+            // Maior que uma página, em qualquer tamanho de página.
+            std::vector<std::byte> data(2 * modb::storage::page_size + 1024, std::byte{0xAB});
             suite.check(blobs.create(data).has_value(), "blob is written");
             suite.check(file->flush().has_value(), "blob database is flushed");
         }
