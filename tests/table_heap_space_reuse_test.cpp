@@ -42,9 +42,11 @@ constexpr std::size_t replacement_record_size = MODB_REPLACEMENT_RECORD_SIZE;
 #else
 constexpr std::size_t replacement_record_size = 63;
 #endif
-// A capacidade física é igual ao tamanho lógico.
+// Num heap marcado (ADR-030), cada registro leva um byte de tipo na frente.
+constexpr std::size_t record_tag_bytes = 1;
+// A capacidade física é o tamanho lógico mais o byte de tipo.
 constexpr std::size_t capacity_for_test(std::size_t size) {
-    return size;
+    return size + record_tag_bytes;
 }
 // Somente substitutos do mesmo tamanho cabem necessariamente em todos os slots liberados.
 constexpr bool replacements_match_original_size =
@@ -199,8 +201,8 @@ int main() {
             }
             for (const auto& slot : page->slots()) {
                 if (slot.occupied()) {
-                    suite.check(slot.record_size == initial_record_size &&
-                                    slot.record_capacity == initial_record_size,
+                    suite.check(slot.record_size == capacity_for_test(initial_record_size) &&
+                                    slot.record_capacity == capacity_for_test(initial_record_size),
                                 "63-byte record reserves exactly 63 bytes");
                 }
             }
@@ -305,8 +307,8 @@ int main() {
                 }
             }
             const auto expected_capacity =
-                replacement_record_count * initial_record_size +
-                replacement_record_count * replacement_record_size;
+                replacement_record_count * capacity_for_test(initial_record_size) +
+                replacement_record_count * capacity_for_test(replacement_record_size);
             suite.check(observed_records == initial_record_count &&
                             observed_capacity == expected_capacity,
                         "persisted capacity equals the total logical record size");

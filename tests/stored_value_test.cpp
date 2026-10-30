@@ -1,8 +1,8 @@
 // Campo `ops::Value` num objeto persistido (PLANO_PROPOSTAS_REGISTRY R14): um
 // membro com `bytes_codec` entra no binding como `bytes`, sobrevive à reabertura
-// do banco e volta igual. O objeto inteiro precisa caber numa página do heap
-// (8 KB com o MODB_PAGE_SIZE padrão): um Value maior falha com
-// `record_too_large` e não deixa nada gravado.
+// do banco e volta igual. Um objeto maior que uma página vai para páginas de
+// overflow (ADR-030) e também volta igual; numa transação desfeita, não fica
+// nada gravado.
 
 #include "modb/object/database.hpp"
 #include "modb/ops/value.hpp"
@@ -87,6 +87,8 @@ int main() {
     });
 
     object::ObjectId id{};
+    object::ObjectId id_grande{};
+    const Value valor_grande{std::string(256 * 1024, 'x')};
     {
         auto database = abrir(db, true);
         suite.check(database.has_value(), "cria o banco e faz o bind com campos Value");
@@ -105,14 +107,22 @@ int main() {
                                   : Result<object::Handle<Agente>>{std::unexpected(tx_medio.error())};
             suite.check(medio.has_value() && tx_medio->commit().has_value(), "um Value de 4 KB cabe no objeto");
 
-            // Maior que a página: falha na escrita, e a transação desfeita não grava nada.
+            // Muito maior que a página: vai para overflow (ADR-030).
             auto tx2 = (*database)->db->begin();
-            auto grande = tx2 ? (*database)->db->create(*tx2, Agente{"grande", Value{std::string(64 * 1024, 'x')}, Value{}})
+            auto grande = tx2 ? (*database)->db->create(*tx2, Agente{"grande", valor_grande, Value{}})
                               : Result<object::Handle<Agente>>{std::unexpected(tx2.error())};
-            suite.check(!grande && grande.error().code == ErrorCode::record_too_large,
-                        "um objeto maior que a página é recusado com record_too_large");
-            if (tx2) {
-                (void)tx2->rollback();
+            suite.check(grande.has_value() && tx2->commit().has_value(), "um objeto de 256 KB é gravado");
+            if (grande) {
+                id_grande = grande->id();
+            }
+
+            // Grande, mas numa transação desfeita: não fica nada.
+            auto tx3 = (*database)->db->begin();
+            auto desfeito = tx3 ? (*database)->db->create(*tx3, Agente{"desfeito", Value{std::string(100 * 1024, 'd')}, Value{}})
+                                : Result<object::Handle<Agente>>{std::unexpected(tx3.error())};
+            suite.check(desfeito.has_value(), "um objeto grande entra numa transação");
+            if (tx3) {
+                (void)tx3->rollback();
             }
         }
     }
@@ -129,11 +139,18 @@ int main() {
                 suite.check(lido->tags == tags, "a lista volta igual (com acento)");
                 suite.check(lido->esquema == esquema, "o mapa aninhado volta igual (tipos e null preservados)");
             }
+            auto grande = (*database)->db->get<Agente>(id_grande);
+            auto lido_grande = grande ? (*database)->db->materialize(*grande) : Result<Agente>{std::unexpected(grande.error())};
+            suite.check(lido_grande && lido_grande->tags == valor_grande,
+                        "o objeto de 256 KB volta igual depois de reabrir");
             std::size_t grandes = 0;
+            std::size_t desfeitos = 0;
             for (auto& row : (*database)->db->query<Agente>().stream()) {
                 grandes += row && row->nome == "grande" ? 1 : 0;
+                desfeitos += row && row->nome == "desfeito" ? 1 : 0;
             }
-            suite.check(grandes == 0, "o objeto recusado não ficou gravado");
+            suite.check(grandes == 1, "a consulta devolve o objeto grande");
+            suite.check(desfeitos == 0, "o objeto da transação desfeita não ficou gravado");
         }
     }
 

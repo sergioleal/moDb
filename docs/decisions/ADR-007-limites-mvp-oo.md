@@ -27,9 +27,9 @@ codec e evolução de schema; limites maiores entram depois, com medição.
 
 > **Atualização (2026-10).** O tamanho de página deixou de ser 4096: o build
 > CMake usa 8192 por padrão e o SDK binário, 16384 (`MODB_PAGE_SIZE`, release
-> `v0.3.0`). O payload de um objeto continua limitado à área útil de uma página:
-> `page_size − 36` bytes (16348 no SDK). Ver `docs/FORMATO_DE_ARQUIVO.md` e
-> `docs/SDK.md`.
+> `v0.3.0`). Desde a [ADR-030](ADR-030-registros-de-qualquer-tamanho.md)
+> (`v0.4.0`), um objeto pode ter qualquer tamanho: o que não cabe numa página vai
+> para páginas de overflow. Ver `docs/FORMATO_DE_ARQUIVO.md` e `docs/SDK.md`.
 - Objetos maiores que uma página não são fatiados no MVP; dados grandes vão
   para a `BlobStore` (Fase 4), e o objeto guarda apenas o `BlobId`.
 

@@ -77,7 +77,10 @@
 
 - **Página**: bloco de tamanho fixo para leitura e escrita no arquivo. O
   tamanho é escolhido na compilação (`MODB_PAGE_SIZE`): 8 KB no build padrão,
-  16 KB no SDK binário. Um objeto inteiro precisa caber numa página.
+  16 KB no SDK binário. Um objeto maior que uma página vai para páginas de
+  overflow (ADR-030).
+- **Página de overflow** (`OVFP`): pedaço de um registro maior que uma slotted
+  page; a slotted page guarda um stub que aponta para a cadeia.
 - **PageId**: identificador lógico e estável de uma página.
 - **Superbloco**: página zero com identidade, versão, tamanho de página e a
   raiz do banco (`catalog_root`).

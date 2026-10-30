@@ -12,9 +12,12 @@ Estado: consolidado na **Fase 10F**. Compatibilidade major/minor:
   CMake padrão, 16384 no SDK binário, 4096 nos bancos antigos; vai gravado no
   superbloco, e um arquivo de outro tamanho é recusado na abertura
   (`page size mismatch`);
-- um registro do heap (o objeto codificado) tem no máximo
-  `page_size − 36` bytes (cabeçalho da página de 28 e um slot de 8): 8156 no
-  build padrão, 16348 no SDK. Acima disso, `record_too_large`;
+- um registro do heap (o objeto codificado) pode ter qualquer tamanho
+  ([ADR-030](decisions/ADR-030-registros-de-qualquer-tamanho.md)): até
+  `page_size − 37` bytes ele fica inline na slotted page (16347 no SDK); acima
+  disso, vai para uma cadeia de páginas `OVFP`, e a slotted page guarda só um
+  stub de 17 bytes. Heaps de antes da ADR-030 mantêm o limite de
+  `page_size − 36` bytes e respondem `record_too_large`;
 - inteiros little-endian; estruturas C++ nunca são memcpy’d para o disco;
 - `PageId` = índice da página; offset = `PageId * page_size`;
 - o banco OO vive num único arquivo `<db>`; o WAL é `<db>.wal` (arquivo separado).
@@ -43,7 +46,8 @@ Abertura rejeita major incompatível ou minor futura não suportada.
 | `BTLF` | B-tree leaf | folhas do índice |
 | `BTIN` | B-tree internal | nós internos |
 | `SLPG` | Slotted page | registros de tamanho variável (heaps) |
-| `THRP` | TableHeap root | raiz de um heap de registros; desde 2026-09 guarda também `free_head`, a lista de páginas livres do heap (campo no fim, zero = vazia; [ADR-023](decisions/ADR-023-lista-de-paginas-livres-do-heap.md)) |
+| `THRP` | TableHeap root | raiz de um heap de registros; desde 2026-09 guarda também `free_head`, a lista de páginas livres do heap (campo no fim, zero = vazia; [ADR-023](decisions/ADR-023-lista-de-paginas-livres-do-heap.md)). O bit 0 das flags (offset 6) marca os registros com byte de tipo e overflow ([ADR-030](decisions/ADR-030-registros-de-qualquer-tamanho.md)) |
+| `OVFP` | Overflow page | pedaço de um registro maior que uma página: `"OVFP" \| versão u16 (1) \| reservado u16 \| next u64 \| tamanho u32 \| reservado u32 \| dados` (cabeçalho de 24 B); a cadeia de cada registro é conferida pelo `db check` ([ADR-030](decisions/ADR-030-registros-de-qualquer-tamanho.md)) |
 
 `modb db check` classifica essas assinaturas e valida cabeçalhos básicos
 (versão/comprimento). Cadeias semânticas profundas (ciclos de blob, consistência
@@ -88,6 +92,16 @@ Registro no TableHeap:
 ```text
 | object_id u64 | type_definition_id u64 | payload |
 ```
+
+Num heap com a flag de registros marcados (ADR-030), o que vai na slotted page
+leva um byte de tipo na frente:
+
+```text
+0x00 | registro                                  inline
+0x01 | tamanho_total u64 | primeira_página u64    stub; os bytes estão na cadeia OVFP
+```
+
+Quem lê pelo `TableHeap` recebe sempre o registro inteiro, sem o byte de tipo.
 
 Payload (versão 1):
 

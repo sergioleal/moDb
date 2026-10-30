@@ -42,6 +42,8 @@ enum class PageKind {
     btree_leaf,
     // Nó interno de B-tree com assinatura BTIN (Fase 7B).
     btree_internal,
+    // Pedaço de um registro maior que uma página, assinatura OVFP (ADR-030).
+    overflow,
     // Assinatura não reconhecida.
     unknown,
 };

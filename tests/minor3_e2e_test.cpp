@@ -6,7 +6,8 @@
 //   modo direto recusa; auditoria e log de chamadas mostram `as`;
 // - detail: chega a quem negociou minor 3 e não a quem negociou minor 2;
 // - idempotência: a mesma chave devolve o resultado sem executar de novo, por
-//   principal, também depois de reabrir o servidor; resultado grande demais.
+//   principal, também depois de reabrir o servidor; resultado maior que uma
+//   página (vai para overflow, ADR-030).
 // - limites por delegado e teto por principal (RateLimitPolicy direto).
 
 #include "modb/app/server_connection.hpp"
@@ -81,12 +82,12 @@ server::Module modulo_teste() {
                   return c.fail(server::conflict("o endereço já está em uso"),
                                 Value::object({{"reason", std::string{"handle_taken"}}, {"field", std::string{"handle"}}}));
               })
-        .proc("t.grande", Mode::read_write, "grava e devolve um resultado maior que o registro de idempotência",
+        .proc("t.grande", Mode::read_write, "grava e devolve um resultado maior que uma página",
               [](Context& c, const ops::Args&) -> Result<Value> {
                   if (auto id = c.create(Evento{"g"}); !id) {
                       return std::unexpected(id.error());
                   }
-                  return Value{std::string(storage::page_size, 'x')};
+                  return Value{std::string(4 * storage::page_size, 'x')};
               })
         .build();
 }
@@ -261,12 +262,10 @@ int main() {
             suite.check(leitura.has_value(), "numa leitura a chave é ignorada");
 
             auto grande = chamar(*gw, "t.grande", net::CallOptions{.idempotency_key = "kg"});
-            std::vector<std::byte> grande_detail;
-            auto grande_de_novo = chamar(*gw, "t.grande", net::CallOptions{.idempotency_key = "kg", .error_detail = &grande_detail});
-            auto gd = ops::decode(grande_detail);
-            suite.check(grande && !grande_de_novo && grande_de_novo.error().code == ErrorCode::conflict && gd &&
-                            *gd->field("reason")->text() == "idempotent_result_too_large",
-                        "resultado grande demais: a repetição não executa, e diz por quê");
+            auto grande_de_novo = chamar(*gw, "t.grande", net::CallOptions{.idempotency_key = "kg"});
+            suite.check(grande && grande_de_novo && *grande_de_novo == *grande &&
+                            grande->text() != nullptr && grande->text()->size() == 4 * storage::page_size,
+                        "um resultado maior que uma página também é guardado e repetido pela chave");
             suite.check(n_de(chamar(*gw, "t.contar")) == 6, "a repetição do resultado grande não gravou outro evento");
         }
 

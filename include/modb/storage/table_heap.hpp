@@ -34,6 +34,19 @@ namespace modb::storage {
 // Valida assinatura, versão e metadados básicos de uma página THRP.
 [[nodiscard]] Result<void> validate_table_heap_root(const Page& page);
 
+// Página de overflow (ADR-030): um pedaço de um registro maior que uma slotted
+// page. | "OVFP" | versão u16 | reservado u16 | next u64 | tamanho u32 | reservado u32 | dados |
+inline constexpr std::size_t overflow_page_header_size = 24;
+inline constexpr std::size_t overflow_page_capacity = page_size - overflow_page_header_size;
+
+struct OverflowPageInfo {
+    std::optional<PageId> next;
+    std::uint32_t length{0};
+};
+
+// Valida o cabeçalho de uma página OVFP (o db check e a leitura das cadeias).
+[[nodiscard]] Result<OverflowPageInfo> validate_overflow_page(const Page& page);
+
 // Resultado de um reparo de raiz de TableHeap.
 struct TableHeapRepairReport {
     // Páginas de dados encontradas percorrendo a cadeia.
@@ -80,6 +93,13 @@ struct HeapRecord {
     friend bool operator==(const HeapRecord&, const HeapRecord&) = default;
 };
 
+// A cadeia de overflow de um registro (ADR-030), para o db check.
+struct OverflowChain {
+    RecordId owner;
+    std::uint64_t total{0};
+    std::vector<PageId> pages;
+};
+
 // Registros de uma única página de dados e o ponteiro para a próxima da cadeia.
 // É o átomo de um scan preguiçoso (Fase 7A): o consumidor lê uma página, produz
 // seus registros e só então segue para `next` — nunca materializa o heap todo.
@@ -91,14 +111,17 @@ struct HeapPageSlice {
 // Trata uma cadeia de slotted pages como uma coleção única de registros.
 class TableHeap {
 public:
-    // Aloca e formata a raiz dedicada de um heap vazio.
+    // Aloca e formata a raiz dedicada de um heap vazio. Heaps novos marcam os
+    // registros e aceitam registros de qualquer tamanho (ADR-030).
     [[nodiscard]] static Result<TableHeap> create(PageFile& file,
                                                    std::size_t scratch_page_count = 1);
     // Abre e valida toda a cadeia iniciada pela página raiz.
     [[nodiscard]] static Result<TableHeap> open(PageFile& file, PageId root,
                                                  std::size_t scratch_page_count = 1);
 
-    // Insere automaticamente na primeira página com espaço ou cria outra.
+    // Insere automaticamente na primeira página com espaço ou cria outra. Num
+    // heap marcado (ADR-030), um registro maior que uma página vai para uma
+    // cadeia de páginas de overflow, e a slotted page guarda só um stub.
     [[nodiscard]] Result<RecordId> insert(std::span<const std::byte> record);
     // Lê um registro somente se sua página pertencer à cadeia.
     [[nodiscard]] Result<std::vector<std::byte>> read(RecordId id);
@@ -131,6 +154,14 @@ public:
     // Retorna os contadores persistidos na raiz dedicada.
     [[nodiscard]] std::uint64_t page_count() const noexcept { return page_count_; }
     [[nodiscard]] std::uint64_t record_count() const noexcept { return record_count_; }
+
+    // Registros marcados (ADR-030): cada registro leva um byte de tipo, e os
+    // maiores que uma página vão para overflow. Heaps de antes não são marcados
+    // e mantêm o limite de um registro por página.
+    [[nodiscard]] bool tagged() const noexcept { return tagged_; }
+    // As cadeias de overflow de todos os registros, validadas (tipo das páginas,
+    // tamanhos, ciclos). Para o db check.
+    [[nodiscard]] Result<std::vector<OverflowChain>> overflow_chains();
 
     // Substitui um registro e informa seu endereço atual.
     [[nodiscard]] Result<RecordId> update(RecordId id, std::span<const std::byte> record);
@@ -166,6 +197,23 @@ private:
     // Página para crescer o heap: a do topo da lista livre, se houver; senão uma
     // nova do arquivo (T33.2, ADR-023).
     [[nodiscard]] Result<PageId> acquire_page();
+    // Devolve uma página à lista livre do heap (uma SlottedPage vazia cujo
+    // `next_page` é a próxima livre).
+    [[nodiscard]] Result<void> release_page(PageId id);
+
+    // --- registros marcados e overflow (ADR-030) ---
+    // O que vai para a slotted page: o registro com o byte de tipo, ou um stub
+    // depois de gravar a cadeia. Num heap não marcado, o próprio registro.
+    [[nodiscard]] Result<std::vector<std::byte>> encode_stored(std::span<const std::byte> record);
+    // O registro a partir do que está na slotted page (lê a cadeia de um stub).
+    [[nodiscard]] Result<std::vector<std::byte>> decode_stored(std::span<const std::byte> stored);
+    // Libera a cadeia de um stub; nada para um registro inline.
+    [[nodiscard]] Result<void> free_stored(std::span<const std::byte> stored);
+    [[nodiscard]] Result<PageId> write_chain(std::span<const std::byte> data);
+    [[nodiscard]] Result<std::vector<std::byte>> read_chain(PageId first, std::uint64_t total);
+    [[nodiscard]] Result<void> free_chain(PageId first);
+    // O insert com os bytes já no formato da slotted page.
+    [[nodiscard]] Result<RecordId> insert_stored(std::span<const std::byte> stored);
 
     // Ponto único de escrita em insertion_capacity_by_page_ que mantém
     // capacity_index_ sincronizado (ação A2, docs-process/PLANO_PROFILING.md
@@ -204,6 +252,8 @@ private:
     // `erase` esvaziou e tirou da cadeia de dados. Cada uma é uma SlottedPage
     // vazia cujo `next_page` aponta para a próxima livre.
     std::optional<PageId> free_head_;
+    // Registros com byte de tipo e overflow (flag da raiz, ADR-030).
+    bool tagged_{false};
     // Espelham os contadores persistidos na raiz dedicada.
     std::uint64_t page_count_{};
     std::uint64_t record_count_{};

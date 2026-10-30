@@ -659,6 +659,7 @@ int command_db_check(const std::filesystem::path& path) {
         case modb::storage::PageKind::index_directory:
         case modb::storage::PageKind::btree_leaf:
         case modb::storage::PageKind::btree_internal:
+        case modb::storage::PageKind::overflow:
             ++object_pages;
             break;
         case modb::storage::PageKind::unknown:

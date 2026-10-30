@@ -112,6 +112,7 @@ foi tomada, mas o conteúdo é atemporal.
 | [ADR-026](decisions/ADR-026-transporte-de-memoria-compartilhada.md) | Clientes em outras linguagens: protocolo nativo publicado e transporte por memória compartilhada |
 | [ADR-027](decisions/ADR-027-leitores-concorrentes-escritor-exclusivo.md) | Concorrência: leitores em paralelo, um escritor exclusivo |
 | [ADR-028](decisions/ADR-028-proxy-de-acesso-remoto.md) | Acesso remoto por proxies: o engine só fala localmente |
+| [ADR-030](decisions/ADR-030-registros-de-qualquer-tamanho.md) | Registros de qualquer tamanho: páginas de overflow no TableHeap |
 | [ADR-029](decisions/ADR-029-delegacao-detalhe-e-idempotencia.md) | Protocolo minor 3: delegação, detalhe nos erros e idempotência |
 
 ### ADRs legadas (modelo relacional, `0001`/`0002`)

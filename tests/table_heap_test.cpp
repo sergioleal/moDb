@@ -112,11 +112,17 @@ int main() {
         suite.check(file->page_count() == 2,
                     "new empty heap allocates only its dedicated root");
 
-        // Um registro maior que a capacidade precisa falhar sem alocar páginas.
-        const std::vector<std::byte> oversized(slotted_page_max_record_size + 1,
-                                               std::byte{0x55U});
-        suite.check_error(heap->insert(oversized), ErrorCode::record_too_large,
-                          "oversized record is rejected before traversal");
+        // Um registro maior que uma página vai para overflow (ADR-030); apagado
+        // em seguida, devolve as páginas e deixa o heap como estava.
+        {
+            const std::vector<std::byte> oversized(slotted_page_max_record_size + 1,
+                                                   std::byte{0x55U});
+            auto big = heap->insert(oversized);
+            auto back = big ? heap->read(*big) : Result<std::vector<std::byte>>{std::unexpected(big.error())};
+            suite.check(heap->tagged() && back.has_value() && *back == oversized,
+                        "a record larger than a page round-trips through overflow pages");
+            suite.check(big && heap->erase(*big).has_value(), "the overflow record is erased");
+        }
 
         // Escala a carga para continuar atravessando ao menos três páginas.
         constexpr auto record_count =

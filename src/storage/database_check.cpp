@@ -47,6 +47,8 @@ constexpr std::array<std::byte, 4> btree_leaf_magic{
     std::byte{'B'}, std::byte{'T'}, std::byte{'L'}, std::byte{'F'}};
 constexpr std::array<std::byte, 4> btree_internal_magic{
     std::byte{'B'}, std::byte{'T'}, std::byte{'I'}, std::byte{'N'}};
+constexpr std::array<std::byte, 4> overflow_magic{
+    std::byte{'O'}, std::byte{'V'}, std::byte{'F'}, std::byte{'P'}};
 
 // Campos do cabeçalho de blob validáveis sem conhecer o conteúdo.
 constexpr std::uint16_t blob_page_version = 1;
@@ -134,6 +136,9 @@ PageKind classify_page(const Page& page) noexcept {
     }
     if (starts_with_magic(page, btree_internal_magic)) {
         return PageKind::btree_internal;
+    }
+    if (starts_with_magic(page, overflow_magic)) {
+        return PageKind::overflow;
     }
     return PageKind::unknown;
 }
@@ -227,6 +232,12 @@ Result<DatabaseCheckReport> check_database(const std::filesystem::path& path) {
             }
             break;
         }
+        case PageKind::overflow:
+            // Cabeçalho OVFP (versão e tamanho); as cadeias são conferidas no L3.
+            if (auto validated = validate_overflow_page(*page); !validated) {
+                entry.error = validated.error();
+            }
+            break;
         case PageKind::unknown:
             entry.error = Error{
                 ErrorCode::invalid_page_format,
@@ -278,6 +289,36 @@ Result<DatabaseCheckReport> check_database(const std::filesystem::path& path) {
                         " is shared by more than one TableHeap chain",
                 });
             }
+        }
+        // Cadeias de overflow (ADR-030): tipo das páginas, tamanhos e ciclos
+        // conferidos pelo heap; aqui, que nenhuma página seja de dois donos.
+        auto chains = heap->overflow_chains();
+        if (!chains) {
+            report.heap_errors.push_back(Error{
+                chains.error().code,
+                "TableHeap root page " + std::to_string(entry.id.value) + " overflow: " +
+                    chains.error().message,
+            });
+            continue;
+        }
+        for (const auto& chain : *chains) {
+            for (const auto& page : chain.pages) {
+                if (!claimed_pages.insert(page.value).second) {
+                    report.heap_errors.push_back(Error{
+                        ErrorCode::corrupt_page,
+                        "overflow page " + std::to_string(page.value) + " has more than one owner",
+                    });
+                }
+            }
+        }
+    }
+    // Uma página OVFP que nenhuma cadeia alcança é espaço perdido.
+    for (const auto& entry : report.pages) {
+        if (entry.kind == PageKind::overflow && !entry.error && !claimed_pages.contains(entry.id.value)) {
+            report.heap_errors.push_back(Error{
+                ErrorCode::corrupt_page,
+                "overflow page " + std::to_string(entry.id.value) + " belongs to no record",
+            });
         }
     }
 

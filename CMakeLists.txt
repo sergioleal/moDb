@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.30)
 
 project(
     moDb
-    VERSION 0.3.0
+    VERSION 0.4.0
     DESCRIPTION "An embedded relational database written in C++26"
     LANGUAGES CXX
 )
@@ -671,6 +671,9 @@ if(BUILD_TESTING)
     # Codec do protocolo minor 3: delegação, chave de idempotência, detail (R8).
     modb_add_test(modb_protocol_minor3_tests tests/protocol_minor3_test.cpp)
     add_test(NAME modb.protocol_minor3 COMMAND modb_protocol_minor3_tests)
+    # Registros de qualquer tamanho: páginas de overflow no TableHeap (ADR-030).
+    modb_add_test(modb_overflow_record_tests tests/overflow_record_test.cpp)
+    add_test(NAME modb.overflow_record COMMAND modb_overflow_record_tests)
     # Campo ops::Value num objeto persistido, via bytes_codec (R14).
     modb_add_test(modb_stored_value_tests tests/stored_value_test.cpp)
     add_test(NAME modb.stored_value COMMAND modb_stored_value_tests)

@@ -104,11 +104,12 @@ escrita lógica).
 - Numa proc de leitura, a chave é ignorada.
 - Retenção: `idempotency_retention_s` no servidor (padrão 86400). Cada escrita
   apaga até 16 registros vencidos.
-- Um resultado maior que meia página (4 KB com páginas de 8 KB; 8 KB no SDK, de
-  páginas de 16 KB) não cabe no registro (um objeto precisa caber numa página,
-  R14). A chave é gravada sem ele, e a repetição recebe
-  `conflict` com `detail.reason = "idempotent_result_too_large"`: a escrita não
-  acontece duas vezes, mas o resultado não é repetido.
+- Um resultado maior que 16 MiB (o teto de um `OpResult`) não é guardado: a
+  chave é gravada sem ele, e a repetição recebe `conflict` com
+  `detail.reason = "idempotent_result_too_large"`. A escrita não acontece duas
+  vezes, mas o resultado não é repetido. *(Até a `v0.3.0`, o teto era meia
+  página, porque o registro precisava caber numa página; com a ADR-030, o
+  registro vai para overflow.)*
 - Com isso, o pool pode repetir uma escrita que leva chave.
 
 ## Alternativas avaliadas

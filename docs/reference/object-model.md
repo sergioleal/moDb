@@ -136,11 +136,13 @@ b.field<1>("name", &Agent::name).field<2>("tags", &Agent::tags).field<3>("schema
 
 The stored bytes are the same binary `Value` v1 as `OpCall` arguments, so no
 text is re-parsed on read. Limits: the field is opaque to indexes and queries,
-changing a field's codec after data exists is a migration, and **the whole
-object must fit in one heap page**: the encoded object may take at most
-`page_size − 36` bytes (8156 with the default `MODB_PAGE_SIZE` of a source
-build, 16348 in the binary SDK). A larger object fails with `record_too_large` and nothing
-is written; put big payloads in a `BlobStore` blob or a persistent collection.
+and changing a field's codec after data exists is a migration. There is no
+per-object size limit in storage: an object larger than one heap page goes to
+overflow pages
+([ADR-030](../decisions/ADR-030-registros-de-qualquer-tamanho.md)). The
+remaining limits are memory (the whole object is built in memory) and, over
+the network, one `OpResult` frame (16 MiB). For content that is read in parts,
+a `BlobStore` blob is still cheaper than a huge field.
 Covered by `modb.stored_value` (`tests/stored_value_test.cpp`).
 
 ### 2.4 Schema evolution and lazy migration

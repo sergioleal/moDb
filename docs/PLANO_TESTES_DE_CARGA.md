@@ -480,9 +480,9 @@ database and the option would not reach it. Example:
 record exceed what fits in one 8 KiB page (`record exceeds the maximum
 TableHeap page payload`; there are no overflow records), so
 `load.crud_full.*.payload_fat` always fails. It was removed from `load-heavy`
-in 2026-09 (T27); `create_only` with `fat` works and stays. Records larger than
-one page are refused by design (`record_too_large`) until there are overflow
-records.
+in 2026-09 (T27); `create_only` with `fat` works and stays. Since ADR-030
+(2026-10) records of any size go to overflow pages, so `crud_full` with `fat`
+should work again; it has not been put back in `load-heavy` nor measured.
 
 `primary_storage=wal_only`
 ([ADR-017](decisions/ADR-017-primary-wal-only-sem-arquivos-de-dados.md))

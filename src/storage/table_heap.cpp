@@ -23,6 +23,22 @@ namespace {
 constexpr std::array<std::byte, 4> root_magic{
     std::byte{'T'}, std::byte{'H'}, std::byte{'R'}, std::byte{'P'}};
 constexpr std::uint16_t root_format_version = 1;
+// Flag da raiz (ADR-030): registros com byte de tipo e páginas de overflow.
+// Um motor anterior recusa a raiz ("unknown flags") em vez de ler um stub
+// como se fosse o registro.
+constexpr std::uint16_t root_flag_tagged = 1;
+
+// Byte de tipo de um registro num heap marcado, e o stub de overflow:
+//   0x00 | registro             0x01 | tamanho_total u64 | primeira_página u64
+constexpr std::byte record_tag_inline{0x00};
+constexpr std::byte record_tag_overflow{0x01};
+constexpr std::size_t overflow_stub_size = 1 + 8 + 8;
+// Defesa contra um stub corrompido: nenhum registro real chega perto disto.
+constexpr std::uint64_t overflow_max_total = std::uint64_t{1} << 40;
+
+constexpr std::array<std::byte, 4> overflow_magic{
+    std::byte{'O'}, std::byte{'V'}, std::byte{'F'}, std::byte{'P'}};
+constexpr std::uint16_t overflow_format_version = 1;
 
 // Representa os campos persistidos na raiz sem expor o formato binário.
 struct RootMetadata {
@@ -33,6 +49,8 @@ struct RootMetadata {
     // Campo acrescentado no fim da raiz (T33.2, ADR-023); zero em raízes
     // anteriores = lista livre vazia. Não muda a versão do formato.
     std::optional<PageId> free_head;
+    // Registros marcados e overflow (ADR-030).
+    bool tagged{false};
 };
 
 // Converte zero no sentinela de ausência usado pelo formato.
@@ -45,7 +63,7 @@ Page encode_root(const RootMetadata& metadata) {
     BinaryWriter writer;
     writer.write_bytes(root_magic);
     writer.write_u16(root_format_version);
-    writer.write_u16(0);
+    writer.write_u16(metadata.tagged ? root_flag_tagged : std::uint16_t{0});
     writer.write_u64(metadata.first ? metadata.first->value : 0);
     writer.write_u64(metadata.last ? metadata.last->value : 0);
     writer.write_u64(metadata.page_count);
@@ -81,7 +99,7 @@ Result<RootMetadata> decode_root(const Page& page) {
             "unsupported TableHeap root version: " + std::to_string(*version),
         });
     }
-    if (*flags != 0) {
+    if ((*flags & ~root_flag_tagged) != 0) {
         return std::unexpected(
             Error{ErrorCode::corrupt_page, "TableHeap root contains unknown flags"});
     }
@@ -90,7 +108,8 @@ Result<RootMetadata> decode_root(const Page& page) {
     auto free_head = reader.read_u64();
     RootMetadata metadata{optional_page_id(*first), optional_page_id(*last),
                           *page_count, *record_count,
-                          free_head ? optional_page_id(*free_head) : std::nullopt};
+                          free_head ? optional_page_id(*free_head) : std::nullopt,
+                          (*flags & root_flag_tagged) != 0};
     const auto empty = metadata.page_count == 0;
     if (metadata.first.has_value() != metadata.last.has_value() ||
         empty != !metadata.first.has_value() || (empty && metadata.record_count != 0)) {
@@ -179,8 +198,10 @@ Result<TableHeapRepairReport> repair_table_heap(PageFile& file, PageId root) {
         }
         rebuilt = RootMetadata{metadata->first, last, pages, records, std::nullopt};
     }
-    // A lista livre não é derivável da cadeia de dados: o reparo a preserva.
+    // A lista livre não é derivável da cadeia de dados: o reparo a preserva,
+    // como a marca dos registros.
     rebuilt.free_head = metadata->free_head;
+    rebuilt.tagged = metadata->tagged;
 
     // Só reescreve a raiz quando algum campo realmente mudou.
     const bool changed = rebuilt.first != metadata->first || rebuilt.last != metadata->last ||
@@ -207,13 +228,17 @@ Result<TableHeap> TableHeap::create(PageFile& file, std::size_t scratch_page_cou
     if (!root) {
         return std::unexpected(root.error());
     }
-    // A raiz nasce sem páginas de dados nem registros.
-    const auto page = encode_root(RootMetadata{});
+    // A raiz nasce sem páginas de dados nem registros, com registros marcados.
+    RootMetadata empty{};
+    empty.tagged = true;
+    const auto page = encode_root(empty);
     if (auto written = file.write(*root, page); !written) {
         return std::unexpected(written.error());
     }
     // Retorna o heap associado ao arquivo fornecido.
-    return TableHeap{file, *root, std::move(*pool)};
+    TableHeap heap{file, *root, std::move(*pool)};
+    heap.tagged_ = true;
+    return heap;
 }
 
 // Abre um heap somente depois de validar toda a cadeia.
@@ -241,6 +266,7 @@ Result<TableHeap> TableHeap::open(PageFile& file, PageId root,
     TableHeap heap{file, root, std::move(*pool), metadata->first, metadata->last,
                    metadata->page_count, metadata->record_count};
     heap.free_head_ = metadata->free_head;
+    heap.tagged_ = metadata->tagged;
     // Percorre assinatura, versões, ligações e ciclos antes de retornar.
     if (auto pages = heap.layout(); !pages) {
         return std::unexpected(pages.error());
@@ -255,7 +281,290 @@ Result<void> TableHeap::persist_root() {
     // Direto no arquivo, NÃO por write_page: a raiz tem estágio próprio, e
     // passar por lá contaria o mesmo tempo duas vezes.
     return file_->write(root_, encode_root(RootMetadata{
-                                   first_, last_, page_count_, record_count_, free_head_}));
+                                   first_, last_, page_count_, record_count_, free_head_, tagged_}));
+}
+
+Result<void> TableHeap::release_page(PageId id) {
+    auto freed = SlottedPage::create();
+    if (auto linked = freed.set_next_page(free_head_); !linked) {
+        return std::unexpected(linked.error());
+    }
+    if (auto written = write_page(id, freed.page()); !written) {
+        return std::unexpected(written.error());
+    }
+    free_head_ = id;
+    return {};
+}
+
+Result<OverflowPageInfo> validate_overflow_page(const Page& page) {
+    BinaryReader reader{page.bytes()};
+    auto magic = reader.read_bytes(overflow_magic.size());
+    if (!magic || !std::equal(overflow_magic.begin(), overflow_magic.end(), magic->begin())) {
+        return std::unexpected(Error{ErrorCode::invalid_page_format, "page is not an overflow page"});
+    }
+    auto version = reader.read_u16();
+    auto reserved = reader.read_u16();
+    auto next = reader.read_u64();
+    auto length = reader.read_u32();
+    if (!version || !reserved || !next || !length) {
+        return std::unexpected(Error{ErrorCode::corrupt_page, "overflow page header is truncated"});
+    }
+    if (*version != overflow_format_version) {
+        return std::unexpected(Error{ErrorCode::incompatible_page_version,
+                                     "unsupported overflow page version: " + std::to_string(*version)});
+    }
+    if (*length == 0 || *length > overflow_page_capacity) {
+        return std::unexpected(Error{ErrorCode::corrupt_page, "overflow page length is out of range"});
+    }
+    return OverflowPageInfo{optional_page_id(*next), *length};
+}
+
+// --- registros marcados e overflow (ADR-030) -------------------------------------
+
+Result<PageId> TableHeap::write_chain(std::span<const std::byte> data) {
+    // Todas as páginas primeiro: cada uma precisa do id da próxima.
+    const std::size_t count = (data.size() + overflow_page_capacity - 1) / overflow_page_capacity;
+    std::vector<PageId> pages;
+    pages.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        auto id = acquire_page();
+        if (!id) {
+            return std::unexpected(id.error());
+        }
+        pages.push_back(*id);
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto offset = i * overflow_page_capacity;
+        const auto length = std::min(overflow_page_capacity, data.size() - offset);
+        BinaryWriter header;
+        header.write_bytes(overflow_magic);
+        header.write_u16(overflow_format_version);
+        header.write_u16(0);
+        header.write_u64(i + 1 < count ? pages[i + 1].value : 0);
+        header.write_u32(static_cast<std::uint32_t>(length));
+        header.write_u32(0);
+        Page page;
+        std::copy(header.bytes().begin(), header.bytes().end(), page.bytes().begin());
+        std::copy_n(data.begin() + static_cast<std::ptrdiff_t>(offset), length,
+                    page.bytes().begin() + static_cast<std::ptrdiff_t>(overflow_page_header_size));
+        if (auto written = write_page(pages[i], page); !written) {
+            return std::unexpected(written.error());
+        }
+    }
+    return pages.front();
+}
+
+Result<std::vector<std::byte>> TableHeap::read_chain(PageId first, std::uint64_t total) {
+    if (total == 0 || total > overflow_max_total) {
+        return std::unexpected(Error{ErrorCode::corrupt_page, "overflow stub has an invalid total length"});
+    }
+    std::vector<std::byte> out;
+    out.reserve(static_cast<std::size_t>(total));
+    std::unordered_set<std::uint64_t> visited;
+    std::optional<PageId> current = first;
+    while (current) {
+        if (!visited.insert(current->value).second) {
+            return std::unexpected(Error{ErrorCode::page_chain_cycle, "overflow chain contains a cycle"});
+        }
+        auto page = file_->view(*current);
+        if (!page) {
+            return std::unexpected(page.error());
+        }
+        auto info = validate_overflow_page(**page);
+        if (!info) {
+            return std::unexpected(info.error());
+        }
+        if (out.size() + info->length > total) {
+            return std::unexpected(Error{ErrorCode::corrupt_page, "overflow chain is longer than its stub says"});
+        }
+        const auto data = (**page).bytes().subspan(overflow_page_header_size, info->length);
+        out.insert(out.end(), data.begin(), data.end());
+        current = info->next;
+    }
+    if (out.size() != total) {
+        return std::unexpected(Error{ErrorCode::corrupt_page, "overflow chain is shorter than its stub says"});
+    }
+    return out;
+}
+
+Result<void> TableHeap::free_chain(PageId first) {
+    // Confere a cadeia inteira antes de liberar qualquer página.
+    std::vector<PageId> pages;
+    std::unordered_set<std::uint64_t> visited;
+    std::optional<PageId> current = first;
+    while (current) {
+        if (!visited.insert(current->value).second) {
+            return std::unexpected(Error{ErrorCode::page_chain_cycle, "overflow chain contains a cycle"});
+        }
+        auto page = file_->view(*current);
+        if (!page) {
+            return std::unexpected(page.error());
+        }
+        auto info = validate_overflow_page(**page);
+        if (!info) {
+            return std::unexpected(info.error());
+        }
+        pages.push_back(*current);
+        current = info->next;
+    }
+    for (const auto id : pages) {
+        if (auto released = release_page(id); !released) {
+            return released;
+        }
+    }
+    return {};
+}
+
+namespace {
+
+struct OverflowStub {
+    std::uint64_t total;
+    PageId first;
+};
+
+// O stub de um registro marcado, ou nada se o registro é inline.
+Result<std::optional<OverflowStub>> parse_stored(std::span<const std::byte> stored) {
+    if (stored.empty()) {
+        return std::unexpected(Error{ErrorCode::corrupt_page, "tagged record is empty"});
+    }
+    if (stored.front() == record_tag_inline) {
+        return std::optional<OverflowStub>{};
+    }
+    if (stored.front() != record_tag_overflow || stored.size() != overflow_stub_size) {
+        return std::unexpected(Error{ErrorCode::corrupt_page, "tagged record has an unknown type"});
+    }
+    BinaryReader reader{stored.subspan(1)};
+    auto total = reader.read_u64();
+    auto first = reader.read_u64();
+    if (!total || !first || *first == 0) {
+        return std::unexpected(Error{ErrorCode::corrupt_page, "overflow stub is malformed"});
+    }
+    return std::optional<OverflowStub>{OverflowStub{*total, PageId{*first}}};
+}
+
+} // namespace
+
+Result<std::vector<std::byte>> TableHeap::encode_stored(std::span<const std::byte> record) {
+    if (record.empty()) {
+        return std::unexpected(Error{ErrorCode::invalid_argument, "record cannot be empty"});
+    }
+    if (!tagged_) {
+        if (record.size() > slotted_page_max_record_size) {
+            return std::unexpected(Error{ErrorCode::record_too_large,
+                                         "record exceeds the maximum TableHeap page payload "
+                                         "(this heap predates overflow records, ADR-030)"});
+        }
+        return std::vector<std::byte>{record.begin(), record.end()};
+    }
+    std::vector<std::byte> stored;
+    if (1 + record.size() <= slotted_page_max_record_size) {
+        stored.reserve(1 + record.size());
+        stored.push_back(record_tag_inline);
+        stored.insert(stored.end(), record.begin(), record.end());
+        return stored;
+    }
+    auto first = write_chain(record);
+    if (!first) {
+        return std::unexpected(first.error());
+    }
+    BinaryWriter stub;
+    stub.write_u64(record.size());
+    stub.write_u64(first->value);
+    stored.push_back(record_tag_overflow);
+    stored.insert(stored.end(), stub.bytes().begin(), stub.bytes().end());
+    return stored;
+}
+
+Result<std::vector<std::byte>> TableHeap::decode_stored(std::span<const std::byte> stored) {
+    if (!tagged_) {
+        return std::vector<std::byte>{stored.begin(), stored.end()};
+    }
+    auto stub = parse_stored(stored);
+    if (!stub) {
+        return std::unexpected(stub.error());
+    }
+    if (!*stub) {
+        return std::vector<std::byte>{stored.begin() + 1, stored.end()};
+    }
+    return read_chain((*stub)->first, (*stub)->total);
+}
+
+Result<void> TableHeap::free_stored(std::span<const std::byte> stored) {
+    if (!tagged_) {
+        return {};
+    }
+    auto stub = parse_stored(stored);
+    if (!stub) {
+        return std::unexpected(stub.error());
+    }
+    if (!*stub) {
+        return {};
+    }
+    return free_chain((*stub)->first);
+}
+
+Result<std::vector<OverflowChain>> TableHeap::overflow_chains() {
+    std::vector<OverflowChain> chains;
+    if (!tagged_ || !first_) {
+        return chains;
+    }
+    std::unordered_set<std::uint64_t> visited_data;
+    auto current_id = *first_;
+    while (true) {
+        if (auto visit = visit_page(visited_data, current_id); !visit) {
+            return std::unexpected(visit.error());
+        }
+        auto current = load_trusted(current_id);
+        if (!current) {
+            return std::unexpected(current.error());
+        }
+        for (const auto& slot : current->slots()) {
+            if (!slot.occupied()) {
+                continue;
+            }
+            auto stored = current->read(slot.id);
+            if (!stored) {
+                return std::unexpected(stored.error());
+            }
+            auto stub = parse_stored(*stored);
+            if (!stub) {
+                return std::unexpected(stub.error());
+            }
+            if (!*stub) {
+                continue;
+            }
+            OverflowChain chain{RecordId{current_id, slot.id, slot.generation}, (*stub)->total, {}};
+            std::unordered_set<std::uint64_t> visited;
+            std::uint64_t length = 0;
+            std::optional<PageId> page_id = (*stub)->first;
+            while (page_id) {
+                if (!visited.insert(page_id->value).second) {
+                    return std::unexpected(Error{ErrorCode::page_chain_cycle, "overflow chain contains a cycle"});
+                }
+                auto page = file_->view(*page_id);
+                if (!page) {
+                    return std::unexpected(page.error());
+                }
+                auto info = validate_overflow_page(**page);
+                if (!info) {
+                    return std::unexpected(info.error());
+                }
+                chain.pages.push_back(*page_id);
+                length += info->length;
+                page_id = info->next;
+            }
+            if (length != chain.total) {
+                return std::unexpected(Error{ErrorCode::corrupt_page,
+                                             "overflow chain length does not match its stub"});
+            }
+            chains.push_back(std::move(chain));
+        }
+        const auto next = current->next_page();
+        if (!next) {
+            return chains;
+        }
+        current_id = *next;
+    }
 }
 
 Result<PageId> TableHeap::acquire_page() {
@@ -347,6 +656,18 @@ Result<SlottedPage> TableHeap::load_trusted(PageId id) {
 
 // Insere um registro escolhendo ou criando a página necessária.
 Result<RecordId> TableHeap::insert(std::span<const std::byte> record) {
+    auto stored = encode_stored(record);
+    if (!stored) {
+        return std::unexpected(stored.error());
+    }
+    auto inserted = insert_stored(*stored);
+    if (!inserted) {
+        static_cast<void>(free_stored(*stored));
+    }
+    return inserted;
+}
+
+Result<RecordId> TableHeap::insert_stored(std::span<const std::byte> record) {
     // Evita percorrer páginas para um registro que nunca poderá caber.
     if (record.size() > slotted_page_max_record_size) {
         return std::unexpected(Error{
@@ -557,10 +878,11 @@ Result<std::vector<std::byte>> TableHeap::read(RecordId id) {
         });
     }
     auto record = SlottedPage::read_in(**page, id.slot);
-    if (record) {
-        stage.add_units(record->size());
+    if (!record) {
+        return record;
     }
-    return record;
+    stage.add_units(record->size());
+    return decode_stored(*record);
 }
 
 // Produz todos os endereços na ordem lógica da cadeia em uma única passada.
@@ -624,7 +946,11 @@ Result<std::vector<HeapRecord>> TableHeap::scan_records() {
         for (const auto& slot : current->slots()) {
             if (slot.occupied()) {
                 // Lê o registro da página já carregada, sem novo acesso ao arquivo.
-                auto bytes = current->read(slot.id);
+                auto stored = current->read(slot.id);
+                if (!stored) {
+                    return std::unexpected(stored.error());
+                }
+                auto bytes = decode_stored(*stored);
                 if (!bytes) {
                     return std::unexpected(bytes.error());
                 }
@@ -652,7 +978,11 @@ Result<HeapPageSlice> TableHeap::read_page_records(PageId id) {
     HeapPageSlice slice;
     for (const auto& slot : current->slots()) {
         if (slot.occupied()) {
-            auto bytes = current->read(slot.id);
+            auto stored = current->read(slot.id);
+            if (!stored) {
+                return std::unexpected(stored.error());
+            }
+            auto bytes = decode_stored(*stored);
             if (!bytes) {
                 return std::unexpected(bytes.error());
             }
@@ -762,22 +1092,46 @@ Result<RecordId> TableHeap::update(RecordId id, std::span<const std::byte> recor
             "record generation does not match the occupied slot",
         });
     }
+    // O que está no slot hoje: um stub tem a cadeia liberada depois da troca.
+    auto old_stored = page->read(id.slot);
+    if (!old_stored) {
+        return std::unexpected(old_stored.error());
+    }
+    auto stored = encode_stored(record);
+    if (!stored) {
+        return std::unexpected(stored.error());
+    }
+    const auto is_overflow = [&](std::span<const std::byte> bytes) {
+        return tagged_ && !bytes.empty() && bytes.front() == record_tag_overflow;
+    };
+    const bool chains_changed = is_overflow(*old_stored) || is_overflow(*stored);
     // Tenta preservar página, slot e geração.
-    auto updated = page->update(id.slot, record);
+    auto updated = page->update(id.slot, *stored);
     if (updated) {
         if (auto written = write_page(id.page, page->page()); !written) {
             return std::unexpected(written.error());
         }
         set_insertion_capacity(id.page.value, page->insertion_capacity());
+        if (auto freed = free_stored(*old_stored); !freed) {
+            return std::unexpected(freed.error());
+        }
+        // A cadeia nova e a velha mexem na lista livre, que está na raiz.
+        if (chains_changed) {
+            if (auto persisted = persist_root(); !persisted) {
+                return std::unexpected(persisted.error());
+            }
+        }
         return id;
     }
     // Erros diferentes de falta de espaço não permitem realocação.
     if (updated.error().code != ErrorCode::page_full) {
+        static_cast<void>(free_stored(*stored));
         return std::unexpected(updated.error());
     }
     // Insere primeiro a nova versão para não perder a antiga em caso de falha.
-    auto replacement = insert(record);
+    auto replacement = insert_stored(*stored);
     if (!replacement) {
+        static_cast<void>(free_stored(*stored));
         return std::unexpected(replacement.error());
     }
     // Remove o endereço antigo depois que a substituição está persistível.
@@ -807,6 +1161,17 @@ Result<void> TableHeap::erase(RecordId id) {
             ErrorCode::record_not_found,
             "record generation does not match the occupied slot",
         });
+    }
+    // Um stub leva a cadeia de overflow junto (ADR-030); a raiz, com a lista
+    // livre, é persistida abaixo.
+    {
+        auto stored = current->read(id.slot);
+        if (!stored) {
+            return std::unexpected(stored.error());
+        }
+        if (auto freed = free_stored(*stored); !freed) {
+            return std::unexpected(freed.error());
+        }
     }
     // Recupera a capacidade e compacta a página.
     if (auto removed = current->erase(id.slot); !removed) {
